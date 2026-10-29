@@ -1,0 +1,1081 @@
+===TICKET:T-01-backend-scaffold.md===
+# T-01: Backend Project Scaffolding (Scala 3 / sbt)
+
+## Objective
+Create the `backend/` sbt project with all Milestone 1 dependencies, a compiling `Main.scala` entry point, and a passing trivial MUnit test to confirm the build pipeline works.
+
+## Requirements
+
+### Directory Structure
+```
+backend/
+├── build.sbt
+├── project/
+│   └── build.properties
+└── src/
+    ├── main/
+    │   └── scala/
+    │       └── durak/
+    │           └── Main.scala
+    └── test/
+        └── scala/
+            └── durak/
+                └── MainSuite.scala
+```
+
+### `project/build.properties`
+```
+sbt.version=1.9.8
+```
+
+### `build.sbt`
+- `scalaVersion := "3.3.3"`
+- `name := "durak-backend"`
+- Dependencies (use latest stable minor versions compatible with Scala 3.3.x):
+  - `"org.http4s" %% "http4s-ember-server" % "0.23.27"`
+  - `"org.http4s" %% "http4s-dsl" % "0.23.27"`
+  - `"org.http4s" %% "http4s-circe" % "0.23.27"`
+  - `"org.typelevel" %% "cats-effect" % "3.5.4"`
+  - `"io.circe" %% "circe-generic" % "0.14.7"`
+  - `"io.circe" %% "circe-parser" % "0.14.7"`
+  - Test dependencies:
+    - `"org.scalameta" %% "munit" % "1.0.0" % Test`
+    - `"org.typelevel" %% "munit-cats-effect" % "2.0.0" % Test`
+- `testFrameworks += new TestFramework("munit.Framework")`
+- `fork := true` (recommended for Cats Effect apps)
+
+### `Main.scala`
+```scala
+package durak
+
+import cats.effect.*
+
+object Main extends IOApp.Simple:
+  def run: IO[Unit] =
+    IO.println("Durak server starting...")
+```
+
+### `MainSuite.scala`
+A trivial MUnit test asserting `1 + 1 == 2` to verify the test pipeline compiles and runs.
+
+## Acceptance Criteria
+- [ ] `cd backend && sbt compile` completes with zero errors
+- [ ] `cd backend && sbt test` runs `MainSuite` and reports all tests passed
+
+## Verification Command
+```bash
+cd backend && sbt test
+```
+
+===TICKET:T-02-frontend-scaffold.md===
+# T-02: Frontend Project Scaffolding (Vite + Preact + TypeScript)
+
+## Objective
+Create the `frontend/` project with Vite, Preact, TypeScript 5, and Vitest. Configure the dev-server proxy for `/api` and `/ws` to `http://localhost:8080`. Confirm the build and test pipelines work.
+
+## Requirements
+
+### Directory Structure
+```
+frontend/
+├── index.html
+├── package.json
+├── tsconfig.json
+├── vite.config.ts
+├── vitest.config.ts  (or merged into vite.config.ts)
+└── src/
+    ├── main.tsx
+    ├── app.tsx
+    ├── app.css
+    └── __tests__/
+        └── app.test.tsx
+```
+
+### `package.json`
+- Dependencies: `preact`
+- Dev dependencies: `vite`, `@preact/preset-vite`, `typescript`, `vitest`, `@testing-library/preact`, `jsdom`
+- Scripts:
+  - `"dev": "vite --host 0.0.0.0 --port 5173"`
+  - `"build": "vite build"`
+  - `"test": "vitest"`
+
+### `vite.config.ts`
+```typescript
+import { defineConfig } from 'vite';
+import preact from '@preact/preset-vite';
+
+export default defineConfig({
+  plugins: [preact()],
+  server: {
+    host: '0.0.0.0',
+    port: 5173,
+    proxy: {
+      '/api': 'http://localhost:8080',
+      '/ws': {
+        target: 'http://localhost:8080',
+        ws: true,
+      },
+    },
+  },
+});
+```
+
+### `tsconfig.json`
+- `"compilerOptions"`: target `"ES2020"`, module `"ESNext"`, jsx `"react-jsx"`, jsxImportSource `"preact"`, strict `true`, moduleResolution `"bundler"`.
+
+### `app.tsx`
+A minimal Preact component rendering `<div class="app"><h1>Lidurak</h1></div>`.
+
+### `app.css`
+```css
+body {
+  margin: 0;
+  background-color: #161512;
+  color: #bababa;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+}
+```
+
+### `app.test.tsx`
+A Vitest test that renders the `App` component and asserts the heading text is `"Lidurak"`.
+
+## Acceptance Criteria
+- [ ] `cd frontend && npm install` succeeds
+- [ ] `cd frontend && npm run build` produces output in `frontend/dist/`
+- [ ] `cd frontend && npm test -- --run` runs `app.test.tsx` and all tests pass
+
+## Verification Command
+```bash
+cd frontend && npm install && npm test -- --run
+```
+
+===TICKET:T-03-core-models.md===
+# T-03: Core Domain Models — Suit, Rank, Card, Deck
+
+## Objective
+Implement the foundational immutable data types for the Durak card engine: `Suit`, `Rank`, `Card`, and `Deck` object with 36-card and 52-card generation. All types go in `backend/src/main/scala/durak/engine/`.
+
+## Requirements
+
+### File: `backend/src/main/scala/durak/engine/Suit.scala`
+```scala
+package durak.engine
+
+enum Suit:
+  case Clubs, Diamonds, Hearts, Spades
+```
+
+### File: `backend/src/main/scala/durak/engine/Rank.scala`
+```scala
+package durak.engine
+
+enum Rank(val value: Int):
+  case Two extends Rank(2)
+  case Three extends Rank(3)
+  case Four extends Rank(4)
+  case Five extends Rank(5)
+  case Six extends Rank(6)
+  case Seven extends Rank(7)
+  case Eight extends Rank(8)
+  case Nine extends Rank(9)
+  case Ten extends Rank(10)
+  case Jack extends Rank(11)
+  case Queen extends Rank(12)
+  case King extends Rank(13)
+  case Ace extends Rank(14)
+```
+- Provide `Ordering[Rank]` via `Rank.value`.
+
+### File: `backend/src/main/scala/durak/engine/Card.scala`
+```scala
+package durak.engine
+
+case class Card(suit: Suit, rank: Rank)
+```
+- Provide `Ordering[Card]` (compare by rank value, then suit ordinal as tiebreaker).
+
+### File: `backend/src/main/scala/durak/engine/Deck.scala`
+```scala
+package durak.engine
+
+object Deck:
+  def standard36: Vector[Card] = // All Suit × Rank where rank.value >= 6
+  def standard52: Vector[Card] = // All Suit × Rank
+  def forPlayerCount(n: Int): Vector[Card] = n match
+    case 2 | 3 => standard36
+    case 4     => standard52
+    case _     => throw IllegalArgumentException(...)
+```
+
+### Test File: `backend/src/test/scala/durak/engine/DeckSuite.scala`
+- `standard36` has exactly 36 cards, no duplicates, minimum rank is `Six`.
+- `standard52` has exactly 52 cards, no duplicates, minimum rank is `Two`.
+- `forPlayerCount(2)` and `forPlayerCount(3)` return 36; `forPlayerCount(4)` returns 52.
+- `forPlayerCount(5)` throws `IllegalArgumentException`.
+- `Card` ordering: `Card(Hearts, Six) < Card(Hearts, Ace)`.
+
+## Acceptance Criteria
+- [ ] All model files compile with no warnings
+- [ ] `DeckSuite` tests all pass
+
+## Verification Command
+```bash
+cd backend && sbt test
+```
+
+===TICKET:T-04-game-state.md===
+# T-04: Game State Data Structures
+
+## Objective
+Define all case classes and ADTs for the Durak game state machine: `BoutPhase`, `TablePair`, `PlayerState`, `GameConfig`, `GameAction`, and `GameState`.
+
+## Requirements
+
+All files in `backend/src/main/scala/durak/engine/`.
+
+### File: `BoutPhase.scala`
+```scala
+enum BoutPhase:
+  case InitialAttack
+  case Defense
+  case SurrenderThrowIn
+  case BoutOver       // Transient phase during resolution
+  case GameOver
+```
+
+### File: `TablePair.scala`
+```scala
+case class TablePair(attack: Card, defense: Option[Card] = None)
+```
+
+### File: `PlayerState.scala`
+```scala
+case class PlayerState(
+  id: String,
+  name: String,
+  hand: Vector[Card],
+  hasPassed: Boolean = false,
+  finishRank: Option[Int] = None  // 1 = first out, etc. Last = Durak
+)
+```
+- A player is "active" (still in the game) iff `finishRank.isEmpty`.
+- A player "has cards" iff `hand.nonEmpty`.
+
+### File: `GameConfig.scala`
+```scala
+case class GameConfig(
+  playerCount: Int,
+  allowRedirect: Boolean = true,
+  seed: Long = System.currentTimeMillis()
+)
+```
+
+### File: `GameAction.scala`
+```scala
+enum GameAction:
+  case InitialAttack(playerId: String, cards: List[Card])
+  case CoverCard(playerId: String, attackIndex: Int, defenseCard: Card)
+  case RedirectAttack(playerId: String, cards: List[Card])
+  case ThrowInCards(playerId: String, cards: List[Card])
+  case DeclareSurrender(playerId: String)
+  case PassTurn(playerId: String)
+```
+
+### File: `GameState.scala`
+```scala
+case class GameState(
+  config: GameConfig,
+  players: Vector[PlayerState],
+  talon: Vector[Card],          // Remaining draw pile (hidden)
+  trumpSuit: Suit,
+  bottomTrumpCard: Option[Card], // Last card of talon, shown face-up
+  discardPile: Vector[Card],
+  tablePairs: Vector[TablePair],
+  attackerIdx: Int,
+  defenderIdx: Int,
+  boutPhase: BoutPhase,
+  defenderInitialHandSize: Int,
+  finishOrder: Vector[String],   // Player IDs in order of finishing
+  isDraw: Boolean = false
+)
+```
+- Helper methods:
+  - `activePlayers: Vector[PlayerState]` — players with `finishRank.isEmpty`
+  - `activePlayersWithCards: Vector[PlayerState]` — active players with `hand.nonEmpty`
+  - `maxBoutAttacks: Int` — `Math.min(6, defenderInitialHandSize)`
+  - `nextActivePlayerIdx(fromIdx: Int): Int` — next seat clockwise among active players
+
+### Test File: `backend/src/test/scala/durak/engine/GameStateSuite.scala`
+- `activePlayers` correctly filters finished players
+- `activePlayersWithCards` correctly filters empty hands
+- `maxBoutAttacks` returns `min(6, defenderInitialHandSize)`
+- `nextActivePlayerIdx` wraps around correctly for 2, 3, and 4 players, skipping finished players
+
+## Acceptance Criteria
+- [ ] All data structure files compile
+- [ ] `GameStateSuite` tests pass
+
+## Verification Command
+```bash
+cd backend && sbt test
+```
+
+===TICKET:T-05-game-init.md===
+# T-05: Game Initialization — Shuffle, Deal, Trump, First Attacker
+
+## Objective
+Implement `GameEngine.createGame(config, playerNames)` that produces a fully initialized `GameState` ready for the first `InitialAttack`.
+
+## Requirements
+
+### File: `backend/src/main/scala/durak/engine/GameEngine.scala`
+
+Create an object `GameEngine` with:
+
+```scala
+object GameEngine:
+  def createGame(config: GameConfig, playerNames: Vector[String]): GameState
+```
+
+**Logic for `createGame`:**
+1. Validate `playerNames.size == config.playerCount` and `playerCount in {2, 3, 4}`.
+2. Generate the deck via `Deck.forPlayerCount(config.playerCount)`.
+3. Shuffle using `new scala.util.Random(config.seed)` — use `random.shuffle(deck)`.
+4. Deal 6 cards to each player sequentially (first 6 to player 0, next 6 to player 1, etc.).
+5. The next card after all hands are dealt is the `bottomTrumpCard`. Place it logically at the **bottom** of the remaining talon (it will be the last card drawn). Set `trumpSuit` from this card's suit.
+   - Implementation: after dealing, the remaining cards form the talon. The first of these remaining cards is the revealed bottom trump. Rearrange so `bottomTrumpCard` is `talon.last` and set `trumpSuit`.
+6. **First attacker:** Find the player holding the lowest-rank trump card. If no player has a trump, `attackerIdx = 0`. `defenderIdx = nextActivePlayerIdx(attackerIdx)`.
+7. Set `boutPhase = BoutPhase.InitialAttack`, `defenderInitialHandSize = players(defenderIdx).hand.size` (which is 6).
+
+### Test File: `backend/src/test/scala/durak/engine/GameInitSuite.scala`
+
+- **Deterministic shuffle:** Creating a game with the same seed twice yields identical states.
+- **Hand sizes:** Every player receives exactly 6 cards after init.
+- **No duplicate cards:** All cards across hands + talon are unique and sum to deck size.
+- **Trump suit:** `trumpSuit` matches `bottomTrumpCard.get.suit`.
+- **Bottom trump position:** `talon.last == bottomTrumpCard.get`.
+- **First attacker — has trump:** Seed the game so at least one player has a trump. Verify the player with the lowest trump rank is `attackerIdx`.
+- **First attacker — no trump:** Construct a scenario (or find a seed) where no player holds a trump card in their initial hand. Verify `attackerIdx == 0`.
+- **Defender is clockwise:** `defenderIdx == (attackerIdx + 1) % playerCount` (when all players are active).
+- **Bout phase:** `boutPhase == BoutPhase.InitialAttack`.
+- **Player count validation:** Passing mismatched `playerNames.size` vs `config.playerCount` throws an exception.
+
+## Acceptance Criteria
+- [ ] `GameEngine.createGame` produces valid initial states
+- [ ] All `GameInitSuite` tests pass
+
+## Verification Command
+```bash
+cd backend && sbt test
+```
+
+===TICKET:T-06-attack-defense.md===
+# T-06: Initial Attack & Defense (Cover) Move Processing
+
+## Objective
+Implement `GameEngine.applyAction` for `InitialAttack` and `CoverCard` actions with full validation and state transitions.
+
+## Requirements
+
+### File: `backend/src/main/scala/durak/engine/GameEngine.scala`
+
+Add to `GameEngine`:
+
+```scala
+def applyAction(state: GameState, action: GameAction): Either[String, GameState]
+```
+
+Returns `Left(errorMessage)` for illegal moves, `Right(newState)` for valid moves.
+
+#### `InitialAttack(playerId, cards)` handling:
+- **Validations:**
+  1. `boutPhase == BoutPhase.InitialAttack`
+  2. `playerId` matches `players(attackerIdx).id`
+  3. `cards.nonEmpty`
+  4. All cards in `cards` are in the attacker's hand
+  5. All cards share the exact same `Rank`
+  6. `cards.size <= maxBoutAttacks`
+- **State transition:**
+  1. Remove played cards from attacker's hand
+  2. Add each card as `TablePair(card, None)` to `tablePairs`
+  3. Set `boutPhase = BoutPhase.Defense`
+
+#### `CoverCard(playerId, attackIndex, defenseCard)` handling:
+- **Validations:**
+  1. `boutPhase == BoutPhase.Defense`
+  2. `playerId` matches `players(defenderIdx).id`
+  3. `defenseCard` is in the defender's hand
+  4. `attackIndex` is a valid index into `tablePairs`
+  5. `tablePairs(attackIndex).defense.isEmpty` (not already covered)
+  6. Legal cover check:
+     - `(defenseCard.suit == attackCard.suit && defenseCard.rank.value > attackCard.rank.value)` OR
+     - `(defenseCard.suit == trumpSuit && attackCard.suit != trumpSuit)`
+- **State transition:**
+  1. Remove `defenseCard` from defender's hand
+  2. Update `tablePairs(attackIndex)` to include the defense card
+
+### Test File: `backend/src/test/scala/durak/engine/AttackDefenseSuite.scala`
+
+**Initial Attack Tests:**
+- Valid single-card attack succeeds, cards appear on table, phase transitions to `Defense`
+- Valid multi-card attack (same rank) succeeds
+- Reject: wrong player tries to attack
+- Reject: wrong phase
+- Reject: cards not in hand
+- Reject: cards of different ranks
+- Reject: more cards than `maxBoutAttacks`
+
+**Cover Card Tests:**
+- Valid same-suit higher-rank cover succeeds
+- Valid trump-over-non-trump cover succeeds
+- Reject: same suit but lower rank
+- Reject: different non-trump suit
+- Reject: trump vs trump with lower rank (must be higher)
+- Reject: card not in defender's hand
+- Reject: attack index already covered
+- Reject: wrong player (not defender)
+- Reject: wrong phase
+
+## Acceptance Criteria
+- [ ] `applyAction` handles `InitialAttack` and `CoverCard` correctly
+- [ ] All `AttackDefenseSuite` tests pass
+
+## Verification Command
+```bash
+cd backend && sbt test
+```
+
+===TICKET:T-07-redirect.md===
+# T-07: Redirect / Reflect Mechanic
+
+## Objective
+Implement `GameEngine.applyAction` for `RedirectAttack` with full validation, role rotation, and `defenderInitialHandSize` update.
+
+## Requirements
+
+### In `GameEngine.applyAction`:
+
+#### `RedirectAttack(playerId, cards)` handling:
+- **Validations:**
+  1. `boutPhase == BoutPhase.Defense`
+  2. `config.allowRedirect == true`
+  3. `playerId` matches `players(defenderIdx).id`
+  4. ALL table pairs have `defense.isEmpty` (zero cards are currently covered)
+  5. `cards.nonEmpty` and all cards in `cards` are in the defender's hand
+  6. All cards in `cards` have the **exact same Rank** as the existing attacking cards on the table
+  7. Compute `nextDefIdx = nextActivePlayerIdx(defenderIdx)` (the player clockwise after current defender, who is NOT the current defender)
+  8. `players(nextDefIdx).hand.size >= (tablePairs.size + cards.size)` — next defender must have enough cards
+  9. `(tablePairs.size + cards.size) <= 6` — total cannot exceed 6
+- **State transition:**
+  1. Remove played cards from the (old) defender's hand
+  2. Add each card as `TablePair(card, None)` to `tablePairs`
+  3. Old `defenderIdx` becomes new `attackerIdx`
+  4. `nextDefIdx` becomes new `defenderIdx`
+  5. Update `defenderInitialHandSize` to `players(nextDefIdx).hand.size`
+  6. Reset all players' `hasPassed` to `false`
+
+### 2-Player Redirect Note
+In a 2-player game, after redirect the original attacker becomes the new defender. Ensure `nextActivePlayerIdx(defenderIdx)` correctly returns the original attacker in this case.
+
+### Test File: `backend/src/test/scala/durak/engine/RedirectSuite.scala`
+
+- **Valid redirect (2P):** Defender redirects with a matching-rank card; roles swap
+- **Valid redirect (3P):** Defender redirects; attack passes to the next clockwise player
+- **Reject:** `config.allowRedirect == false`
+- **Reject:** Some cards on the table are already covered
+- **Reject:** Redirect cards have a different rank than table cards
+- **Reject:** Next defender doesn't have enough cards
+- **Reject:** Total table pairs would exceed 6
+- **Reject:** Cards not in defender's hand
+- **Role rotation correctness:** After redirect, `attackerIdx` is the old defender, `defenderIdx` is the next clockwise player
+- **`defenderInitialHandSize` update:** Correctly set to new defender's hand size after redirect
+- **Chain redirect (3P):** Defender A redirects to B, then B redirects to original attacker (if conditions met)
+
+## Acceptance Criteria
+- [ ] Redirect mechanic fully implemented with validation
+- [ ] All `RedirectSuite` tests pass
+
+## Verification Command
+```bash
+cd backend && sbt test
+```
+
+===TICKET:T-08-surrender-throwin.md===
+# T-08: Surrender Declaration & Throw-In Cards
+
+## Objective
+Implement `GameEngine.applyAction` for `DeclareSurrender` and `ThrowInCards` actions.
+
+## Requirements
+
+### In `GameEngine.applyAction`:
+
+#### `DeclareSurrender(playerId)` handling:
+- **Validations:**
+  1. `boutPhase == BoutPhase.Defense`
+  2. `playerId` matches `players(defenderIdx).id`
+  3. At least 1 uncovered attacking card exists: `tablePairs.exists(_.defense.isEmpty)`
+- **State transition:**
+  1. Set `boutPhase = BoutPhase.SurrenderThrowIn`
+  2. Reset all non-defending players' `hasPassed` to `false`
+  3. Auto-pass any non-defending active player who has 0 cards or where `tablePairs.size >= maxBoutAttacks`
+
+#### `ThrowInCards(playerId, cards)` handling:
+- **Validations:**
+  1. `boutPhase` is `Defense` or `SurrenderThrowIn`
+  2. `playerId` is NOT the defender
+  3. `playerId` is an active player (not finished)
+  4. `cards.nonEmpty`
+  5. All cards in `cards` are in the player's hand
+  6. Every card's rank matches the rank of **at least one** card already on the table (either attack or defense side)
+  7. `tablePairs.size + cards.size <= maxBoutAttacks`
+  8. During `Defense` phase only: additionally ensure new uncovered cards don't exceed defender's current hand size (the defender must be able to potentially cover them)
+- **State transition:**
+  1. Remove played cards from the throwing player's hand
+  2. Add each card as `TablePair(card, None)` to `tablePairs`
+  3. If `boutPhase == BoutPhase.Defense`: reset all non-defending active players' `hasPassed` to `false`
+  4. If `boutPhase == BoutPhase.SurrenderThrowIn`: do NOT reset passed flags (throw-in during surrender doesn't reopen passing)
+
+### Test File: `backend/src/test/scala/durak/engine/SurrenderThrowInSuite.scala`
+
+**Surrender Tests:**
+- Valid surrender transitions to `SurrenderThrowIn`
+- Reject: non-defender tries to surrender
+- Reject: wrong phase (not Defense)
+- Reject: all attacking cards are already covered (nothing to surrender to)
+
+**Throw-In Tests:**
+- Valid throw-in during Defense: card rank matches table, added to table
+- Valid throw-in during SurrenderThrowIn
+- Valid throw-in by non-attacker, non-defender (3P+ game)
+- Reject: defender tries to throw in
+- Reject: card rank doesn't match any table card
+- Reject: would exceed `maxBoutAttacks`
+- Reject: cards not in player's hand
+- **Passed flags reset:** After throw-in during Defense, all non-defender passed flags are reset
+- **No reset during Surrender:** After throw-in during SurrenderThrowIn, passed flags are NOT reset
+
+## Acceptance Criteria
+- [ ] `DeclareSurrender` and `ThrowInCards` fully implemented
+- [ ] All `SurrenderThrowInSuite` tests pass
+
+## Verification Command
+```bash
+cd backend && sbt test
+```
+
+===TICKET:T-09-pass-bout-resolution.md===
+# T-09: Pass Logic & Bout Resolution (Draw, Discard, Role Rotation)
+
+## Objective
+Implement `PassTurn` action handling and the complete bout resolution logic: card drawing, discard/pickup, and attacker/defender role rotation for the next bout.
+
+## Requirements
+
+### In `GameEngine.applyAction`:
+
+#### `PassTurn(playerId)` handling:
+- **Validations:**
+  1. `boutPhase` is `Defense` or `SurrenderThrowIn`
+  2. `playerId` is NOT the defender
+  3. `playerId` is an active player
+  4. Player has not already passed (`hasPassed == false`)
+  5. During `Defense` phase: all attacking cards must be covered (`tablePairs.forall(_.defense.isDefined)`) OR `tablePairs.size >= maxBoutAttacks`
+- **State transition:**
+  1. Set the player's `hasPassed = true`
+  2. Check if all active non-defending players have now passed (auto-pass players with 0 cards or where table is full)
+  3. If all have passed → trigger bout resolution (see below)
+
+#### Bout Resolution — `resolveBout(state: GameState): GameState`
+
+Implement as a private helper. Called when all non-defenders have passed.
+
+**Determine outcome based on `boutPhase`:**
+
+**Case A — Successful Defense** (phase was `Defense`, all cards covered):
+1. Move all table cards (attack + defense) to `discardPile`
+2. Clear `tablePairs`
+3. Draw cards (see draw order below)
+4. **Role rotation:** old `defenderIdx` becomes new `attackerIdx`; new `defenderIdx` = `nextActivePlayerIdx(new attackerIdx)`
+5. Set `boutPhase = BoutPhase.InitialAttack`
+
+**Case B — Surrender** (phase was `SurrenderThrowIn`):
+1. Defender picks up ALL cards from the table (both attack and defense cards) into their hand
+2. Clear `tablePairs`
+3. Draw cards — but **defender does NOT draw** (they just picked up cards)
+4. **Role rotation:** new `attackerIdx` = `nextActivePlayerIdx(defenderIdx)` (skip the defender); new `defenderIdx` = `nextActivePlayerIdx(new attackerIdx)`
+5. Set `boutPhase = BoutPhase.InitialAttack`
+
+**Card Drawing Order** (while `talon.nonEmpty` and player has < 6 cards):
+1. Primary attacker draws to 6
+2. Other non-defending active players draw to 6 in clockwise seat order from attacker
+3. Defender draws to 6 last (skipped entirely in Case B)
+
+After drawing, set `defenderInitialHandSize` to the new defender's hand size.
+Reset all players' `hasPassed = false`.
+
+### Test File: `backend/src/test/scala/durak/engine/BoutResolutionSuite.scala`
+
+**Pass Tests:**
+- Valid pass when all cards covered
+- Reject: pass when uncovered cards remain (Defense phase)
+- Reject: defender tries to pass
+- Reject: player already passed
+- Auto-pass players with empty hands
+
+**Successful Defense Tests:**
+- Table cards go to discard pile
+- Players draw to 6 in correct order (attacker first, defender last)
+- Roles rotate: defender becomes attacker
+- Bout phase resets to `InitialAttack`
+
+**Surrender Tests:**
+- Defender picks up all table cards
+- Non-defenders draw (defender does not)
+- Roles skip surrendering defender
+- Bout phase resets to `InitialAttack`
+
+**Drawing Tests:**
+- Draw order: attacker → clockwise non-defenders → defender
+- Drawing stops when talon is empty (partial draws)
+- `bottomTrumpCard` is the last card drawn from talon; after talon empties, `bottomTrumpCard = None`
+
+**3-Player Role Rotation:**
+- After successful defense in 3P: verify correct attacker/defender cycling
+- After surrender in 3P: verify defender is skipped for attack turn
+
+## Acceptance Criteria
+- [ ] Pass and bout resolution fully implemented
+- [ ] All `BoutResolutionSuite` tests pass
+
+## Verification Command
+```bash
+cd backend && sbt test
+```
+
+===TICKET:T-10-endgame.md===
+# T-10: Endgame — Player Elimination, Victory Conditions, Draw Detection
+
+## Objective
+Implement post-bout player elimination checks, finish ordering, game-over detection, and the 2-player simultaneous draw condition.
+
+## Requirements
+
+### In `GameEngine` (extend `resolveBout` or add `checkEndgame`):
+
+After the draw phase of bout resolution, add an endgame check step:
+
+#### Player Elimination
+- When `talon.isEmpty`: any active player whose `hand.isEmpty` is **eliminated** (finished the game successfully).
+- Set their `finishRank` to `finishOrder.size + 1` and append their `id` to `finishOrder`.
+- Process eliminations in a consistent order (by seat index).
+
+#### 2-Player Draw Detection
+- After a successful defense bout (Case A), if `talon.isEmpty` and both remaining players have `hand.isEmpty` simultaneously (attacker played last cards, defender covered with last cards), mark `isDraw = true`, and both players are added to `finishOrder` with the same `finishRank`.
+
+#### Game Over Check
+- After eliminations, if `activePlayersWithCards.size <= 1`:
+  - If exactly 1 player remains with cards: they are the **Durak** (last place). Set their `finishRank` to `finishOrder.size + 1`, add to `finishOrder`.
+  - Set `boutPhase = BoutPhase.GameOver`.
+- If `activePlayersWithCards.size == 0` (all players finished, e.g., 2-player draw): set `boutPhase = BoutPhase.GameOver`.
+
+### Test File: `backend/src/test/scala/durak/engine/EndgameSuite.scala`
+
+**Elimination Tests:**
+- Player with empty hand after talon is depleted gets `finishRank` assigned
+- Multiple players finishing in same bout get ranks in seat order
+- Player finishing first gets `finishRank = 1`
+
+**Durak Detection Tests:**
+- Last player with cards is the Durak (highest `finishRank`)
+- Game phase transitions to `GameOver`
+
+**2-Player Draw Tests:**
+- Construct a late-game state where talon is empty, attacker plays last card(s), defender covers with last card(s) → both finish simultaneously → `isDraw == true`, both have same `finishRank`
+
+**3/4-Player Endgame Tests:**
+- Players eliminated in correct order over multiple bouts
+- Game ends when only 1 player has cards remaining
+
+**Full Game Simulation Test:**
+- Play through a complete 2-player game using a fixed seed, applying a predetermined sequence of legal actions, and verify the game reaches `GameOver` with correct `finishOrder`
+
+## Acceptance Criteria
+- [ ] Endgame logic fully implemented and integrated into bout resolution
+- [ ] All `EndgameSuite` tests pass
+
+## Verification Command
+```bash
+cd backend && sbt test
+```
+
+===TICKET:T-11-player-view-json.md===
+# T-11: PlayerGameView Projection & Circe JSON Codecs
+
+## Objective
+Implement the `PlayerGameView` projection that strips hidden information from `GameState`, and define Circe JSON encoders/decoders for all engine types and WebSocket messages.
+
+## Requirements
+
+### File: `backend/src/main/scala/durak/engine/PlayerGameView.scala`
+
+```scala
+case class PublicPlayerSummary(
+  id: String,
+  name: String,
+  cardCount: Int,
+  hasPassed: Boolean,
+  finishRank: Option[Int]
+)
+
+case class PlayerGameView(
+  myId: String,
+  myHand: List[Card],
+  opponents: List[PublicPlayerSummary],
+  tablePairs: Vector[TablePair],
+  talonCount: Int,
+  bottomTrumpCard: Option[Card],  // None when talon is empty
+  trumpSuit: Suit,
+  attackerIdx: Int,
+  defenderIdx: Int,
+  boutPhase: BoutPhase,
+  legalActions: List[String],     // e.g. ["attack", "cover", "pass", "surrender", "redirect", "throwIn"]
+  finishOrder: Vector[String],
+  isDraw: Boolean,
+  maxBoutAttacks: Int
+)
+
+object PlayerGameView:
+  def forViewer(state: GameState, viewerId: String): PlayerGameView
+```
+
+**`forViewer` logic:**
+1. Find the viewer's `PlayerState` by `viewerId`.
+2. `myHand` = viewer's hand as `List[Card]`.
+3. `opponents` = all other players mapped to `PublicPlayerSummary` (only `cardCount`, never actual cards).
+4. `talonCount` = `state.talon.size`.
+5. `bottomTrumpCard` = `state.bottomTrumpCard` only if `talon.nonEmpty`, else `None`.
+6. Compute `legalActions` for this viewer based on current state (what actions the viewer can currently perform).
+
+### File: `backend/src/main/scala/durak/engine/JsonCodecs.scala`
+
+Provide Circe `Encoder` and `Decoder` instances for:
+- `Suit`, `Rank`, `Card`
+- `TablePair`, `BoutPhase`
+- `PublicPlayerSummary`, `PlayerGameView`
+- `GameAction` (all variants, for receiving WebSocket commands)
+
+Use `circe-generic` semi-auto derivation or manual codecs. Ensure:
+- `Suit` and `Rank` serialize as lowercase strings (e.g., `"hearts"`, `"ace"`)
+- `Card` serializes as `{"suit": "hearts", "rank": "ace"}`
+- `GameAction` uses a `"type"` discriminator field (e.g., `{"type": "initialAttack", "playerId": "...", "cards": [...]}`)
+
+### Test File: `backend/src/test/scala/durak/engine/PlayerViewSuite.scala`
+
+**Projection Tests:**
+- Viewer's own hand is included correctly
+- Opponent cards are NOT included (only `cardCount`)
+- `talonCount` matches actual talon size
+- `bottomTrumpCard` is `None` when talon is empty
+- `legalActions` correctly lists available actions per phase and role
+
+### Test File: `backend/src/test/scala/durak/engine/JsonCodecsSuite.scala`
+
+**Round-Trip Tests:**
+- `Card` encodes and decodes correctly
+- `PlayerGameView` round-trips through JSON
+- `GameAction.InitialAttack` decodes from JSON string
+- `GameAction.CoverCard` decodes from JSON string
+- `GameAction.RedirectAttack` decodes from JSON string
+- All `GameAction` variants decode correctly with `"type"` discriminator
+
+## Acceptance Criteria
+- [ ] `PlayerGameView.forViewer` never leaks hidden state
+- [ ] All JSON codecs round-trip correctly
+- [ ] All tests pass
+
+## Verification Command
+```bash
+cd backend && sbt test
+```
+
+===TICKET:T-12-game-actor-server.md===
+# T-12: Game Actor & Http4s REST/WebSocket Server
+
+## Objective
+Implement a Cats Effect–based game actor that holds game state in a `Ref` and broadcasts updates via `Topic`, plus Http4s routes for creating games, querying state, and playing via WebSocket. Wire everything into `Main.scala` serving on `0.0.0.0:8080`.
+
+## Requirements
+
+### File: `backend/src/main/scala/durak/server/GameActor.scala`
+
+```scala
+package durak.server
+
+import cats.effect.*
+import cats.effect.std.Queue
+import fs2.concurrent.Topic
+
+case class GameRoom(
+  gameId: String,
+  stateRef: Ref[IO, GameState],
+  topic: Topic[IO, GameState],  // Broadcasts state changes
+  playerIds: Vector[String]
+)
+
+object GameActor:
+  def create(config: GameConfig, playerNames: Vector[String]): IO[GameRoom]
+  def applyAction(room: GameRoom, action: GameAction): IO[Either[String, GameState]]
+```
+
+- `create`: Initializes `GameState` via `GameEngine.createGame`, stores in `Ref`, creates `Topic`.
+- `applyAction`: Atomically validates and applies the action via `stateRef.modify`, publishes new state to `topic`.
+
+### File: `backend/src/main/scala/durak/server/GameManager.scala`
+
+```scala
+package durak.server
+
+import cats.effect.*
+
+class GameManager(rooms: Ref[IO, Map[String, GameRoom]]):
+  def createGame(config: GameConfig, playerNames: Vector[String]): IO[GameRoom]
+  def getRoom(gameId: String): IO[Option[GameRoom]]
+```
+
+- Generates unique `gameId` (UUID).
+- Stores rooms in the `Ref[IO, Map]`.
+
+### File: `backend/src/main/scala/durak/server/GameRoutes.scala`
+
+```scala
+package durak.server
+
+import org.http4s.*
+import org.http4s.dsl.io.*
+
+object GameRoutes:
+  def routes(manager: GameManager): HttpRoutes[IO]
+```
+
+**REST Endpoints:**
+- `POST /api/game/create` — Body: `{"playerCount": 2, "playerNames": ["Alice", "Bob"], "allowRedirect": true}` → Creates game, returns `{"gameId": "...", "players": [...]}`
+- `GET /api/game/:gameId/view/:playerId` — Returns `PlayerGameView` as JSON for the given player
+- `POST /api/game/:gameId/action` — Body: `GameAction` JSON → Applies action, returns updated `PlayerGameView` or error
+
+**WebSocket Endpoint:**
+- `GET /ws/game/:gameId/:playerId` — Upgrades to WebSocket:
+  - **Incoming:** JSON `GameAction` messages → applied via `GameActor.applyAction`
+  - **Outgoing:** `PlayerGameView` JSON pushed on every state change (subscribe to `topic`, map through `PlayerGameView.forViewer`)
+
+### File: `backend/src/main/scala/durak/Main.scala`
+
+Update to:
+1. Create a `GameManager`
+2. Build `GameRoutes.routes(manager)`
+3. Start `EmberServerBuilder` on `0.0.0.0:8080` with the routes
+4. Log `"Durak server running on 0.0.0.0:8080"`
+
+### Test File: `backend/src/test/scala/durak/server/GameActorSuite.scala`
+
+- Create a game room → initial state has correct phase and player count
+- Apply valid `InitialAttack` → state updates, new state published to topic
+- Apply invalid action → returns `Left(error)`, state unchanged
+- Multiple sequential actions (attack → defend → pass) progress the game
+
+### Test File: `backend/src/test/scala/durak/server/GameRoutesSuite.scala`
+
+- `POST /api/game/create` returns 200 with `gameId`
+- `GET /api/game/:id/view/:playerId` returns valid `PlayerGameView` JSON
+- `POST /api/game/:id/action` with valid action returns updated view
+- `POST /api/game/:id/action` with invalid action returns 400 with error message
+- Non-existent `gameId` returns 404
+
+## Acceptance Criteria
+- [ ] Game actor manages state atomically
+- [ ] REST endpoints create games, return views, and process actions
+- [ ] WebSocket endpoint streams filtered views
+- [ ] `Main.scala` boots the server successfully
+- [ ] All tests pass
+
+## Verification Command
+```bash
+cd backend && sbt test
+```
+
+===TICKET:T-13-svg-cards-table.md===
+# T-13: SVG Playing Card Components & Responsive Table Layout
+
+## Objective
+Build custom inline SVG playing card components and the responsive game table layout using Preact, CSS Grid/Flexbox, and the Lichess dark-mode aesthetic.
+
+## Requirements
+
+### File: `frontend/src/components/Card.tsx`
+
+A Preact component that renders an inline SVG playing card:
+- **Props:** `{ suit: string, rank: string, faceUp?: boolean, selected?: boolean, onClick?: () => void }`
+- **Face-up card:** White/cream rounded rectangle with rank text (top-left, bottom-right) and suit symbol (center). Suit colors: `♠♣` = `#bababa`, `♥♦` = `#c33`.
+- **Face-down card:** Dark patterned rectangle (use `#262421` with a subtle pattern or cross-hatch).
+- **Selected state:** Slight upward translation (`translateY(-8px)`) and green border highlight (`#629924`).
+- Card dimensions: approximately `70×100px`, scalable via CSS.
+
+### File: `frontend/src/components/CardBack.tsx`
+
+A simpler component for opponent card backs (no rank/suit, just the back design).
+
+### File: `frontend/src/components/TablePair.tsx`
+
+Renders a single attack–defense pair:
+- Attack card flat, defense card overlapping at a slight offset (translate ~20px right and ~15px down).
+- If no defense card, show only the attack card.
+
+### File: `frontend/src/components/GameTable.tsx`
+
+The main game table layout:
+- **Center:** Battle area showing `TablePair` components in a flex row/wrap.
+- **Bottom:** Player's own hand — fanned/sorted cards, clickable for selection.
+- **Top / Sides:** Opponent areas showing card back count and player name/status.
+- **Top-Right:** Talon display — stacked card backs with count badge, plus the perpendicular bottom trump card (a card rotated 90°) visible while talon > 0.
+- **Trump indicator:** Badge showing trump suit symbol and color.
+- **Action buttons area:** Below the hand — contextual buttons (rendered by parent, this component provides the layout slot).
+
+### File: `frontend/src/components/ActionBar.tsx`
+
+Action buttons component:
+- **Props:** `{ legalActions: string[], onAction: (action: object) => void }`
+- Buttons: "Pass" (green), "Surrender" (red), "Redirect" (yellow/amber).
+- Only show buttons relevant to `legalActions`.
+- Styled with Lichess aesthetic: rounded, high-contrast, hover effects.
+
+### File: `frontend/src/styles/table.css`
+
+- Dark theme: `#161512` background, `#262421` panels, `#bababa` text.
+- Responsive layout: CSS Grid for table regions, flexbox for card rows.
+- Media queries for mobile (`< 640px`): stack opponent areas above battle area, reduce card size.
+- Active turn indicator: `#629924` glow/border on the current attacker/defender.
+
+### Test File: `frontend/src/__tests__/Card.test.tsx`
+
+- Renders face-up card with correct rank and suit text
+- Renders face-down card (card back)
+- Selected card has the `selected` CSS class or style
+- Click handler fires on click
+
+### Test File: `frontend/src/__tests__/GameTable.test.tsx`
+
+- Renders player hand with correct number of cards
+- Renders table pairs in the battle area
+- Renders opponent summary areas
+- Renders talon count
+
+## Acceptance Criteria
+- [ ] SVG cards render correctly with proper suit colors
+- [ ] Table layout is responsive (no horizontal scroll at 360px width)
+- [ ] All component tests pass
+
+## Verification Command
+```bash
+cd frontend && npm test -- --run
+```
+
+===TICKET:T-14-ws-client-interactive.md===
+# T-14: Frontend WebSocket Client & Interactive Game Play
+
+## Objective
+Implement the WebSocket connection manager, game state management, card interaction UX, and a working local play flow where the user can create a game via the REST API and play it interactively at `http://localhost:5173`.
+
+## Requirements
+
+### File: `frontend/src/api/client.ts`
+
+REST API client:
+```typescript
+export async function createGame(playerCount: number, playerNames: string[], allowRedirect?: boolean): Promise<{ gameId: string, players: string[] }>
+export async function getGameView(gameId: string, playerId: string): Promise<PlayerGameView>
+export async function sendAction(gameId: string, action: GameAction): Promise<PlayerGameView | { error: string }>
+```
+
+### File: `frontend/src/api/websocket.ts`
+
+WebSocket connection manager:
+```typescript
+export class GameWebSocket {
+  constructor(gameId: string, playerId: string, onStateUpdate: (view: PlayerGameView) => void)
+  connect(): void
+  sendAction(action: GameAction): void
+  disconnect(): void
+}
+```
+- Connects to `ws://${location.host}/ws/game/${gameId}/${playerId}`
+- Parses incoming `PlayerGameView` JSON and calls `onStateUpdate`
+- Sends `GameAction` JSON objects
+- Auto-reconnect on disconnect (with exponential backoff, max 3 retries)
+
+### File: `frontend/src/types.ts`
+
+TypeScript interfaces matching the backend JSON codecs:
+```typescript
+export interface Card { suit: string; rank: string }
+export interface TablePair { attack: Card; defense?: Card }
+export interface PublicPlayerSummary { id: string; name: string; cardCount: number; hasPassed: boolean; finishRank?: number }
+export interface PlayerGameView {
+  myId: string; myHand: Card[]; opponents: PublicPlayerSummary[];
+  tablePairs: TablePair[]; talonCount: number; bottomTrumpCard?: Card;
+  trumpSuit: string; attackerIdx: number; defenderIdx: number;
+  boutPhase: string; legalActions: string[]; finishOrder: string[];
+  isDraw: boolean; maxBoutAttacks: number;
+}
+export interface GameAction { type: string; playerId: string; [key: string]: any }
+```
+
+### File: `frontend/src/pages/GamePage.tsx`
+
+The main game page component (`/g/:gameId` route or default local page):
+- **State:** `PlayerGameView | null`, selected cards `Set<number>`, current player ID
+- **Card Selection UX:**
+  - Clicking a card in hand toggles selection (Card component's `selected` prop)
+  - For attacks: select multiple same-rank cards, click "Attack" button
+  - For defense: select one hand card, then click an uncovered table card to cover it
+  - For throw-in: select matching-rank cards, click "Throw In" button
+- **Action Dispatch:** Clicking action buttons builds the appropriate `GameAction` JSON and sends it via WebSocket (or REST fallback)
+- **Game Over Display:** When `boutPhase === "GameOver"`, show results (winner, Durak, draw)
+
+### File: `frontend/src/pages/LobbyPage.tsx`
+
+Simple local lobby for M1 (not the full matchmaking lobby):
+- Form to create a local game: player count (2/3/4), player names, redirect toggle
+- "Create Game" button → calls `POST /api/game/create`
+- On success, displays game links/tabs for each player to open `GamePage`
+- For local testing: provide a tabbed view or player-selector dropdown to switch between player views
+
+### File: `frontend/src/app.tsx`
+
+Update to include basic client-side routing:
+- `/` → `LobbyPage`
+- `/g/:gameId` → `GamePage`
+- Use `preact-router` or a simple hash-based router
+
+### Test File: `frontend/src/__tests__/types.test.ts`
+
+- `PlayerGameView` interface validates against sample JSON from backend
+- `GameAction` construction for each action type produces valid JSON structure
+
+### Test File: `frontend/src/__tests__/websocket.test.ts`
+
+- `GameWebSocket` calls `onStateUpdate` when receiving a valid message
+- `sendAction` serializes action to JSON correctly
+- (Use mock WebSocket or jsdom WebSocket stub)
+
+## Acceptance Criteria
+- [ ] Local game creation flow works: create game → see table → play moves
+- [ ] WebSocket client connects and receives state updates
+- [ ] Card selection and action dispatch produce correct `GameAction` payloads
+- [ ] Multiple player views are accessible for local testing
+- [ ] All tests pass
+- [ ] Full stack is playable at `http://localhost:5173` (with backend on `:8080`)
+
+## Verification Command
+```bash
+cd frontend && npm test -- --run
+```

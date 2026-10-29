@@ -2,36 +2,44 @@
 set -u
 
 # === CONFIGURATION ===
-# Run `agy models` to verify exact model slugs on your account
-ARCHITECT_MODEL="claude-opus-4.6-thinking"
-REVIEWER_MODEL="claude-sonnet-4.6-thinking"
-SESSION_TIMEOUT_SEC=3300   # 55 minutes (catches FreeBuff's 1-hr cutoff cleanly)
-POLL_INTERVAL_SEC=10       # Check .tickets/STATUS every 10 seconds
-MAX_REVIEW_RETRIES=3       # Max times FreeBuff can attempt fixes per ticket
+ARCHITECT_MODEL="claude-opus-4-6-thinking"
+REVIEWER_MODEL="claude-sonnet-4-6"
+SESSION_TIMEOUT_SEC=3300   # 55 minutes
+POLL_INTERVAL_SEC=10
+MAX_REVIEW_RETRIES=3
 
 mkdir -p .tickets .reviews
 
-# Helper: Run Antigravity with automatic 5-hour quota sleep/retry
+# Helper: Run Antigravity safely with NO interactive hanging
 run_agy_safe() {
   local MODEL=$1
-  local PROMPT=$2
+  local PROMPT_FILE=$2
   local OUT_FILE=$3
 
   while true; do
     echo "🤖 Calling Antigravity (${MODEL})..."
-    if agy -p "$PROMPT" --model "$MODEL" --effort high > "$OUT_FILE" 2>.reviews/agy_err.log; then
+    
+    # < /dev/null prevents infinite hangs waiting for keyboard input
+    if agy -p "$(cat "$PROMPT_FILE")" --model "$MODEL" --dangerously-skip-permissions < /dev/null > "$OUT_FILE" 2>.reviews/agy_err.log; then
       if [ -s "$OUT_FILE" ]; then
         return 0
       fi
     fi
-    echo "⏳ Antigravity call failed or hit 5-hour Pro quota limit. Error log:"
+    
+    echo "⏳ Antigravity call failed. Error log:"
     cat .reviews/agy_err.log
-    echo "💤 Sleeping 15 minutes before retrying..."
+    
+    if grep -qi "model" .reviews/agy_err.log; then
+       echo "🛑 Fatal error: Model slug not recognized. Check 'agy models'. Exiting."
+       exit 1
+    fi
+    
+    echo "💤 Quota limit likely hit or connection failed. Sleeping 15 minutes before retrying..."
     sleep 900
   done
 }
 
-# Helper: Send prompt to FreeBuff inside Docker tmux and wait for .tickets/STATUS == DONE
+# Helper: Send prompt to FreeBuff inside Docker tmux
 run_freebuff_until_done() {
   local PROMPT=$1
   rm -f .tickets/STATUS
@@ -41,10 +49,9 @@ run_freebuff_until_done() {
     docker exec freebuff_worker tmux kill-session -t buff 2>/dev/null || true
     docker exec freebuff_worker tmux new-session -d -s buff "freebuff"
     
-    # Wait 6 seconds for FreeBuff TUI to initialize
-    sleep 6
+    sleep 15
 
-    # Inject prompt using bracketed paste so OpenTUI receives it cleanly
+    # Inject prompt atomically
     docker exec freebuff_worker tmux send-keys -t buff $'\e[200~'"${PROMPT}"$'\e[201~'
     sleep 1
     docker exec freebuff_worker tmux send-keys -t buff Enter
@@ -54,53 +61,69 @@ run_freebuff_until_done() {
       sleep $POLL_INTERVAL_SEC
       ELAPSED=$((ELAPSED + POLL_INTERVAL_SEC))
 
-      # 1. Check if FreeBuff wrote DONE to .tickets/STATUS
       if [ -f .tickets/STATUS ] && grep -q "DONE" .tickets/STATUS; then
         echo "✅ FreeBuff signaled DONE after ${ELAPSED}s!"
         docker exec freebuff_worker tmux kill-session -t buff 2>/dev/null || true
         return 0
       fi
 
-      # 2. Check if the FreeBuff tmux session crashed or exited early
       if ! docker exec freebuff_worker tmux has-session -t buff 2>/dev/null; then
         echo "⚠️ FreeBuff tmux session exited before DONE. Respawning in 15s..."
         sleep 15
         break
       fi
 
-      # Print a heartbeat every 60 seconds
       if [ $((ELAPSED % 60)) -eq 0 ]; then
         echo "⏱️  Still working... (${ELAPSED}s / ${SESSION_TIMEOUT_SEC}s)"
       fi
     done
 
-    # If we reach here, the 1-hour session cut off or exited before finishing
-    echo "🔄 1-Hour session limit reached or interrupted. Restarting FreeBuff with continuation context..."
-    PROMPT="A previous session cut off before completing the task. Run 'git status' and 'git diff' to inspect existing progress, complete all remaining requirements in the ticket/review, run all tests, and run: echo DONE > .tickets/STATUS"
+    echo "🔄 1-Hour limit reached or interrupted. Restarting FreeBuff with continuation context..."
+    PROMPT="A previous session cut off. Run 'git status' and 'git diff' to inspect existing progress, complete all remaining requirements, run tests, and run: echo DONE > .tickets/STATUS"
     sleep 10
   done
 }
 
-# === PHASE 1: DECOMPOSE SPEC WITH CLAUDE OPUS 4.6 ===
+# === PHASE 1: DECOMPOSE SPEC WITH CLAUDE OPUS ===
 if [ -z "$(ls -A .tickets/T-*.md 2>/dev/null)" ]; then
-  echo "🏗️ Phase 1: Decomposing @SPEC.md into atomic tickets using ${ARCHITECT_MODEL}..."
+  echo "🏗️ Phase 1: Decomposing SPEC.md into atomic tickets..."
   
-  SPEC_PROMPT="You are a Principal Systems Architect. Read @SPEC.md and @AGENTS.md.
-Break this project down into sequential, atomic implementation tickets.
+  # QUOTA SALVAGE CHECK
+  if grep -q "===TICKET:" .reviews/raw_tickets.txt 2>/dev/null; then
+    echo "♻️ Found existing tickets in .reviews/raw_tickets.txt! Salvaging to save quota..."
+  else
+    # Build prompt in a file to prevent bash argument limits
+    cat << 'PROMPT_EOF' > .reviews/phase1_prompt.txt
+You are a Principal Systems Architect. DO NOT use any internal tools, DO NOT run bash commands, and DO NOT check the repository state. 
+
+Read the following specification and agent rules, and break this project down into sequential, atomic implementation tickets for Milestone 1 ONLY.
+
+<spec>
+$(cat SPEC.md)
+</spec>
+
+<agents>
+$(cat AGENTS.md)
+</agents>
+
 Output each ticket using this EXACT delimiter format on its own line:
 ===TICKET:T-01-setup.md===
 [Full Markdown content of ticket 1 including exact file paths, types, and test commands]
 ===TICKET:T-02-models.md===
 [Full Markdown content of ticket 2]
-Do NOT output any text before the first ===TICKET:...=== marker."
 
-  run_agy_safe "$ARCHITECT_MODEL" "$SPEC_PROMPT" ".reviews/raw_tickets.txt"
+Do NOT output any text or thinking preamble before the first ===TICKET:...=== marker.
+PROMPT_EOF
 
-  # Split the single Opus output into individual .tickets/T-XX.md files
+    run_agy_safe "$ARCHITECT_MODEL" ".reviews/phase1_prompt.txt" ".reviews/raw_tickets.txt"
+  fi
+
+  # Split the output safely
   awk '
-    /^===TICKET:.*===$/ {
-      sub(/^===TICKET:/, "", $0);
-      sub(/===$/, "", $0);
+    /===TICKET:.*===/ {
+      gsub(/.*===TICKET:/, "");
+      gsub(/===.*/, "");
+      gsub(/[ \t\r]/, "");
       out=".tickets/" $0;
       next
     }
@@ -142,15 +165,17 @@ for TICKET_FILE in $(ls -1 .tickets/T-*.md | sort); do
     REVIEW_FILE=".reviews/${TICKET_NAME}-review-${ATTEMPT}.md"
     echo "🔍 Auditing ${TICKET_NAME} (Attempt ${ATTEMPT}/${MAX_REVIEW_RETRIES}) with ${REVIEWER_MODEL}..."
 
-    REVIEW_PROMPT="You are a Principal Code Reviewer. Do NOT modify any files.
+    cat << PROMPT_EOF > .reviews/review_prompt.txt
+You are a Principal Code Reviewer. Do NOT modify any files.
 Review the git diff in @${DIFF_FILE} against @${TICKET_FILE} and @SPEC.md.
 Verify all requirements and unit tests are present and bug-free.
 End your response with EXACTLY one of:
 VERDICT: APPROVED
 or
-VERDICT: CHANGES_REQUESTED"
+VERDICT: CHANGES_REQUESTED
+PROMPT_EOF
 
-    run_agy_safe "$REVIEWER_MODEL" "$REVIEW_PROMPT" "$REVIEW_FILE"
+    run_agy_safe "$REVIEWER_MODEL" ".reviews/review_prompt.txt" "$REVIEW_FILE"
     rm -f "$DIFF_FILE"
 
     if grep -q "VERDICT: APPROVED" "$REVIEW_FILE"; then
@@ -176,6 +201,3 @@ VERDICT: CHANGES_REQUESTED"
 done
 
 echo "🏆 ALL TICKETS COMPLETED AND MERGED TO MAIN!"
-EOF
-chmod +x ~/agent-project/autopilot.sh
-
