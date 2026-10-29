@@ -73,6 +73,8 @@ object GameEngine:
         applyDeclareSurrender(state, playerId)
       case GameAction.ThrowInCards(playerId, cards) =>
         applyThrowInCards(state, playerId, cards)
+      case GameAction.PassTurn(playerId) =>
+        applyPassTurn(state, playerId)
       case other =>
         Left(s"Unsupported action: $other")
 
@@ -272,6 +274,116 @@ object GameEngine:
         players = players,
         tablePairs = state.tablePairs ++ cards.map(card => TablePair(card))
       )
+
+  /**
+   * A non-defending player declares they have nothing more to add this bout.
+   * Once every active non-defender has passed, the bout resolves.
+   */
+  private def applyPassTurn(state: GameState, playerId: String): Either[String, GameState] =
+    val passablePhase =
+      state.boutPhase == BoutPhase.Defense || state.boutPhase == BoutPhase.SurrenderThrowIn
+    val playerIdx = state.players.indexWhere(_.id == playerId)
+
+    for
+      _ <- check(passablePhase, s"Cannot pass during ${state.boutPhase} phase")
+      passer <- state.players.lift(playerIdx).toRight(s"Unknown player: $playerId")
+      _ <- check(passer.isActive, s"$playerId has already finished the game")
+      _ <- check(playerIdx != state.defenderIdx, "The defender cannot pass")
+      _ <- check(!passer.hasPassed, s"$playerId has already passed")
+      _ <- check(
+        state.boutPhase != BoutPhase.Defense ||
+          state.tablePairs.forall(_.defense.isDefined) ||
+          state.tablePairs.size >= state.maxBoutAttacks,
+        "Cannot pass while attacking cards are still uncovered"
+      )
+    yield
+      settlePasses(
+        state.copy(players = state.players.updated(playerIdx, passer.copy(hasPassed = true)))
+      )
+
+  /**
+   * Auto-passes players that cannot act (empty hand or a full table) and
+   * resolves the bout once every active non-defender has passed.
+   */
+  private def settlePasses(state: GameState): GameState =
+    val tableIsFull = state.tablePairs.size >= state.maxBoutAttacks
+    val players = state.players.zipWithIndex.map { case (player, idx) =>
+      val cantAct = player.hand.isEmpty || tableIsFull
+      if idx != state.defenderIdx && player.isActive && cantAct then
+        player.copy(hasPassed = true)
+      else player
+    }
+    val settled = state.copy(players = players)
+    val nonDefenders = players.zipWithIndex.filter { case (player, idx) =>
+      idx != state.defenderIdx && player.isActive
+    }
+    if nonDefenders.forall(_._1.hasPassed) then resolveBout(settled) else settled
+
+  /**
+   * Ends the current bout: clears the table (discarding it after a successful
+   * defense or handing it to a surrendering defender), refills hands in draw
+   * order, rotates the roles, and opens the next bout's initial attack.
+   */
+  private def resolveBout(state: GameState): GameState =
+    val surrendered = state.boutPhase == BoutPhase.SurrenderThrowIn
+    val tableCards = state.tablePairs.flatMap(pair => pair.attack :: pair.defense.toList)
+
+    val afterTable =
+      if surrendered then
+        val defender = state.players(state.defenderIdx)
+        state.copy(
+          players = state.players
+            .updated(state.defenderIdx, defender.copy(hand = defender.hand ++ tableCards)),
+          tablePairs = Vector.empty
+        )
+      else
+        state.copy(tablePairs = Vector.empty, discardPile = state.discardPile ++ tableCards)
+
+    val drawn = drawHands(afterTable, includeDefender = !surrendered)
+
+    val newAttackerIdx =
+      if surrendered then drawn.nextActivePlayerIdx(state.defenderIdx)
+      else state.defenderIdx
+    val newDefenderIdx = drawn.nextActivePlayerIdx(newAttackerIdx)
+
+    drawn.copy(
+      players = drawn.players.map(_.copy(hasPassed = false)),
+      attackerIdx = newAttackerIdx,
+      defenderIdx = newDefenderIdx,
+      boutPhase = BoutPhase.InitialAttack,
+      defenderInitialHandSize = drawn.players(newDefenderIdx).hand.size
+    )
+
+  /**
+   * Refills hands to six from the talon: the primary attacker first, then the
+   * other active non-defenders clockwise, and the defender last.
+   */
+  private def drawHands(state: GameState, includeDefender: Boolean): GameState =
+    val attackerIdx = state.attackerIdx
+    val others = (1 until state.players.size)
+      .map(offset => (attackerIdx + offset) % state.players.size)
+      .filter(idx => idx != state.defenderIdx && state.players(idx).isActive)
+      .toVector
+    val defenderOrder =
+      if includeDefender && state.players(state.defenderIdx).isActive then
+        Vector(state.defenderIdx)
+      else Vector.empty
+
+    (attackerIdx +: (others ++ defenderOrder)).foldLeft(state) { (current, idx) =>
+      drawToHandSize(current, idx, InitialHandSize)
+    }
+
+  /** Draws from the talon until the player holds `target` cards or it empties. */
+  private def drawToHandSize(state: GameState, playerIdx: Int, target: Int): GameState =
+    val player = state.players(playerIdx)
+    val missing = Math.max(0, target - player.hand.size)
+    val (drawn, remaining) = state.talon.splitAt(missing)
+    state.copy(
+      players = state.players.updated(playerIdx, player.copy(hand = player.hand ++ drawn)),
+      talon = remaining,
+      // The bottom trump is the last card drawn; once the talon is gone it is no longer shown.
+      bottomTrumpCard = if remaining.isEmpty then None else state.bottomTrumpCard
+    )
 
   /** Legal cover: same suit with a higher rank, or a trump against a non-trump. */
   private def isLegalCover(attack: Card, defense: Card, trumpSuit: Suit): Boolean =
