@@ -45,13 +45,17 @@ run_freebuff_until_done() {
   rm -f .tickets/STATUS
 
   while true; do
-    echo "🚀 Launching fresh FreeBuff session inside Docker tmux..."
-    docker exec freebuff_worker tmux kill-session -t buff 2>/dev/null || true
-    docker exec freebuff_worker tmux new-session -d -s buff "freebuff"
-    
-    sleep 15
+    # Only launch a new session if one doesn't already exist
+    if ! docker exec freebuff_worker tmux has-session -t buff 2>/dev/null; then
+      echo "🚀 Launching fresh FreeBuff session inside Docker tmux..."
+      docker exec freebuff_worker tmux new-session -d -s buff "freebuff"
+      sleep 15
+    else
+      echo "♻️ Reusing existing FreeBuff session to save quota..."
+      sleep 2
+    fi
 
-    # Inject prompt atomically
+    # Inject prompt atomically into the running session
     docker exec freebuff_worker tmux send-keys -t buff $'\e[200~'"${PROMPT}"$'\e[201~'
     sleep 1
     docker exec freebuff_worker tmux send-keys -t buff Enter
@@ -63,7 +67,8 @@ run_freebuff_until_done() {
 
       if [ -f .tickets/STATUS ] && grep -q "DONE" .tickets/STATUS; then
         echo "✅ FreeBuff signaled DONE after ${ELAPSED}s!"
-        docker exec freebuff_worker tmux kill-session -t buff 2>/dev/null || true
+        # CRITICAL FIX: We no longer kill the tmux session here. 
+        # It stays alive for the next ticket to reuse.
         return 0
       fi
 
@@ -78,9 +83,13 @@ run_freebuff_until_done() {
       fi
     done
 
-    echo "🔄 1-Hour limit reached or interrupted. Restarting FreeBuff with continuation context..."
-    PROMPT="A previous session cut off. Run 'git status' and 'git diff' to inspect existing progress, complete all remaining requirements, run tests, and run: echo DONE > .tickets/STATUS"
-    sleep 10
+    # If the 55-minute timer expires, we explicitly kill and restart to reset the FreeBuff hour block
+    if [ $ELAPSED -ge $SESSION_TIMEOUT_SEC ]; then
+      echo "🔄 1-Hour limit reached. Restarting FreeBuff with continuation context..."
+      docker exec freebuff_worker tmux kill-session -t buff 2>/dev/null || true
+      PROMPT="A previous session cut off. Run 'git status' and 'git diff' to inspect existing progress, complete all remaining requirements, run tests, and run: echo DONE > .tickets/STATUS"
+      sleep 10
+    fi
   done
 }
 
@@ -118,7 +127,7 @@ PROMPT_EOF
     run_agy_safe "$ARCHITECT_MODEL" ".reviews/phase1_prompt.txt" ".reviews/raw_tickets.txt"
   fi
 
-  # Split the output safely
+  # Split the output safely using the lenient regex
   awk '
     /===TICKET:.*===/ {
       gsub(/.*===TICKET:/, "");
