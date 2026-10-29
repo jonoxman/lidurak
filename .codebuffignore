@@ -2,3 +2,6 @@
 orchestrate.sh
 Dockerfile.sandbox
 docker-compose.yml
+oversee-freebuff.sh
+autopilot.sh
+start-workspace.sh
