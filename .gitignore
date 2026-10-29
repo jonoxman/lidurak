@@ -3,3 +3,6 @@ backend/project/target/
 backend/project/project/
 frontend/node_modules/
 frontend/dist/
+oversee-freebuff.sh
+autopilot.sh
+start-workspace.sh

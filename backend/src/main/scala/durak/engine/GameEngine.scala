@@ -69,6 +69,10 @@ object GameEngine:
         applyCoverCard(state, playerId, attackIndex, defenseCard)
       case GameAction.RedirectAttack(playerId, cards) =>
         applyRedirectAttack(state, playerId, cards)
+      case GameAction.DeclareSurrender(playerId) =>
+        applyDeclareSurrender(state, playerId)
+      case GameAction.ThrowInCards(playerId, cards) =>
+        applyThrowInCards(state, playerId, cards)
       case other =>
         Left(s"Unsupported action: $other")
 
@@ -184,6 +188,89 @@ object GameEngine:
         attackerIdx = state.defenderIdx,
         defenderIdx = nextDefIdx,
         defenderInitialHandSize = players(nextDefIdx).hand.size
+      )
+
+  /**
+   * Defender gives up on the current bout. Throw-ins stay open to every other
+   * active player, and players who cannot add anything are passed immediately.
+   */
+  private def applyDeclareSurrender(
+      state: GameState,
+      playerId: String
+  ): Either[String, GameState] =
+    for
+      _ <- check(
+        state.boutPhase == BoutPhase.Defense,
+        s"Cannot surrender during ${state.boutPhase} phase"
+      )
+      defender <- state.players.lift(state.defenderIdx).toRight("Invalid defender seat")
+      _ <- check(defender.id == playerId, s"$playerId is not the defender")
+      _ <- check(
+        state.tablePairs.exists(_.defense.isEmpty),
+        "Cannot surrender when every attacking card is already covered"
+      )
+    yield
+      val boutIsFull = state.tablePairs.size >= state.maxBoutAttacks
+      val players = state.players.zipWithIndex.map { case (player, idx) =>
+        if idx == state.defenderIdx || player.finishRank.nonEmpty then player
+        else player.copy(hasPassed = player.hand.isEmpty || boutIsFull)
+      }
+      state.copy(players = players, boutPhase = BoutPhase.SurrenderThrowIn)
+
+  /**
+   * Any active non-defending player adds cards matching a rank already on the
+   * table. During the defense phase this reopens passing for everyone else.
+   */
+  private def applyThrowInCards(
+      state: GameState,
+      playerId: String,
+      cards: List[Card]
+  ): Either[String, GameState] =
+    val phaseAllowsThrowIn =
+      state.boutPhase == BoutPhase.Defense || state.boutPhase == BoutPhase.SurrenderThrowIn
+
+    for
+      _ <- check(
+        phaseAllowsThrowIn,
+        s"Cannot throw in cards during ${state.boutPhase} phase"
+      )
+      defender <- state.players.lift(state.defenderIdx).toRight("Invalid defender seat")
+      throwerIdx = state.players.indexWhere(_.id == playerId)
+      _ <- check(throwerIdx != -1, s"Unknown player: $playerId")
+      thrower = state.players(throwerIdx)
+      _ <- check(defender.id != playerId, "The defender cannot throw in cards")
+      _ <- check(thrower.finishRank.isEmpty, s"$playerId has already finished the game")
+      _ <- check(cards.nonEmpty, "A throw-in must contain at least one card")
+      remainingHand <- removeCards(thrower.hand, cards)
+        .toRight("Throw-in contains cards that are not in the player's hand")
+      tableRanks = state.tablePairs
+        .flatMap(pair => pair.attack.rank :: pair.defense.map(_.rank).toList)
+        .toSet
+      _ <- check(
+        cards.forall(card => tableRanks.contains(card.rank)),
+        "Every thrown-in card must match the rank of a card on the table"
+      )
+      _ <- check(
+        state.tablePairs.size + cards.size <= state.maxBoutAttacks,
+        s"A throw-in may not grow the attack beyond ${state.maxBoutAttacks} cards"
+      )
+      _ <- check(
+        state.boutPhase != BoutPhase.Defense ||
+          state.tablePairs.count(_.defense.isEmpty) + cards.size <= defender.hand.size,
+        "The defender does not have enough cards to cover the thrown-in cards"
+      )
+    yield
+      val players = state.players.zipWithIndex.map { case (player, idx) =>
+        val updated = if idx == throwerIdx then player.copy(hand = remainingHand) else player
+        if state.boutPhase == BoutPhase.Defense &&
+            idx != state.defenderIdx &&
+            updated.finishRank.isEmpty
+        then updated.copy(hasPassed = false)
+        else updated
+      }
+      state.copy(
+        players = players,
+        tablePairs = state.tablePairs ++ cards.map(card => TablePair(card))
       )
 
   /** Legal cover: same suit with a higher rank, or a trump against a non-trump. */
