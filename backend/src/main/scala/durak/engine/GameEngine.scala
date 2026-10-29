@@ -67,6 +67,8 @@ object GameEngine:
         applyInitialAttack(state, playerId, cards)
       case GameAction.CoverCard(playerId, attackIndex, defenseCard) =>
         applyCoverCard(state, playerId, attackIndex, defenseCard)
+      case GameAction.RedirectAttack(playerId, cards) =>
+        applyRedirectAttack(state, playerId, cards)
       case other =>
         Left(s"Unsupported action: $other")
 
@@ -127,6 +129,61 @@ object GameEngine:
       state.copy(
         players = state.players.updated(state.defenderIdx, defender.copy(hand = remainingHand)),
         tablePairs = state.tablePairs.updated(attackIndex, pair.copy(defense = Some(defenseCard)))
+      )
+
+  /**
+   * Defender reflects the attack onto the next active player clockwise.
+   * The redirected cards join the table uncovered, and the roles rotate.
+   */
+  private def applyRedirectAttack(
+      state: GameState,
+      playerId: String,
+      cards: List[Card]
+  ): Either[String, GameState] =
+    for
+      _ <- check(
+        state.boutPhase == BoutPhase.Defense,
+        s"Cannot redirect during ${state.boutPhase} phase"
+      )
+      _ <- check(state.config.allowRedirect, "Redirecting is disabled in this game")
+      defender <- state.players.lift(state.defenderIdx).toRight("Invalid defender seat")
+      _ <- check(defender.id == playerId, s"$playerId is not the defender")
+      _ <- check(
+        state.tablePairs.forall(_.defense.isEmpty),
+        "Cannot redirect once any card on the table is covered"
+      )
+      _ <- check(cards.nonEmpty, "A redirect must contain at least one card")
+      remainingHand <- removeCards(defender.hand, cards)
+        .toRight("Redirect contains cards that are not in the defender's hand")
+      _ <- check(
+        state.tablePairs.nonEmpty,
+        "Cannot redirect when there is no attack on the table"
+      )
+      _ <- check(
+        cards.map(_.rank).distinct.size == 1 &&
+          state.tablePairs.forall(_.attack.rank == cards.head.rank),
+        "Redirect cards must share the rank of the attacking cards on the table"
+      )
+      _ <- check(
+        state.tablePairs.size + cards.size <= 6,
+        "A redirect may not grow the attack beyond 6 cards"
+      )
+      nextDefIdx = state.nextActivePlayerIdx(state.defenderIdx)
+      nextDefender <- state.players.lift(nextDefIdx).toRight("Invalid next defender seat")
+      _ <- check(
+        nextDefender.hand.size >= state.tablePairs.size + cards.size,
+        s"${nextDefender.name} does not have enough cards to defend the redirected attack"
+      )
+    yield
+      val players = state.players
+        .updated(state.defenderIdx, defender.copy(hand = remainingHand))
+        .map(_.copy(hasPassed = false))
+      state.copy(
+        players = players,
+        tablePairs = state.tablePairs ++ cards.map(card => TablePair(card)),
+        attackerIdx = state.defenderIdx,
+        defenderIdx = nextDefIdx,
+        defenderInitialHandSize = players(nextDefIdx).hand.size
       )
 
   /** Legal cover: same suit with a higher rank, or a trump against a non-trump. */
