@@ -1,0 +1,14 @@
+
+> lidurak-frontend@0.1.0 test
+> vitest --run
+
+
+ RUN  v2.1.9 /workspace/frontend
+
+ ✓ src/__tests__/app.test.tsx (1 test) 52ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  01:25:50
+   Duration  705ms (transform 35ms, setup 0ms, collect 89ms, tests 52ms, environment 336ms, prepare 51ms)
+

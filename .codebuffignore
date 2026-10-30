@@ -5,3 +5,5 @@ docker-compose.yml
 oversee-freebuff.sh
 autopilot.sh
 start-workspace.sh
+next-milestone.sh
+watch-reviews.sh
