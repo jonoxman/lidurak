@@ -4,713 +4,1093 @@ CRITICAL INSTRUCTION: Do NOT use any tools, do NOT run bash commands, and do NOT
 <tickets_in_scope>
 
 
---- TICKET: .tickets/T-12-game-actor-server.md ---
-# T-12: Game Actor & Http4s REST/WebSocket Server
+--- TICKET: .tickets/T-13-svg-cards-table.md ---
+# T-13: SVG Playing Card Components & Responsive Table Layout
 
 ## Objective
-Implement a Cats Effect–based game actor that holds game state in a `Ref` and broadcasts updates via `Topic`, plus Http4s routes for creating games, querying state, and playing via WebSocket. Wire everything into `Main.scala` serving on `0.0.0.0:8080`.
+Build custom inline SVG playing card components and the responsive game table layout using Preact, CSS Grid/Flexbox, and the Lichess dark-mode aesthetic.
 
 ## Requirements
 
-### File: `backend/src/main/scala/durak/server/GameActor.scala`
+### File: `frontend/src/components/Card.tsx`
 
-```scala
-package durak.server
+A Preact component that renders an inline SVG playing card:
+- **Props:** `{ suit: string, rank: string, faceUp?: boolean, selected?: boolean, onClick?: () => void }`
+- **Face-up card:** White/cream rounded rectangle with rank text (top-left, bottom-right) and suit symbol (center). Suit colors: `♠♣` = `#bababa`, `♥♦` = `#c33`.
+- **Face-down card:** Dark patterned rectangle (use `#262421` with a subtle pattern or cross-hatch).
+- **Selected state:** Slight upward translation (`translateY(-8px)`) and green border highlight (`#629924`).
+- Card dimensions: approximately `70×100px`, scalable via CSS.
 
-import cats.effect.*
-import cats.effect.std.Queue
-import fs2.concurrent.Topic
+### File: `frontend/src/components/CardBack.tsx`
 
-case class GameRoom(
-  gameId: String,
-  stateRef: Ref[IO, GameState],
-  topic: Topic[IO, GameState],  // Broadcasts state changes
-  playerIds: Vector[String]
-)
+A simpler component for opponent card backs (no rank/suit, just the back design).
 
-object GameActor:
-  def create(config: GameConfig, playerNames: Vector[String]): IO[GameRoom]
-  def applyAction(room: GameRoom, action: GameAction): IO[Either[String, GameState]]
-```
+### File: `frontend/src/components/TablePair.tsx`
 
-- `create`: Initializes `GameState` via `GameEngine.createGame`, stores in `Ref`, creates `Topic`.
-- `applyAction`: Atomically validates and applies the action via `stateRef.modify`, publishes new state to `topic`.
+Renders a single attack–defense pair:
+- Attack card flat, defense card overlapping at a slight offset (translate ~20px right and ~15px down).
+- If no defense card, show only the attack card.
 
-### File: `backend/src/main/scala/durak/server/GameManager.scala`
+### File: `frontend/src/components/GameTable.tsx`
 
-```scala
-package durak.server
+The main game table layout:
+- **Center:** Battle area showing `TablePair` components in a flex row/wrap.
+- **Bottom:** Player's own hand — fanned/sorted cards, clickable for selection.
+- **Top / Sides:** Opponent areas showing card back count and player name/status.
+- **Top-Right:** Talon display — stacked card backs with count badge, plus the perpendicular bottom trump card (a card rotated 90°) visible while talon > 0.
+- **Trump indicator:** Badge showing trump suit symbol and color.
+- **Action buttons area:** Below the hand — contextual buttons (rendered by parent, this component provides the layout slot).
 
-import cats.effect.*
+### File: `frontend/src/components/ActionBar.tsx`
 
-class GameManager(rooms: Ref[IO, Map[String, GameRoom]]):
-  def createGame(config: GameConfig, playerNames: Vector[String]): IO[GameRoom]
-  def getRoom(gameId: String): IO[Option[GameRoom]]
-```
+Action buttons component:
+- **Props:** `{ legalActions: string[], onAction: (action: object) => void }`
+- Buttons: "Pass" (green), "Surrender" (red), "Redirect" (yellow/amber).
+- Only show buttons relevant to `legalActions`.
+- Styled with Lichess aesthetic: rounded, high-contrast, hover effects.
 
-- Generates unique `gameId` (UUID).
-- Stores rooms in the `Ref[IO, Map]`.
+### File: `frontend/src/styles/table.css`
 
-### File: `backend/src/main/scala/durak/server/GameRoutes.scala`
+- Dark theme: `#161512` background, `#262421` panels, `#bababa` text.
+- Responsive layout: CSS Grid for table regions, flexbox for card rows.
+- Media queries for mobile (`< 640px`): stack opponent areas above battle area, reduce card size.
+- Active turn indicator: `#629924` glow/border on the current attacker/defender.
 
-```scala
-package durak.server
+### Test File: `frontend/src/__tests__/Card.test.tsx`
 
-import org.http4s.*
-import org.http4s.dsl.io.*
+- Renders face-up card with correct rank and suit text
+- Renders face-down card (card back)
+- Selected card has the `selected` CSS class or style
+- Click handler fires on click
 
-object GameRoutes:
-  def routes(manager: GameManager): HttpRoutes[IO]
-```
+### Test File: `frontend/src/__tests__/GameTable.test.tsx`
 
-**REST Endpoints:**
-- `POST /api/game/create` — Body: `{"playerCount": 2, "playerNames": ["Alice", "Bob"], "allowRedirect": true}` → Creates game, returns `{"gameId": "...", "players": [...]}`
-- `GET /api/game/:gameId/view/:playerId` — Returns `PlayerGameView` as JSON for the given player
-- `POST /api/game/:gameId/action` — Body: `GameAction` JSON → Applies action, returns updated `PlayerGameView` or error
-
-**WebSocket Endpoint:**
-- `GET /ws/game/:gameId/:playerId` — Upgrades to WebSocket:
-  - **Incoming:** JSON `GameAction` messages → applied via `GameActor.applyAction`
-  - **Outgoing:** `PlayerGameView` JSON pushed on every state change (subscribe to `topic`, map through `PlayerGameView.forViewer`)
-
-### File: `backend/src/main/scala/durak/Main.scala`
-
-Update to:
-1. Create a `GameManager`
-2. Build `GameRoutes.routes(manager)`
-3. Start `EmberServerBuilder` on `0.0.0.0:8080` with the routes
-4. Log `"Durak server running on 0.0.0.0:8080"`
-
-### Test File: `backend/src/test/scala/durak/server/GameActorSuite.scala`
-
-- Create a game room → initial state has correct phase and player count
-- Apply valid `InitialAttack` → state updates, new state published to topic
-- Apply invalid action → returns `Left(error)`, state unchanged
-- Multiple sequential actions (attack → defend → pass) progress the game
-
-### Test File: `backend/src/test/scala/durak/server/GameRoutesSuite.scala`
-
-- `POST /api/game/create` returns 200 with `gameId`
-- `GET /api/game/:id/view/:playerId` returns valid `PlayerGameView` JSON
-- `POST /api/game/:id/action` with valid action returns updated view
-- `POST /api/game/:id/action` with invalid action returns 400 with error message
-- Non-existent `gameId` returns 404
+- Renders player hand with correct number of cards
+- Renders table pairs in the battle area
+- Renders opponent summary areas
+- Renders talon count
 
 ## Acceptance Criteria
-- [ ] Game actor manages state atomically
-- [ ] REST endpoints create games, return views, and process actions
-- [ ] WebSocket endpoint streams filtered views
-- [ ] `Main.scala` boots the server successfully
-- [ ] All tests pass
+- [ ] SVG cards render correctly with proper suit colors
+- [ ] Table layout is responsive (no horizontal scroll at 360px width)
+- [ ] All component tests pass
 
 ## Verification Command
 ```bash
-cd backend && sbt test
+cd frontend && npm test -- --run
 ```
 </tickets_in_scope>
 
 <git_diff>
-diff --git a/backend/src/main/scala/durak/Main.scala b/backend/src/main/scala/durak/Main.scala
-index f8f2d4b..7a8e764 100644
---- a/backend/src/main/scala/durak/Main.scala
-+++ b/backend/src/main/scala/durak/Main.scala
-@@ -1,7 +1,20 @@
- package durak
- 
- import cats.effect.*
-+import com.comcast.ip4s.*
-+import durak.server.{GameManager, GameRoutes}
-+import org.http4s.ember.server.EmberServerBuilder
- 
- object Main extends IOApp.Simple:
-   def run: IO[Unit] =
--    IO.println("Durak server starting...")
-+    (for
-+      manager <- Resource.eval(GameManager.create)
-+      server <- EmberServerBuilder
-+        .default[IO]
-+        .withHost(host"0.0.0.0")
-+        .withPort(port"8080")
-+        .withHttpWebSocketApp(ws => GameRoutes.routes(manager)(using ws).orNotFound)
-+        .build
-+    yield server).use { _ =>
-+      IO.println("Durak server running on 0.0.0.0:8080") *> IO.never
-+    }
-diff --git a/backend/src/main/scala/durak/server/GameActor.scala b/backend/src/main/scala/durak/server/GameActor.scala
+diff --git a/frontend/src/__tests__/Card.test.tsx b/frontend/src/__tests__/Card.test.tsx
 new file mode 100644
-index 0000000..b576f8f
+index 0000000..72d0470
 --- /dev/null
-+++ b/backend/src/main/scala/durak/server/GameActor.scala
-@@ -0,0 +1,63 @@
-+package durak.server
++++ b/frontend/src/__tests__/Card.test.tsx
+@@ -0,0 +1,51 @@
++import { describe, expect, it, vi } from 'vitest';
++import { fireEvent, render, screen } from '@testing-library/preact';
++import { Card } from '../components/Card';
 +
-+import cats.effect.*
-+import durak.engine.*
-+import fs2.concurrent.Topic
++describe('Card', () => {
++  it('renders a face-up card with its rank and suit text', () => {
++    const { container } = render(<Card suit="hearts" rank="ace" />);
 +
-+import java.util.UUID
++    const svg = screen.getByLabelText('ace of hearts');
++    expect(svg.tagName.toLowerCase()).toBe('svg');
 +
-+/** A live game: its authoritative state, its broadcast topic, and its seats. */
-+case class GameRoom(
-+  gameId: String,
-+  stateRef: Ref[IO, GameState],
-+  topic: Topic[IO, GameState],
-+  playerIds: Vector[String]
-+)
++    const texts = Array.from(container.querySelectorAll('text')).map(
++      (node) => node.textContent,
++    );
++    expect(texts[0]).toBe('A');
++    expect(texts.filter((text) => text === '♥')).toHaveLength(3);
++    expect(container.querySelector('.card-slot')!.getAttribute('data-suit')).toBe('hearts');
++  });
 +
-+object GameActor:
++  it('colors heart and diamond suits red and black suits grey', () => {
++    const { container: red } = render(<Card suit="diamonds" rank="king" />);
++    expect(red.querySelector('text')!.getAttribute('fill')).toBe('#c33');
 +
-+  /**
-+   * Creates a room holding the engine's initial state for `config`. All player
-+   * ids are derived from the engine's seat naming (`p0`, `p1`, ...).
-+   */
-+  def create(config: GameConfig, playerNames: Vector[String]): IO[GameRoom] =
-+    IO.delay(GameEngine.createGame(config, playerNames)).flatMap { initialState =>
-+      for
-+        stateRef <- Ref.of[IO, GameState](initialState)
-+        topic <- Topic[IO, GameState]
-+      yield GameRoom(
-+        gameId = UUID.randomUUID().toString,
-+        stateRef = stateRef,
-+        topic = topic,
-+        playerIds = initialState.players.map(_.id)
-+      )
-+    }
++    const { container: black } = render(<Card suit="clubs" rank="king" />);
++    expect(black.querySelector('text')!.getAttribute('fill')).toBe('#bababa');
++  });
 +
-+  /**
-+   * Validates and applies `action` atomically. A rejected action leaves the
-+   * stored state untouched; a successful one publishes the new state to the
-+   * room's topic for every subscriber.
-+   */
-+  def applyAction(room: GameRoom, action: GameAction): IO[Either[String, GameState]] =
-+    room.stateRef
-+      .modify { current =>
-+        GameEngine.applyAction(current, action) match
-+          case Right(next)  => (next, Right(next): Either[String, GameState])
-+          case Left(error)  => (current, Left(error): Either[String, GameState])
-+      }
-+      .flatMap {
-+        case Right(next) =>
-+          room.topic.publish1(next).void.as(Right(next): Either[String, GameState])
-+        case rejected @ Left(_) =>
-+          IO.pure(rejected)
-+      }
++  it('renders a face-down card back without rank or suit text', () => {
++    const { container } = render(<Card suit="spades" rank="seven" faceUp={false} />);
 +
-+  /** The seat that issued `action`. */
-+  def actorId(action: GameAction): String =
-+    action match
-+      case GameAction.InitialAttack(playerId, _)  => playerId
-+      case GameAction.CoverCard(playerId, _, _)   => playerId
-+      case GameAction.RedirectAttack(playerId, _) => playerId
-+      case GameAction.ThrowInCards(playerId, _)   => playerId
-+      case GameAction.DeclareSurrender(playerId)  => playerId
-+      case GameAction.PassTurn(playerId)          => playerId
-diff --git a/backend/src/main/scala/durak/server/GameManager.scala b/backend/src/main/scala/durak/server/GameManager.scala
++    expect(screen.getByLabelText('Card back')).toBeTruthy();
++    expect(container.querySelector('.card-slot .card-back')).toBeTruthy();
++    expect(container.querySelectorAll('text')).toHaveLength(0);
++  });
++
++  it('marks a selected card with the selected class and state', () => {
++    const { container } = render(<Card suit="clubs" rank="queen" selected />);
++
++    expect(container.querySelector('.card-slot')!.classList.contains('selected')).toBe(true);
++    expect(container.querySelector('.card-slot')!.getAttribute('data-selected')).toBe('true');
++  });
++
++  it('fires the click handler when the card is clicked', () => {
++    const onClick = vi.fn();
++    const { container } = render(<Card suit="diamonds" rank="six" onClick={onClick} />);
++
++    fireEvent.click(container.querySelector('.card-slot')!);
++
++    expect(onClick).toHaveBeenCalledTimes(1);
++  });
++});
+diff --git a/frontend/src/__tests__/GameTable.test.tsx b/frontend/src/__tests__/GameTable.test.tsx
 new file mode 100644
-index 0000000..a7caa95
+index 0000000..9d26a7e
 --- /dev/null
-+++ b/backend/src/main/scala/durak/server/GameManager.scala
-@@ -0,0 +1,21 @@
-+package durak.server
++++ b/frontend/src/__tests__/GameTable.test.tsx
+@@ -0,0 +1,106 @@
++import { describe, expect, it } from 'vitest';
++import { render, screen, within } from '@testing-library/preact';
++import {
++  GameTable,
++  type OpponentSummary,
++  type TablePairData,
++} from '../components/GameTable';
++import type { CardData } from '../components/Card';
 +
-+import cats.effect.*
-+import durak.engine.*
++const hand: CardData[] = [
++  { suit: 'spades', rank: 'six' },
++  { suit: 'hearts', rank: 'ace' },
++  { suit: 'clubs', rank: 'king' },
++];
 +
-+/** An in-memory registry of live game rooms, keyed by their generated game id. */
-+class GameManager(rooms: Ref[IO, Map[String, GameRoom]]):
++const opponents: OpponentSummary[] = [
++  { id: 'p1', name: 'Bob', cardCount: 2, hasPassed: false, finishRank: null },
++  { id: 'p2', name: 'Carol', cardCount: 4, hasPassed: true, finishRank: 1 },
++];
 +
-+  /** Creates a room with a fresh unique id and registers it. */
-+  def createGame(config: GameConfig, playerNames: Vector[String]): IO[GameRoom] =
-+    GameActor.create(config, playerNames).flatMap { room =>
-+      rooms.update(current => current.updated(room.gameId, room)).as(room)
-+    }
++const tablePairs: TablePairData[] = [
++  { attack: { suit: 'spades', rank: 'six' }, defense: { suit: 'spades', rank: 'seven' } },
++  { attack: { suit: 'clubs', rank: 'king' }, defense: null },
++];
 +
-+  def getRoom(gameId: String): IO[Option[GameRoom]] =
-+    rooms.get.map(_.get(gameId))
++function renderTable() {
++  return render(
++    <GameTable
++      myId="p0"
++      myHand={hand}
++      opponents={opponents}
++      tablePairs={tablePairs}
++      talonCount={24}
++      bottomTrumpCard={{ suit: 'diamonds', rank: 'ace' }}
++      trumpSuit="diamonds"
++      attackerId="p1"
++      defenderId="p0"
++    />,
++  );
++}
 +
-+object GameManager:
++describe('GameTable', () => {
++  it('renders the player hand with one card per hand card', () => {
++    renderTable();
 +
-+  def create: IO[GameManager] =
-+    Ref.of[IO, Map[String, GameRoom]](Map.empty).map(new GameManager(_))
-diff --git a/backend/src/main/scala/durak/server/GameRoutes.scala b/backend/src/main/scala/durak/server/GameRoutes.scala
++    const handArea = screen.getByLabelText('Your hand');
++    expect(handArea.querySelectorAll('.card-slot')).toHaveLength(3);
++    expect(handArea.querySelectorAll('svg.playing-card')).toHaveLength(3);
++  });
++
++  it('renders every table pair in the battle area', () => {
++    renderTable();
++
++    const battle = screen.getByLabelText('Battle');
++    expect(battle.querySelectorAll('.table-pair')).toHaveLength(2);
++    expect(battle.querySelectorAll('.table-pair .card-slot')).toHaveLength(3);
++    expect(battle.querySelectorAll('.table-pair-defense')).toHaveLength(1);
++  });
++
++  it('renders an opponent area per opponent with names and card counts', () => {
++    renderTable();
++
++    const areas = screen.getAllByTestId('opponent');
++    expect(areas).toHaveLength(2);
++    expect(within(areas[0]).getByText('Bob')).toBeTruthy();
++    expect(areas[0].querySelector('.opponent-count')!.textContent).toBe('2 cards');
++    expect(within(areas[1]).getByText('Carol')).toBeTruthy();
++    expect(areas[1].querySelector('.opponent-count')!.textContent).toBe('4 cards');
++  });
++
++  it('marks the current attacker and defender areas', () => {
++    renderTable();
++
++    const areas = screen.getAllByTestId('opponent');
++    expect(areas[0].classList.contains('active-attacker')).toBe(true);
++    expect(areas[1].classList.contains('active-attacker')).toBe(false);
++  });
++
++  it('renders the talon count and the perpendicular bottom trump card', () => {
++    const { container } = renderTable();
++
++    expect(screen.getByTestId('talon-count').textContent).toBe('24');
++    expect(screen.getByLabelText('Bottom trump card')).toBeTruthy();
++    expect(screen.getByText('Trump')).toBeTruthy();
++    expect(container.querySelector('.trump-badge .trump-symbol')!.textContent).toBe('♦');
++    expect(container.querySelector('.trump-badge')!.classList.contains('red')).toBe(true);
++  });
++
++  it('hides the bottom trump card once the talon is empty', () => {
++    const { container } = render(
++      <GameTable
++        myId="p0"
++        myHand={hand}
++        opponents={opponents}
++        tablePairs={[]}
++        talonCount={0}
++        bottomTrumpCard={{ suit: 'diamonds', rank: 'ace' }}
++        trumpSuit="diamonds"
++      />,
++    );
++
++    expect(screen.getByTestId('talon-count').textContent).toBe('0');
++    expect(container.querySelector('.bottom-trump')).toBeNull();
++    expect(screen.getByLabelText('Battle').querySelectorAll('.table-pair')).toHaveLength(0);
++  });
++});
+diff --git a/frontend/src/components/ActionBar.tsx b/frontend/src/components/ActionBar.tsx
 new file mode 100644
-index 0000000..808c358
+index 0000000..3154dc8
 --- /dev/null
-+++ b/backend/src/main/scala/durak/server/GameRoutes.scala
-@@ -0,0 +1,152 @@
-+package durak.server
++++ b/frontend/src/components/ActionBar.tsx
+@@ -0,0 +1,39 @@
++export interface ActionBarProps {
++  legalActions: string[];
++  onAction: (action: { type: string }) => void;
++}
 +
-+import cats.effect.IO
-+import cats.syntax.all.*
-+import durak.engine.*
-+import durak.engine.JsonCodecs.given
-+import fs2.{Pipe, Stream}
-+import io.circe.{Decoder, Json, parser}
-+import io.circe.generic.semiauto.deriveDecoder
-+import io.circe.syntax.*
-+import org.http4s.*
-+import org.http4s.circe.CirceEntityDecoder.*
-+import org.http4s.circe.CirceEntityEncoder.*
-+import org.http4s.dsl.io.*
-+import org.http4s.server.websocket.WebSocketBuilder2
-+import org.http4s.websocket.WebSocketFrame
++interface ActionButton {
++  action: string;
++  type: string;
++  label: string;
++  variant: 'green' | 'red' | 'amber';
++}
 +
-+/** Body of `POST /api/game/create`. */
-+case class CreateGameRequest(
-+  playerCount: Int,
-+  playerNames: List[String],
-+  allowRedirect: Boolean = true
-+)
++const BUTTONS: ActionButton[] = [
++  { action: 'pass', type: 'passTurn', label: 'Pass', variant: 'green' },
++  { action: 'surrender', type: 'declareSurrender', label: 'Surrender', variant: 'red' },
++  { action: 'redirect', type: 'redirect', label: 'Redirect', variant: 'amber' },
++];
 +
-+object CreateGameRequest:
-+  given Decoder[CreateGameRequest] = deriveDecoder[CreateGameRequest]
++/** Contextual bout buttons; only actions present in `legalActions` are shown. */
++export function ActionBar({ legalActions, onAction }: ActionBarProps) {
++  const buttons = BUTTONS.filter((button) => legalActions.includes(button.action));
 +
-+object GameRoutes:
++  if (buttons.length === 0) return null;
 +
-+  /** The full app: REST endpoints plus the live-game WebSocket. */
-+  def routes(manager: GameManager)(using webSockets: WebSocketBuilder2[IO]): HttpRoutes[IO] =
-+    restRoutes(manager) <+> webSocketRoutes(manager, webSockets)
-+
-+  /** REST endpoints, split out so they can be exercised without a WebSocket builder. */
-+  def restRoutes(manager: GameManager): HttpRoutes[IO] = HttpRoutes.of[IO] {
-+
-+    case req @ POST -> Root / "api" / "game" / "create" =>
-+      req.as[Json].attempt.flatMap {
-+        case Left(error) =>
-+          BadRequest(errorBody(s"Invalid JSON body: ${describe(error)}"))
-+        case Right(json) =>
-+          json.as[CreateGameRequest] match
-+            case Left(error) =>
-+              BadRequest(errorBody(s"Invalid create request: ${error.getMessage}"))
-+            case Right(request) =>
-+              manager
-+                .createGame(
-+                  GameConfig(request.playerCount, request.allowRedirect),
-+                  request.playerNames.toVector
-+                )
-+                .flatMap(room => Ok(createResponse(room, request.playerNames)))
-+                .handleErrorWith(failure => errorResponse(failure))
-+      }
-+
-+    case GET -> Root / "api" / "game" / gameId / "view" / playerId =>
-+      withRoom(manager, gameId) { room =>
-+        room.stateRef.get.flatMap { state =>
-+          if state.players.exists(_.id == playerId) then
-+            Ok(PlayerGameView.forViewer(state, playerId).asJson)
-+          else NotFound(errorBody(s"Unknown player: $playerId"))
-+        }
-+      }
-+
-+    case req @ POST -> Root / "api" / "game" / gameId / "action" =>
-+      withRoom(manager, gameId) { room =>
-+        req.as[Json].attempt.flatMap {
-+          case Left(error) =>
-+            BadRequest(errorBody(s"Invalid JSON body: ${describe(error)}"))
-+          case Right(json) =>
-+            json.as[GameAction] match
-+              case Left(error) =>
-+                BadRequest(errorBody(s"Invalid game action: ${error.getMessage}"))
-+              case Right(action) =>
-+                GameActor.applyAction(room, action).flatMap {
-+                  case Left(error) => BadRequest(errorBody(error))
-+                  case Right(state) =>
-+                    val viewerId = GameActor.actorId(action)
-+                    if state.players.exists(_.id == viewerId) then
-+                      Ok(PlayerGameView.forViewer(state, viewerId).asJson)
-+                    else NotFound(errorBody(s"Unknown player: $viewerId"))
-+                }
-+        }
-+      }
-+  }
-+
-+  /**
-+   * Streams the viewer's filtered projection: the current state once on
-+   * connect, then every subsequent state published to the room's topic.
-+   * Incoming text frames are decoded as [[GameAction]]s and applied.
-+   */
-+  private def webSocketRoutes(
-+      manager: GameManager,
-+      webSockets: WebSocketBuilder2[IO]
-+  ): HttpRoutes[IO] = HttpRoutes.of[IO] {
-+
-+    case GET -> Root / "ws" / "game" / gameId / playerId =>
-+      withRoom(manager, gameId) { room =>
-+        room.stateRef.get.flatMap { state =>
-+          if !state.players.exists(_.id == playerId) then
-+            NotFound(errorBody(s"Unknown player: $playerId"))
-+          else
-+            val views: Stream[IO, WebSocketFrame] =
-+              (Stream.eval(room.stateRef.get) ++ room.topic.subscribe(64))
-+                .map { current =>
-+                  WebSocketFrame.Text(
-+                    PlayerGameView.forViewer(current, playerId).asJson.noSpaces
-+                  )
-+                }
-+            val commands: Pipe[IO, WebSocketFrame, Unit] =
-+              _.collect { case WebSocketFrame.Text(text, _) => text }
-+                .evalMap { text =>
-+                  parser.decode[GameAction](text) match
-+                    case Right(action) => GameActor.applyAction(room, action).void
-+                    case Left(_)       => IO.unit
-+                }
-+            webSockets.build(views, commands)
-+        }
-+      }
-+  }
-+
-+  private def withRoom(manager: GameManager, gameId: String)(
-+      handle: GameRoom => IO[Response[IO]]
-+  ): IO[Response[IO]] =
-+    manager.getRoom(gameId).flatMap {
-+      case Some(room) => handle(room)
-+      case None       => NotFound(errorBody(s"Unknown game: $gameId"))
-+    }
-+
-+  private def createResponse(room: GameRoom, names: List[String]): Json =
-+    val players = room.playerIds.zipWithIndex.map { case (id, idx) =>
-+      Json.obj(
-+        "id" -> Json.fromString(id),
-+        "name" -> Json.fromString(names.lift(idx).getOrElse(""))
-+      )
-+    }
-+    Json.obj(
-+      "gameId" -> Json.fromString(room.gameId),
-+      "players" -> Json.fromValues(players)
-+    )
-+
-+  private def errorBody(message: String): Json =
-+    Json.obj("error" -> Json.fromString(message))
-+
-+  private def errorResponse(error: Throwable): IO[Response[IO]] =
-+    error match
-+      case _: IllegalArgumentException | _: IllegalStateException =>
-+        BadRequest(errorBody(describe(error)))
-+      case _ =>
-+        InternalServerError(errorBody("Internal server error"))
-+
-+  private def describe(error: Throwable): String =
-+    Option(error.getMessage).getOrElse(error.getClass.getSimpleName)
-diff --git a/backend/src/test/scala/durak/server/GameActorSuite.scala b/backend/src/test/scala/durak/server/GameActorSuite.scala
++  return (
++    <div class="action-bar">
++      {buttons.map((button) => (
++        <button
++          key={button.action}
++          type="button"
++          class={`action-button ${button.variant}`}
++          onClick={() => onAction({ type: button.type })}
++        >
++          {button.label}
++        </button>
++      ))}
++    </div>
++  );
++}
+diff --git a/frontend/src/components/Card.tsx b/frontend/src/components/Card.tsx
 new file mode 100644
-index 0000000..7b86b98
+index 0000000..e9402a8
 --- /dev/null
-+++ b/backend/src/test/scala/durak/server/GameActorSuite.scala
-@@ -0,0 +1,124 @@
-+package durak.server
++++ b/frontend/src/components/Card.tsx
+@@ -0,0 +1,121 @@
++import { CardBack } from './CardBack';
 +
-+import cats.effect.IO
-+import cats.effect.unsafe.implicits.global
-+import durak.engine.*
-+import fs2.Stream
++export interface CardData {
++  suit: string;
++  rank: string;
++}
 +
-+import scala.concurrent.duration.*
++export interface CardProps {
++  suit: string;
++  rank: string;
++  faceUp?: boolean;
++  selected?: boolean;
++  onClick?: () => void;
++}
 +
-+class GameActorSuite extends munit.FunSuite:
++const SUIT_SYMBOLS: Record<string, string> = {
++  spades: '♠',
++  hearts: '♥',
++  diamonds: '♦',
++  clubs: '♣',
++};
 +
-+  private def newRoom(seed: Long = 7L): GameRoom =
-+    GameActor
-+      .create(GameConfig(playerCount = 2, seed = seed), Vector("Alice", "Bob"))
-+      .unsafeRunSync()
++const RANK_LABELS: Record<string, string> = {
++  two: '2',
++  three: '3',
++  four: '4',
++  five: '5',
++  six: '6',
++  seven: '7',
++  eight: '8',
++  nine: '9',
++  ten: '10',
++  jack: 'J',
++  queen: 'Q',
++  king: 'K',
++  ace: 'A',
++};
 +
-+  test("a created room starts in the initial attack phase with both seats") {
-+    val room = newRoom()
-+    val state = room.stateRef.get.unsafeRunSync()
++export function isRedSuit(suit: string): boolean {
++  const normalized = suit.toLowerCase();
++  return normalized === 'hearts' || normalized === 'diamonds';
++}
 +
-+    assert(room.gameId.nonEmpty)
-+    assertEquals(room.playerIds, Vector("p0", "p1"))
-+    assertEquals(state.players.map(_.id), Vector("p0", "p1"))
-+    assertEquals(state.players.map(_.hand.size), Vector(6, 6))
-+    assertEquals(state.boutPhase, BoutPhase.InitialAttack)
++export function suitColor(suit: string): string {
++  return isRedSuit(suit) ? '#c33' : '#bababa';
++}
++
++export function suitSymbol(suit: string): string {
++  return SUIT_SYMBOLS[suit.toLowerCase()] ?? '?';
++}
++
++export function rankLabel(rank: string): string {
++  return RANK_LABELS[rank.toLowerCase()] ?? rank;
++}
++
++/** An inline SVG playing card, roughly 70x100px and scalable via CSS. */
++export function Card({ suit, rank, faceUp = true, selected = false, onClick }: CardProps) {
++  const classes = ['card-slot'];
++  if (selected) classes.push('selected');
++  if (onClick) classes.push('clickable');
++
++  if (!faceUp) {
++    return (
++      <div
++        class={classes.join(' ')}
++        data-selected={selected ? 'true' : 'false'}
++        onClick={onClick}
++      >
++        <CardBack />
++      </div>
++    );
 +  }
 +
-+  test("every room gets its own unique game id") {
-+    assertNotEquals(newRoom().gameId, newRoom().gameId)
-+  }
++  const color = suitColor(suit);
++  const symbol = suitSymbol(suit);
++  const label = rankLabel(rank);
 +
-+  test("a valid initial attack updates the room state") {
-+    val room = newRoom()
-+    val before = room.stateRef.get.unsafeRunSync()
-+    val attacker = before.players(before.attackerIdx)
-+    val attack = List(attacker.hand.head)
-+
-+    val result = GameActor
-+      .applyAction(room, GameAction.InitialAttack(attacker.id, attack))
-+      .unsafeRunSync()
-+
-+    val after = result.getOrElse(fail(s"initial attack was rejected: $result"))
-+    assertEquals(after.boutPhase, BoutPhase.Defense)
-+    assertEquals(after.tablePairs.map(_.attack).toList, attack)
-+    assertEquals(room.stateRef.get.unsafeRunSync(), after)
-+  }
-+
-+  test("a successful action publishes the new state to the topic") {
-+    val room = newRoom()
-+    val before = room.stateRef.get.unsafeRunSync()
-+    val attacker = before.players(before.attackerIdx)
-+    val action = GameAction.InitialAttack(attacker.id, List(attacker.hand.head))
-+
-+    val published = room.topic
-+      .subscribe(16)
-+      .take(1)
-+      .concurrently(
-+        Stream.eval(IO.sleep(100.millis) *> GameActor.applyAction(room, action).void)
-+      )
-+      .compile
-+      .last
-+      .unsafeRunSync()
-+
-+    assertEquals(published.map(_.boutPhase), Some(BoutPhase.Defense))
-+    assertEquals(
-+      published.map(_.tablePairs.map(_.attack).toList),
-+      Some(List(attacker.hand.head))
-+    )
-+  }
-+
-+  test("an invalid action is rejected and leaves the state unchanged") {
-+    val room = newRoom()
-+    val before = room.stateRef.get.unsafeRunSync()
-+    val defender = before.players(before.defenderIdx)
-+
-+    val result = GameActor
-+      .applyAction(room, GameAction.CoverCard(defender.id, 0, defender.hand.head))
-+      .unsafeRunSync()
-+
-+    assert(result.isLeft, s"covering with no attack should fail, got $result")
-+    assertEquals(room.stateRef.get.unsafeRunSync(), before)
-+  }
-+
-+  test("attack, cover and pass advance the game to the next bout") {
-+    val room = newRoom()
-+    val start = room.stateRef.get.unsafeRunSync()
-+    val attacker = start.players(start.attackerIdx)
-+    val defender = start.players(start.defenderIdx)
-+
-+    def covers(attack: Card, defense: Card): Boolean =
-+      (defense.suit == attack.suit && defense.rank.value > attack.rank.value) ||
-+        (defense.suit == start.trumpSuit && attack.suit != start.trumpSuit)
-+
-+    val pairing = (for
-+      attack <- attacker.hand
-+      defense <- defender.hand
-+      if covers(attack, defense)
-+    yield (attack, defense)).headOption
-+
-+    val (attackCard, defenseCard) =
-+      pairing.getOrElse(fail("seed 7 produced no coverable opening attack"))
-+
-+    val attacked = GameActor
-+      .applyAction(room, GameAction.InitialAttack(attacker.id, List(attackCard)))
-+      .unsafeRunSync()
-+      .getOrElse(fail("initial attack was rejected"))
-+    assertEquals(attacked.boutPhase, BoutPhase.Defense)
-+
-+    val covered = GameActor
-+      .applyAction(room, GameAction.CoverCard(defender.id, 0, defenseCard))
-+      .unsafeRunSync()
-+      .getOrElse(fail("cover was rejected"))
-+    assertEquals(covered.tablePairs.head.defense, Some(defenseCard))
-+
-+    val resolved = GameActor
-+      .applyAction(room, GameAction.PassTurn(attacker.id))
-+      .unsafeRunSync()
-+      .getOrElse(fail("pass was rejected"))
-+
-+    assertEquals(resolved.tablePairs, Vector.empty)
-+    assertEquals(resolved.boutPhase, BoutPhase.InitialAttack)
-+    assertEquals(resolved.attackerIdx, start.defenderIdx)
-+    assertEquals(room.stateRef.get.unsafeRunSync(), resolved)
-+  }
-diff --git a/backend/src/test/scala/durak/server/GameRoutesSuite.scala b/backend/src/test/scala/durak/server/GameRoutesSuite.scala
++  return (
++    <div
++      class={classes.join(' ')}
++      data-selected={selected ? 'true' : 'false'}
++      data-suit={suit.toLowerCase()}
++      data-rank={rank.toLowerCase()}
++      onClick={onClick}
++    >
++      <svg
++        class="playing-card"
++        viewBox="0 0 70 100"
++        role="img"
++        aria-label={`${rank} of ${suit}`}
++      >
++        <rect
++          x="1"
++          y="1"
++          width="68"
++          height="98"
++          rx="6"
++          ry="6"
++          fill="#f5f1e6"
++          stroke="#bababa"
++          strokeWidth={1.5}
++        />
++        <text x="6" y="20" fontSize={15} fontWeight={700} fill={color}>
++          {label}
++        </text>
++        <text x="6" y="33" fontSize={12} fill={color}>
++          {symbol}
++        </text>
++        <text x="35" y="62" fontSize={30} textAnchor="middle" fill={color}>
++          {symbol}
++        </text>
++        <text x="64" y="94" fontSize={15} fontWeight={700} textAnchor="end" fill={color}>
++          {label}
++        </text>
++        <text x="64" y="81" fontSize={12} textAnchor="end" fill={color}>
++          {symbol}
++        </text>
++      </svg>
++    </div>
++  );
++}
+diff --git a/frontend/src/components/CardBack.tsx b/frontend/src/components/CardBack.tsx
 new file mode 100644
-index 0000000..953aa4e
+index 0000000..7718a9c
 --- /dev/null
-+++ b/backend/src/test/scala/durak/server/GameRoutesSuite.scala
-@@ -0,0 +1,185 @@
-+package durak.server
++++ b/frontend/src/components/CardBack.tsx
+@@ -0,0 +1,50 @@
++export interface CardBackProps {
++  class?: string;
++}
 +
-+import cats.effect.IO
-+import cats.effect.unsafe.implicits.global
-+import durak.engine.*
-+import durak.engine.JsonCodecs.given
-+import io.circe.Json
-+import io.circe.syntax.*
-+import org.http4s.*
-+import org.http4s.circe.CirceEntityDecoder.*
-+import org.http4s.circe.CirceEntityEncoder.*
-+import org.http4s.headers.`Content-Type`
++/** The dark patterned back of a playing card, sized like a [[Card]]. */
++export function CardBack({ class: className }: CardBackProps) {
++  return (
++    <svg
++      class={`playing-card card-back${className ? ` ${className}` : ''}`}
++      viewBox="0 0 70 100"
++      role="img"
++      aria-label="Card back"
++    >
++      <defs>
++        <pattern
++          id="card-back-hatch"
++          width="8"
++          height="8"
++          patternUnits="userSpaceOnUse"
++          patternTransform="rotate(45)"
++        >
++          <rect width="8" height="8" fill="#262421" />
++          <line x1="0" y1="0" x2="0" y2="8" stroke="#3a3733" strokeWidth={3} />
++        </pattern>
++      </defs>
++      <rect
++        x="1"
++        y="1"
++        width="68"
++        height="98"
++        rx="6"
++        ry="6"
++        fill="#262421"
++        stroke="#3a3733"
++        strokeWidth={2}
++      />
++      <rect
++        x="6"
++        y="6"
++        width="58"
++        height="88"
++        rx="4"
++        ry="4"
++        fill="url(#card-back-hatch)"
++        stroke="#3a3733"
++        strokeWidth={1}
++      />
++    </svg>
++  );
++}
+diff --git a/frontend/src/components/GameTable.tsx b/frontend/src/components/GameTable.tsx
+new file mode 100644
+index 0000000..46d412e
+--- /dev/null
++++ b/frontend/src/components/GameTable.tsx
+@@ -0,0 +1,171 @@
++import type { ComponentChildren } from 'preact';
++import { Card, isRedSuit, suitSymbol, type CardData } from './Card';
++import { CardBack } from './CardBack';
++import { TablePair } from './TablePair';
++import '../styles/table.css';
 +
-+class GameRoutesSuite extends munit.FunSuite:
++export interface OpponentSummary {
++  id: string;
++  name: string;
++  cardCount: number;
++  hasPassed: boolean;
++  finishRank?: number | null;
++}
 +
-+  private def newManager: GameManager = GameManager.create.unsafeRunSync()
++export interface TablePairData {
++  attack: CardData;
++  defense?: CardData | null;
++}
 +
-+  private def send(
-+      manager: GameManager,
-+      request: Request[IO]
-+  ): (Status, Json) =
-+    GameRoutes
-+      .restRoutes(manager)
-+      .orNotFound
-+      .run(request)
-+      .flatMap(response => response.as[Json].map(json => (response.status, json)))
-+      .unsafeRunSync()
++export interface GameTableProps {
++  myId: string;
++  myHand: CardData[];
++  opponents: OpponentSummary[];
++  tablePairs: TablePairData[];
++  talonCount: number;
++  bottomTrumpCard?: CardData | null;
++  trumpSuit: string;
++  attackerId?: string;
++  defenderId?: string;
++  selectedKeys?: string[];
++  onCardClick?: (card: CardData) => void;
++  children?: ComponentChildren;
++}
 +
-+  private def get(manager: GameManager, path: String): (Status, Json) =
-+    send(manager, Request[IO](Method.GET, Uri.unsafeFromString(path)))
++const SUIT_ORDER: Record<string, number> = {
++  spades: 0,
++  hearts: 1,
++  diamonds: 2,
++  clubs: 3,
++};
 +
-+  private def post(manager: GameManager, path: String, body: Json): (Status, Json) =
-+    send(
-+      manager,
-+      Request[IO](Method.POST, Uri.unsafeFromString(path))
-+        .withEntity(body)
-+        .withContentType(`Content-Type`(MediaType.application.json))
-+    )
++const RANK_ORDER: Record<string, number> = {
++  two: 2,
++  three: 3,
++  four: 4,
++  five: 5,
++  six: 6,
++  seven: 7,
++  eight: 8,
++  nine: 9,
++  ten: 10,
++  jack: 11,
++  queen: 12,
++  king: 13,
++  ace: 14,
++};
 +
-+  private def createGame(manager: GameManager, players: Int): String =
-+    val names = (1 to players).map(index => s"Player$index").toList
-+    val (status, json) = post(
-+      manager,
-+      "/api/game/create",
-+      Json.obj(
-+        "playerCount" -> players.asJson,
-+        "playerNames" -> names.asJson,
-+        "allowRedirect" -> true.asJson
-+      )
-+    )
-+    assertEquals(status, Status.Ok)
-+    json.hcursor
-+      .get[String]("gameId")
-+      .getOrElse(fail(s"missing gameId in ${json.noSpaces}"))
++export const cardKey = (card: CardData): string =>
++  `${card.suit.toLowerCase()}:${card.rank.toLowerCase()}`;
 +
-+  test("POST /api/game/create returns a game id and the players") {
-+    val manager = newManager
++const sortHand = (hand: CardData[]): CardData[] =>
++  [...hand].sort((left, right) => {
++    const suitDiff =
++      (SUIT_ORDER[left.suit.toLowerCase()] ?? 9) -
++      (SUIT_ORDER[right.suit.toLowerCase()] ?? 9);
++    if (suitDiff !== 0) return suitDiff;
++    return (
++      (RANK_ORDER[left.rank.toLowerCase()] ?? 0) -
++      (RANK_ORDER[right.rank.toLowerCase()] ?? 0)
++    );
++  });
 +
-+    val (status, json) = post(
-+      manager,
-+      "/api/game/create",
-+      Json.obj(
-+        "playerCount" -> 2.asJson,
-+        "playerNames" -> List("Alice", "Bob").asJson,
-+        "allowRedirect" -> true.asJson
-+      )
-+    )
++/**
++ * The responsive game table: opponents and talon on top, the battle area in the
++ * middle, the viewer's sorted hand at the bottom, and an action slot below it.
++ */
++export function GameTable({
++  myId,
++  myHand,
++  opponents,
++  tablePairs,
++  talonCount,
++  bottomTrumpCard,
++  trumpSuit,
++  attackerId,
++  defenderId,
++  selectedKeys = [],
++  onCardClick,
++  children,
++}: GameTableProps) {
++  const hand = sortHand(myHand);
 +
-+    assertEquals(status, Status.Ok)
-+    assert(json.hcursor.get[String]("gameId").exists(_.nonEmpty))
-+    assertEquals(json.hcursor.downField("players").as[List[Json]].map(_.size).toOption, Some(2))
++  return (
++    <div class="game-table" data-my-id={myId}>
++      <header class="table-top">
++        <section class="opponents" aria-label="Opponents">
++          {opponents.map((opponent) => {
++            const classes = ['opponent'];
++            if (opponent.id === attackerId) classes.push('active-attacker');
++            if (opponent.id === defenderId) classes.push('active-defender');
++            return (
++              <div key={opponent.id} class={classes.join(' ')} data-testid="opponent">
++                <span class="opponent-name">{opponent.name}</span>
++                <div class="opponent-cards" aria-label={`${opponent.name}'s cards`}>
++                  {Array.from({ length: opponent.cardCount }, (_, index) => (
++                    <CardBack key={index} />
++                  ))}
++                </div>
++                <span class="opponent-count">{opponent.cardCount} cards</span>
++                {opponent.finishRank != null ? (
++                  <span class="opponent-rank">Finished #{opponent.finishRank}</span>
++                ) : null}
++                {opponent.hasPassed ? <span class="opponent-passed">Passed</span> : null}
++              </div>
++            );
++          })}
++        </section>
++
++        <aside class="table-status" aria-label="Talon">
++          <div class="talon-stack">
++            <CardBack class="talon-back talon-back-second" />
++            <CardBack class="talon-back" />
++            <span class="talon-count" data-testid="talon-count">
++              {talonCount}
++            </span>
++          </div>
++          {talonCount > 0 && bottomTrumpCard ? (
++            <div class="bottom-trump" aria-label="Bottom trump card">
++              <div class="bottom-trump-card">
++                <Card suit={bottomTrumpCard.suit} rank={bottomTrumpCard.rank} />
++              </div>
++            </div>
++          ) : null}
++          <div
++            class={`trump-badge ${isRedSuit(trumpSuit) ? 'red' : 'black'}`}
++            data-suit={trumpSuit.toLowerCase()}
++          >
++            <span>Trump</span>
++            <span class="trump-symbol">{suitSymbol(trumpSuit)}</span>
++          </div>
++        </aside>
++      </header>
++
++      <section class="battle" aria-label="Battle">
++        {tablePairs.length === 0 ? (
++          <p class="battle-empty">Waiting for the first attack…</p>
++        ) : (
++          tablePairs.map((pair, index) => (
++            <TablePair key={index} attack={pair.attack} defense={pair.defense} />
++          ))
++        )}
++      </section>
++
++      <section class="hand" aria-label="Your hand">
++        {hand.map((card, index) => (
++          <Card
++            key={`${cardKey(card)}-${index}`}
++            suit={card.suit}
++            rank={card.rank}
++            selected={selectedKeys.includes(cardKey(card))}
++            onClick={onCardClick ? () => onCardClick(card) : undefined}
++          />
++        ))}
++      </section>
++
++      <footer class="actions-slot" aria-label="Actions">
++        {children}
++      </footer>
++    </div>
++  );
++}
+diff --git a/frontend/src/components/TablePair.tsx b/frontend/src/components/TablePair.tsx
+new file mode 100644
+index 0000000..09d22a3
+--- /dev/null
++++ b/frontend/src/components/TablePair.tsx
+@@ -0,0 +1,22 @@
++import { Card, type CardData } from './Card';
++
++export interface TablePairProps {
++  attack: CardData;
++  defense?: CardData | null;
++}
++
++/** One attack on the table, with the defending card overlapping it if played. */
++export function TablePair({ attack, defense }: TablePairProps) {
++  return (
++    <div class="table-pair">
++      <div class="table-pair-attack">
++        <Card suit={attack.suit} rank={attack.rank} />
++      </div>
++      {defense ? (
++        <div class="table-pair-defense">
++          <Card suit={defense.suit} rank={defense.rank} />
++        </div>
++      ) : null}
++    </div>
++  );
++}
+diff --git a/frontend/src/styles/table.css b/frontend/src/styles/table.css
+new file mode 100644
+index 0000000..c61a1f0
+--- /dev/null
++++ b/frontend/src/styles/table.css
+@@ -0,0 +1,401 @@
++:root {
++  --durak-bg: #161512;
++  --durak-panel: #262421;
++  --durak-text: #bababa;
++  --durak-accent: #629924;
++  --durak-danger: #c33;
++  --durak-amber: #d9a326;
++  --durak-border: #3a3733;
++}
++
++.game-table {
++  display: grid;
++  grid-template-columns: minmax(0, 1fr) auto;
++  grid-template-rows: auto minmax(170px, 1fr) auto auto;
++  grid-template-areas:
++    'opponents status'
++    'battle battle'
++    'hand hand'
++    'actions actions';
++  gap: 12px;
++  box-sizing: border-box;
++  width: 100%;
++  max-width: 100%;
++  min-height: 100vh;
++  padding: 12px;
++  background: var(--durak-bg);
++  color: var(--durak-text);
++}
++
++.game-table *,
++.game-table *::before,
++.game-table *::after {
++  box-sizing: border-box;
++}
++
++/* --- Opponents --- */
++
++.table-top {
++  display: contents;
++}
++
++.opponents {
++  grid-area: opponents;
++  display: flex;
++  flex-wrap: wrap;
++  gap: 10px;
++  min-width: 0;
++}
++
++.opponent {
++  display: flex;
++  flex-direction: column;
++  gap: 4px;
++  min-width: 96px;
++  max-width: 100%;
++  padding: 8px 10px;
++  background: var(--durak-panel);
++  border: 2px solid transparent;
++  border-radius: 8px;
++}
++
++.opponent.active-attacker,
++.opponent.active-defender {
++  border-color: var(--durak-accent);
++  box-shadow: 0 0 10px rgba(98, 153, 36, 0.6);
++}
++
++.opponent-name {
++  font-weight: 600;
++  color: #f5f1e6;
++}
++
++.opponent-cards {
++  display: flex;
++  align-items: center;
++  min-height: 32px;
++}
++
++.opponent .playing-card {
++  width: 22px;
++  height: 32px;
++  margin-left: -10px;
++}
++
++.opponent .playing-card:first-child {
++  margin-left: 0;
++}
++
++.opponent-count {
++  font-size: 12px;
++  opacity: 0.85;
++}
++
++.opponent-rank {
++  font-size: 11px;
++  color: var(--durak-amber);
++}
++
++.opponent-passed {
++  font-size: 11px;
++  color: var(--durak-accent);
++}
++
++/* --- Talon & trump --- */
++
++.table-status {
++  grid-area: status;
++  display: flex;
++  flex-direction: column;
++  align-items: flex-end;
++  gap: 10px;
++  min-width: 0;
++}
++
++.talon-stack {
++  position: relative;
++  width: 70px;
++  height: 100px;
++}
++
++.talon-back {
++  position: absolute;
++  top: 0;
++  left: 0;
++  width: 70px;
++  height: 100px;
++}
++
++.talon-back-second {
++  top: 5px;
++  left: 5px;
++  opacity: 0.85;
++}
++
++.talon-count {
++  position: absolute;
++  right: -8px;
++  bottom: -8px;
++  padding: 2px 8px;
++  background: var(--durak-bg);
++  border: 1px solid var(--durak-border);
++  border-radius: 999px;
++  font-weight: 700;
++  color: #f5f1e6;
++}
++
++.bottom-trump {
++  display: grid;
++  place-items: center;
++  width: 100px;
++  height: 70px;
++}
++
++.bottom-trump-card {
++  transform: rotate(90deg);
++}
++
++.trump-badge {
++  display: inline-flex;
++  align-items: center;
++  gap: 6px;
++  padding: 4px 10px;
++  background: var(--durak-panel);
++  border: 1px solid var(--durak-border);
++  border-radius: 999px;
++  font-size: 13px;
++  letter-spacing: 0.04em;
++  text-transform: uppercase;
++}
++
++.trump-badge .trump-symbol {
++  font-size: 18px;
++  line-height: 1;
++}
++
++.trump-badge.red .trump-symbol {
++  color: var(--durak-danger);
++}
++
++.trump-badge.black .trump-symbol {
++  color: var(--durak-text);
++}
++
++/* --- Cards --- */
++
++.card-slot {
++  position: relative;
++  flex: 0 0 auto;
++  width: 70px;
++  height: 100px;
++  border-radius: 6px;
++  transition: transform 120ms ease, box-shadow 120ms ease;
++}
++
++.playing-card {
++  display: block;
++  width: 100%;
++  height: 100%;
++}
++
++.card-slot.clickable {
++  cursor: pointer;
++}
++
++.card-slot.clickable:hover {
++  transform: translateY(-4px);
++}
++
++.card-slot.selected {
++  transform: translateY(-8px);
++  box-shadow: 0 0 0 3px var(--durak-accent);
++}
++
++/* --- Battle area --- */
++
++.battle {
++  grid-area: battle;
++  display: flex;
++  flex-wrap: wrap;
++  align-items: flex-start;
++  justify-content: center;
++  gap: 22px;
++  min-width: 0;
++  min-height: 170px;
++  padding: 16px;
++  background: var(--durak-panel);
++  border-radius: 10px;
++}
++
++.battle-empty {
++  margin: auto;
++  font-style: italic;
++  opacity: 0.7;
++}
++
++.table-pair {
++  position: relative;
++  flex: 0 0 auto;
++  width: 96px;
++  height: 120px;
++}
++
++.table-pair-attack {
++  position: absolute;
++  top: 0;
++  left: 0;
++}
++
++.table-pair-defense {
++  position: absolute;
++  top: 15px;
++  left: 20px;
++}
++
++/* --- Hand --- */
++
++.hand {
++  grid-area: hand;
++  display: flex;
++  flex-wrap: wrap;
++  align-items: flex-end;
++  justify-content: center;
++  gap: 6px;
++  min-width: 0;
++  padding: 10px 4px 18px;
++}
++
++.hand .card-slot + .card-slot {
++  margin-left: -10px;
++}
++
++/* --- Actions --- */
++
++.actions-slot {
++  grid-area: actions;
++  display: flex;
++  justify-content: center;
++  min-height: 0;
++}
++
++.action-bar {
++  display: flex;
++  flex-wrap: wrap;
++  justify-content: center;
++  gap: 10px;
++}
++
++.action-button {
++  padding: 10px 22px;
++  border: none;
++  border-radius: 8px;
++  background: var(--durak-border);
++  color: #f5f1e6;
++  font-size: 15px;
++  font-weight: 600;
++  cursor: pointer;
++  transition: transform 100ms ease, filter 150ms ease;
++}
++
++.action-button:hover {
++  transform: translateY(-2px);
++  filter: brightness(1.12);
++}
++
++.action-button.green {
++  background: var(--durak-accent);
++}
++
++.action-button.red {
++  background: var(--durak-danger);
++}
++
++.action-button.amber {
++  background: var(--durak-amber);
++  color: var(--durak-bg);
++}
++
++/* --- Mobile --- */
++
++@media (max-width: 640px) {
++  .game-table {
++    grid-template-columns: minmax(0, 1fr);
++    grid-template-areas:
++      'opponents'
++      'status'
++      'battle'
++      'hand'
++      'actions';
++    gap: 8px;
++    padding: 8px;
 +  }
 +
-+  test("GET view returns the PlayerGameView for the requested seat") {
-+    val manager = newManager
-+    val gameId = createGame(manager, 3)
-+
-+    val (status, json) = get(manager, s"/api/game/$gameId/view/p1")
-+
-+    assertEquals(status, Status.Ok)
-+    val view = json.as[PlayerGameView].getOrElse(fail(s"invalid view body: ${json.noSpaces}"))
-+    assertEquals(view.myId, "p1")
-+    assertEquals(view.myHand.size, 6)
-+    assertEquals(view.opponents.size, 2)
-+    assert(view.talonCount > 0)
-+    assert(!json.noSpaces.contains("\"talon\""), json.noSpaces)
++  .opponents {
++    gap: 8px;
 +  }
 +
-+  test("POST action applies a legal move and returns the updated view") {
-+    val manager = newManager
-+    val gameId = createGame(manager, 2)
-+
-+    val (_, startJson) = get(manager, s"/api/game/$gameId/view/p0")
-+    val start = startJson.as[PlayerGameView].getOrElse(fail("invalid start view"))
-+    val attackerId = s"p${start.attackerIdx}"
-+    val (_, attackerJson) =
-+      if attackerId == "p0" then (Status.Ok, startJson)
-+      else get(manager, s"/api/game/$gameId/view/p1")
-+    val attackerView =
-+      attackerJson.as[PlayerGameView].getOrElse(fail("invalid attacker view"))
-+    val card = attackerView.myHand.head
-+
-+    val (status, json) = post(
-+      manager,
-+      s"/api/game/$gameId/action",
-+      Json.obj(
-+        "type" -> "initialAttack".asJson,
-+        "playerId" -> attackerId.asJson,
-+        "cards" -> Json.arr(card.asJson)
-+      )
-+    )
-+
-+    assertEquals(status, Status.Ok)
-+    val view = json.as[PlayerGameView].getOrElse(fail(s"invalid action view: ${json.noSpaces}"))
-+    assertEquals(view.myId, attackerId)
-+    assertEquals(view.boutPhase, BoutPhase.Defense)
-+    assertEquals(view.tablePairs.map(_.attack), Vector(card))
++  .opponent {
++    flex: 1 1 84px;
++    min-width: 84px;
++    padding: 6px 8px;
 +  }
 +
-+  test("POST action rejects an illegal move with 400 and an error message") {
-+    val manager = newManager
-+    val gameId = createGame(manager, 2)
-+
-+    val (status, json) = post(
-+      manager,
-+      s"/api/game/$gameId/action",
-+      Json.obj("type" -> "passTurn".asJson, "playerId" -> "p0".asJson)
-+    )
-+
-+    assertEquals(status, Status.BadRequest)
-+    assert(json.hcursor.get[String]("error").exists(_.nonEmpty), json.noSpaces)
++  .table-status {
++    flex-direction: row;
++    flex-wrap: wrap;
++    align-items: center;
++    justify-content: space-between;
 +  }
 +
-+  test("POST action rejects an unknown action type with 400") {
-+    val manager = newManager
-+    val gameId = createGame(manager, 2)
-+
-+    val (status, json) = post(
-+      manager,
-+      s"/api/game/$gameId/action",
-+      Json.obj("type" -> "teleport".asJson, "playerId" -> "p0".asJson)
-+    )
-+
-+    assertEquals(status, Status.BadRequest)
-+    assert(json.hcursor.get[String]("error").exists(_.nonEmpty), json.noSpaces)
++  .card-slot {
++    width: 48px;
++    height: 68px;
 +  }
 +
-+  test("POST /api/game/create rejects an unsupported player count with 400") {
-+    val manager = newManager
-+
-+    val (status, json) = post(
-+      manager,
-+      "/api/game/create",
-+      Json.obj(
-+        "playerCount" -> 7.asJson,
-+        "playerNames" -> (1 to 7).map(index => s"P$index").toList.asJson
-+      )
-+    )
-+
-+    assertEquals(status, Status.BadRequest)
-+    assert(json.hcursor.get[String]("error").exists(_.nonEmpty), json.noSpaces)
++  .talon-stack,
++  .talon-back {
++    width: 48px;
++    height: 68px;
 +  }
 +
-+  test("an unknown game id returns 404") {
-+    val manager = newManager
-+
-+    val (viewStatus, _) = get(manager, "/api/game/missing/view/p0")
-+    val (actionStatus, _) = post(
-+      manager,
-+      "/api/game/missing/action",
-+      Json.obj("type" -> "passTurn".asJson, "playerId" -> "p0".asJson)
-+    )
-+
-+    assertEquals(viewStatus, Status.NotFound)
-+    assertEquals(actionStatus, Status.NotFound)
++  .bottom-trump {
++    width: 68px;
++    height: 48px;
 +  }
 +
-+  test("an unknown player id returns 404") {
-+    val manager = newManager
-+    val gameId = createGame(manager, 2)
-+
-+    val (status, _) = get(manager, s"/api/game/$gameId/view/ghost")
-+
-+    assertEquals(status, Status.NotFound)
++  .bottom-trump-card,
++  .bottom-trump-card .card-slot {
++    width: 48px;
++    height: 68px;
 +  }
++
++  .battle {
++    gap: 14px;
++    min-height: 120px;
++    padding: 10px;
++  }
++
++  .table-pair {
++    width: 70px;
++    height: 88px;
++  }
++
++  .table-pair-defense {
++    top: 10px;
++    left: 14px;
++  }
++
++  .hand {
++    gap: 4px;
++    padding: 8px 0 12px;
++  }
++
++  .hand .card-slot + .card-slot {
++    margin-left: -8px;
++  }
++
++  .action-button {
++    padding: 8px 16px;
++    font-size: 14px;
++  }
++}
 </git_diff>
 
 Audit the diff against the ticket requirements for logic bugs, security flaws, or missing edge-case tests. Be concise and specific.
