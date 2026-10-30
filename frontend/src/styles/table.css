@@ -252,6 +252,12 @@
   left: 20px;
 }
 
+/* An uncovered attack that can be clicked to cover it. */
+.table-pair .card-slot.clickable {
+  border-radius: 6px;
+  box-shadow: 0 0 0 2px var(--durak-amber);
+}
+
 /* --- Hand --- */
 
 .hand {
@@ -300,6 +306,13 @@
 .action-button:hover {
   transform: translateY(-2px);
   filter: brightness(1.12);
+}
+
+.action-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+  transform: none;
+  filter: none;
 }
 
 .action-button.green {
