@@ -5,10 +5,10 @@
 
  RUN  v2.1.9 /workspace/frontend
 
- ✓ src/__tests__/app.test.tsx (1 test) 53ms
+ ✓ src/__tests__/app.test.tsx (1 test) 55ms
 
  Test Files  1 passed (1)
       Tests  1 passed (1)
-   Start at  01:31:40
-   Duration  690ms (transform 45ms, setup 0ms, collect 92ms, tests 53ms, environment 336ms, prepare 65ms)
+   Start at  01:40:48
+   Duration  715ms (transform 38ms, setup 0ms, collect 93ms, tests 55ms, environment 345ms, prepare 63ms)
 
