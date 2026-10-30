@@ -284,22 +284,41 @@ object GameEngine:
       state.boutPhase == BoutPhase.Defense || state.boutPhase == BoutPhase.SurrenderThrowIn
     val playerIdx = state.players.indexWhere(_.id == playerId)
 
-    for
-      _ <- check(passablePhase, s"Cannot pass during ${state.boutPhase} phase")
-      passer <- state.players.lift(playerIdx).toRight(s"Unknown player: $playerId")
-      _ <- check(passer.isActive, s"$playerId has already finished the game")
-      _ <- check(playerIdx != state.defenderIdx, "The defender cannot pass")
-      _ <- check(!passer.hasPassed, s"$playerId has already passed")
-      _ <- check(
-        state.boutPhase != BoutPhase.Defense ||
-          state.tablePairs.forall(_.defense.isDefined) ||
-          state.tablePairs.size >= state.maxBoutAttacks,
-        "Cannot pass while attacking cards are still uncovered"
-      )
-    yield
-      settlePasses(
-        state.copy(players = state.players.updated(playerIdx, passer.copy(hasPassed = true)))
-      )
+    // A surrender auto-passes every non-defender who can no longer act, which
+    // can settle the bout without any further move. Passing is then idempotent:
+    // the bout resolves instead of being rejected as a second pass.
+    val boutAlreadySettled =
+      passablePhase &&
+        playerIdx != -1 &&
+        playerIdx != state.defenderIdx &&
+        state.players(playerIdx).isActive &&
+        boutIsComplete(state)
+
+    if boutAlreadySettled then Right(resolveBout(state))
+    else
+      for
+        _ <- check(passablePhase, s"Cannot pass during ${state.boutPhase} phase")
+        passer <- state.players.lift(playerIdx).toRight(s"Unknown player: $playerId")
+        _ <- check(passer.isActive, s"$playerId has already finished the game")
+        _ <- check(playerIdx != state.defenderIdx, "The defender cannot pass")
+        _ <- check(!passer.hasPassed, s"$playerId has already passed")
+        _ <- check(
+          state.boutPhase != BoutPhase.Defense ||
+            state.tablePairs.forall(_.defense.isDefined) ||
+            state.tablePairs.size >= state.maxBoutAttacks,
+          "Cannot pass while attacking cards are still uncovered"
+        )
+      yield
+        settlePasses(
+          state.copy(players = state.players.updated(playerIdx, passer.copy(hasPassed = true)))
+        )
+
+  /** True when every active non-defender has already passed this bout. */
+  private def boutIsComplete(state: GameState): Boolean =
+    val nonDefenders = state.players.zipWithIndex.filter { case (player, idx) =>
+      idx != state.defenderIdx && player.isActive
+    }
+    nonDefenders.nonEmpty && nonDefenders.forall(_._1.hasPassed)
 
   /**
    * Auto-passes players that cannot act (empty hand or a full table) and
@@ -322,7 +341,8 @@ object GameEngine:
   /**
    * Ends the current bout: clears the table (discarding it after a successful
    * defense or handing it to a surrendering defender), refills hands in draw
-   * order, rotates the roles, and opens the next bout's initial attack.
+   * order, applies the endgame rules, and — while the game goes on — rotates
+   * the roles and opens the next bout's initial attack.
    */
   private def resolveBout(state: GameState): GameState =
     val surrendered = state.boutPhase == BoutPhase.SurrenderThrowIn
@@ -340,18 +360,74 @@ object GameEngine:
         state.copy(tablePairs = Vector.empty, discardPile = state.discardPile ++ tableCards)
 
     val drawn = drawHands(afterTable, includeDefender = !surrendered)
+    val cleared = drawn.copy(players = drawn.players.map(_.copy(hasPassed = false)))
 
-    val newAttackerIdx =
-      if surrendered then drawn.nextActivePlayerIdx(state.defenderIdx)
-      else state.defenderIdx
-    val newDefenderIdx = drawn.nextActivePlayerIdx(newAttackerIdx)
+    if isTwoPlayerDraw(cleared, successfulDefense = !surrendered) then
+      val rank = cleared.finishOrder.size + 1
+      cleared.copy(
+        players = cleared.players.map(_.copy(finishRank = Some(rank))),
+        finishOrder = cleared.finishOrder ++ cleared.players.map(_.id),
+        isDraw = true,
+        boutPhase = BoutPhase.GameOver
+      )
+    else
+      val roster =
+        if cleared.talon.isEmpty then eliminateEmptyHands(cleared) else cleared
+      val remaining = roster.activePlayersWithCards
 
-    drawn.copy(
-      players = drawn.players.map(_.copy(hasPassed = false)),
-      attackerIdx = newAttackerIdx,
-      defenderIdx = newDefenderIdx,
-      boutPhase = BoutPhase.InitialAttack,
-      defenderInitialHandSize = drawn.players(newDefenderIdx).hand.size
+      if remaining.size <= 1 then
+        val finished =
+          if remaining.size == 1 then crownDurak(roster, remaining.head) else roster
+        finished.copy(boutPhase = BoutPhase.GameOver)
+      else
+        // Rotate only among players left in the game: a defender who just went
+        // out cannot be handed the next attack or defense.
+        val defenderIdx = roster.defenderIdx
+        val newAttackerIdx =
+          if surrendered || !roster.players(defenderIdx).isActive then
+            roster.nextActivePlayerIdx(defenderIdx)
+          else defenderIdx
+        val newDefenderIdx = roster.nextActivePlayerIdx(newAttackerIdx)
+        roster.copy(
+          attackerIdx = newAttackerIdx,
+          defenderIdx = newDefenderIdx,
+          boutPhase = BoutPhase.InitialAttack,
+          defenderInitialHandSize = roster.players(newDefenderIdx).hand.size
+        )
+
+  /**
+   * Two players going out on the same successful defense is a draw: both are
+   * ranked equally and the game is over.
+   */
+  private def isTwoPlayerDraw(state: GameState, successfulDefense: Boolean): Boolean =
+    successfulDefense &&
+      state.talon.isEmpty &&
+      state.players.size == 2 &&
+      state.players.forall(player => player.isActive && player.hand.isEmpty)
+
+  /** Finishes every active player with an empty hand, in seat order. */
+  private def eliminateEmptyHands(state: GameState): GameState =
+    state.players.indices.foldLeft(state) { (current, idx) =>
+      val player = current.players(idx)
+      if player.isActive && !player.hasCards then
+        val rank = current.finishOrder.size + 1
+        current.copy(
+          players = current.players.updated(
+            idx,
+            player.copy(finishRank = Some(rank), hasPassed = false)
+          ),
+          finishOrder = current.finishOrder :+ player.id
+        )
+      else current
+    }
+
+  /** Records the last player still holding cards as the Durak (last place). */
+  private def crownDurak(state: GameState, durak: PlayerState): GameState =
+    val idx = state.players.indexWhere(_.id == durak.id)
+    val rank = state.finishOrder.size + 1
+    state.copy(
+      players = state.players.updated(idx, state.players(idx).copy(finishRank = Some(rank))),
+      finishOrder = state.finishOrder :+ durak.id
     )
 
   /**
