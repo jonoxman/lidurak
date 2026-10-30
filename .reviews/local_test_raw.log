@@ -5,10 +5,12 @@
 
  RUN  v2.1.9 /workspace/frontend
 
- ✓ src/__tests__/app.test.tsx (1 test) 55ms
+ ✓ src/__tests__/Card.test.tsx (5 tests) 32ms
+ ✓ src/__tests__/app.test.tsx (1 test) 59ms
+ ✓ src/__tests__/GameTable.test.tsx (6 tests) 126ms
 
- Test Files  1 passed (1)
-      Tests  1 passed (1)
-   Start at  01:40:48
-   Duration  715ms (transform 38ms, setup 0ms, collect 93ms, tests 55ms, environment 345ms, prepare 63ms)
+ Test Files  3 passed (3)
+      Tests  12 passed (12)
+   Start at  01:45:47
+   Duration  880ms (transform 132ms, setup 0ms, collect 409ms, tests 216ms, environment 1.12s, prepare 207ms)
 

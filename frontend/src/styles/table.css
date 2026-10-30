@@ -1,0 +1,401 @@
+:root {
+  --durak-bg: #161512;
+  --durak-panel: #262421;
+  --durak-text: #bababa;
+  --durak-accent: #629924;
+  --durak-danger: #c33;
+  --durak-amber: #d9a326;
+  --durak-border: #3a3733;
+}
+
+.game-table {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(170px, 1fr) auto auto;
+  grid-template-areas:
+    'opponents status'
+    'battle battle'
+    'hand hand'
+    'actions actions';
+  gap: 12px;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-height: 100vh;
+  padding: 12px;
+  background: var(--durak-bg);
+  color: var(--durak-text);
+}
+
+.game-table *,
+.game-table *::before,
+.game-table *::after {
+  box-sizing: border-box;
+}
+
+/* --- Opponents --- */
+
+.table-top {
+  display: contents;
+}
+
+.opponents {
+  grid-area: opponents;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+}
+
+.opponent {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 96px;
+  max-width: 100%;
+  padding: 8px 10px;
+  background: var(--durak-panel);
+  border: 2px solid transparent;
+  border-radius: 8px;
+}
+
+.opponent.active-attacker,
+.opponent.active-defender {
+  border-color: var(--durak-accent);
+  box-shadow: 0 0 10px rgba(98, 153, 36, 0.6);
+}
+
+.opponent-name {
+  font-weight: 600;
+  color: #f5f1e6;
+}
+
+.opponent-cards {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+}
+
+.opponent .playing-card {
+  width: 22px;
+  height: 32px;
+  margin-left: -10px;
+}
+
+.opponent .playing-card:first-child {
+  margin-left: 0;
+}
+
+.opponent-count {
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.opponent-rank {
+  font-size: 11px;
+  color: var(--durak-amber);
+}
+
+.opponent-passed {
+  font-size: 11px;
+  color: var(--durak-accent);
+}
+
+/* --- Talon & trump --- */
+
+.table-status {
+  grid-area: status;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  min-width: 0;
+}
+
+.talon-stack {
+  position: relative;
+  width: 70px;
+  height: 100px;
+}
+
+.talon-back {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 70px;
+  height: 100px;
+}
+
+.talon-back-second {
+  top: 5px;
+  left: 5px;
+  opacity: 0.85;
+}
+
+.talon-count {
+  position: absolute;
+  right: -8px;
+  bottom: -8px;
+  padding: 2px 8px;
+  background: var(--durak-bg);
+  border: 1px solid var(--durak-border);
+  border-radius: 999px;
+  font-weight: 700;
+  color: #f5f1e6;
+}
+
+.bottom-trump {
+  display: grid;
+  place-items: center;
+  width: 100px;
+  height: 70px;
+}
+
+.bottom-trump-card {
+  transform: rotate(90deg);
+}
+
+.trump-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--durak-panel);
+  border: 1px solid var(--durak-border);
+  border-radius: 999px;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.trump-badge .trump-symbol {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.trump-badge.red .trump-symbol {
+  color: var(--durak-danger);
+}
+
+.trump-badge.black .trump-symbol {
+  color: var(--durak-text);
+}
+
+/* --- Cards --- */
+
+.card-slot {
+  position: relative;
+  flex: 0 0 auto;
+  width: 70px;
+  height: 100px;
+  border-radius: 6px;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.playing-card {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.card-slot.clickable {
+  cursor: pointer;
+}
+
+.card-slot.clickable:hover {
+  transform: translateY(-4px);
+}
+
+.card-slot.selected {
+  transform: translateY(-8px);
+  box-shadow: 0 0 0 3px var(--durak-accent);
+}
+
+/* --- Battle area --- */
+
+.battle {
+  grid-area: battle;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 22px;
+  min-width: 0;
+  min-height: 170px;
+  padding: 16px;
+  background: var(--durak-panel);
+  border-radius: 10px;
+}
+
+.battle-empty {
+  margin: auto;
+  font-style: italic;
+  opacity: 0.7;
+}
+
+.table-pair {
+  position: relative;
+  flex: 0 0 auto;
+  width: 96px;
+  height: 120px;
+}
+
+.table-pair-attack {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.table-pair-defense {
+  position: absolute;
+  top: 15px;
+  left: 20px;
+}
+
+/* --- Hand --- */
+
+.hand {
+  grid-area: hand;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px 4px 18px;
+}
+
+.hand .card-slot + .card-slot {
+  margin-left: -10px;
+}
+
+/* --- Actions --- */
+
+.actions-slot {
+  grid-area: actions;
+  display: flex;
+  justify-content: center;
+  min-height: 0;
+}
+
+.action-bar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+
+.action-button {
+  padding: 10px 22px;
+  border: none;
+  border-radius: 8px;
+  background: var(--durak-border);
+  color: #f5f1e6;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 100ms ease, filter 150ms ease;
+}
+
+.action-button:hover {
+  transform: translateY(-2px);
+  filter: brightness(1.12);
+}
+
+.action-button.green {
+  background: var(--durak-accent);
+}
+
+.action-button.red {
+  background: var(--durak-danger);
+}
+
+.action-button.amber {
+  background: var(--durak-amber);
+  color: var(--durak-bg);
+}
+
+/* --- Mobile --- */
+
+@media (max-width: 640px) {
+  .game-table {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'opponents'
+      'status'
+      'battle'
+      'hand'
+      'actions';
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .opponents {
+    gap: 8px;
+  }
+
+  .opponent {
+    flex: 1 1 84px;
+    min-width: 84px;
+    padding: 6px 8px;
+  }
+
+  .table-status {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .card-slot {
+    width: 48px;
+    height: 68px;
+  }
+
+  .talon-stack,
+  .talon-back {
+    width: 48px;
+    height: 68px;
+  }
+
+  .bottom-trump {
+    width: 68px;
+    height: 48px;
+  }
+
+  .bottom-trump-card,
+  .bottom-trump-card .card-slot {
+    width: 48px;
+    height: 68px;
+  }
+
+  .battle {
+    gap: 14px;
+    min-height: 120px;
+    padding: 10px;
+  }
+
+  .table-pair {
+    width: 70px;
+    height: 88px;
+  }
+
+  .table-pair-defense {
+    top: 10px;
+    left: 14px;
+  }
+
+  .hand {
+    gap: 4px;
+    padding: 8px 0 12px;
+  }
+
+  .hand .card-slot + .card-slot {
+    margin-left: -8px;
+  }
+
+  .action-button {
+    padding: 8px 16px;
+    font-size: 14px;
+  }
+}
