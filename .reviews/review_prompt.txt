@@ -4,89 +4,103 @@ CRITICAL INSTRUCTION: Do NOT use any tools, do NOT run bash commands, and do NOT
 <tickets_in_scope>
 
 
---- TICKET: .tickets/T-11-player-view-json.md ---
-# T-11: PlayerGameView Projection & Circe JSON Codecs
+--- TICKET: .tickets/T-12-game-actor-server.md ---
+# T-12: Game Actor & Http4s REST/WebSocket Server
 
 ## Objective
-Implement the `PlayerGameView` projection that strips hidden information from `GameState`, and define Circe JSON encoders/decoders for all engine types and WebSocket messages.
+Implement a Cats Effect–based game actor that holds game state in a `Ref` and broadcasts updates via `Topic`, plus Http4s routes for creating games, querying state, and playing via WebSocket. Wire everything into `Main.scala` serving on `0.0.0.0:8080`.
 
 ## Requirements
 
-### File: `backend/src/main/scala/durak/engine/PlayerGameView.scala`
+### File: `backend/src/main/scala/durak/server/GameActor.scala`
 
 ```scala
-case class PublicPlayerSummary(
-  id: String,
-  name: String,
-  cardCount: Int,
-  hasPassed: Boolean,
-  finishRank: Option[Int]
+package durak.server
+
+import cats.effect.*
+import cats.effect.std.Queue
+import fs2.concurrent.Topic
+
+case class GameRoom(
+  gameId: String,
+  stateRef: Ref[IO, GameState],
+  topic: Topic[IO, GameState],  // Broadcasts state changes
+  playerIds: Vector[String]
 )
 
-case class PlayerGameView(
-  myId: String,
-  myHand: List[Card],
-  opponents: List[PublicPlayerSummary],
-  tablePairs: Vector[TablePair],
-  talonCount: Int,
-  bottomTrumpCard: Option[Card],  // None when talon is empty
-  trumpSuit: Suit,
-  attackerIdx: Int,
-  defenderIdx: Int,
-  boutPhase: BoutPhase,
-  legalActions: List[String],     // e.g. ["attack", "cover", "pass", "surrender", "redirect", "throwIn"]
-  finishOrder: Vector[String],
-  isDraw: Boolean,
-  maxBoutAttacks: Int
-)
-
-object PlayerGameView:
-  def forViewer(state: GameState, viewerId: String): PlayerGameView
+object GameActor:
+  def create(config: GameConfig, playerNames: Vector[String]): IO[GameRoom]
+  def applyAction(room: GameRoom, action: GameAction): IO[Either[String, GameState]]
 ```
 
-**`forViewer` logic:**
-1. Find the viewer's `PlayerState` by `viewerId`.
-2. `myHand` = viewer's hand as `List[Card]`.
-3. `opponents` = all other players mapped to `PublicPlayerSummary` (only `cardCount`, never actual cards).
-4. `talonCount` = `state.talon.size`.
-5. `bottomTrumpCard` = `state.bottomTrumpCard` only if `talon.nonEmpty`, else `None`.
-6. Compute `legalActions` for this viewer based on current state (what actions the viewer can currently perform).
+- `create`: Initializes `GameState` via `GameEngine.createGame`, stores in `Ref`, creates `Topic`.
+- `applyAction`: Atomically validates and applies the action via `stateRef.modify`, publishes new state to `topic`.
 
-### File: `backend/src/main/scala/durak/engine/JsonCodecs.scala`
+### File: `backend/src/main/scala/durak/server/GameManager.scala`
 
-Provide Circe `Encoder` and `Decoder` instances for:
-- `Suit`, `Rank`, `Card`
-- `TablePair`, `BoutPhase`
-- `PublicPlayerSummary`, `PlayerGameView`
-- `GameAction` (all variants, for receiving WebSocket commands)
+```scala
+package durak.server
 
-Use `circe-generic` semi-auto derivation or manual codecs. Ensure:
-- `Suit` and `Rank` serialize as lowercase strings (e.g., `"hearts"`, `"ace"`)
-- `Card` serializes as `{"suit": "hearts", "rank": "ace"}`
-- `GameAction` uses a `"type"` discriminator field (e.g., `{"type": "initialAttack", "playerId": "...", "cards": [...]}`)
+import cats.effect.*
 
-### Test File: `backend/src/test/scala/durak/engine/PlayerViewSuite.scala`
+class GameManager(rooms: Ref[IO, Map[String, GameRoom]]):
+  def createGame(config: GameConfig, playerNames: Vector[String]): IO[GameRoom]
+  def getRoom(gameId: String): IO[Option[GameRoom]]
+```
 
-**Projection Tests:**
-- Viewer's own hand is included correctly
-- Opponent cards are NOT included (only `cardCount`)
-- `talonCount` matches actual talon size
-- `bottomTrumpCard` is `None` when talon is empty
-- `legalActions` correctly lists available actions per phase and role
+- Generates unique `gameId` (UUID).
+- Stores rooms in the `Ref[IO, Map]`.
 
-### Test File: `backend/src/test/scala/durak/engine/JsonCodecsSuite.scala`
+### File: `backend/src/main/scala/durak/server/GameRoutes.scala`
 
-**Round-Trip Tests:**
-- `Card` encodes and decodes correctly
-- `PlayerGameView` round-trips through JSON
-- `GameAction.InitialAttack` decodes from JSON string
-- `GameAction.CoverCard` decodes from JSON string
-- `GameAction.RedirectAttack` decodes from JSON string
-- All `GameAction` variants decode correctly with `"type"` discriminator
+```scala
+package durak.server
+
+import org.http4s.*
+import org.http4s.dsl.io.*
+
+object GameRoutes:
+  def routes(manager: GameManager): HttpRoutes[IO]
+```
+
+**REST Endpoints:**
+- `POST /api/game/create` — Body: `{"playerCount": 2, "playerNames": ["Alice", "Bob"], "allowRedirect": true}` → Creates game, returns `{"gameId": "...", "players": [...]}`
+- `GET /api/game/:gameId/view/:playerId` — Returns `PlayerGameView` as JSON for the given player
+- `POST /api/game/:gameId/action` — Body: `GameAction` JSON → Applies action, returns updated `PlayerGameView` or error
+
+**WebSocket Endpoint:**
+- `GET /ws/game/:gameId/:playerId` — Upgrades to WebSocket:
+  - **Incoming:** JSON `GameAction` messages → applied via `GameActor.applyAction`
+  - **Outgoing:** `PlayerGameView` JSON pushed on every state change (subscribe to `topic`, map through `PlayerGameView.forViewer`)
+
+### File: `backend/src/main/scala/durak/Main.scala`
+
+Update to:
+1. Create a `GameManager`
+2. Build `GameRoutes.routes(manager)`
+3. Start `EmberServerBuilder` on `0.0.0.0:8080` with the routes
+4. Log `"Durak server running on 0.0.0.0:8080"`
+
+### Test File: `backend/src/test/scala/durak/server/GameActorSuite.scala`
+
+- Create a game room → initial state has correct phase and player count
+- Apply valid `InitialAttack` → state updates, new state published to topic
+- Apply invalid action → returns `Left(error)`, state unchanged
+- Multiple sequential actions (attack → defend → pass) progress the game
+
+### Test File: `backend/src/test/scala/durak/server/GameRoutesSuite.scala`
+
+- `POST /api/game/create` returns 200 with `gameId`
+- `GET /api/game/:id/view/:playerId` returns valid `PlayerGameView` JSON
+- `POST /api/game/:id/action` with valid action returns updated view
+- `POST /api/game/:id/action` with invalid action returns 400 with error message
+- Non-existent `gameId` returns 404
 
 ## Acceptance Criteria
-- [ ] `PlayerGameView.forViewer` never leaks hidden state
-- [ ] All JSON codecs round-trip correctly
+- [ ] Game actor manages state atomically
+- [ ] REST endpoints create games, return views, and process actions
+- [ ] WebSocket endpoint streams filtered views
+- [ ] `Main.scala` boots the server successfully
 - [ ] All tests pass
 
 ## Verification Command
@@ -96,844 +110,606 @@ cd backend && sbt test
 </tickets_in_scope>
 
 <git_diff>
-diff --git a/backend/src/main/scala/durak/engine/JsonCodecs.scala b/backend/src/main/scala/durak/engine/JsonCodecs.scala
-new file mode 100644
-index 0000000..f1c2974
---- /dev/null
-+++ b/backend/src/main/scala/durak/engine/JsonCodecs.scala
-@@ -0,0 +1,141 @@
-+package durak.engine
-+
-+import io.circe.{Decoder, DecodingFailure, Encoder, Json}
-+import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
-+import io.circe.syntax.*
-+
-+/** Circe codecs for the engine types that cross the REST/WebSocket boundary. */
-+object JsonCodecs:
-+
-+  // --- Enums ---
-+
-+  given Encoder[Suit] = Encoder.encodeString.contramap(_.toString.toLowerCase)
-+
-+  given Decoder[Suit] = Decoder.decodeString.emap { raw =>
-+    Suit.values
-+      .find(_.toString.equalsIgnoreCase(raw))
-+      .toRight(s"Unknown suit: $raw")
-+  }
-+
-+  given Encoder[Rank] = Encoder.encodeString.contramap(_.toString.toLowerCase)
-+
-+  given Decoder[Rank] = Decoder.decodeString.emap { raw =>
-+    Rank.values
-+      .find(_.toString.equalsIgnoreCase(raw))
-+      .toRight(s"Unknown rank: $raw")
-+  }
-+
-+  given Encoder[BoutPhase] =
-+    Encoder.encodeString.contramap(phase => lowerFirst(phase.toString))
-+
-+  given Decoder[BoutPhase] = Decoder.decodeString.emap { raw =>
-+    BoutPhase.values
-+      .find(_.toString.equalsIgnoreCase(raw))
-+      .toRight(s"Unknown bout phase: $raw")
-+  }
-+
-+  private def lowerFirst(value: String): String =
-+    if value.isEmpty then value else value.head.toLower + value.tail
-+
-+  // --- Value objects ---
-+
-+  given Encoder[Card] = Encoder.instance { card =>
-+    Json.obj("suit" -> card.suit.asJson, "rank" -> card.rank.asJson)
-+  }
-+
-+  given Decoder[Card] = Decoder.instance { cursor =>
-+    for
-+      suit <- cursor.downField("suit").as[Suit]
-+      rank <- cursor.downField("rank").as[Rank]
-+    yield Card(suit, rank)
-+  }
-+
-+  given Encoder[TablePair] = deriveEncoder[TablePair]
-+  given Decoder[TablePair] = deriveDecoder[TablePair]
-+
-+  // --- Views ---
-+
-+  given Encoder[PublicPlayerSummary] = deriveEncoder[PublicPlayerSummary]
-+  given Decoder[PublicPlayerSummary] = deriveDecoder[PublicPlayerSummary]
-+
-+  given Encoder[PlayerGameView] = deriveEncoder[PlayerGameView]
-+  given Decoder[PlayerGameView] = deriveDecoder[PlayerGameView]
-+
-+  // --- WebSocket commands ---
-+
-+  given Encoder[GameAction] = Encoder.instance {
-+    case GameAction.InitialAttack(playerId, cards) =>
-+      Json.obj(
-+        "type" -> Json.fromString("initialAttack"),
-+        "playerId" -> playerId.asJson,
-+        "cards" -> cards.asJson
-+      )
-+    case GameAction.CoverCard(playerId, attackIndex, defenseCard) =>
-+      Json.obj(
-+        "type" -> Json.fromString("coverCard"),
-+        "playerId" -> playerId.asJson,
-+        "attackIndex" -> attackIndex.asJson,
-+        "defenseCard" -> defenseCard.asJson
-+      )
-+    case GameAction.RedirectAttack(playerId, cards) =>
-+      Json.obj(
-+        "type" -> Json.fromString("redirectAttack"),
-+        "playerId" -> playerId.asJson,
-+        "cards" -> cards.asJson
-+      )
-+    case GameAction.ThrowInCards(playerId, cards) =>
-+      Json.obj(
-+        "type" -> Json.fromString("throwInCards"),
-+        "playerId" -> playerId.asJson,
-+        "cards" -> cards.asJson
-+      )
-+    case GameAction.DeclareSurrender(playerId) =>
-+      Json.obj(
-+        "type" -> Json.fromString("declareSurrender"),
-+        "playerId" -> playerId.asJson
-+      )
-+    case GameAction.PassTurn(playerId) =>
-+      Json.obj(
-+        "type" -> Json.fromString("passTurn"),
-+        "playerId" -> playerId.asJson
-+      )
-+  }
-+
-+  given Decoder[GameAction] = Decoder.instance { cursor =>
-+    cursor.downField("type").as[String].flatMap { raw =>
-+      raw.toLowerCase match
-+        case "initialattack" =>
-+          for
-+            playerId <- cursor.downField("playerId").as[String]
-+            cards <- cursor.downField("cards").as[List[Card]]
-+          yield GameAction.InitialAttack(playerId, cards)
-+        case "covercard" =>
-+          for
-+            playerId <- cursor.downField("playerId").as[String]
-+            attackIndex <- cursor.downField("attackIndex").as[Int]
-+            defenseCard <- cursor.downField("defenseCard").as[Card]
-+          yield GameAction.CoverCard(playerId, attackIndex, defenseCard)
-+        case "redirectattack" =>
-+          for
-+            playerId <- cursor.downField("playerId").as[String]
-+            cards <- cursor.downField("cards").as[List[Card]]
-+          yield GameAction.RedirectAttack(playerId, cards)
-+        case "throwincards" =>
-+          for
-+            playerId <- cursor.downField("playerId").as[String]
-+            cards <- cursor.downField("cards").as[List[Card]]
-+          yield GameAction.ThrowInCards(playerId, cards)
-+        case "declaresurrender" =>
-+          cursor
-+            .downField("playerId")
-+            .as[String]
-+            .map(playerId => GameAction.DeclareSurrender(playerId))
-+        case "passturn" =>
-+          cursor
-+            .downField("playerId")
-+            .as[String]
-+            .map(playerId => GameAction.PassTurn(playerId))
-+        case _ =>
-+          Left(DecodingFailure(s"Unknown game action type: $raw", cursor.history))
+diff --git a/backend/src/main/scala/durak/Main.scala b/backend/src/main/scala/durak/Main.scala
+index f8f2d4b..7a8e764 100644
+--- a/backend/src/main/scala/durak/Main.scala
++++ b/backend/src/main/scala/durak/Main.scala
+@@ -1,7 +1,20 @@
+ package durak
+ 
+ import cats.effect.*
++import com.comcast.ip4s.*
++import durak.server.{GameManager, GameRoutes}
++import org.http4s.ember.server.EmberServerBuilder
+ 
+ object Main extends IOApp.Simple:
+   def run: IO[Unit] =
+-    IO.println("Durak server starting...")
++    (for
++      manager <- Resource.eval(GameManager.create)
++      server <- EmberServerBuilder
++        .default[IO]
++        .withHost(host"0.0.0.0")
++        .withPort(port"8080")
++        .withHttpWebSocketApp(ws => GameRoutes.routes(manager)(using ws).orNotFound)
++        .build
++    yield server).use { _ =>
++      IO.println("Durak server running on 0.0.0.0:8080") *> IO.never
 +    }
-+  }
-diff --git a/backend/src/main/scala/durak/engine/PlayerGameView.scala b/backend/src/main/scala/durak/engine/PlayerGameView.scala
+diff --git a/backend/src/main/scala/durak/server/GameActor.scala b/backend/src/main/scala/durak/server/GameActor.scala
 new file mode 100644
-index 0000000..dcda838
+index 0000000..b576f8f
 --- /dev/null
-+++ b/backend/src/main/scala/durak/engine/PlayerGameView.scala
-@@ -0,0 +1,161 @@
-+package durak.engine
++++ b/backend/src/main/scala/durak/server/GameActor.scala
+@@ -0,0 +1,63 @@
++package durak.server
 +
-+/** A non-viewing player, reduced to public information only. */
-+case class PublicPlayerSummary(
-+  id: String,
-+  name: String,
-+  cardCount: Int,
-+  hasPassed: Boolean,
-+  finishRank: Option[Int]
++import cats.effect.*
++import durak.engine.*
++import fs2.concurrent.Topic
++
++import java.util.UUID
++
++/** A live game: its authoritative state, its broadcast topic, and its seats. */
++case class GameRoom(
++  gameId: String,
++  stateRef: Ref[IO, GameState],
++  topic: Topic[IO, GameState],
++  playerIds: Vector[String]
 +)
 +
-+/**
-+ * The strictly filtered projection of [[GameState]] a single viewer may see:
-+ * their own hand, public summaries of the other players, and public table and
-+ * talon information. Opponent hands and the talon order never appear.
-+ */
-+case class PlayerGameView(
-+  myId: String,
-+  myHand: List[Card],
-+  opponents: List[PublicPlayerSummary],
-+  tablePairs: Vector[TablePair],
-+  talonCount: Int,
-+  bottomTrumpCard: Option[Card],
-+  trumpSuit: Suit,
-+  attackerIdx: Int,
-+  defenderIdx: Int,
-+  boutPhase: BoutPhase,
-+  legalActions: List[String],
-+  finishOrder: Vector[String],
-+  isDraw: Boolean,
-+  maxBoutAttacks: Int
-+)
-+
-+object PlayerGameView:
-+
-+  /** Canonical ordering of the action identifiers returned in `legalActions`. */
-+  private val ActionOrder =
-+    List("attack", "cover", "pass", "surrender", "redirect", "throwIn")
++object GameActor:
 +
 +  /**
-+   * Builds the view for `viewerId`. Their own hand is included; every other
-+   * player is reduced to a [[PublicPlayerSummary]], and the talon is exposed
-+   * only as a count plus the (public) bottom trump card.
++   * Creates a room holding the engine's initial state for `config`. All player
++   * ids are derived from the engine's seat naming (`p0`, `p1`, ...).
 +   */
-+  def forViewer(state: GameState, viewerId: String): PlayerGameView =
-+    val viewerIdx = state.players.indexWhere(_.id == viewerId)
-+    if viewerIdx == -1 then
-+      throw new IllegalArgumentException(s"Unknown player: $viewerId")
-+    val viewer = state.players(viewerIdx)
-+
-+    PlayerGameView(
-+      myId = viewer.id,
-+      myHand = viewer.hand.toList,
-+      opponents = state.players.zipWithIndex.collect {
-+        case (other, idx) if idx != viewerIdx =>
-+          PublicPlayerSummary(
-+            id = other.id,
-+            name = other.name,
-+            cardCount = other.hand.size,
-+            hasPassed = other.hasPassed,
-+            finishRank = other.finishRank
-+          )
-+      }.toList,
-+      tablePairs = state.tablePairs,
-+      talonCount = state.talon.size,
-+      // The bottom trump is only public while there are still cards to draw.
-+      bottomTrumpCard = if state.talon.nonEmpty then state.bottomTrumpCard else None,
-+      trumpSuit = state.trumpSuit,
-+      attackerIdx = state.attackerIdx,
-+      defenderIdx = state.defenderIdx,
-+      boutPhase = state.boutPhase,
-+      legalActions = legalActionsFor(state, viewer, viewerIdx),
-+      finishOrder = state.finishOrder,
-+      isDraw = state.isDraw,
-+      maxBoutAttacks = state.maxBoutAttacks
-+    )
-+
-+  private def legalActionsFor(
-+      state: GameState,
-+      viewer: PlayerState,
-+      viewerIdx: Int
-+  ): List[String] =
-+    val available = availableActions(state, viewer, viewerIdx)
-+    ActionOrder.filter(available.contains)
-+
-+  private def availableActions(
-+      state: GameState,
-+      viewer: PlayerState,
-+      viewerIdx: Int
-+  ): Set[String] =
-+    if !viewer.isActive then Set.empty
-+    else
-+      state.boutPhase match
-+        case BoutPhase.InitialAttack =>
-+          val isAttacker = viewerIdx == state.attackerIdx
-+          if isAttacker && viewer.hasCards && state.maxBoutAttacks > 0 then Set("attack")
-+          else Set.empty
-+        case BoutPhase.Defense =>
-+          if viewerIdx == state.defenderIdx then
-+            Set(
-+              Option.when(canCoverAny(state, viewer))("cover"),
-+              Option.when(canRedirect(state, viewer))("redirect"),
-+              Option.when(state.tablePairs.exists(_.defense.isEmpty))("surrender")
-+            ).flatten
-+          else
-+            Set(
-+              Option.when(canPassDefense(state, viewer))("pass"),
-+              Option.when(canThrowIn(state, viewer))("throwIn")
-+            ).flatten
-+        case BoutPhase.SurrenderThrowIn =>
-+          if viewerIdx == state.defenderIdx then Set.empty
-+          else
-+            Set(
-+              Option.when(!viewer.hasPassed)("pass"),
-+              Option.when(canThrowIn(state, viewer))("throwIn")
-+            ).flatten
-+        case BoutPhase.BoutOver | BoutPhase.GameOver =>
-+          Set.empty
-+
-+  /** True when at least one uncovered attack can be covered from this hand. */
-+  private def canCoverAny(state: GameState, defender: PlayerState): Boolean =
-+    state.tablePairs.exists { pair =>
-+      pair.defense.isEmpty &&
-+      defender.hand.exists(card => isLegalCover(pair.attack, card, state.trumpSuit))
++  def create(config: GameConfig, playerNames: Vector[String]): IO[GameRoom] =
++    IO.delay(GameEngine.createGame(config, playerNames)).flatMap { initialState =>
++      for
++        stateRef <- Ref.of[IO, GameState](initialState)
++        topic <- Topic[IO, GameState]
++      yield GameRoom(
++        gameId = UUID.randomUUID().toString,
++        stateRef = stateRef,
++        topic = topic,
++        playerIds = initialState.players.map(_.id)
++      )
 +    }
 +
-+  /** True when a single-card redirect is legal right now. */
-+  private def canRedirect(state: GameState, defender: PlayerState): Boolean =
-+    val nextDefIdx = state.nextActivePlayerIdx(state.defenderIdx)
-+    val nextDefender = state.players.lift(nextDefIdx)
-+    state.config.allowRedirect &&
-+    state.tablePairs.nonEmpty &&
-+    state.tablePairs.forall(_.defense.isEmpty) &&
-+    state.tablePairs.size + 1 <= 6 &&
-+    defender.hand.exists(card => state.tablePairs.forall(_.attack.rank == card.rank)) &&
-+    nextDefender.exists(_.hand.size >= state.tablePairs.size + 1)
++  /**
++   * Validates and applies `action` atomically. A rejected action leaves the
++   * stored state untouched; a successful one publishes the new state to the
++   * room's topic for every subscriber.
++   */
++  def applyAction(room: GameRoom, action: GameAction): IO[Either[String, GameState]] =
++    room.stateRef
++      .modify { current =>
++        GameEngine.applyAction(current, action) match
++          case Right(next)  => (next, Right(next): Either[String, GameState])
++          case Left(error)  => (current, Left(error): Either[String, GameState])
++      }
++      .flatMap {
++        case Right(next) =>
++          room.topic.publish1(next).void.as(Right(next): Either[String, GameState])
++        case rejected @ Left(_) =>
++          IO.pure(rejected)
++      }
 +
-+  /** Passing is only possible once the table is covered or the bout is full. */
-+  private def canPassDefense(state: GameState, player: PlayerState): Boolean =
-+    !player.hasPassed &&
-+      (state.tablePairs.forall(_.defense.isDefined) ||
-+        state.tablePairs.size >= state.maxBoutAttacks)
-+
-+  /** True when this player could add at least one card matching the table. */
-+  private def canThrowIn(state: GameState, player: PlayerState): Boolean =
-+    val tableRanks = state.tablePairs
-+      .flatMap(pair => pair.attack.rank :: pair.defense.map(_.rank).toList)
-+      .toSet
-+    val defenderCanCover =
-+      state.boutPhase != BoutPhase.Defense ||
-+        state.players(state.defenderIdx).hand.size >
-+          state.tablePairs.count(_.defense.isEmpty)
-+    tableRanks.nonEmpty &&
-+    player.hand.exists(card => tableRanks.contains(card.rank)) &&
-+    state.tablePairs.size < state.maxBoutAttacks &&
-+    defenderCanCover
-+
-+  /** Legal cover: same suit with a higher rank, or a trump against a non-trump. */
-+  private def isLegalCover(attack: Card, defense: Card, trumpSuit: Suit): Boolean =
-+    (defense.suit == attack.suit && defense.rank.value > attack.rank.value) ||
-+      (defense.suit == trumpSuit && attack.suit != trumpSuit)
-diff --git a/backend/src/test/scala/durak/engine/JsonCodecsSuite.scala b/backend/src/test/scala/durak/engine/JsonCodecsSuite.scala
++  /** The seat that issued `action`. */
++  def actorId(action: GameAction): String =
++    action match
++      case GameAction.InitialAttack(playerId, _)  => playerId
++      case GameAction.CoverCard(playerId, _, _)   => playerId
++      case GameAction.RedirectAttack(playerId, _) => playerId
++      case GameAction.ThrowInCards(playerId, _)   => playerId
++      case GameAction.DeclareSurrender(playerId)  => playerId
++      case GameAction.PassTurn(playerId)          => playerId
+diff --git a/backend/src/main/scala/durak/server/GameManager.scala b/backend/src/main/scala/durak/server/GameManager.scala
 new file mode 100644
-index 0000000..2a32c1a
+index 0000000..a7caa95
 --- /dev/null
-+++ b/backend/src/test/scala/durak/engine/JsonCodecsSuite.scala
-@@ -0,0 +1,181 @@
-+package durak.engine
++++ b/backend/src/main/scala/durak/server/GameManager.scala
+@@ -0,0 +1,21 @@
++package durak.server
 +
-+import io.circe.{Json, parser}
-+import io.circe.syntax.*
-+import JsonCodecs.given
++import cats.effect.*
++import durak.engine.*
 +
-+class JsonCodecsSuite extends munit.FunSuite:
++/** An in-memory registry of live game rooms, keyed by their generated game id. */
++class GameManager(rooms: Ref[IO, Map[String, GameRoom]]):
 +
-+  private def card(rank: Rank, suit: Suit = Suit.Spades): Card = Card(suit, rank)
-+
-+  private def decodeAction(json: String): GameAction =
-+    parser.decode[GameAction](json).fold(error => fail(error.getMessage), identity)
-+
-+  // --- Basic types ---
-+
-+  test("suits encode as lowercase strings") {
-+    Suit.values.foreach { suit =>
-+      assertEquals(suit.asJson, Json.fromString(suit.toString.toLowerCase))
++  /** Creates a room with a fresh unique id and registers it. */
++  def createGame(config: GameConfig, playerNames: Vector[String]): IO[GameRoom] =
++    GameActor.create(config, playerNames).flatMap { room =>
++      rooms.update(current => current.updated(room.gameId, room)).as(room)
 +    }
-+    assertEquals(Suit.Hearts.asJson, Json.fromString("hearts"))
-+  }
 +
-+  test("ranks encode as lowercase strings") {
-+    Rank.values.foreach { rank =>
-+      assertEquals(rank.asJson, Json.fromString(rank.toString.toLowerCase))
-+    }
-+    assertEquals(Rank.Ace.asJson, Json.fromString("ace"))
-+    assertEquals(Rank.Ten.asJson, Json.fromString("ten"))
-+  }
++  def getRoom(gameId: String): IO[Option[GameRoom]] =
++    rooms.get.map(_.get(gameId))
 +
-+  test("suits and ranks decode from lowercase strings") {
-+    Suit.values.foreach { suit =>
-+      val raw = s""""${suit.toString.toLowerCase}""""
-+      assertEquals(parser.decode[Suit](raw), Right(suit))
-+    }
-+    Rank.values.foreach { rank =>
-+      val raw = s""""${rank.toString.toLowerCase}""""
-+      assertEquals(parser.decode[Rank](raw), Right(rank))
-+    }
-+    assert(parser.decode[Suit]("\"stars\"").isLeft)
-+    assert(parser.decode[Rank]("\"joker\"").isLeft)
-+  }
++object GameManager:
 +
-+  test("cards encode as suit/rank objects and round-trip") {
-+    val ace = Card(Suit.Hearts, Rank.Ace)
-+
-+    assertEquals(ace.asJson, Json.obj("suit" -> "hearts".asJson, "rank" -> "ace".asJson))
-+    assertEquals(parser.decode[Card](ace.asJson.noSpaces), Right(ace))
-+  }
-+
-+  test("table pairs round-trip with and without a defense") {
-+    val pairs = List(
-+      TablePair(card(Rank.Six)),
-+      TablePair(card(Rank.Seven, Suit.Clubs), Some(card(Rank.Eight, Suit.Clubs)))
-+    )
-+
-+    pairs.foreach { pair =>
-+      assertEquals(parser.decode[TablePair](pair.asJson.noSpaces), Right(pair))
-+    }
-+  }
-+
-+  test("bout phases encode as lowercase-first names and round-trip") {
-+    assertEquals(BoutPhase.InitialAttack.asJson, Json.fromString("initialAttack"))
-+    assertEquals(BoutPhase.Defense.asJson, Json.fromString("defense"))
-+    assertEquals(BoutPhase.SurrenderThrowIn.asJson, Json.fromString("surrenderThrowIn"))
-+    assertEquals(BoutPhase.BoutOver.asJson, Json.fromString("boutOver"))
-+    assertEquals(BoutPhase.GameOver.asJson, Json.fromString("gameOver"))
-+
-+    BoutPhase.values.foreach { phase =>
-+      assertEquals(parser.decode[BoutPhase](phase.asJson.noSpaces), Right(phase))
-+    }
-+    assert(parser.decode[BoutPhase]("\"lunchBreak\"").isLeft)
-+  }
-+
-+  test("public player summaries round-trip") {
-+    val summary =
-+      PublicPlayerSummary("p1", "Bob", 4, hasPassed = true, finishRank = Some(2))
-+
-+    assertEquals(
-+      parser.decode[PublicPlayerSummary](summary.asJson.noSpaces),
-+      Right(summary)
-+    )
-+  }
-+
-+  // --- Player view ---
-+
-+  test("PlayerGameView round-trips through JSON") {
-+    val game = GameEngine.createGame(
-+      GameConfig(playerCount = 3, seed = 99L),
-+      Vector("a", "b", "c")
-+    )
-+    val view = PlayerGameView.forViewer(game, "p1")
-+
-+    val decoded = parser
-+      .decode[PlayerGameView](view.asJson.noSpaces)
-+      .fold(error => fail(error.getMessage), identity)
-+
-+    assertEquals(decoded, view)
-+  }
-+
-+  // --- Game actions ---
-+
-+  test("InitialAttack decodes from a JSON command") {
-+    val json =
-+      """{"type":"initialAttack","playerId":"p0","cards":[{"suit":"spades","rank":"six"},{"suit":"hearts","rank":"six"}]}"""
-+
-+    assertEquals(
-+      decodeAction(json),
-+      GameAction.InitialAttack("p0", List(card(Rank.Six), card(Rank.Six, Suit.Hearts)))
-+    )
-+  }
-+
-+  test("CoverCard decodes from a JSON command") {
-+    val json =
-+      """{"type":"coverCard","playerId":"p1","attackIndex":0,"defenseCard":{"suit":"spades","rank":"seven"}}"""
-+
-+    assertEquals(decodeAction(json), GameAction.CoverCard("p1", 0, card(Rank.Seven)))
-+  }
-+
-+  test("RedirectAttack decodes from a JSON command") {
-+    val json =
-+      """{"type":"redirectAttack","playerId":"p1","cards":[{"suit":"clubs","rank":"eight"}]}"""
-+
-+    assertEquals(
-+      decodeAction(json),
-+      GameAction.RedirectAttack("p1", List(card(Rank.Eight, Suit.Clubs)))
-+    )
-+  }
-+
-+  test("every GameAction variant encodes with a type discriminator and round-trips") {
-+    val actions = List(
-+      GameAction.InitialAttack("p0", List(card(Rank.Six))),
-+      GameAction.CoverCard("p1", 2, card(Rank.Ace, Suit.Hearts)),
-+      GameAction.RedirectAttack("p1", List(card(Rank.Six, Suit.Clubs))),
-+      GameAction.ThrowInCards("p2", List(card(Rank.Seven), card(Rank.Seven, Suit.Hearts))),
-+      GameAction.DeclareSurrender("p1"),
-+      GameAction.PassTurn("p2")
-+    )
-+
-+    actions.foreach { action =>
-+      val json = action.asJson
-+      assert(
-+        json.asObject.exists(_("type").flatMap(_.asString).nonEmpty),
-+        s"missing type discriminator: ${json.noSpaces}"
-+      )
-+      assertEquals(parser.decode[GameAction](json.noSpaces), Right(action))
-+    }
-+  }
-+
-+  test("each game action uses its documented discriminator") {
-+    val expected = List(
-+      GameAction.InitialAttack("p0", Nil) -> "initialAttack",
-+      GameAction.CoverCard("p0", 0, card(Rank.Six)) -> "coverCard",
-+      GameAction.RedirectAttack("p0", Nil) -> "redirectAttack",
-+      GameAction.ThrowInCards("p0", Nil) -> "throwInCards",
-+      GameAction.DeclareSurrender("p0") -> "declareSurrender",
-+      GameAction.PassTurn("p0") -> "passTurn"
-+    )
-+
-+    expected.foreach { case (action, discriminator) =>
-+      val encoded =
-+        action.asJson.asObject.flatMap(_("type")).flatMap(_.asString)
-+      assertEquals(encoded, Some(discriminator))
-+    }
-+  }
-+
-+  test("unknown action types are rejected") {
-+    assert(parser.decode[GameAction]("""{"type":"teleport","playerId":"p0"}""").isLeft)
-+  }
-+
-+  test("actions with missing or invalid fields are rejected") {
-+    assert(parser.decode[GameAction]("""{"type":"coverCard","playerId":"p1"}""").isLeft)
-+    assert(parser.decode[GameAction]("""{"playerId":"p1"}""").isLeft)
-+    assert(
-+      parser
-+        .decode[GameAction](
-+          """{"type":"initialAttack","playerId":"p0","cards":[{"suit":"stars","rank":"six"}]}"""
-+        )
-+        .isLeft
-+    )
-+  }
-diff --git a/backend/src/test/scala/durak/engine/PlayerViewSuite.scala b/backend/src/test/scala/durak/engine/PlayerViewSuite.scala
++  def create: IO[GameManager] =
++    Ref.of[IO, Map[String, GameRoom]](Map.empty).map(new GameManager(_))
+diff --git a/backend/src/main/scala/durak/server/GameRoutes.scala b/backend/src/main/scala/durak/server/GameRoutes.scala
 new file mode 100644
-index 0000000..1fa1579
+index 0000000..808c358
 --- /dev/null
-+++ b/backend/src/test/scala/durak/engine/PlayerViewSuite.scala
-@@ -0,0 +1,332 @@
-+package durak.engine
++++ b/backend/src/main/scala/durak/server/GameRoutes.scala
+@@ -0,0 +1,152 @@
++package durak.server
 +
++import cats.effect.IO
++import cats.syntax.all.*
++import durak.engine.*
++import durak.engine.JsonCodecs.given
++import fs2.{Pipe, Stream}
++import io.circe.{Decoder, Json, parser}
++import io.circe.generic.semiauto.deriveDecoder
 +import io.circe.syntax.*
-+import JsonCodecs.given
++import org.http4s.*
++import org.http4s.circe.CirceEntityDecoder.*
++import org.http4s.circe.CirceEntityEncoder.*
++import org.http4s.dsl.io.*
++import org.http4s.server.websocket.WebSocketBuilder2
++import org.http4s.websocket.WebSocketFrame
 +
-+class PlayerViewSuite extends munit.FunSuite:
++/** Body of `POST /api/game/create`. */
++case class CreateGameRequest(
++  playerCount: Int,
++  playerNames: List[String],
++  allowRedirect: Boolean = true
++)
 +
-+  private def card(rank: Rank, suit: Suit = Suit.Spades): Card = Card(suit, rank)
++object CreateGameRequest:
++  given Decoder[CreateGameRequest] = deriveDecoder[CreateGameRequest]
 +
-+  private def player(
-+      id: String,
-+      hand: List[Card],
-+      hasPassed: Boolean = false,
-+      finishRank: Option[Int] = None
-+  ): PlayerState =
-+    PlayerState(
-+      id = id,
-+      name = id.toUpperCase,
-+      hand = hand.toVector,
-+      hasPassed = hasPassed,
-+      finishRank = finishRank
-+    )
++object GameRoutes:
 +
-+  private def state(
-+      players: Vector[PlayerState],
-+      tablePairs: Vector[TablePair] = Vector.empty,
-+      talon: Vector[Card] = Vector.empty,
-+      bottomTrumpCard: Option[Card] = None,
-+      attackerIdx: Int = 0,
-+      defenderIdx: Int = 1,
-+      boutPhase: BoutPhase = BoutPhase.Defense,
-+      trumpSuit: Suit = Suit.Spades,
-+      defenderInitialHandSize: Int = 6,
-+      finishOrder: Vector[String] = Vector.empty,
-+      isDraw: Boolean = false
-+  ): GameState =
-+    GameState(
-+      config = GameConfig(players.size, seed = 42L),
-+      players = players,
-+      talon = talon,
-+      trumpSuit = trumpSuit,
-+      bottomTrumpCard = bottomTrumpCard,
-+      discardPile = Vector.empty,
-+      tablePairs = tablePairs,
-+      attackerIdx = attackerIdx,
-+      defenderIdx = defenderIdx,
-+      boutPhase = boutPhase,
-+      defenderInitialHandSize = defenderInitialHandSize,
-+      finishOrder = finishOrder,
-+      isDraw = isDraw
-+    )
++  /** The full app: REST endpoints plus the live-game WebSocket. */
++  def routes(manager: GameManager)(using webSockets: WebSocketBuilder2[IO]): HttpRoutes[IO] =
++    restRoutes(manager) <+> webSocketRoutes(manager, webSockets)
 +
-+  // --- Hand & opponent projection ---
++  /** REST endpoints, split out so they can be exercised without a WebSocket builder. */
++  def restRoutes(manager: GameManager): HttpRoutes[IO] = HttpRoutes.of[IO] {
 +
-+  test("the viewer's own hand is included as a list of cards") {
-+    val gs = state(
-+      Vector(
-+        player("p0", List(card(Rank.Six), card(Rank.Seven, Suit.Hearts))),
-+        player("p1", List(card(Rank.Eight))),
-+        player("p2", List(card(Rank.Nine)))
-+      ),
-+      boutPhase = BoutPhase.InitialAttack
-+    )
++    case req @ POST -> Root / "api" / "game" / "create" =>
++      req.as[Json].attempt.flatMap {
++        case Left(error) =>
++          BadRequest(errorBody(s"Invalid JSON body: ${describe(error)}"))
++        case Right(json) =>
++          json.as[CreateGameRequest] match
++            case Left(error) =>
++              BadRequest(errorBody(s"Invalid create request: ${error.getMessage}"))
++            case Right(request) =>
++              manager
++                .createGame(
++                  GameConfig(request.playerCount, request.allowRedirect),
++                  request.playerNames.toVector
++                )
++                .flatMap(room => Ok(createResponse(room, request.playerNames)))
++                .handleErrorWith(failure => errorResponse(failure))
++      }
 +
-+    val view = PlayerGameView.forViewer(gs, "p0")
++    case GET -> Root / "api" / "game" / gameId / "view" / playerId =>
++      withRoom(manager, gameId) { room =>
++        room.stateRef.get.flatMap { state =>
++          if state.players.exists(_.id == playerId) then
++            Ok(PlayerGameView.forViewer(state, playerId).asJson)
++          else NotFound(errorBody(s"Unknown player: $playerId"))
++        }
++      }
 +
-+    assertEquals(view.myId, "p0")
-+    assertEquals(view.myHand, List(card(Rank.Six), card(Rank.Seven, Suit.Hearts)))
++    case req @ POST -> Root / "api" / "game" / gameId / "action" =>
++      withRoom(manager, gameId) { room =>
++        req.as[Json].attempt.flatMap {
++          case Left(error) =>
++            BadRequest(errorBody(s"Invalid JSON body: ${describe(error)}"))
++          case Right(json) =>
++            json.as[GameAction] match
++              case Left(error) =>
++                BadRequest(errorBody(s"Invalid game action: ${error.getMessage}"))
++              case Right(action) =>
++                GameActor.applyAction(room, action).flatMap {
++                  case Left(error) => BadRequest(errorBody(error))
++                  case Right(state) =>
++                    val viewerId = GameActor.actorId(action)
++                    if state.players.exists(_.id == viewerId) then
++                      Ok(PlayerGameView.forViewer(state, viewerId).asJson)
++                    else NotFound(errorBody(s"Unknown player: $viewerId"))
++                }
++        }
++      }
 +  }
 +
-+  test("opponents are summarised without their cards") {
-+    val gs = state(
-+      Vector(
-+        player("p0", List(card(Rank.Six))),
-+        player("p1", List(card(Rank.Seven), card(Rank.Eight), card(Rank.Nine))),
-+        player("p2", List(card(Rank.Ten), card(Rank.Jack)), hasPassed = true)
-+      ),
-+      boutPhase = BoutPhase.InitialAttack
++  /**
++   * Streams the viewer's filtered projection: the current state once on
++   * connect, then every subsequent state published to the room's topic.
++   * Incoming text frames are decoded as [[GameAction]]s and applied.
++   */
++  private def webSocketRoutes(
++      manager: GameManager,
++      webSockets: WebSocketBuilder2[IO]
++  ): HttpRoutes[IO] = HttpRoutes.of[IO] {
++
++    case GET -> Root / "ws" / "game" / gameId / playerId =>
++      withRoom(manager, gameId) { room =>
++        room.stateRef.get.flatMap { state =>
++          if !state.players.exists(_.id == playerId) then
++            NotFound(errorBody(s"Unknown player: $playerId"))
++          else
++            val views: Stream[IO, WebSocketFrame] =
++              (Stream.eval(room.stateRef.get) ++ room.topic.subscribe(64))
++                .map { current =>
++                  WebSocketFrame.Text(
++                    PlayerGameView.forViewer(current, playerId).asJson.noSpaces
++                  )
++                }
++            val commands: Pipe[IO, WebSocketFrame, Unit] =
++              _.collect { case WebSocketFrame.Text(text, _) => text }
++                .evalMap { text =>
++                  parser.decode[GameAction](text) match
++                    case Right(action) => GameActor.applyAction(room, action).void
++                    case Left(_)       => IO.unit
++                }
++            webSockets.build(views, commands)
++        }
++      }
++  }
++
++  private def withRoom(manager: GameManager, gameId: String)(
++      handle: GameRoom => IO[Response[IO]]
++  ): IO[Response[IO]] =
++    manager.getRoom(gameId).flatMap {
++      case Some(room) => handle(room)
++      case None       => NotFound(errorBody(s"Unknown game: $gameId"))
++    }
++
++  private def createResponse(room: GameRoom, names: List[String]): Json =
++    val players = room.playerIds.zipWithIndex.map { case (id, idx) =>
++      Json.obj(
++        "id" -> Json.fromString(id),
++        "name" -> Json.fromString(names.lift(idx).getOrElse(""))
++      )
++    }
++    Json.obj(
++      "gameId" -> Json.fromString(room.gameId),
++      "players" -> Json.fromValues(players)
 +    )
 +
-+    val view = PlayerGameView.forViewer(gs, "p0")
++  private def errorBody(message: String): Json =
++    Json.obj("error" -> Json.fromString(message))
 +
++  private def errorResponse(error: Throwable): IO[Response[IO]] =
++    error match
++      case _: IllegalArgumentException | _: IllegalStateException =>
++        BadRequest(errorBody(describe(error)))
++      case _ =>
++        InternalServerError(errorBody("Internal server error"))
++
++  private def describe(error: Throwable): String =
++    Option(error.getMessage).getOrElse(error.getClass.getSimpleName)
+diff --git a/backend/src/test/scala/durak/server/GameActorSuite.scala b/backend/src/test/scala/durak/server/GameActorSuite.scala
+new file mode 100644
+index 0000000..7b86b98
+--- /dev/null
++++ b/backend/src/test/scala/durak/server/GameActorSuite.scala
+@@ -0,0 +1,124 @@
++package durak.server
++
++import cats.effect.IO
++import cats.effect.unsafe.implicits.global
++import durak.engine.*
++import fs2.Stream
++
++import scala.concurrent.duration.*
++
++class GameActorSuite extends munit.FunSuite:
++
++  private def newRoom(seed: Long = 7L): GameRoom =
++    GameActor
++      .create(GameConfig(playerCount = 2, seed = seed), Vector("Alice", "Bob"))
++      .unsafeRunSync()
++
++  test("a created room starts in the initial attack phase with both seats") {
++    val room = newRoom()
++    val state = room.stateRef.get.unsafeRunSync()
++
++    assert(room.gameId.nonEmpty)
++    assertEquals(room.playerIds, Vector("p0", "p1"))
++    assertEquals(state.players.map(_.id), Vector("p0", "p1"))
++    assertEquals(state.players.map(_.hand.size), Vector(6, 6))
++    assertEquals(state.boutPhase, BoutPhase.InitialAttack)
++  }
++
++  test("every room gets its own unique game id") {
++    assertNotEquals(newRoom().gameId, newRoom().gameId)
++  }
++
++  test("a valid initial attack updates the room state") {
++    val room = newRoom()
++    val before = room.stateRef.get.unsafeRunSync()
++    val attacker = before.players(before.attackerIdx)
++    val attack = List(attacker.hand.head)
++
++    val result = GameActor
++      .applyAction(room, GameAction.InitialAttack(attacker.id, attack))
++      .unsafeRunSync()
++
++    val after = result.getOrElse(fail(s"initial attack was rejected: $result"))
++    assertEquals(after.boutPhase, BoutPhase.Defense)
++    assertEquals(after.tablePairs.map(_.attack).toList, attack)
++    assertEquals(room.stateRef.get.unsafeRunSync(), after)
++  }
++
++  test("a successful action publishes the new state to the topic") {
++    val room = newRoom()
++    val before = room.stateRef.get.unsafeRunSync()
++    val attacker = before.players(before.attackerIdx)
++    val action = GameAction.InitialAttack(attacker.id, List(attacker.hand.head))
++
++    val published = room.topic
++      .subscribe(16)
++      .take(1)
++      .concurrently(
++        Stream.eval(IO.sleep(100.millis) *> GameActor.applyAction(room, action).void)
++      )
++      .compile
++      .last
++      .unsafeRunSync()
++
++    assertEquals(published.map(_.boutPhase), Some(BoutPhase.Defense))
 +    assertEquals(
-+      view.opponents,
-+      List(
-+        PublicPlayerSummary("p1", "P1", 3, false, None),
-+        PublicPlayerSummary("p2", "P2", 2, true, None)
++      published.map(_.tablePairs.map(_.attack).toList),
++      Some(List(attacker.hand.head))
++    )
++  }
++
++  test("an invalid action is rejected and leaves the state unchanged") {
++    val room = newRoom()
++    val before = room.stateRef.get.unsafeRunSync()
++    val defender = before.players(before.defenderIdx)
++
++    val result = GameActor
++      .applyAction(room, GameAction.CoverCard(defender.id, 0, defender.hand.head))
++      .unsafeRunSync()
++
++    assert(result.isLeft, s"covering with no attack should fail, got $result")
++    assertEquals(room.stateRef.get.unsafeRunSync(), before)
++  }
++
++  test("attack, cover and pass advance the game to the next bout") {
++    val room = newRoom()
++    val start = room.stateRef.get.unsafeRunSync()
++    val attacker = start.players(start.attackerIdx)
++    val defender = start.players(start.defenderIdx)
++
++    def covers(attack: Card, defense: Card): Boolean =
++      (defense.suit == attack.suit && defense.rank.value > attack.rank.value) ||
++        (defense.suit == start.trumpSuit && attack.suit != start.trumpSuit)
++
++    val pairing = (for
++      attack <- attacker.hand
++      defense <- defender.hand
++      if covers(attack, defense)
++    yield (attack, defense)).headOption
++
++    val (attackCard, defenseCard) =
++      pairing.getOrElse(fail("seed 7 produced no coverable opening attack"))
++
++    val attacked = GameActor
++      .applyAction(room, GameAction.InitialAttack(attacker.id, List(attackCard)))
++      .unsafeRunSync()
++      .getOrElse(fail("initial attack was rejected"))
++    assertEquals(attacked.boutPhase, BoutPhase.Defense)
++
++    val covered = GameActor
++      .applyAction(room, GameAction.CoverCard(defender.id, 0, defenseCard))
++      .unsafeRunSync()
++      .getOrElse(fail("cover was rejected"))
++    assertEquals(covered.tablePairs.head.defense, Some(defenseCard))
++
++    val resolved = GameActor
++      .applyAction(room, GameAction.PassTurn(attacker.id))
++      .unsafeRunSync()
++      .getOrElse(fail("pass was rejected"))
++
++    assertEquals(resolved.tablePairs, Vector.empty)
++    assertEquals(resolved.boutPhase, BoutPhase.InitialAttack)
++    assertEquals(resolved.attackerIdx, start.defenderIdx)
++    assertEquals(room.stateRef.get.unsafeRunSync(), resolved)
++  }
+diff --git a/backend/src/test/scala/durak/server/GameRoutesSuite.scala b/backend/src/test/scala/durak/server/GameRoutesSuite.scala
+new file mode 100644
+index 0000000..953aa4e
+--- /dev/null
++++ b/backend/src/test/scala/durak/server/GameRoutesSuite.scala
+@@ -0,0 +1,185 @@
++package durak.server
++
++import cats.effect.IO
++import cats.effect.unsafe.implicits.global
++import durak.engine.*
++import durak.engine.JsonCodecs.given
++import io.circe.Json
++import io.circe.syntax.*
++import org.http4s.*
++import org.http4s.circe.CirceEntityDecoder.*
++import org.http4s.circe.CirceEntityEncoder.*
++import org.http4s.headers.`Content-Type`
++
++class GameRoutesSuite extends munit.FunSuite:
++
++  private def newManager: GameManager = GameManager.create.unsafeRunSync()
++
++  private def send(
++      manager: GameManager,
++      request: Request[IO]
++  ): (Status, Json) =
++    GameRoutes
++      .restRoutes(manager)
++      .orNotFound
++      .run(request)
++      .flatMap(response => response.as[Json].map(json => (response.status, json)))
++      .unsafeRunSync()
++
++  private def get(manager: GameManager, path: String): (Status, Json) =
++    send(manager, Request[IO](Method.GET, Uri.unsafeFromString(path)))
++
++  private def post(manager: GameManager, path: String, body: Json): (Status, Json) =
++    send(
++      manager,
++      Request[IO](Method.POST, Uri.unsafeFromString(path))
++        .withEntity(body)
++        .withContentType(`Content-Type`(MediaType.application.json))
++    )
++
++  private def createGame(manager: GameManager, players: Int): String =
++    val names = (1 to players).map(index => s"Player$index").toList
++    val (status, json) = post(
++      manager,
++      "/api/game/create",
++      Json.obj(
++        "playerCount" -> players.asJson,
++        "playerNames" -> names.asJson,
++        "allowRedirect" -> true.asJson
 +      )
 +    )
-+    assert(!view.opponents.exists(_.id == "p0"), view.opponents.map(_.id))
-+  }
++    assertEquals(status, Status.Ok)
++    json.hcursor
++      .get[String]("gameId")
++      .getOrElse(fail(s"missing gameId in ${json.noSpaces}"))
 +
-+  test("talonCount matches the actual talon size") {
-+    val gs = state(
-+      Vector(player("p0", List(card(Rank.Six))), player("p1", List(card(Rank.Seven)))),
-+      talon = Vector(
-+        card(Rank.Eight, Suit.Diamonds),
-+        card(Rank.Nine, Suit.Diamonds),
-+        card(Rank.Ten, Suit.Diamonds),
-+        card(Rank.Jack, Suit.Diamonds),
-+        card(Rank.Queen, Suit.Diamonds)
++  test("POST /api/game/create returns a game id and the players") {
++    val manager = newManager
++
++    val (status, json) = post(
++      manager,
++      "/api/game/create",
++      Json.obj(
++        "playerCount" -> 2.asJson,
++        "playerNames" -> List("Alice", "Bob").asJson,
++        "allowRedirect" -> true.asJson
 +      )
 +    )
 +
-+    assertEquals(PlayerGameView.forViewer(gs, "p0").talonCount, 5)
++    assertEquals(status, Status.Ok)
++    assert(json.hcursor.get[String]("gameId").exists(_.nonEmpty))
++    assertEquals(json.hcursor.downField("players").as[List[Json]].map(_.size).toOption, Some(2))
 +  }
 +
-+  test("the bottom trump card is visible while the talon still has cards") {
-+    val trump = card(Rank.Six, Suit.Diamonds)
-+    val gs = state(
-+      Vector(player("p0", List(card(Rank.Six))), player("p1", List(card(Rank.Seven)))),
-+      talon = Vector(card(Rank.Eight, Suit.Clubs)),
-+      bottomTrumpCard = Some(trump)
-+    )
++  test("GET view returns the PlayerGameView for the requested seat") {
++    val manager = newManager
++    val gameId = createGame(manager, 3)
 +
-+    assertEquals(PlayerGameView.forViewer(gs, "p0").bottomTrumpCard, Some(trump))
++    val (status, json) = get(manager, s"/api/game/$gameId/view/p1")
++
++    assertEquals(status, Status.Ok)
++    val view = json.as[PlayerGameView].getOrElse(fail(s"invalid view body: ${json.noSpaces}"))
++    assertEquals(view.myId, "p1")
++    assertEquals(view.myHand.size, 6)
++    assertEquals(view.opponents.size, 2)
++    assert(view.talonCount > 0)
++    assert(!json.noSpaces.contains("\"talon\""), json.noSpaces)
 +  }
 +
-+  test("the bottom trump card is None once the talon is empty") {
-+    val gs = state(
-+      Vector(player("p0", List(card(Rank.Six))), player("p1", List(card(Rank.Seven)))),
-+      talon = Vector.empty,
-+      bottomTrumpCard = Some(card(Rank.Six, Suit.Diamonds))
++  test("POST action applies a legal move and returns the updated view") {
++    val manager = newManager
++    val gameId = createGame(manager, 2)
++
++    val (_, startJson) = get(manager, s"/api/game/$gameId/view/p0")
++    val start = startJson.as[PlayerGameView].getOrElse(fail("invalid start view"))
++    val attackerId = s"p${start.attackerIdx}"
++    val (_, attackerJson) =
++      if attackerId == "p0" then (Status.Ok, startJson)
++      else get(manager, s"/api/game/$gameId/view/p1")
++    val attackerView =
++      attackerJson.as[PlayerGameView].getOrElse(fail("invalid attacker view"))
++    val card = attackerView.myHand.head
++
++    val (status, json) = post(
++      manager,
++      s"/api/game/$gameId/action",
++      Json.obj(
++        "type" -> "initialAttack".asJson,
++        "playerId" -> attackerId.asJson,
++        "cards" -> Json.arr(card.asJson)
++      )
 +    )
 +
-+    assertEquals(PlayerGameView.forViewer(gs, "p0").bottomTrumpCard, None)
-+  }
-+
-+  test("the public state mirrors the game state") {
-+    val gs = state(
-+      Vector(
-+        player("p0", List(card(Rank.Six))),
-+        player("p1", List(card(Rank.Seven))),
-+        player("p2", List(card(Rank.Eight)))
-+      ),
-+      tablePairs = Vector(TablePair(card(Rank.Six), Some(card(Rank.Seven)))),
-+      boutPhase = BoutPhase.Defense,
-+      defenderInitialHandSize = 4,
-+      finishOrder = Vector("p3")
-+    )
-+
-+    val view = PlayerGameView.forViewer(gs, "p2")
-+
-+    assertEquals(view.tablePairs, gs.tablePairs)
-+    assertEquals(view.trumpSuit, Suit.Spades)
-+    assertEquals(view.attackerIdx, 0)
-+    assertEquals(view.defenderIdx, 1)
++    assertEquals(status, Status.Ok)
++    val view = json.as[PlayerGameView].getOrElse(fail(s"invalid action view: ${json.noSpaces}"))
++    assertEquals(view.myId, attackerId)
 +    assertEquals(view.boutPhase, BoutPhase.Defense)
-+    assertEquals(view.finishOrder, Vector("p3"))
-+    assertEquals(view.isDraw, false)
-+    assertEquals(view.maxBoutAttacks, 4)
++    assertEquals(view.tablePairs.map(_.attack), Vector(card))
 +  }
 +
-+  // --- Legal actions ---
++  test("POST action rejects an illegal move with 400 and an error message") {
++    val manager = newManager
++    val gameId = createGame(manager, 2)
 +
-+  test("the attacker may attack during the initial attack, nobody else may act") {
-+    val gs = state(
-+      Vector(
-+        player("p0", List(card(Rank.Six), card(Rank.Seven))),
-+        player("p1", List(card(Rank.Eight))),
-+        player("p2", List(card(Rank.Nine)))
-+      ),
-+      boutPhase = BoutPhase.InitialAttack
++    val (status, json) = post(
++      manager,
++      s"/api/game/$gameId/action",
++      Json.obj("type" -> "passTurn".asJson, "playerId" -> "p0".asJson)
 +    )
 +
-+    assertEquals(PlayerGameView.forViewer(gs, "p0").legalActions, List("attack"))
-+    assertEquals(PlayerGameView.forViewer(gs, "p1").legalActions, List.empty)
++    assertEquals(status, Status.BadRequest)
++    assert(json.hcursor.get[String]("error").exists(_.nonEmpty), json.noSpaces)
 +  }
 +
-+  test("a defender that can cover, redirect and surrender sees all three actions") {
-+    val gs = state(
-+      Vector(
-+        player("p0", List(card(Rank.King), card(Rank.Queen))),
-+        player("p1", List(card(Rank.Seven), card(Rank.Six, Suit.Hearts), card(Rank.King, Suit.Clubs))),
-+        player("p2", List(card(Rank.Eight, Suit.Diamonds), card(Rank.Nine, Suit.Diamonds)))
-+      ),
-+      tablePairs = Vector(TablePair(card(Rank.Six)))
++  test("POST action rejects an unknown action type with 400") {
++    val manager = newManager
++    val gameId = createGame(manager, 2)
++
++    val (status, json) = post(
++      manager,
++      s"/api/game/$gameId/action",
++      Json.obj("type" -> "teleport".asJson, "playerId" -> "p0".asJson)
 +    )
 +
-+    assertEquals(
-+      PlayerGameView.forViewer(gs, "p1").legalActions,
-+      List("cover", "surrender", "redirect")
-+    )
++    assertEquals(status, Status.BadRequest)
++    assert(json.hcursor.get[String]("error").exists(_.nonEmpty), json.noSpaces)
 +  }
 +
-+  test("a defender without a legal cover may still surrender and redirect") {
-+    val gs = state(
-+      Vector(
-+        player("p0", List(card(Rank.King))),
-+        player("p1", List(card(Rank.Six, Suit.Hearts))),
-+        player("p2", List(card(Rank.Eight), card(Rank.Nine)))
-+      ),
-+      tablePairs = Vector(TablePair(card(Rank.Six)))
++  test("POST /api/game/create rejects an unsupported player count with 400") {
++    val manager = newManager
++
++    val (status, json) = post(
++      manager,
++      "/api/game/create",
++      Json.obj(
++        "playerCount" -> 7.asJson,
++        "playerNames" -> (1 to 7).map(index => s"P$index").toList.asJson
++      )
 +    )
 +
-+    assertEquals(
-+      PlayerGameView.forViewer(gs, "p1").legalActions,
-+      List("surrender", "redirect")
-+    )
++    assertEquals(status, Status.BadRequest)
++    assert(json.hcursor.get[String]("error").exists(_.nonEmpty), json.noSpaces)
 +  }
 +
-+  test("a redirect is not offered when the next defender cannot take the attack") {
-+    val gs = state(
-+      Vector(
-+        player("p0", List(card(Rank.King))),
-+        player("p1", List(card(Rank.Six, Suit.Hearts))),
-+        player("p2", List(card(Rank.Eight)))
-+      ),
-+      tablePairs = Vector(TablePair(card(Rank.Six)))
++  test("an unknown game id returns 404") {
++    val manager = newManager
++
++    val (viewStatus, _) = get(manager, "/api/game/missing/view/p0")
++    val (actionStatus, _) = post(
++      manager,
++      "/api/game/missing/action",
++      Json.obj("type" -> "passTurn".asJson, "playerId" -> "p0".asJson)
 +    )
 +
-+    assertEquals(PlayerGameView.forViewer(gs, "p1").legalActions, List("surrender"))
++    assertEquals(viewStatus, Status.NotFound)
++    assertEquals(actionStatus, Status.NotFound)
 +  }
 +
-+  test("a non-defender may pass and throw in once the table is covered") {
-+    val gs = state(
-+      Vector(
-+        player("p0", List(card(Rank.King), card(Rank.Queen))),
-+        player("p1", List(card(Rank.Seven), card(Rank.Eight))),
-+        player("p2", List(card(Rank.Six, Suit.Hearts), card(Rank.Nine, Suit.Clubs)))
-+      ),
-+      tablePairs = Vector(TablePair(card(Rank.Six), Some(card(Rank.Seven))))
-+    )
++  test("an unknown player id returns 404") {
++    val manager = newManager
++    val gameId = createGame(manager, 2)
 +
-+    assertEquals(
-+      PlayerGameView.forViewer(gs, "p2").legalActions,
-+      List("pass", "throwIn")
-+    )
-+  }
++    val (status, _) = get(manager, s"/api/game/$gameId/view/ghost")
 +
-+  test("a non-defender cannot pass while an attack is uncovered") {
-+    val gs = state(
-+      Vector(
-+        player("p0", List(card(Rank.King), card(Rank.Queen))),
-+        player("p1", List(card(Rank.Seven), card(Rank.Eight), card(Rank.Nine))),
-+        player("p2", List(card(Rank.Six, Suit.Hearts)))
-+      ),
-+      tablePairs = Vector(TablePair(card(Rank.Six)))
-+    )
-+
-+    assertEquals(PlayerGameView.forViewer(gs, "p2").legalActions, List("throwIn"))
-+  }
-+
-+  test("a non-defender without a matching rank can only pass") {
-+    val gs = state(
-+      Vector(
-+        player("p0", List(card(Rank.King), card(Rank.Queen))),
-+        player("p1", List(card(Rank.Seven), card(Rank.Eight))),
-+        player("p2", List(card(Rank.Nine, Suit.Clubs)))
-+      ),
-+      tablePairs = Vector(TablePair(card(Rank.Six), Some(card(Rank.Seven))))
-+    )
-+
-+    assertEquals(PlayerGameView.forViewer(gs, "p2").legalActions, List("pass"))
-+  }
-+
-+  test("during a surrender throw-in non-defenders may pass or throw in, the defender may not act") {
-+    val gs = state(
-+      Vector(
-+        player("p0", List(card(Rank.King), card(Rank.Queen))),
-+        player("p1", List(card(Rank.Seven), card(Rank.Eight))),
-+        player("p2", List(card(Rank.Six, Suit.Hearts)))
-+      ),
-+      tablePairs = Vector(TablePair(card(Rank.Six))),
-+      boutPhase = BoutPhase.SurrenderThrowIn
-+    )
-+
-+    assertEquals(
-+      PlayerGameView.forViewer(gs, "p2").legalActions,
-+      List("pass", "throwIn")
-+    )
-+    assertEquals(PlayerGameView.forViewer(gs, "p1").legalActions, List.empty)
-+  }
-+
-+  test("a finished player has no legal actions") {
-+    val gs = state(
-+      Vector(
-+        player("p0", List.empty, finishRank = Some(1)),
-+        player("p1", List(card(Rank.Seven))),
-+        player("p2", List(card(Rank.Eight)))
-+      ),
-+      tablePairs = Vector(TablePair(card(Rank.Six), Some(card(Rank.Seven))))
-+    )
-+
-+    assertEquals(PlayerGameView.forViewer(gs, "p0").legalActions, List.empty)
-+  }
-+
-+  test("no player has legal actions once the game is over") {
-+    val gs = state(
-+      Vector(
-+        player("p0", List(card(Rank.Six))),
-+        player("p1", List(card(Rank.Seven)))
-+      ),
-+      boutPhase = BoutPhase.GameOver
-+    )
-+
-+    assertEquals(PlayerGameView.forViewer(gs, "p0").legalActions, List.empty)
-+  }
-+
-+  test("an unknown viewer is rejected") {
-+    val gs = state(
-+      Vector(player("p0", List(card(Rank.Six))), player("p1", List(card(Rank.Seven))))
-+    )
-+
-+    intercept[IllegalArgumentException](PlayerGameView.forViewer(gs, "ghost"))
-+  }
-+
-+  // --- Hidden information ---
-+
-+  test("the serialized view never exposes opponent hands, the talon or the discard pile") {
-+    val secret = card(Rank.Ace, Suit.Hearts)
-+    val gs = state(
-+      Vector(
-+        player("p0", List(card(Rank.Six))),
-+        player("p1", List(secret, card(Rank.King, Suit.Clubs)))
-+      ),
-+      talon = Vector(card(Rank.Eight, Suit.Diamonds)),
-+      bottomTrumpCard = Some(card(Rank.Seven, Suit.Diamonds)),
-+      boutPhase = BoutPhase.InitialAttack
-+    )
-+
-+    val json = PlayerGameView.forViewer(gs, "p0").asJson
-+    val encoded = json.noSpaces
-+    val keys = json.asObject.map(_.keys.toSet).getOrElse(Set.empty)
-+
-+    assert(!keys.contains("talon"), keys.toString)
-+    assert(!keys.contains("players"), keys.toString)
-+    assert(!keys.contains("discardPile"), keys.toString)
-+    assert(!encoded.contains(secret.asJson.noSpaces), s"view leaked an opponent card: $encoded")
-+    assert(keys.contains("myHand"), keys.toString)
-+    assert(keys.contains("talonCount"), keys.toString)
++    assertEquals(status, Status.NotFound)
 +  }
 </git_diff>
 
