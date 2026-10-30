@@ -3,25 +3,9 @@ set -u
 
 # === CONFIGURATION ===
 PRIMARY_ARCHITECT_MODEL="claude-opus-4-6-thinking"
-PRIMARY_ARCHITECT_EFFORT="" # Claude models do not accept the effort flag
+PRIMARY_REVIEWER_MODEL="claude-sonnet-4-6"
+FALLBACK_MODEL="gemini-3.8-flash-high"
 
-PRIMARY_REVIEWER_MODEL="claude-sonnet-4-6-thinking"
-PRIMARY_REVIEWER_EFFORT="" # Claude models do not accept the effort flag
-
-# Auto-detect exact Gemini 3.8 Flash slug from 'agy models' for fallback
-DETECTED_FLASH=$(agy models 2>/dev/null | grep -oE 'gemini-3[.-]8-flash[a-z0-9-]*' | head -n 1 || true)
-FALLBACK_MODEL="${DETECTED_FLASH:-gemini-3.8-flash}"
-
-# If the detected Gemini slug already has the effort baked in (e.g. -high), don't pass the flag
-if [[ "$FALLBACK_MODEL" =~ -(high|medium|low)$ ]]; then
-  FALLBACK_ARCHITECT_EFFORT=""
-  FALLBACK_REVIEWER_EFFORT=""
-else
-  FALLBACK_ARCHITECT_EFFORT="high"
-  FALLBACK_REVIEWER_EFFORT="medium"
-fi
-
-# Batching toggle
 REVIEW_EVERY_N_TICKETS="${REVIEW_EVERY_N_TICKETS:-1}"
 if [ "${1:-}" = "--batch" ] && [ -n "${2:-}" ]; then
   REVIEW_EVERY_N_TICKETS="$2"
@@ -29,37 +13,26 @@ fi
 
 SESSION_TIMEOUT_SEC=3300   # 55 minutes
 POLL_INTERVAL_SEC=10
-MAX_REVIEW_RETRIES=3
+MAX_REVIEW_ROUNDS=4        # Max back-and-forth rounds between Reviewer and Implementer
 
 mkdir -p .tickets .reviews
 
 echo "=================================================================="
 echo "⚙️  Architect Routing : ${PRIMARY_ARCHITECT_MODEL} -> Fallback: ${FALLBACK_MODEL}"
 echo "⚙️  Reviewer Routing  : ${PRIMARY_REVIEWER_MODEL} -> Fallback: ${FALLBACK_MODEL}"
-echo "⚙️  LLM Review Cadence: Every ${REVIEW_EVERY_N_TICKETS} ticket(s) (Local test gate runs on ALL tickets)"
+echo "⚙️  Max Debate Rounds : ${MAX_REVIEW_ROUNDS} rounds per ticket (via .reviews/agent_notes.md)"
 echo "=================================================================="
 
-# Helper: Run a single Antigravity call dynamically omitting invalid flags
 try_agy_call() {
   local MODEL=$1
-  local EFFORT=$2
-  local PROMPT_FILE=$3
-  local OUT_FILE=$4
-  local EXPECT_PATTERN=$5
+  local PROMPT_FILE=$2
+  local OUT_FILE=$3
+  local EXPECT_PATTERN=$4
 
   rm -f "$OUT_FILE" .reviews/agy_err.log
+  echo "🤖 Calling Antigravity [Model: ${MODEL}]..."
 
-  # Safely construct the arguments array
-  local AGY_ARGS=( -p "$(cat "$PROMPT_FILE")" --model "$MODEL" --dangerously-skip-permissions )
-  
-  if [ -n "$EFFORT" ]; then
-    echo "🤖 Calling Antigravity [Model: ${MODEL} | Effort: ${EFFORT}]..."
-    AGY_ARGS+=( --effort "$EFFORT" )
-  else
-    echo "🤖 Calling Antigravity [Model: ${MODEL}]..."
-  fi
-
-  if agy "${AGY_ARGS[@]}" < /dev/null > "$OUT_FILE" 2>.reviews/agy_err.log; then
+  if agy -p "$(cat "$PROMPT_FILE")" --model "$MODEL" --dangerously-skip-permissions < /dev/null > "$OUT_FILE" 2>.reviews/agy_err.log; then
     if [ -s "$OUT_FILE" ] && grep -qE "$EXPECT_PATTERN" "$OUT_FILE"; then
       echo "✅ ${MODEL} succeeded."
       return 0
@@ -73,24 +46,21 @@ try_agy_call() {
   return 1
 }
 
-# Helper: Try Primary (Claude) first; automatically fall back to Gemini 3.8 Flash
 run_agy_with_fallback() {
   local PRIMARY_MODEL=$1
-  local PRIMARY_EFFORT=$2
-  local FB_MODEL=$3
-  local FB_EFFORT=$4
-  local PROMPT_FILE=$5
-  local OUT_FILE=$6
-  local EXPECT_PATTERN=$7
+  local FB_MODEL=$2
+  local PROMPT_FILE=$3
+  local OUT_FILE=$4
+  local EXPECT_PATTERN=$5
 
   while true; do
-    if try_agy_call "$PRIMARY_MODEL" "$PRIMARY_EFFORT" "$PROMPT_FILE" "$OUT_FILE" "$EXPECT_PATTERN"; then
+    if try_agy_call "$PRIMARY_MODEL" "$PROMPT_FILE" "$OUT_FILE" "$EXPECT_PATTERN"; then
       ACTIVE_MODEL_USED="$PRIMARY_MODEL"
       return 0
     fi
 
     echo "🔀 Falling back from ${PRIMARY_MODEL} to ${FB_MODEL}..."
-    if try_agy_call "$FB_MODEL" "$FB_EFFORT" "$PROMPT_FILE" "$OUT_FILE" "$EXPECT_PATTERN"; then
+    if try_agy_call "$FB_MODEL" "$PROMPT_FILE" "$OUT_FILE" "$EXPECT_PATTERN"; then
       ACTIVE_MODEL_USED="$FB_MODEL"
       return 0
     fi
@@ -106,7 +76,6 @@ run_agy_with_fallback() {
   done
 }
 
-# Helper: Deterministic Local Test Gate
 run_local_test_gate() {
   local CURRENT_TICKET=$1
   echo "🧪 Running deterministic local test gate inside Docker container..."
@@ -123,7 +92,7 @@ run_local_test_gate() {
 # 🚨 Automated Local Test Gate Failure Report
 - **Ticket Being Verified:** \`${CURRENT_TICKET}\`
 - **Failed Stage:** Backend Scala Test Suite (\`cd /workspace/backend && sbt -batch test\`)
-- **Action Required:** You marked this ticket as \`DONE\`, but \`sbt test\` failed with compilation or test assertion errors. Fix the exact errors below without rewriting unrelated working code.
+- **Action Required:** Fix the exact failing tests or compilation errors below without rewriting unrelated working code.
 
 ## 1. Extracted Failing Tests & Compiler Errors
 \`\`\`text
@@ -148,7 +117,7 @@ REPORT_EOF
 # 🚨 Automated Local Test Gate Failure Report
 - **Ticket Being Verified:** \`${CURRENT_TICKET}\`
 - **Failed Stage:** Frontend Test Suite (\`cd /workspace/frontend && npm test -- --run\`)
-- **Action Required:** You marked this ticket as \`DONE\`, but \`npm test\` failed. Fix the exact failing tests or TypeScript errors below without rewriting unrelated working code.
+- **Action Required:** Fix the exact failing tests or TypeScript errors below without rewriting unrelated working code.
 
 ## 1. Extracted Failing Suites & Assertions
 \`\`\`text
@@ -169,7 +138,6 @@ REPORT_EOF
   return 0
 }
 
-# Helper: Send prompt to FreeBuff inside Docker tmux
 run_freebuff_until_done() {
   local PROMPT=$1
   rm -f .tickets/STATUS
@@ -212,7 +180,7 @@ run_freebuff_until_done() {
     if [ $ELAPSED -ge $SESSION_TIMEOUT_SEC ]; then
       echo "🔄 1-Hour session limit reached. Restarting FreeBuff with continuation context..."
       docker exec freebuff_worker tmux kill-session -t buff 2>/dev/null || true
-      PROMPT="Your previous 1-hour FreeBuff session timed out while working. Run 'git status' and 'git diff' to see what is already implemented, finish any remaining work, verify tests pass, and run: echo DONE > .tickets/STATUS"
+      PROMPT="Your previous 1-hour FreeBuff session timed out while working. Run 'git status' and 'git diff' to see what is already implemented, finish any remaining work, verify tests pass, write your summary/rebuttal to .reviews/agent_notes.md, and run: echo DONE > .tickets/STATUS"
       sleep 10
     fi
   done
@@ -248,8 +216,8 @@ Do NOT output any text or preamble before the first ===TICKET:...=== marker.
 PROMPT_EOF
 
     run_agy_with_fallback \
-      "$PRIMARY_ARCHITECT_MODEL" "$PRIMARY_ARCHITECT_EFFORT" \
-      "$FALLBACK_MODEL" "$FALLBACK_ARCHITECT_EFFORT" \
+      "$PRIMARY_ARCHITECT_MODEL" \
+      "$FALLBACK_MODEL" \
       ".reviews/phase1_prompt.txt" ".reviews/raw_tickets.txt" "===TICKET:"
   fi
 
@@ -268,7 +236,7 @@ PROMPT_EOF
   ls -1 .tickets/T-*.md
 fi
 
-# === PHASE 2: AUTONOMOUS TICKET EXECUTION & HYBRID REVIEW LOOP ===
+# === PHASE 2: AUTONOMOUS TICKET EXECUTION & BIDIRECTIONAL REVIEW LOOP ===
 mapfile -t ALL_TICKETS < <(ls -1 .tickets/T-*.md | sort)
 TOTAL_TICKETS=${#ALL_TICKETS[@]}
 UNCOMPLETED_COUNT=0
@@ -297,26 +265,39 @@ for (( i=0; i<TOTAL_TICKETS; i++ )); do
   BRANCH_NAME="feat/${TICKET_NAME}"
   git checkout -b "$BRANCH_NAME" 2>/dev/null || git checkout "$BRANCH_NAME"
 
-  WORK_PROMPT="Implement @${TICKET_FILE} following all rules in @AGENTS.md and @SPEC.md. When all unit tests pass, run: echo DONE > .tickets/STATUS"
-  run_freebuff_until_done "$WORK_PROMPT"
+  # If FreeBuff already finished work on this branch (e.g. .tickets/STATUS == DONE), verify it first without redoing work!
+  if [ -f .tickets/STATUS ] && grep -q "DONE" .tickets/STATUS; then
+    echo "♻️  Found existing completed work (.tickets/STATUS == DONE) on ${BRANCH_NAME}. Proceeding straight to verification..."
+  else
+    rm -f .reviews/agent_notes.md
+    WORK_PROMPT="Implement @${TICKET_FILE} following all rules in @AGENTS.md and @SPEC.md. Write a brief summary of your implementation into .reviews/agent_notes.md, verify all unit tests pass, and then run: echo DONE > .tickets/STATUS"
+    run_freebuff_until_done "$WORK_PROMPT"
+  fi
 
   DO_AI_REVIEW=0
   if [ $((UNCOMPLETED_COUNT % REVIEW_EVERY_N_TICKETS)) -eq 0 ] || [ "$TICKET_NUM" -eq "$TOTAL_TICKETS" ]; then
     DO_AI_REVIEW=1
   fi
 
-  ATTEMPT=1
-  while [ $ATTEMPT -le $MAX_REVIEW_RETRIES ]; do
+  # Verification & Bidirectional Debate Loop
+  ROUND=1
+  TEST_RETRIES=0
+  while true; do
     
+    # STAGE 1: Deterministic Local Test Gate
     if ! run_local_test_gate "$TICKET_FILE"; then
-      FIX_TESTS_PROMPT="🚨 AUTOMATED TEST GATE REJECTION: You marked @${TICKET_FILE} as DONE, but when the host ran the test suite, tests or compilation FAILED. Do NOT re-implement the whole ticket from scratch. Read @.reviews/test_failure_report.md to see the exact failing test names and compiler errors, fix ONLY the broken code/tests, verify the test command passes in the terminal, and then run: echo DONE > .tickets/STATUS"
+      TEST_RETRIES=$((TEST_RETRIES + 1))
+      if [ $TEST_RETRIES -gt $MAX_REVIEW_ROUNDS ]; then
+        echo "🛑 ${TICKET_NAME} failed local test gate ${TEST_RETRIES} times. Pausing pipeline."
+        exit 1
+      fi
+      FIX_TESTS_PROMPT="🚨 AUTOMATED TEST GATE REJECTION: You marked @${TICKET_FILE} as DONE, but the host test suite FAILED. Read @.reviews/test_failure_report.md, fix the broken code/tests, update .reviews/agent_notes.md, and run: echo DONE > .tickets/STATUS"
       run_freebuff_until_done "$FIX_TESTS_PROMPT"
-      ATTEMPT=$((ATTEMPT + 1))
       continue
     fi
 
     if [ "$DO_AI_REVIEW" -eq 0 ]; then
-      echo "⚡ Local test gate passed! Merging intermediate batch ticket ${TICKET_NAME} (AI review scheduled in $((REVIEW_EVERY_N_TICKETS - (UNCOMPLETED_COUNT % REVIEW_EVERY_N_TICKETS))) ticket(s))..."
+      echo "⚡ Local test gate passed! Merging intermediate batch ticket ${TICKET_NAME}..."
       git add -A
       git commit -m "Complete ${TICKET_NAME} (verified by local test gate)"
       git checkout main 2>/dev/null || git checkout master
@@ -325,6 +306,7 @@ for (( i=0; i<TOTAL_TICKETS; i++ )); do
       break
     fi
 
+    # STAGE 2: Bidirectional AI Code Review
     git add -N .
     DIFF_FILE=".reviews/current.diff"
     git diff "$BATCH_BASE_COMMIT" -- . \
@@ -334,24 +316,42 @@ for (( i=0; i<TOTAL_TICKETS; i++ )); do
       ':(exclude)*/target/*' \
       ':(exclude)*/node_modules/*' \
       ':(exclude).reviews/*' \
-      ':(exclude).tickets/*' | head -c 65000 > "$DIFF_FILE"
+      ':(exclude).tickets/*' \
+      ':(exclude)autopilot.sh' \
+      ':(exclude)start-workspace.sh' \
+      ':(exclude)oversee-freebuff.sh' \
+      ':(exclude)watch-reviews.sh' \
+      ':(exclude)next-milestone.sh' | head -c 65000 > "$DIFF_FILE"
 
-    REVIEW_FILE=".reviews/${TICKET_NAME}-review-${ATTEMPT}.md"
-    echo "🔍 Auditing ${TICKET_NAME} (Attempt ${ATTEMPT}/${MAX_REVIEW_RETRIES})..."
+    NOTES_CONTENT="No implementer notes provided."
+    if [ -f .reviews/agent_notes.md ]; then
+      NOTES_CONTENT=$(cat .reviews/agent_notes.md)
+    fi
+
+    REVIEW_FILE=".reviews/${TICKET_NAME}-review-${ROUND}.md"
+    echo "🔍 Auditing ${TICKET_NAME} (Review Round ${ROUND}/${MAX_REVIEW_ROUNDS})..."
 
     cat << PROMPT_EOF > .reviews/review_prompt.txt
-You are a Principal Code Reviewer.
+You are a Principal Code Reviewer conducting Review Round ${ROUND} of ${MAX_REVIEW_ROUNDS}.
 CRITICAL INSTRUCTION: Do NOT use any tools, do NOT run bash commands, and do NOT read any external files. All required context is provided inline below. Note that the local unit test suite ('sbt test' / 'npm test') has ALREADY passed.
 
 <tickets_in_scope>
 ${BATCH_TICKET_DOCS}
 </tickets_in_scope>
 
+<implementer_notes_and_rebuttals>
+${NOTES_CONTENT}
+</implementer_notes_and_rebuttals>
+
 <git_diff>
 $(cat "$DIFF_FILE")
 </git_diff>
 
-Audit the diff against the ticket requirements for logic bugs, security flaws, or missing edge-case tests. Be concise and specific.
+REVIEW GUIDELINES:
+1. Carefully read <implementer_notes_and_rebuttals> to see how the implementer addressed previous review feedback and why certain choices or scope boundaries were maintained.
+2. Only request changes (VERDICT: CHANGES_REQUESTED) if there is a genuine High/Medium severity logic bug, security flaw, or missing core requirement from the ticket.
+3. Do NOT block approval over Low-severity nitpicks, hypothetical edge cases outside standard Durak rules, or valid scope rebuttals explained in <implementer_notes_and_rebuttals>.
+
 End your response with EXACTLY one of:
 VERDICT: APPROVED
 or
@@ -360,13 +360,14 @@ PROMPT_EOF
 
     ACTIVE_MODEL_USED=""
     run_agy_with_fallback \
-      "$PRIMARY_REVIEWER_MODEL" "$PRIMARY_REVIEWER_EFFORT" \
-      "$FALLBACK_MODEL" "$FALLBACK_REVIEWER_EFFORT" \
+      "$PRIMARY_REVIEWER_MODEL" \
+      "$FALLBACK_MODEL" \
       ".reviews/review_prompt.txt" "$REVIEW_FILE" "VERDICT: (APPROVED|CHANGES_REQUESTED)"
     rm -f "$DIFF_FILE"
 
     if grep -q "VERDICT: APPROVED" "$REVIEW_FILE"; then
-      echo "🎉 ${TICKET_NAME} APPROVED by ${ACTIVE_MODEL_USED}!"
+      echo "🎉 ${TICKET_NAME} APPROVED by ${ACTIVE_MODEL_USED} on Round ${ROUND}!"
+      rm -f .tickets/STATUS
       git add -A
       git commit -m "Complete ${TICKET_NAME} (reviewed by ${ACTIVE_MODEL_USED})"
       git checkout main 2>/dev/null || git checkout master
@@ -375,18 +376,19 @@ PROMPT_EOF
       BATCH_BASE_COMMIT=$(git rev-parse HEAD)
       BATCH_TICKET_DOCS=""
       break
-    else
-      echo "🔧 Changes requested by ${ACTIVE_MODEL_USED} on ${TICKET_NAME}. Sending review to FreeBuff..."
-      FIX_PROMPT="🚨 CODE REVIEW REJECTION: Your code for @${TICKET_FILE} passed local tests, but the Principal Reviewer (${ACTIVE_MODEL_USED}) requested changes. Read the specific issues listed in @${REVIEW_FILE}, fix each issue without breaking existing tests, re-run the test suite, and run: echo DONE > .tickets/STATUS"
-      run_freebuff_until_done "$FIX_PROMPT"
-      ATTEMPT=$((ATTEMPT + 1))
     fi
-  done
 
-  if [ ! -f "$DONE_MARKER" ]; then
-    echo "🛑 ${TICKET_NAME} failed verification after ${MAX_REVIEW_RETRIES} attempts. Pausing pipeline for human inspection."
-    exit 1
-  fi
+    # Check if we hit max debate rounds AFTER reviewing the latest fix
+    if [ $ROUND -ge $MAX_REVIEW_ROUNDS ]; then
+      echo "🛑 Disagreement unresolved after ${MAX_REVIEW_ROUNDS} review rounds on ${TICKET_NAME}. Pausing for human inspection."
+      exit 1
+    fi
+
+    echo "🔧 Changes requested by ${ACTIVE_MODEL_USED} (Round ${ROUND}). Sending review to FreeBuff for fix or rebuttal..."
+    FIX_PROMPT="🚨 CODE REVIEW FEEDBACK (Round ${ROUND}): Read the reviewer feedback in @${REVIEW_FILE} and the original ticket @${TICKET_FILE}. For each point raised: (1) If it is a valid bug or missing test in your scope, fix it in the code/tests. (2) If you disagree with a point or it is outside your ticket scope, write a clear technical rebuttal in .reviews/agent_notes.md explaining what you fixed and why any remaining point was not changed. Re-run the test suite until green, save .reviews/agent_notes.md, and run: echo DONE > .tickets/STATUS"
+    run_freebuff_until_done "$FIX_PROMPT"
+    ROUND=$((ROUND + 1))
+  done
 done
 
 echo "🏆 ALL TICKETS IN CURRENT MILESTONE COMPLETED AND MERGED TO MAIN!"

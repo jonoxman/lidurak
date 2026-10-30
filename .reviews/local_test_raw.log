@@ -5,12 +5,21 @@
 
  RUN  v2.1.9 /workspace/frontend
 
- ✓ src/__tests__/Card.test.tsx (5 tests) 32ms
- ✓ src/__tests__/app.test.tsx (1 test) 59ms
- ✓ src/__tests__/GameTable.test.tsx (6 tests) 126ms
+ ✓ src/__tests__/types.test.ts (12 tests) 16ms
+ ✓ src/__tests__/websocket.test.ts (13 tests) 22ms
+ ✓ src/__tests__/GameTable.test.tsx (6 tests) 180ms
+ ✓ src/__tests__/LobbyPage.test.tsx (4 tests) 213ms
+ ✓ src/__tests__/GamePage.test.tsx (5 tests) 216ms
+ ✓ src/__tests__/Card.test.tsx (5 tests) 33ms
+ ✓ src/__tests__/app.test.tsx (7 tests) 116ms
 
- Test Files  3 passed (3)
-      Tests  12 passed (12)
-   Start at  01:45:47
-   Duration  880ms (transform 132ms, setup 0ms, collect 409ms, tests 216ms, environment 1.12s, prepare 207ms)
+ Test Files  7 passed (7)
+      Tests  52 passed (52)
+   Start at  03:05:04
+   Duration  2.41s (transform 702ms, setup 0ms, collect 1.75s, tests 796ms, environment 5.58s, prepare 604ms)
 
+npm notice
+npm notice New major version of npm available! 10.9.9 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

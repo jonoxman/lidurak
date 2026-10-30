@@ -29,6 +29,7 @@ export interface GameTableProps {
   defenderId?: string;
   selectedKeys?: string[];
   onCardClick?: (card: CardData) => void;
+  onTableCardClick?: (attackIndex: number) => void;
   children?: ComponentChildren;
 }
 
@@ -86,6 +87,7 @@ export function GameTable({
   defenderId,
   selectedKeys = [],
   onCardClick,
+  onTableCardClick,
   children,
 }: GameTableProps) {
   const hand = sortHand(myHand);
@@ -146,7 +148,16 @@ export function GameTable({
           <p class="battle-empty">Waiting for the first attack…</p>
         ) : (
           tablePairs.map((pair, index) => (
-            <TablePair key={index} attack={pair.attack} defense={pair.defense} />
+            <TablePair
+              key={index}
+              attack={pair.attack}
+              defense={pair.defense}
+              onAttackClick={
+                onTableCardClick && !pair.defense
+                  ? () => onTableCardClick(index)
+                  : undefined
+              }
+            />
           ))
         )}
       </section>
