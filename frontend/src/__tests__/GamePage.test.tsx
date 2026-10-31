@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/preact';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/preact';
 import type { PlayerGameView } from '../types';
 
 vi.mock('../api/client', () => ({
@@ -72,6 +72,45 @@ describe('GamePage', () => {
     );
   });
 
+  it('renders the three-column shell zones', async () => {
+    getGameView.mockResolvedValue(view);
+
+    const { container } = render(
+      <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
+    );
+
+    await waitFor(() => expect(screen.getByText('Pass')).toBeTruthy());
+
+    const left = container.querySelector('[data-zone="sidebar-left"]');
+    const arena = container.querySelector('[data-zone="table-arena"]');
+    const right = container.querySelector('[data-zone="sidebar-right"]');
+    expect(left).not.toBeNull();
+    expect(arena).not.toBeNull();
+    expect(right).not.toBeNull();
+
+    // How to Play lives in the left sidebar, not above the table.
+    expect(within(left as HTMLElement).getByText('How to Play')).toBeTruthy();
+    expect(within(left as HTMLElement).getByRole('tablist')).toBeTruthy();
+    expect(screen.getByTestId('turn-clock').textContent?.trim()).toBe('00:15');
+    expect(container.querySelector('[data-zone="table-deck"]')).not.toBeNull();
+  });
+
+  it('switches the hotseat player from the left sidebar tabs', async () => {
+    getGameView.mockResolvedValue(view);
+    const onSwitchPlayer = vi.fn();
+
+    render(
+      <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={onSwitchPlayer} />,
+    );
+
+    await waitFor(() => expect(screen.getByRole('tablist')).toBeTruthy());
+    const tabs = screen.getAllByRole('tab');
+    expect(tabs).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole('tab', { name: /Bob/ }));
+    expect(onSwitchPlayer).toHaveBeenCalledWith('p1');
+  });
+
   it('selects a hand card, then covers an uncovered table attack with it', async () => {
     const defenseView: PlayerGameView = {
       ...view,
@@ -108,7 +147,7 @@ describe('GamePage', () => {
     );
   });
 
-  it('shows the winner and the Durak when the bout phase is GameOver', async () => {
+  it('shows the winner and the Durak in the right sidebar when the bout phase is GameOver', async () => {
     const gameOverView: PlayerGameView = {
       ...view,
       myHand: [],
@@ -120,11 +159,31 @@ describe('GamePage', () => {
     };
     getGameView.mockResolvedValue(gameOverView);
 
-    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+    const { container } = render(
+      <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
+    );
 
     await waitFor(() => expect(screen.getByText('Bob wins')).toBeTruthy());
     expect(screen.getByText('You are the Durak.')).toBeTruthy();
     expect(screen.queryByText('Pass')).toBeNull();
+
+    const result = container.querySelector('[data-zone="sidebar-right"] .game-result');
+    expect(result).not.toBeNull();
+  });
+
+  it('renders no instructional text clutter inside the table', async () => {
+    getGameView.mockResolvedValue(view);
+
+    const { container } = render(
+      <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
+    );
+
+    await waitFor(() => expect(screen.getByText('Pass')).toBeTruthy());
+
+    const arena = container.querySelector('[data-zone="table-arena"]') as HTMLElement;
+    expect(arena.textContent).not.toMatch(/Waiting for/i);
+    expect(arena.textContent).not.toMatch(/Your turn/i);
+    expect(container.querySelector('.game-hint')).toBeNull();
   });
 
   it('marks the connection live once the socket delivers a view', async () => {

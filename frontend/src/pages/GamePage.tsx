@@ -20,6 +20,15 @@ import {
 
 const EMPTY_SELECTION: Set<number> = new Set();
 
+const HOW_TO_PLAY = [
+  'Defend every attacking card. A higher card of the same suit beats it, and any trump beats a non-trump.',
+  'Cover all attacks, then pass to end the bout; defended cards go to the discard pile.',
+  'Throw in extra attacks that match a rank already on the table.',
+  'Surrender to take every table card into your hand and skip your next attack.',
+  'Redirect before any card is covered to hand the defense to the next player.',
+  'The last player holding cards is the Durak.',
+];
+
 export interface GamePageProps {
   gameId: string;
   playerId: string;
@@ -198,22 +207,9 @@ export function GamePage({ gameId, playerId, onSwitchPlayer }: GamePageProps) {
 
   const playerOptions = [view.myId, ...view.opponents.map((opponent) => opponent.id)];
 
-  const hint = (() => {
-    if (hasLegalAction(view.legalActions, 'cover')) {
-      return selectedCards.length === 1
-        ? 'Click an uncovered attack card to cover it.'
-        : 'Select one card to defend with.';
-    }
-    if (isAttackerTurn) return 'Select one or more cards of the same rank, then Attack.';
-    if (hasLegalAction(view.legalActions, 'throwIn')) {
-      return 'Select cards matching a rank on the table, then Throw In.';
-    }
-    if (hasLegalAction(view.legalActions, 'pass')) return 'Pass when you have nothing more to add.';
-    return 'Waiting for the next move…';
-  })();
-
   const winnerId = view.finishOrder[0];
   const durakId = view.finishOrder[view.finishOrder.length - 1];
+  const gameOver = isGameOverPhase(view.boutPhase);
 
   return (
     <div class="page game-page">
@@ -224,25 +220,7 @@ export function GamePage({ gameId, playerId, onSwitchPlayer }: GamePageProps) {
             {live ? 'Connected' : 'Connecting…'}
           </span>
         </div>
-        <div class="game-player-switch">
-          <label>
-            Player view{' '}
-            <select
-              aria-label="Switch player view"
-              value={playerId}
-              onChange={(event) =>
-                onSwitchPlayer((event.target as HTMLSelectElement).value)
-              }
-            >
-              {playerOptions.map((id) => (
-                <option key={id} value={id}>
-                  {nameFor(id)} ({id})
-                </option>
-              ))}
-            </select>
-          </label>
-          <a href="#/">Back to lobby</a>
-        </div>
+        <a href="#/">Back to lobby</a>
       </header>
 
       {error ? (
@@ -251,43 +229,52 @@ export function GamePage({ gameId, playerId, onSwitchPlayer }: GamePageProps) {
         </p>
       ) : null}
 
-      <GameTable
-        myId={view.myId}
-        myHand={view.myHand}
-        opponents={view.opponents}
-        tablePairs={view.tablePairs}
-        talonCount={view.talonCount}
-        bottomTrumpCard={view.bottomTrumpCard}
-        trumpSuit={view.trumpSuit}
-        selectedKeys={selectedKeys}
-        onCardClick={toggleCard}
-        onTableCardClick={hasLegalAction(view.legalActions, 'cover') ? coverAttack : undefined}
-      >
-        {isGameOverPhase(view.boutPhase) ? (
-          <section class="game-result" aria-label="Game over">
-            <h2>
-              {view.isDraw
-                ? 'Draw'
-                : winnerId
-                  ? `${nameFor(winnerId)} wins`
-                  : 'Game over'}
-            </h2>
-            {!view.isDraw && durakId ? (
-              <p class="durak-line">
-                {durakId === view.myId
-                  ? 'You are the Durak.'
-                  : `${nameFor(durakId)} is the Durak.`}
-              </p>
-            ) : null}
-            <ol class="finish-order">
-              {view.finishOrder.map((id) => (
-                <li key={id}>{nameFor(id)}</li>
+      <div class="game-shell">
+        <aside class="game-sidebar sidebar-left" data-zone="sidebar-left">
+          <section class="panel">
+            <h2>Hotseat</h2>
+            <div class="hotseat-tabs" role="tablist" aria-label="Hotseat player switcher">
+              {playerOptions.map((id) => (
+                <button
+                  key={id}
+                  type="button"
+                  role="tab"
+                  aria-selected={id === playerId}
+                  class={`hotseat-tab${id === playerId ? ' active' : ''}`}
+                  onClick={() => onSwitchPlayer(id)}
+                >
+                  <span class="hotseat-name">{nameFor(id)}</span>
+                  <span class="hotseat-id">{id}</span>
+                </button>
               ))}
-            </ol>
+            </div>
           </section>
-        ) : (
-          <div class="game-controls">
-            <p class="game-hint">{hint}</p>
+
+          <section class="panel" aria-label="How to Play">
+            <h2>How to Play</h2>
+            <ul class="how-to-play">
+              {HOW_TO_PLAY.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          </section>
+        </aside>
+
+        <GameTable
+          myId={view.myId}
+          myHand={view.myHand}
+          opponents={view.opponents}
+          tablePairs={view.tablePairs}
+          talonCount={view.talonCount}
+          bottomTrumpCard={view.bottomTrumpCard}
+          trumpSuit={view.trumpSuit}
+          selectedKeys={selectedKeys}
+          onCardClick={toggleCard}
+          onTableCardClick={
+            hasLegalAction(view.legalActions, 'cover') ? coverAttack : undefined
+          }
+        >
+          {gameOver ? null : (
             <div class="game-buttons">
               {isAttackerTurn ? (
                 <button
@@ -311,9 +298,63 @@ export function GamePage({ gameId, playerId, onSwitchPlayer }: GamePageProps) {
               ) : null}
               <ActionBar legalActions={view.legalActions} onAction={handleActionBar} />
             </div>
-          </div>
-        )}
-      </GameTable>
+          )}
+        </GameTable>
+
+        <aside class="game-sidebar sidebar-right" data-zone="sidebar-right">
+          <section class="panel turn-clock-panel" aria-label="Turn clock">
+            <h2>Turn</h2>
+            <span class="turn-clock" data-testid="turn-clock">
+              00:15
+            </span>
+          </section>
+
+          <section class="panel" aria-label="Player status">
+            <h2>Players</h2>
+            <ul class="status-badges">
+              <li class="status-badge mine">
+                <span class="status-name">{nameFor(view.myId)}</span>
+                <span class="status-count">{view.myHand.length} cards</span>
+              </li>
+              {view.opponents.map((opponent) => (
+                <li key={opponent.id} class="status-badge">
+                  <span class="status-name">{opponent.name}</span>
+                  <span class="status-count">{opponent.cardCount} cards</span>
+                  {opponent.finishRank != null ? (
+                    <span class="status-rank">
+                      {opponent.finishRank === 1 ? 'WINNER' : 'OUT'}
+                    </span>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          {gameOver ? (
+            <section class="panel game-result" aria-label="Game over">
+              <h2>
+                {view.isDraw
+                  ? 'Draw'
+                  : winnerId
+                    ? `${nameFor(winnerId)} wins`
+                    : 'Game over'}
+              </h2>
+              {!view.isDraw && durakId ? (
+                <p class="durak-line">
+                  {durakId === view.myId
+                    ? 'You are the Durak.'
+                    : `${nameFor(durakId)} is the Durak.`}
+                </p>
+              ) : null}
+              <ol class="finish-order">
+                {view.finishOrder.map((id) => (
+                  <li key={id}>{nameFor(id)}</li>
+                ))}
+              </ol>
+            </section>
+          ) : null}
+        </aside>
+      </div>
     </div>
   );
 }
