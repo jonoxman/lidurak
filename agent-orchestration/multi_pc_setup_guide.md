@@ -172,3 +172,8 @@ powershell -ExecutionPolicy Bypass -File "$HOME\mission-control.ps1" -Workers 3
 - **Window 3 (`watch-reviews.sh`):** Displays live worker status lines (`🔨 Implementing`, `🧪 Testing`, `🔍 Reviewing`, `☁️ Pushing PR`) and streams the newest review or test gate report.
 - **Window 4 (Interactive Shell):** Run `./agent-orchestration/play-local.sh` to test at `http://localhost:5173`, `./agent-orchestration/ask-architect.sh "..."` to query the codebase, or `gh pr list` to inspect GitHub PRs.
 
+
+## Adding and Removing Agents
+- Add or remove more workers: ./agent-orchestration/scale-workers.sh N (N = total number of workers). Workers will be shut off after they are finished their current ticket. --now tag can be used to force shut off instead.
+- 
+
