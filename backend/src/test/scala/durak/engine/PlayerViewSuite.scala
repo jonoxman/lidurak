@@ -32,10 +32,12 @@ class PlayerViewSuite extends munit.FunSuite:
       trumpSuit: Suit = Suit.Spades,
       defenderInitialHandSize: Int = 6,
       finishOrder: Vector[String] = Vector.empty,
-      isDraw: Boolean = false
+      isDraw: Boolean = false,
+      chaosMode: Boolean = false,
+      turnDeadlineMs: Long = 0L
   ): GameState =
     GameState(
-      config = GameConfig(players.size, seed = 42L),
+      config = GameConfig(players.size, seed = 42L, chaosMode = chaosMode),
       players = players,
       talon = talon,
       trumpSuit = trumpSuit,
@@ -47,7 +49,8 @@ class PlayerViewSuite extends munit.FunSuite:
       boutPhase = boutPhase,
       defenderInitialHandSize = defenderInitialHandSize,
       finishOrder = finishOrder,
-      isDraw = isDraw
+      isDraw = isDraw,
+      turnDeadlineMs = turnDeadlineMs
     )
 
   // --- Hand & opponent projection ---
@@ -295,6 +298,53 @@ class PlayerViewSuite extends munit.FunSuite:
     )
 
     assertEquals(PlayerGameView.forViewer(gs, "p0").legalActions, List.empty)
+  }
+
+  test("chaos mode offers a redirect when any eligible player can take the attack") {
+    val gs = state(
+      Vector(
+        player("p0", List(card(Rank.King))),
+        player("p1", List(card(Rank.Six, Suit.Hearts))),
+        player("p2", List(card(Rank.Eight, Suit.Spades))),
+        player("p3", List(card(Rank.Nine, Suit.Spades), card(Rank.Ten, Suit.Spades)))
+      ),
+      tablePairs = Vector(TablePair(card(Rank.Six))),
+      chaosMode = true
+    )
+
+    // The next clockwise seat (p2) holds one card, but p3 can take both cards.
+    assert(PlayerGameView.forViewer(gs, "p1").legalActions.contains("redirect"))
+  }
+
+  // --- Turn clock ---
+
+  test("the view serializes the turn deadline and seconds remaining") {
+    val gs = state(
+      Vector(player("p0", List(card(Rank.Six))), player("p1", List(card(Rank.Seven)))),
+      turnDeadlineMs = 50_000L
+    )
+
+    val view = PlayerGameView.forViewer(gs, "p0", nowMs = 38_000L)
+
+    assertEquals(view.turnDeadlineMs, 50_000L)
+    assertEquals(view.turnSecondsRemaining, 12)
+  }
+
+  test("an idle table reports the full 15-second clock") {
+    val gs = state(
+      Vector(player("p0", List(card(Rank.Six))), player("p1", List(card(Rank.Seven))))
+    )
+
+    assertEquals(PlayerGameView.forViewer(gs, "p0", nowMs = 1_000L).turnSecondsRemaining, 15)
+  }
+
+  test("an expired clock reports zero and a finished game never ticks") {
+    val players = Vector(player("p0", List(card(Rank.Six))), player("p1", List(card(Rank.Seven))))
+    val expired = state(players, turnDeadlineMs = 50_000L)
+    val finished = state(players, boutPhase = BoutPhase.GameOver, turnDeadlineMs = 50_000L)
+
+    assertEquals(PlayerGameView.forViewer(expired, "p0", nowMs = 60_000L).turnSecondsRemaining, 0)
+    assertEquals(PlayerGameView.forViewer(finished, "p0", nowMs = 0L).turnSecondsRemaining, 0)
   }
 
   test("an unknown viewer is rejected") {

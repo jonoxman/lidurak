@@ -12,6 +12,13 @@ object GameEngine:
    * revealed bottom trump, trump suit, and the first attacker/defender pair.
    */
   def createGame(config: GameConfig, playerNames: Vector[String]): GameState =
+    createGameAt(config, playerNames, nowMs = 0L)
+
+  /**
+   * Creates a game whose turn clock is already running: it gives the opening
+   * attacker a full 15 seconds starting at `nowMs`.
+   */
+  def createGameAt(config: GameConfig, playerNames: Vector[String], nowMs: Long): GameState =
     validate(config, playerNames)
 
     val playerCount = config.playerCount
@@ -52,19 +59,40 @@ object GameEngine:
       defenderIdx = defenderIdx,
       boutPhase = BoutPhase.InitialAttack,
       defenderInitialHandSize = players(defenderIdx).hand.size,
-      finishOrder = Vector.empty
+      finishOrder = Vector.empty,
+      turnDeadlineMs = if nowMs > 0 then nowMs + GameState.TurnDurationMs else 0L
     )
 
   /**
-   * Applies a player action to the game state.
+   * Applies a player action to the game state without touching the turn clock.
    *
    * Returns `Left(error)` when the move is illegal, leaving the caller's state
    * untouched, or `Right(newState)` for a legal move.
    */
   def applyAction(state: GameState, action: GameAction): Either[String, GameState] =
+    transition(state, action)
+
+  /**
+   * Applies an action and restarts the 15-second turn clock at `nowMs`.
+   * The server uses this so every accepted move gives the next player a full
+   * turn; pure engine calls keep the stored deadline untouched.
+   */
+  def applyActionAt(
+      state: GameState,
+      action: GameAction,
+      nowMs: Long
+  ): Either[String, GameState] =
+    transition(state, action).map(next => resetTurnClock(next, nowMs))
+
+  /** Restarts (or clears, on game over) the turn clock at `nowMs`. */
+  def resetTurnClock(state: GameState, nowMs: Long): GameState =
+    if state.boutPhase == BoutPhase.GameOver then state.copy(turnDeadlineMs = 0L)
+    else state.copy(turnDeadlineMs = nowMs + GameState.TurnDurationMs)
+
+  private def transition(state: GameState, action: GameAction): Either[String, GameState] =
     action match
-      case GameAction.InitialAttack(playerId, cards) =>
-        applyInitialAttack(state, playerId, cards)
+      case GameAction.InitialAttack(playerId, cards, targetDefender) =>
+        applyInitialAttack(state, playerId, cards, targetDefender)
       case GameAction.CoverCard(playerId, attackIndex, defenseCard) =>
         applyCoverCard(state, playerId, attackIndex, defenseCard)
       case GameAction.RedirectAttack(playerId, cards) =>
@@ -81,7 +109,8 @@ object GameEngine:
   private def applyInitialAttack(
       state: GameState,
       playerId: String,
-      cards: List[Card]
+      cards: List[Card],
+      targetDefender: Option[String]
   ): Either[String, GameState] =
     for
       _ <- check(
@@ -97,16 +126,66 @@ object GameEngine:
         cards.map(_.rank).distinct.size == 1,
         "All cards in an initial attack must share the same rank"
       )
+      defenderIdx <- resolveInitialDefender(state, attacker, targetDefender)
+      // Standard boutes use the recorded capacity; a chaos target resets it.
+      boutCapacity =
+        if state.chaosMode then Math.min(6, state.players(defenderIdx).hand.size)
+        else state.maxBoutAttacks
       _ <- check(
-        cards.size <= state.maxBoutAttacks,
-        s"An initial attack may contain at most ${state.maxBoutAttacks} cards"
+        cards.size <= boutCapacity,
+        s"An initial attack may contain at most $boutCapacity cards against this defender"
       )
     yield
       state.copy(
         players = state.players.updated(state.attackerIdx, attacker.copy(hand = remainingHand)),
         tablePairs = state.tablePairs ++ cards.map(card => TablePair(card)),
+        // The bout belongs to the chosen defender; throw-ins keep targeting them.
+        defenderIdx = defenderIdx,
+        defenderInitialHandSize =
+          if state.chaosMode then state.players(defenderIdx).hand.size
+          else state.defenderInitialHandSize,
         boutPhase = BoutPhase.Defense
       )
+
+  /**
+   * Resolves who defends the opening attack. Standard rules always use the next
+   * active seat clockwise; chaos mode lets the attacker name any active player
+   * holding cards (defaulting to the next clockwise seat).
+   */
+  private def resolveInitialDefender(
+      state: GameState,
+      attacker: PlayerState,
+      targetDefender: Option[String]
+  ): Either[String, Int] =
+    val naturalIdx = state.nextActivePlayerIdx(state.attackerIdx)
+    if !state.chaosMode then
+      targetDefender match
+        case None => Right(naturalIdx)
+        case Some(id) =>
+          val idx = state.players.indexWhere(_.id == id)
+          if idx == naturalIdx then Right(idx)
+          else Left("Targeting a specific defender requires chaos mode")
+    else
+      val candidates = chaosDefenderCandidates(state)
+      targetDefender match
+        case Some(id) =>
+          val idx = state.players.indexWhere(_.id == id)
+          if idx == -1 then Left(s"Unknown player: $id")
+          else if idx == state.attackerIdx then Left("The attacker cannot defend their own attack")
+          else if !state.players(idx).isActive then Left(s"$id has already finished the game")
+          else if !state.players(idx).hasCards then Left(s"$id has no cards to defend with")
+          else Right(idx)
+        case None =>
+          if candidates.contains(naturalIdx) then Right(naturalIdx)
+          else candidates.headOption.toRight("No active player has cards to defend this attack")
+
+  /** Seats a chaos-mode attacker may target: active, holding cards, not the attacker. */
+  private def chaosDefenderCandidates(state: GameState): Vector[Int] =
+    state.players.indices
+      .filter(idx =>
+        idx != state.attackerIdx && state.players(idx).isActive && state.players(idx).hasCards
+      )
+      .toVector
 
   private def applyCoverCard(
       state: GameState,
@@ -174,12 +253,7 @@ object GameEngine:
         state.tablePairs.size + cards.size <= 6,
         "A redirect may not grow the attack beyond 6 cards"
       )
-      nextDefIdx = state.nextActivePlayerIdx(state.defenderIdx)
-      nextDefender <- state.players.lift(nextDefIdx).toRight("Invalid next defender seat")
-      _ <- check(
-        nextDefender.hand.size >= state.tablePairs.size + cards.size,
-        s"${nextDefender.name} does not have enough cards to defend the redirected attack"
-      )
+      nextDefIdx <- chooseRedirectTarget(state, cards.size)
     yield
       val players = state.players
         .updated(state.defenderIdx, defender.copy(hand = remainingHand))
@@ -191,6 +265,19 @@ object GameEngine:
         defenderIdx = nextDefIdx,
         defenderInitialHandSize = players(nextDefIdx).hand.size
       )
+
+  /**
+   * Picks the seat that receives a redirect: the next clockwise active player
+   * under the standard rules, or a random eligible player in chaos mode.
+   */
+  private def chooseRedirectTarget(state: GameState, redirectCards: Int): Either[String, Int] =
+    val required = state.tablePairs.size + redirectCards
+    val candidates = state.redirectTargets(state.defenderIdx, required)
+    if candidates.isEmpty then
+      Left("No active player has enough cards to defend the redirected attack")
+    else if state.chaosMode then
+      Right(candidates(chaosRandom(state).nextInt(candidates.size)))
+    else Right(candidates.head)
 
   /**
    * Defender gives up on the current bout. Throw-ins stay open to every other
@@ -466,6 +553,96 @@ object GameEngine:
     (defense.suit == attack.suit && defense.rank.value > attack.rank.value) ||
       (defense.suit == trumpSuit && attack.suit != trumpSuit)
 
+  /**
+   * The move the engine makes for the player on the clock once their 15 seconds
+   * expire: a random legal attack card, an automatic surrender for the defender,
+   * or a pass for a non-defending player.
+   */
+  def defaultAction(state: GameState): Option[GameAction] =
+    state.boutPhase match
+      case BoutPhase.InitialAttack =>
+        state.players.lift(state.attackerIdx).filter(_.hasCards).map { attacker =>
+          val card = attacker.hand(chaosRandom(state).nextInt(attacker.hand.size))
+          GameAction.InitialAttack(attacker.id, List(card), chaosTargetFor(state))
+        }
+      case BoutPhase.Defense =>
+        if state.tablePairs.exists(_.defense.isEmpty) then
+          state.players
+            .lift(state.defenderIdx)
+            .filter(_.isActive)
+            .map(defender => GameAction.DeclareSurrender(defender.id))
+        else autoPassAction(state)
+      case BoutPhase.SurrenderThrowIn => autoPassAction(state)
+      case BoutPhase.BoutOver | BoutPhase.GameOver => None
+
+  /**
+   * The automatic follow-up the current state calls for, if any. A defender
+   * with no legal cover and no legal redirect has no move left but to surrender.
+   */
+  def pendingAutoAction(state: GameState): Option[GameAction] =
+    if state.boutPhase != BoutPhase.Defense then None
+    else
+      val uncovered = state.tablePairs.exists(_.defense.isEmpty)
+      state.players.lift(state.defenderIdx).filter(_.isActive) match
+        case Some(defender)
+            if uncovered && !canDefenderCover(state) && !canDefenderRedirect(state) =>
+          Some(GameAction.DeclareSurrender(defender.id))
+        case _ => None
+
+  /** True when the defender can legally cover at least one uncovered attack. */
+  def canDefenderCover(state: GameState): Boolean =
+    state.players.lift(state.defenderIdx).exists { defender =>
+      state.tablePairs.exists { pair =>
+        pair.defense.isEmpty &&
+          defender.hand.exists(card => isLegalCover(pair.attack, card, state.trumpSuit))
+      }
+    }
+
+  /** True when the defender can redirect at least one card to an eligible seat. */
+  def canDefenderRedirect(state: GameState): Boolean =
+    state.config.allowRedirect &&
+      state.tablePairs.nonEmpty &&
+      state.tablePairs.forall(_.defense.isEmpty) &&
+      state.tablePairs.size + 1 <= 6 &&
+      state.players.lift(state.defenderIdx).exists { defender =>
+        defender.hand.exists(card => state.tablePairs.forall(_.attack.rank == card.rank))
+      } &&
+      state.redirectTargets(state.defenderIdx, state.tablePairs.size + 1).nonEmpty
+
+  private def autoPassAction(state: GameState): Option[GameAction] =
+    state.players.zipWithIndex
+      .collectFirst {
+        case (player, idx) if idx != state.defenderIdx && player.isActive && !player.hasPassed =>
+          GameAction.PassTurn(player.id)
+      }
+
+  /** Random legal target for a chaos-mode opening attack, if any. */
+  private def chaosTargetFor(state: GameState): Option[String] =
+    if !state.chaosMode then None
+    else
+      val candidates = chaosDefenderCandidates(state)
+      if candidates.isEmpty then None
+      else Some(state.players(candidates(chaosRandom(state).nextInt(candidates.size))).id)
+
+  /** Deterministic pseudo-randomness derived from the state, for chaos effects. */
+  private def chaosRandom(state: GameState): Random =
+    new Random(
+      mixSeed(
+        state.config.seed ^
+          (state.tablePairs.size.toLong * 0x9E3779B1L) ^
+          (state.defenderIdx.toLong << 16) ^
+          (state.finishOrder.size.toLong << 32) ^
+          state.players.map(_.hand.size).sum.toLong
+      )
+    )
+
+  /** SplitMix64 finalizer so nearby seeds still produce spread-out choices. */
+  private def mixSeed(seed: Long): Long =
+    val shifted = seed + 0x9E3779B97F4A7C15L
+    val first = (shifted ^ (shifted >>> 30)) * 0xBF58476D1CE4E5B9L
+    val second = (first ^ (first >>> 27)) * 0x94D049BB133111EBL
+    second ^ (second >>> 31)
+
   private def check(condition: Boolean, error: String): Either[String, Unit] =
     Either.cond(condition, (), error)
 
@@ -490,6 +667,10 @@ object GameEngine:
     if !Set(2, 3, 4).contains(config.playerCount) then
       throw new IllegalArgumentException(
         s"Unsupported player count: ${config.playerCount} (expected 2, 3, or 4)"
+      )
+    if config.chaosMode && config.playerCount <= 2 then
+      throw new IllegalArgumentException(
+        "Chaos mode requires more than 2 players"
       )
 
   /** Index of the player holding the lowest-rank trump card, or 0 if nobody has one. */

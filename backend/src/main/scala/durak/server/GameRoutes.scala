@@ -19,11 +19,26 @@ import org.http4s.websocket.WebSocketFrame
 case class CreateGameRequest(
   playerCount: Int,
   playerNames: List[String],
-  allowRedirect: Boolean = true
+  allowRedirect: Boolean = true,
+  chaosMode: Boolean = false
 )
 
 object CreateGameRequest:
-  given Decoder[CreateGameRequest] = deriveDecoder[CreateGameRequest]
+
+  /** Optional flags may be omitted by older clients; they default to on/off. */
+  given Decoder[CreateGameRequest] = Decoder.instance { cursor =>
+    for
+      playerCount <- cursor.downField("playerCount").as[Int]
+      playerNames <- cursor.downField("playerNames").as[List[String]]
+      allowRedirect <- cursor.downField("allowRedirect").as[Option[Boolean]]
+      chaosMode <- cursor.downField("chaosMode").as[Option[Boolean]]
+    yield CreateGameRequest(
+      playerCount,
+      playerNames,
+      allowRedirect.getOrElse(true),
+      chaosMode.getOrElse(false)
+    )
+  }
 
 object GameRoutes:
 
@@ -45,7 +60,11 @@ object GameRoutes:
             case Right(request) =>
               manager
                 .createGame(
-                  GameConfig(request.playerCount, request.allowRedirect),
+                  GameConfig(
+                  request.playerCount,
+                  request.allowRedirect,
+                  chaosMode = request.chaosMode
+                ),
                   request.playerNames.toVector
                 )
                 .flatMap(room => Ok(createResponse(room, request.playerNames)))

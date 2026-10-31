@@ -99,6 +99,33 @@ class GameStateSuite extends munit.FunSuite:
     assertEquals(gs.nextActivePlayerIdx(2), 0)
   }
 
+  test("redirectTargets offers only the next clockwise seat in standard mode") {
+    val gs = state(Vector(player("p0"), player("p1"), player("p2"), player("p3")))
+
+    assertEquals(gs.copy(defenderIdx = 1).redirectTargets(1, 2), Vector(2))
+    assertEquals(gs.copy(defenderIdx = 1).redirectTargets(1, 7), Vector.empty)
+  }
+
+  test("chaos mode offers every eligible active seat as a redirect target") {
+    val chaos = state(Vector(player("p0"), player("p1"), player("p2"), player("p3")))
+      .copy(config = GameConfig(4, seed = 42L, chaosMode = true), defenderIdx = 1)
+
+    assertEquals(chaos.redirectTargets(1, 2), Vector(0, 2, 3))
+    assertEquals(chaos.redirectTargets(1, 7), Vector.empty)
+  }
+
+  test("turn clock helpers report the remaining seconds and expiry") {
+    val clocked = state(Vector(player("p0"), player("p1")))
+      .copy(turnDeadlineMs = 30_000L)
+
+    assertEquals(clocked.turnSecondsRemaining(16_000L), 14)
+    assertEquals(clocked.turnSecondsRemaining(29_500L), 1)
+    assertEquals(clocked.turnSecondsRemaining(30_000L), 0)
+    assert(!clocked.isTurnExpired(29_999L))
+    assert(clocked.isTurnExpired(30_000L))
+    assertEquals(clocked.copy(boutPhase = BoutPhase.GameOver).turnSecondsRemaining(0L), 0)
+  }
+
   test("nextActivePlayerIdx returns the only active seat when all others finished") {
     val gs = state(Vector(player("p0"), player("p1", finishRank = Some(1))))
     assertEquals(gs.nextActivePlayerIdx(0), 0)

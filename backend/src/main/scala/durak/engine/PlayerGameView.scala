@@ -13,6 +13,8 @@ case class PublicPlayerSummary(
  * The strictly filtered projection of [[GameState]] a single viewer may see:
  * their own hand, public summaries of the other players, and public table and
  * talon information. Opponent hands and the talon order never appear.
+ *
+ * `turnDeadlineMs` / `turnSecondsRemaining` drive the sidebar `00:XX` clock.
  */
 case class PlayerGameView(
   myId: String,
@@ -28,7 +30,9 @@ case class PlayerGameView(
   legalActions: List[String],
   finishOrder: Vector[String],
   isDraw: Boolean,
-  maxBoutAttacks: Int
+  maxBoutAttacks: Int,
+  turnDeadlineMs: Long,
+  turnSecondsRemaining: Int
 )
 
 object PlayerGameView:
@@ -42,7 +46,11 @@ object PlayerGameView:
    * player is reduced to a [[PublicPlayerSummary]], and the talon is exposed
    * only as a count plus the (public) bottom trump card.
    */
-  def forViewer(state: GameState, viewerId: String): PlayerGameView =
+  def forViewer(
+      state: GameState,
+      viewerId: String,
+      nowMs: Long = System.currentTimeMillis()
+  ): PlayerGameView =
     val viewerIdx = state.players.indexWhere(_.id == viewerId)
     if viewerIdx == -1 then
       throw new IllegalArgumentException(s"Unknown player: $viewerId")
@@ -72,7 +80,9 @@ object PlayerGameView:
       legalActions = legalActionsFor(state, viewer, viewerIdx),
       finishOrder = state.finishOrder,
       isDraw = state.isDraw,
-      maxBoutAttacks = state.maxBoutAttacks
+      maxBoutAttacks = state.maxBoutAttacks,
+      turnDeadlineMs = state.turnDeadlineMs,
+      turnSecondsRemaining = state.turnSecondsRemaining(nowMs)
     )
 
   private def legalActionsFor(
@@ -98,8 +108,8 @@ object PlayerGameView:
         case BoutPhase.Defense =>
           if viewerIdx == state.defenderIdx then
             Set(
-              Option.when(canCoverAny(state, viewer))("cover"),
-              Option.when(canRedirect(state, viewer))("redirect"),
+              Option.when(GameEngine.canDefenderCover(state))("cover"),
+              Option.when(GameEngine.canDefenderRedirect(state))("redirect"),
               Option.when(state.tablePairs.exists(_.defense.isEmpty))("surrender")
             ).flatten
           else
@@ -116,24 +126,6 @@ object PlayerGameView:
             ).flatten
         case BoutPhase.BoutOver | BoutPhase.GameOver =>
           Set.empty
-
-  /** True when at least one uncovered attack can be covered from this hand. */
-  private def canCoverAny(state: GameState, defender: PlayerState): Boolean =
-    state.tablePairs.exists { pair =>
-      pair.defense.isEmpty &&
-      defender.hand.exists(card => isLegalCover(pair.attack, card, state.trumpSuit))
-    }
-
-  /** True when a single-card redirect is legal right now. */
-  private def canRedirect(state: GameState, defender: PlayerState): Boolean =
-    val nextDefIdx = state.nextActivePlayerIdx(state.defenderIdx)
-    val nextDefender = state.players.lift(nextDefIdx)
-    state.config.allowRedirect &&
-    state.tablePairs.nonEmpty &&
-    state.tablePairs.forall(_.defense.isEmpty) &&
-    state.tablePairs.size + 1 <= 6 &&
-    defender.hand.exists(card => state.tablePairs.forall(_.attack.rank == card.rank)) &&
-    nextDefender.exists(_.hand.size >= state.tablePairs.size + 1)
 
   /** Passing is only possible once the table is covered or the bout is full. */
   private def canPassDefense(state: GameState, player: PlayerState): Boolean =
@@ -154,8 +146,3 @@ object PlayerGameView:
     player.hand.exists(card => tableRanks.contains(card.rank)) &&
     state.tablePairs.size < state.maxBoutAttacks &&
     defenderCanCover
-
-  /** Legal cover: same suit with a higher rank, or a trump against a non-trump. */
-  private def isLegalCover(attack: Card, defense: Card, trumpSuit: Suit): Boolean =
-    (defense.suit == attack.suit && defense.rank.value > attack.rank.value) ||
-      (defense.suit == trumpSuit && attack.suit != trumpSuit)

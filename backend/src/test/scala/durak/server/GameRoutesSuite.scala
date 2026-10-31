@@ -145,6 +145,93 @@ class GameRoutesSuite extends munit.FunSuite:
     assert(json.hcursor.get[String]("error").exists(_.nonEmpty), json.noSpaces)
   }
 
+  test("POST /api/game/create accepts chaos mode for three players") {
+    val manager = newManager
+
+    val (status, json) = post(
+      manager,
+      "/api/game/create",
+      Json.obj(
+        "playerCount" -> 3.asJson,
+        "playerNames" -> List("Alice", "Bob", "Cara").asJson,
+        "chaosMode" -> true.asJson
+      )
+    )
+
+    assertEquals(status, Status.Ok)
+    assert(json.hcursor.get[String]("gameId").exists(_.nonEmpty), json.noSpaces)
+  }
+
+  test("POST /api/game/create rejects chaos mode for two players") {
+    val manager = newManager
+
+    val (status, json) = post(
+      manager,
+      "/api/game/create",
+      Json.obj(
+        "playerCount" -> 2.asJson,
+        "playerNames" -> List("Alice", "Bob").asJson,
+        "chaosMode" -> true.asJson
+      )
+    )
+
+    assertEquals(status, Status.BadRequest)
+    assert(json.hcursor.get[String]("error").exists(_.nonEmpty), json.noSpaces)
+  }
+
+  test("chaos mode lets the opening attacker target a non-adjacent defender") {
+    val manager = newManager
+    val names = List("Alice", "Bob", "Cara")
+    val (createStatus, created) = post(
+      manager,
+      "/api/game/create",
+      Json.obj(
+        "playerCount" -> 3.asJson,
+        "playerNames" -> names.asJson,
+        "chaosMode" -> true.asJson
+      )
+    )
+    assertEquals(createStatus, Status.Ok)
+    val gameId = created.hcursor
+      .get[String]("gameId")
+      .getOrElse(fail(s"missing gameId in ${created.noSpaces}"))
+
+    val (_, viewJson) = get(manager, s"/api/game/$gameId/view/p0")
+    val view = viewJson.as[PlayerGameView].getOrElse(fail("invalid view body"))
+    val attackerIdx = view.attackerIdx
+    val targetIdx = (attackerIdx + 2) % 3
+    val (_, attackerJson) = get(manager, s"/api/game/$gameId/view/p${attackerIdx}")
+    val attackerView = attackerJson.as[PlayerGameView].getOrElse(fail("invalid attacker view"))
+
+    val (status, json) = post(
+      manager,
+      s"/api/game/$gameId/action",
+      Json.obj(
+        "type" -> "initialAttack".asJson,
+        "playerId" -> s"p$attackerIdx".asJson,
+        "cards" -> Json.arr(attackerView.myHand.head.asJson),
+        "targetDefender" -> s"p$targetIdx".asJson
+      )
+    )
+
+    assertEquals(status, Status.Ok)
+    val after = json.as[PlayerGameView].getOrElse(fail(s"invalid action view: ${json.noSpaces}"))
+    assertEquals(after.defenderIdx, targetIdx)
+    assertEquals(after.boutPhase, BoutPhase.Defense)
+  }
+
+  test("the returned view carries the 15-second turn clock") {
+    val manager = newManager
+    val gameId = createGame(manager, 2)
+
+    val (status, json) = get(manager, s"/api/game/$gameId/view/p0")
+
+    assertEquals(status, Status.Ok)
+    val view = json.as[PlayerGameView].getOrElse(fail("invalid view body"))
+    assert(view.turnDeadlineMs > 0, view.turnDeadlineMs)
+    assert(view.turnSecondsRemaining >= 0 && view.turnSecondsRemaining <= 15, view.turnSecondsRemaining)
+  }
+
   test("POST /api/game/create rejects an unsupported player count with 400") {
     val manager = newManager
 

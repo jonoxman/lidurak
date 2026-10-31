@@ -15,10 +15,17 @@ class RedirectSuite extends munit.FunSuite:
       allowRedirect: Boolean = true,
       trumpSuit: Suit = Suit.Spades,
       boutPhase: BoutPhase = BoutPhase.Defense,
-      defenderInitialHandSize: Int = 6
+      defenderInitialHandSize: Int = 6,
+      chaosMode: Boolean = false,
+      seed: Long = 42L
   ): GameState =
     GameState(
-      config = GameConfig(players.size, allowRedirect = allowRedirect, seed = 42L),
+      config = GameConfig(
+        players.size,
+        allowRedirect = allowRedirect,
+        seed = seed,
+        chaosMode = chaosMode
+      ),
       players = players,
       talon = Vector.empty,
       trumpSuit = trumpSuit,
@@ -349,6 +356,89 @@ class RedirectSuite extends munit.FunSuite:
     assert(result.isRight, result)
     val next = result.getOrElse(fail("expected a valid redirect"))
     assert(next.players.forall(!_.hasPassed), next.players.map(_.hasPassed))
+  }
+
+  // --- Chaos mode redirects ---
+
+  test("chaos mode redirects to a random eligible active player") {
+    val sixSpades = card(Rank.Six, Suit.Spades)
+    val sixHearts = card(Rank.Six, Suit.Hearts)
+
+    def game(seed: Long): GameState =
+      state(
+        Vector(
+          player("p0", List(card(Rank.Ace, Suit.Clubs))),
+          player("p1", List(sixHearts)),
+          player("p2", List(card(Rank.Ace, Suit.Spades), card(Rank.King, Suit.Diamonds))),
+          player(
+            "p3",
+            List(card(Rank.Ace, Suit.Hearts), card(Rank.King, Suit.Hearts), card(Rank.Queen, Suit.Hearts))
+          )
+        ),
+        tablePairs = Vector(TablePair(sixSpades)),
+        chaosMode = true,
+        seed = seed
+      )
+
+    val chosen = (0L until 60L).flatMap { seed =>
+      GameEngine
+        .applyAction(game(seed), GameAction.RedirectAttack("p1", List(sixHearts)))
+        .toOption
+        .map(next => (next.attackerIdx, next.defenderIdx))
+    }
+
+    assertEquals(chosen.size, 60)
+    // p0 has one card, so it can never take the two-card attack.
+    assert(chosen.forall((_, defenderIdx) => defenderIdx == 2 || defenderIdx == 3), chosen)
+    assert(chosen.forall((attackerIdx, _) => attackerIdx == 1), chosen)
+    // The choice really is random across games: both eligible seats come up.
+    assertEquals(chosen.map(_._2).toSet, Set(2, 3))
+  }
+
+  test("chaos mode skips players that cannot cover the redirected attack") {
+    val sixSpades = card(Rank.Six, Suit.Spades)
+    val sixHearts = card(Rank.Six, Suit.Hearts)
+
+    def game(seed: Long): GameState =
+      state(
+        Vector(
+          player("p0", List(card(Rank.Ace, Suit.Clubs))),
+          player("p1", List(sixHearts)),
+          player("p2", List(card(Rank.Ace, Suit.Spades))),
+          player("p3", List(card(Rank.Ace, Suit.Hearts), card(Rank.King, Suit.Hearts)))
+        ),
+        tablePairs = Vector(TablePair(sixSpades)),
+        chaosMode = true,
+        seed = seed
+      )
+
+    val defenders = (0L until 30L).flatMap { seed =>
+      GameEngine
+        .applyAction(game(seed), GameAction.RedirectAttack("p1", List(sixHearts)))
+        .toOption
+        .map(_.defenderIdx)
+    }
+
+    assertEquals(defenders.size, 30)
+    assert(defenders.forall(_ == 3), defenders)
+  }
+
+  test("chaos mode rejects a redirect when nobody else can take the attack") {
+    val sixSpades = card(Rank.Six, Suit.Spades)
+    val sixHearts = card(Rank.Six, Suit.Hearts)
+    val gs = state(
+      Vector(
+        player("p0", List(card(Rank.Ace, Suit.Clubs))),
+        player("p1", List(sixHearts)),
+        player("p2", List(card(Rank.Ace, Suit.Spades)))
+      ),
+      tablePairs = Vector(TablePair(sixSpades)),
+      chaosMode = true
+    )
+
+    val result = GameEngine.applyAction(gs, GameAction.RedirectAttack("p1", List(sixHearts)))
+
+    assert(result.isLeft, result)
   }
 
   test("a 3-player chain redirect sends the attack back to the original attacker") {

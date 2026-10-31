@@ -110,6 +110,18 @@ class JsonCodecsSuite extends munit.FunSuite:
     )
   }
 
+  test("InitialAttack round-trips an optional chaos target defender") {
+    val targeted = GameAction.InitialAttack("p0", List(card(Rank.Six)), Some("p2"))
+    val encoded = targeted.asJson
+
+    assertEquals(encoded.hcursor.get[String]("targetDefender"), Right("p2"))
+    assertEquals(parser.decode[GameAction](encoded.noSpaces), Right(targeted))
+
+    val untargeted = GameAction.InitialAttack("p0", List(card(Rank.Six)))
+    assertEquals(untargeted.asJson.hcursor.get[String]("targetDefender").isLeft, true)
+    assertEquals(parser.decode[GameAction](untargeted.asJson.noSpaces), Right(untargeted))
+  }
+
   test("CoverCard decodes from a JSON command") {
     val json =
       """{"type":"coverCard","playerId":"p1","attackIndex":0,"defenseCard":{"suit":"spades","rank":"seven"}}"""

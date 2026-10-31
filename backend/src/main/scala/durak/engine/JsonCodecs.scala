@@ -64,12 +64,14 @@ object JsonCodecs:
   // --- WebSocket commands ---
 
   given Encoder[GameAction] = Encoder.instance {
-    case GameAction.InitialAttack(playerId, cards) =>
-      Json.obj(
+    case GameAction.InitialAttack(playerId, cards, targetDefender) =>
+      val base = Json.obj(
         "type" -> Json.fromString("initialAttack"),
         "playerId" -> playerId.asJson,
         "cards" -> cards.asJson
       )
+      // Only chaos-mode attacks name a defender, so omit the field otherwise.
+      targetDefender.fold(base)(id => base.deepMerge(Json.obj("targetDefender" -> id.asJson)))
     case GameAction.CoverCard(playerId, attackIndex, defenseCard) =>
       Json.obj(
         "type" -> Json.fromString("coverCard"),
@@ -108,7 +110,8 @@ object JsonCodecs:
           for
             playerId <- cursor.downField("playerId").as[String]
             cards <- cursor.downField("cards").as[List[Card]]
-          yield GameAction.InitialAttack(playerId, cards)
+            targetDefender <- cursor.downField("targetDefender").as[Option[String]]
+          yield GameAction.InitialAttack(playerId, cards, targetDefender)
         case "covercard" =>
           for
             playerId <- cursor.downField("playerId").as[String]

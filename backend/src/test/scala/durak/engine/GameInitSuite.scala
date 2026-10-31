@@ -121,3 +121,14 @@ class GameInitSuite extends munit.FunSuite:
       GameEngine.createGame(GameConfig(5, seed = 1L), names(5))
     }
   }
+
+  test("chaos mode is rejected for two-player games") {
+    intercept[IllegalArgumentException] {
+      GameEngine.createGame(GameConfig(2, seed = 1L, chaosMode = true), names(2))
+    }
+  }
+
+  test("chaos mode is accepted for three and four players") {
+    for n <- 3 to 4 do
+      assert(GameEngine.createGame(GameConfig(n, seed = 1L, chaosMode = true), names(n)).chaosMode)
+  }

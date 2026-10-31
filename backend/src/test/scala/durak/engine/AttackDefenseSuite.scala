@@ -14,10 +14,11 @@ class AttackDefenseSuite extends munit.FunSuite:
       attackerIdx: Int = 0,
       defenderIdx: Int = 1,
       boutPhase: BoutPhase = BoutPhase.InitialAttack,
-      defenderInitialHandSize: Int = 6
+      defenderInitialHandSize: Int = 6,
+      chaosMode: Boolean = false
   ): GameState =
     GameState(
-      config = GameConfig(players.size, seed = 42L),
+      config = GameConfig(players.size, seed = 42L, chaosMode = chaosMode),
       players = players,
       talon = Vector.empty,
       trumpSuit = trumpSuit,
@@ -145,6 +146,137 @@ class AttackDefenseSuite extends munit.FunSuite:
     val result = GameEngine.applyAction(gs, GameAction.InitialAttack("p0", Nil))
 
     assert(result.isLeft, result)
+  }
+
+  // --- Chaos mode targeting ---
+
+  test("chaos mode lets the opening attacker choose a non-adjacent defender") {
+    val six = card(Rank.Six, Suit.Clubs)
+    val gs = state(
+      Vector(
+        player("p0", List(six, card(Rank.Ace, Suit.Clubs))),
+        player("p1", List(card(Rank.Seven, Suit.Hearts))),
+        player("p2", List(card(Rank.Eight, Suit.Hearts), card(Rank.Nine, Suit.Hearts)))
+      ),
+      chaosMode = true
+    )
+
+    val result =
+      GameEngine.applyAction(gs, GameAction.InitialAttack("p0", List(six), Some("p2")))
+
+    assert(result.isRight, result)
+    val next = result.getOrElse(fail("expected a valid chaos attack"))
+    assertEquals(next.defenderIdx, 2)
+    assertEquals(next.players(next.defenderIdx).id, "p2")
+    assertEquals(next.defenderInitialHandSize, 2)
+    assertEquals(next.maxBoutAttacks, 2)
+    assertEquals(next.tablePairs, Vector(TablePair(six)))
+    assertEquals(next.boutPhase, BoutPhase.Defense)
+  }
+
+  test("chaos mode defaults to the next clockwise player when no target is given") {
+    val gs = state(
+      Vector(
+        player("p0", List(card(Rank.Six))),
+        player("p1", List(card(Rank.Seven))),
+        player("p2", List(card(Rank.Eight)))
+      ),
+      chaosMode = true
+    )
+
+    val result = GameEngine.applyAction(gs, GameAction.InitialAttack("p0", List(card(Rank.Six))))
+
+    assert(result.isRight, result)
+    assertEquals(result.toOption.map(_.defenderIdx), Some(1))
+  }
+
+  test("chaos mode rejects targeting an inactive or cardless player") {
+    val base = state(
+      Vector(
+        player("p0", List(card(Rank.Six))),
+        player("p1", List(card(Rank.Seven))),
+        player("p2", Nil)
+      ),
+      chaosMode = true
+    )
+
+    val cardless =
+      GameEngine.applyAction(base, GameAction.InitialAttack("p0", List(card(Rank.Six)), Some("p2")))
+    val finished = GameEngine.applyAction(
+      base.copy(players = base.players.updated(1, base.players(1).copy(finishRank = Some(1)))),
+      GameAction.InitialAttack("p0", List(card(Rank.Six)), Some("p1"))
+    )
+
+    assert(cardless.isLeft, cardless)
+    assert(finished.isLeft, finished)
+  }
+
+  test("chaos mode rejects targeting the attacker themselves") {
+    val gs = state(
+      Vector(
+        player("p0", List(card(Rank.Six))),
+        player("p1", List(card(Rank.Seven))),
+        player("p2", List(card(Rank.Eight)))
+      ),
+      chaosMode = true
+    )
+
+    val result =
+      GameEngine.applyAction(gs, GameAction.InitialAttack("p0", List(card(Rank.Six)), Some("p0")))
+
+    assert(result.isLeft, result)
+  }
+
+  test("the opening attack is capped by the chosen defender's hand size") {
+    val sixes = List(card(Rank.Six, Suit.Spades), card(Rank.Six, Suit.Hearts))
+    val gs = state(
+      Vector(
+        player("p0", sixes),
+        player("p1", List(card(Rank.Seven))),
+        player("p2", List(card(Rank.Eight, Suit.Clubs)))
+      ),
+      chaosMode = true
+    )
+
+    val tooMany =
+      GameEngine.applyAction(gs, GameAction.InitialAttack("p0", sixes, Some("p2")))
+    val single =
+      GameEngine.applyAction(gs, GameAction.InitialAttack("p0", List(sixes.head), Some("p2")))
+
+    assert(tooMany.isLeft, tooMany)
+    assert(single.isRight, single)
+    assertEquals(single.toOption.map(_.maxBoutAttacks), Some(1))
+  }
+
+  test("standard mode rejects an explicit non-adjacent target") {
+    val gs = state(
+      Vector(
+        player("p0", List(card(Rank.Six))),
+        player("p1", List(card(Rank.Seven))),
+        player("p2", List(card(Rank.Eight)))
+      )
+    )
+
+    val result =
+      GameEngine.applyAction(gs, GameAction.InitialAttack("p0", List(card(Rank.Six)), Some("p2")))
+
+    assert(result.isLeft, result)
+  }
+
+  test("standard mode accepts naming the natural defender explicitly") {
+    val gs = state(
+      Vector(
+        player("p0", List(card(Rank.Six))),
+        player("p1", List(card(Rank.Seven))),
+        player("p2", List(card(Rank.Eight)))
+      )
+    )
+
+    val result =
+      GameEngine.applyAction(gs, GameAction.InitialAttack("p0", List(card(Rank.Six)), Some("p1")))
+
+    assert(result.isRight, result)
+    assertEquals(result.toOption.map(_.defenderIdx), Some(1))
   }
 
   // --- Cover card ---

@@ -6,9 +6,9 @@ import durak.engine.*
 /** An in-memory registry of live game rooms, keyed by their generated game id. */
 class GameManager(rooms: Ref[IO, Map[String, GameRoom]]):
 
-  /** Creates a room with a fresh unique id and registers it. */
+  /** Creates a room with a fresh unique id, starts its turn clock, and registers it. */
   def createGame(config: GameConfig, playerNames: Vector[String]): IO[GameRoom] =
-    GameActor.create(config, playerNames).flatMap { room =>
+    GameActor.createWithClock(config, playerNames).flatMap { room =>
       rooms.update(current => current.updated(room.gameId, room)).as(room)
     }
 
