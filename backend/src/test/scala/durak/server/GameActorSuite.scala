@@ -29,6 +29,15 @@ class GameActorSuite extends munit.FunSuite:
     assertNotEquals(newRoom().gameId, newRoom().gameId)
   }
 
+  test("game ids are exactly 8 alphanumeric characters") {
+    val ids = (1 to 20).map(_ => GameManager.generateGameId()) :+ newRoom().gameId
+
+    ids.foreach { id =>
+      assertEquals(id.length, 8, s"game id is not 8 characters: $id")
+      assert(id.matches("^[A-Za-z0-9]{8}$"), s"game id is not alphanumeric: $id")
+    }
+  }
+
   test("a valid initial attack updates the room state") {
     val room = newRoom()
     val before = room.stateRef.get.unsafeRunSync()

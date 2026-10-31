@@ -75,8 +75,6 @@ object GameEngine:
         applyThrowInCards(state, playerId, cards)
       case GameAction.PassTurn(playerId) =>
         applyPassTurn(state, playerId)
-      case other =>
-        Left(s"Unsupported action: $other")
 
   private def applyInitialAttack(
       state: GameState,

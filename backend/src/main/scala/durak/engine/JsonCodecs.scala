@@ -35,7 +35,7 @@ object JsonCodecs:
   }
 
   private def lowerFirst(value: String): String =
-    if value.isEmpty then value else value.head.toLower + value.tail
+    if value.isEmpty then value else s"${value.head.toLower}${value.tail}"
 
   // --- Value objects ---
 

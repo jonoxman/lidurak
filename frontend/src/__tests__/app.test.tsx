@@ -23,6 +23,14 @@ describe('parseRoute', () => {
     });
   });
 
+  it('routes an 8-character alphanumeric game id', () => {
+    expect(parseRoute('#/g/aB3dE9fZ?player=p1')).toEqual({
+      name: 'game',
+      gameId: 'aB3dE9fZ',
+      playerId: 'p1',
+    });
+  });
+
   it('decodes the game id and defaults the player id', () => {
     expect(parseRoute('#/g/game%2F1')).toEqual({
       name: 'game',
