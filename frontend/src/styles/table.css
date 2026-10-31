@@ -32,16 +32,56 @@
 
 /* --- Row 1: opponent seats --- */
 
+/* Item 15: every seat is the same fixed size, so no box looks bigger. */
 .seat {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  align-items: stretch;
+  gap: 4px;
   min-width: 0;
+  width: 100%;
+  max-width: var(--seat-width, 240px);
+  height: var(--seat-height, 140px);
+  box-sizing: border-box;
+}
+
+.seat-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  justify-content: center;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
   padding: 8px 10px;
   background: var(--durak-panel);
   border: 2px solid transparent;
   border-radius: 8px;
   box-sizing: border-box;
+  overflow: hidden;
+}
+
+/* Item 14: each player's own digital clock lives directly above their box. */
+.seat-clock,
+.hand-clock {
+  align-self: center;
+  padding: 1px 8px;
+  background: rgba(22, 21, 18, 0.72);
+  border: 1px solid var(--durak-border);
+  border-radius: 999px;
+  color: var(--durak-text);
+  font-family: monospace;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.seat-clock.active,
+.hand-clock.active {
+  color: #f5f1e6;
+  border-color: var(--attacker-accent, #d9a326);
+  box-shadow: 0 0 8px rgba(217, 163, 38, 0.35);
 }
 
 .seat-top-left {
@@ -62,10 +102,15 @@
   justify-self: end;
 }
 
-.seat.active-attacker,
-.seat.active-defender {
-  border-color: var(--durak-accent);
-  box-shadow: 0 0 10px rgba(98, 153, 36, 0.6);
+/* Item 21: amber marks the attacker, crimson marks the defender. */
+.seat.active-attacker .seat-box {
+  border-color: var(--attacker-accent, #d9a326);
+  box-shadow: 0 0 10px rgba(217, 163, 38, 0.55);
+}
+
+.seat.active-defender .seat-box {
+  border-color: var(--defender-accent, #c33);
+  box-shadow: 0 0 10px rgba(204, 51, 51, 0.55);
 }
 
 .seat-head {
@@ -180,6 +225,12 @@
   justify-content: center;
 }
 
+/* Target outlines live in the bout row, facing the defender's seat. */
+.bout-target {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
 /* Item 12: one dashed target outline in front of each legal attack target. */
 /* Item 5: outlines match the card size exactly, so drops never distort a card. */
 .target-outline,
@@ -279,15 +330,19 @@
   min-width: 0;
 }
 
+/* Item 1: the talon and the perpendicular trump share one grid cell, so the
+   T-shape overlap needs no absolute positioning. */
 .deck-stack {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: 80px;
+  grid-template-rows: 114px;
+  align-items: start;
   min-width: 0;
 }
 
 .talon-stack {
+  grid-area: 1 / 1;
+  z-index: 2;
   display: grid;
   grid-template-columns: 80px;
   grid-template-rows: 114px;
@@ -322,11 +377,17 @@
 
 /* The bottom trump card lies face up, perpendicular to the talon. */
 .bottom-trump {
+  grid-area: 1 / 1;
+  align-self: end;
+  justify-self: start;
+  z-index: 1;
   display: grid;
   place-items: center;
   flex: 0 0 auto;
   width: 114px;
   height: 80px;
+  /* Tucked under the deck's bottom edge, forming the crossbar of the T. */
+  margin: 0 0 -10px 30px;
 }
 
 .bottom-trump-card {
@@ -407,22 +468,44 @@
   grid-column: 2;
   grid-row: 3;
   display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: 0;
+  padding: 2px 0 8px;
+}
+
+/* Item 22: the highlight hugs the cards instead of the whole grid column. */
+.hand-cards {
+  display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
   justify-content: center;
-  gap: 6px;
+  width: max-content;
+  max-width: 100%;
   min-width: 0;
-  padding: 4px 0 8px;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 8px;
+  box-sizing: border-box;
+}
+
+.hand-cards.attacker-turn {
+  animation: attackerPulse 2.4s infinite ease-in-out;
+}
+
+.hand-cards.defender-turn {
+  animation: defenderPulse 2.4s infinite ease-in-out;
 }
 
 [data-zone='player-hand'] .card-slot + .card-slot {
   margin-left: -10px;
 }
 
-/* Item 17: the active attacker's hand breathes while they owe a play. */
-[data-zone='player-hand'].turn-pulse {
-  animation: turnPulse 2.4s infinite ease-in-out;
-  border-radius: 8px;
+/* Item 17/22: the pulse lives on the tight card container, not the column. */
+[data-zone='player-hand'].turn-pulse .hand-cards {
+  outline: none;
 }
 
 /* --- Row 3, column 3: sort bar & contextual controls --- */
@@ -536,6 +619,17 @@
   animation: redirectNudge 180ms ease-in-out;
 }
 
+/* Item 21: a single source of truth for the accent pairs, so the attacker's
+   seat outline and the attacker's hand glow can never drift apart. */
+.table-arena {
+  --attacker-accent: #d9a326;
+  --attacker-glow: rgba(217, 163, 38, 0.8);
+  --attacker-glow-soft: rgba(217, 163, 38, 0.35);
+  --defender-accent: #c33;
+  --defender-glow: rgba(204, 51, 51, 0.8);
+  --defender-glow-soft: rgba(204, 51, 51, 0.35);
+}
+
 /* Item 17: gentle 2.4s rhythmic glow. */
 @keyframes turnPulse {
   0%,
@@ -544,6 +638,28 @@
   }
   50% {
     box-shadow: 0 0 12px 3px rgba(217, 163, 38, 0.8);
+  }
+}
+
+/* Item 21: the attacker's hand glows amber, matching their seat highlight. */
+@keyframes attackerPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 2px var(--attacker-glow-soft);
+  }
+  50% {
+    box-shadow: 0 0 12px 3px var(--attacker-glow);
+  }
+}
+
+/* The defender's hand glows crimson, matching their seat highlight. */
+@keyframes defenderPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 2px var(--defender-glow-soft);
+  }
+  50% {
+    box-shadow: 0 0 12px 3px var(--defender-glow);
   }
 }
 
@@ -609,6 +725,20 @@
   .card-slot {
     width: 48px;
     height: 68px;
+  }
+
+  .seat {
+    width: 100%;
+    height: auto;
+  }
+
+  .seat-clock,
+  .hand-clock {
+    font-size: 11px;
+  }
+
+  .hand-cards {
+    padding: 2px 4px;
   }
 
   .talon-stack {

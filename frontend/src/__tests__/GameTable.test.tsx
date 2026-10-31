@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/preact';
 import {
   GameTable,
+  SEAT_BOX,
   assignSeats,
   clockwiseOffset,
   seatForOffset,
@@ -619,5 +620,172 @@ describe('minimalist controls', () => {
     expect(within(controls).getByRole('button', { name: 'Suit' })).toBeTruthy();
     expect(within(controls).getByRole('button', { name: 'Surrender' })).toBeTruthy();
     expect(within(controls).queryByRole('button', { name: 'Redirect' })).toBeNull();
+  });
+});
+
+describe('seat boxes, clocks and the T-shaped deck', () => {
+  const seatedOpponents: OpponentSummary[] = [
+    { id: 'p1', name: 'Bob', cardCount: 3, hasPassed: false, finishRank: null },
+    { id: 'p2', name: 'Carol', cardCount: 5, hasPassed: false, finishRank: null },
+  ];
+
+  it('overlaps the perpendicular trump card with the talon in one grid cell', () => {
+    const { container } = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={seatedOpponents}
+        tablePairs={[]}
+        talonCount={12}
+        bottomTrumpCard={{ suit: 'diamonds', rank: 'six' }}
+        trumpSuit="diamonds"
+      />,
+    );
+
+    const stack = within(
+      container.querySelector('[data-zone="table-deck"]') as HTMLElement,
+    ).getByTestId('deck-t-shape');
+    expect(stack.getAttribute('data-layout')).toBe('t-shape');
+    expect(stack.querySelector('.talon-stack')).not.toBeNull();
+
+    // The trump is rotated a quarter turn and shares the deck's grid cell.
+    const trump = stack.querySelector('.bottom-trump') as HTMLElement;
+    expect(trump).not.toBeNull();
+    expect(trump.querySelector('[data-rotated="true"]')).not.toBeNull();
+    expect(trump.parentElement).toBe(stack);
+  });
+
+  it('gives every opponent box identical dimensions with a clock above it', () => {
+    const { container } = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={seatedOpponents}
+        tablePairs={[]}
+        talonCount={12}
+        trumpSuit="diamonds"
+      />,
+    );
+
+    const seats = Array.from(
+      container.querySelectorAll('[data-testid="opponent"]'),
+    ) as HTMLElement[];
+    expect(seats).toHaveLength(2);
+
+    const sizes = seats.map(
+      (seat) => `${seat.style.getPropertyValue('--seat-width')}x${seat.style.getPropertyValue('--seat-height')}`,
+    );
+    expect(new Set(sizes).size).toBe(1);
+    expect(sizes[0]).toBe(`${SEAT_BOX.width}pxx${SEAT_BOX.height}px`);
+
+    for (const seat of seats) {
+      const clock = seat.querySelector('.seat-clock') as HTMLElement;
+      expect(clock).not.toBeNull();
+      expect(clock.nextElementSibling?.classList.contains('seat-box')).toBe(true);
+    }
+  });
+
+  it('ticks only the clock of the player being waited on', () => {
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={seatedOpponents}
+        tablePairs={[]}
+        talonCount={12}
+        trumpSuit="diamonds"
+        attackerId="p1"
+        defenderId="p2"
+        turnPlayerId="p1"
+        turnSecondsRemaining={7}
+      />,
+    );
+
+    expect(screen.getByTestId('seat-clock-p1').textContent).toBe('00:07');
+    expect(screen.getByTestId('seat-clock-p1').getAttribute('data-active')).toBe('true');
+    expect(screen.getByTestId('seat-clock-p2').textContent).toBe('00:15');
+    expect(screen.getByTestId('seat-clock-p2').getAttribute('data-active')).toBe('false');
+    // The viewer is not the one being waited on, so their own clock is idle.
+    expect(screen.getByTestId('hand-clock').textContent).toBe('00:15');
+    expect(screen.getByTestId('hand-clock').getAttribute('data-active')).toBe('false');
+  });
+
+  it('clamps the clock of the waiting player and puts it above the tight hand box', () => {
+    const handSize = hand.length;
+    const { container } = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={seatedOpponents}
+        tablePairs={[]}
+        talonCount={12}
+        trumpSuit="diamonds"
+        attackerId="p0"
+        defenderId="p1"
+        awaitingAttack
+        turnPlayerId="p0"
+        turnSecondsRemaining={42}
+      />,
+    );
+
+    expect(screen.getByTestId('hand-clock').textContent).toBe('00:15');
+    expect(screen.getByTestId('hand-clock').getAttribute('data-active')).toBe('true');
+
+    const handZone = container.querySelector('[data-zone="player-hand"]') as HTMLElement;
+    expect(handZone.firstElementChild?.classList.contains('hand-clock')).toBe(true);
+
+    // The pulse sits on the card container, which hugs the three cards.
+    const cards = handZone.querySelector('.hand-cards') as HTMLElement;
+    expect(cards.classList.contains('attacker-turn')).toBe(true);
+    expect(cards.querySelectorAll('.card-slot')).toHaveLength(handSize);
+  });
+
+  it('marks the attacked defender hand differently from the attacker hand', () => {
+    const { container, unmount } = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={seatedOpponents}
+        tablePairs={uncoveredPair}
+        talonCount={12}
+        trumpSuit="diamonds"
+        attackerId="p1"
+        defenderId="p0"
+        defending
+        turnPlayerId="p0"
+      />,
+    );
+
+    const cards = container.querySelector('.hand-cards') as HTMLElement;
+    expect(cards.classList.contains('defender-turn')).toBe(true);
+    expect(cards.classList.contains('attacker-turn')).toBe(false);
+
+    const attackerSeat = screen
+      .getByTestId('seat-clock-p1')
+      .closest('.seat') as HTMLElement;
+    expect(attackerSeat.classList.contains('active-attacker')).toBe(true);
+    expect(attackerSeat.classList.contains('active-defender')).toBe(false);
+    unmount();
+
+    // A defender outside the viewer's seat gets the crimson class instead.
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={seatedOpponents}
+        tablePairs={uncoveredPair}
+        talonCount={12}
+        trumpSuit="diamonds"
+        attackerId="p1"
+        defenderId="p2"
+        turnPlayerId="p2"
+      />,
+    );
+
+    const defenderSeat = screen
+      .getByTestId('seat-clock-p2')
+      .closest('.seat') as HTMLElement;
+    expect(defenderSeat.classList.contains('active-defender')).toBe(true);
+    expect(defenderSeat.classList.contains('active-attacker')).toBe(false);
   });
 });

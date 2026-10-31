@@ -412,4 +412,124 @@ describe('GamePage', () => {
     await waitFor(() => expect(screen.getByText('Surrender')).toBeTruthy());
     expect(screen.queryByText('Pass')).toBeNull();
   });
+
+  it('renders Back to lobby as a styled action button', async () => {
+    getGameView.mockResolvedValue(view);
+
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    await waitFor(() => expect(screen.getByText('Pass')).toBeTruthy());
+    const backToLobby = screen.getByRole('button', { name: 'Back to lobby' });
+
+    expect(backToLobby.tagName).toBe('BUTTON');
+    expect(backToLobby.className).toContain('action-button');
+    expect(backToLobby.className).toContain('back-to-lobby');
+    expect(screen.queryByRole('link', { name: 'Back to lobby' })).toBeNull();
+  });
+
+  it('keeps hotseat tabs and the players list in fixed seat order', async () => {
+    const threePlayerView: PlayerGameView = {
+      ...view,
+      opponents: [
+        { id: 'p2', name: 'Carol', cardCount: 4, hasPassed: false, finishRank: null },
+        { id: 'p1', name: 'Bob', cardCount: 6, hasPassed: false, finishRank: null },
+      ],
+    };
+    getGameView.mockResolvedValue(threePlayerView);
+
+    const { container } = render(
+      <GamePage gameId="game-1" playerId="p1" onSwitchPlayer={() => {}} />,
+    );
+
+    await waitFor(() => expect(screen.getByRole('tablist')).toBeTruthy());
+    const tabs = screen.getAllByRole('tab');
+    expect(tabs.map((tab) => tab.querySelector('.hotseat-id')?.textContent)).toEqual([
+      'p0',
+      'p1',
+      'p2',
+    ]);
+    // The active player stays in its seat slot instead of jumping to the top.
+    expect(tabs[1].getAttribute('aria-selected')).toBe('true');
+
+    const badges = Array.from(
+      container.querySelectorAll('.status-badge'),
+    ) as HTMLElement[];
+    expect(badges.map((badge) => badge.getAttribute('data-player-id'))).toEqual([
+      'p0',
+      'p1',
+      'p2',
+    ]);
+  });
+
+  it('shows a clock above every seat and ticks only the player being waited on', async () => {
+    getGameView.mockResolvedValue({
+      ...view,
+      opponents: [
+        { id: 'p2', name: 'Carol', cardCount: 4, hasPassed: false, finishRank: null },
+        { id: 'p1', name: 'Bob', cardCount: 6, hasPassed: false, finishRank: null },
+      ],
+      attackerIdx: 2,
+      defenderIdx: 0,
+      boutPhase: 'defense',
+      turnPlayerId: 'p1',
+      turnSecondsRemaining: 9,
+      legalActions: ['pass'],
+    });
+
+    const { container } = render(
+      <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('seat-clock-p1')).toBeTruthy());
+    expect(screen.getByTestId('seat-clock-p1').textContent).toBe('00:09');
+    expect(screen.getByTestId('seat-clock-p1').getAttribute('data-active')).toBe('true');
+    expect(screen.getByTestId('seat-clock-p2').getAttribute('data-active')).toBe('false');
+
+    const seats = Array.from(
+      container.querySelectorAll('[data-testid="opponent"]'),
+    ) as HTMLElement[];
+    for (const seat of seats) {
+      expect(seat.querySelector('.seat-clock')?.nextElementSibling).toBe(
+        seat.querySelector('.seat-box'),
+      );
+    }
+
+    // The viewer's own clock sits directly above their hand.
+    const handClock = screen.getByTestId('hand-clock');
+    expect(handClock.getAttribute('data-active')).toBe('false');
+    expect(handClock.nextElementSibling?.classList.contains('hand-cards')).toBe(true);
+  });
+
+  it('binds amber to the attacker and crimson to the defender', async () => {
+    getGameView.mockResolvedValue({
+      ...view,
+      opponents: [
+        { id: 'p1', name: 'Bob', cardCount: 6, hasPassed: false, finishRank: null },
+        { id: 'p2', name: 'Carol', cardCount: 6, hasPassed: false, finishRank: null },
+      ],
+      tablePairs: [{ attack: { suit: 'spades', rank: 'six' }, defense: null }],
+      attackerIdx: 1,
+      defenderIdx: 2,
+      boutPhase: 'defense',
+      legalActions: ['pass'],
+    });
+
+    const { container } = render(
+      <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('seat-clock-p1')).toBeTruthy());
+    const attackerSeat = screen
+      .getByTestId('seat-clock-p1')
+      .closest('.seat') as HTMLElement;
+    const defenderSeat = screen
+      .getByTestId('seat-clock-p2')
+      .closest('.seat') as HTMLElement;
+
+    expect(attackerSeat.classList.contains('active-attacker')).toBe(true);
+    expect(defenderSeat.classList.contains('active-defender')).toBe(true);
+    expect(attackerSeat.classList.contains('active-defender')).toBe(false);
+    expect(defenderSeat.classList.contains('active-attacker')).toBe(false);
+    expect(container.querySelector('.seat-box')).not.toBeNull();
+  });
 });
