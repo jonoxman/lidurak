@@ -6,7 +6,8 @@ case class PublicPlayerSummary(
   name: String,
   cardCount: Int,
   hasPassed: Boolean,
-  finishRank: Option[Int]
+  finishRank: Option[Int],
+  status: String = PlayerStatus.Active
 )
 
 /**
@@ -28,7 +29,11 @@ case class PlayerGameView(
   legalActions: List[String],
   finishOrder: Vector[String],
   isDraw: Boolean,
-  maxBoutAttacks: Int
+  maxBoutAttacks: Int,
+  myStatus: String,
+  myFinishRank: Option[Int],
+  winners: List[String],
+  durak: Option[String]
 )
 
 object PlayerGameView:
@@ -58,7 +63,8 @@ object PlayerGameView:
             name = other.name,
             cardCount = other.hand.size,
             hasPassed = other.hasPassed,
-            finishRank = other.finishRank
+            finishRank = other.finishRank,
+            status = other.status
           )
       }.toList,
       tablePairs = state.tablePairs,
@@ -72,7 +78,11 @@ object PlayerGameView:
       legalActions = legalActionsFor(state, viewer, viewerIdx),
       finishOrder = state.finishOrder,
       isDraw = state.isDraw,
-      maxBoutAttacks = state.maxBoutAttacks
+      maxBoutAttacks = state.maxBoutAttacks,
+      myStatus = viewer.status,
+      myFinishRank = viewer.finishRank,
+      winners = state.winners,
+      durak = state.durak
     )
 
   private def legalActionsFor(

@@ -3,6 +3,7 @@ package durak.server
 import cats.effect.*
 import durak.engine.*
 import fs2.concurrent.Topic
+import org.slf4j.LoggerFactory
 
 import java.util.UUID
 
@@ -15,6 +16,21 @@ case class GameRoom(
 )
 
 object GameActor:
+
+  private val logger = LoggerFactory.getLogger("durak.server.GameActor")
+
+  /**
+   * Records a rejected client action as a warning. The line goes to SLF4J and
+   * to stdout, so invalid traffic stays visible without a log binding.
+   */
+  def logRejected(message: String): IO[Unit] =
+    IO.delay {
+      logger.warn(message)
+      println(message)
+    }.void
+
+  /** Name of the action's variant, e.g. `InitialAttack`, used in log lines. */
+  def actionType(action: GameAction): String = action.productPrefix
 
   /**
    * Creates a room holding the engine's initial state for `config`. All player
@@ -48,8 +64,10 @@ object GameActor:
       .flatMap {
         case Right(next) =>
           room.topic.publish1(next).void.as(Right(next): Either[String, GameState])
-        case rejected @ Left(_) =>
-          IO.pure(rejected)
+        case rejected @ Left(error) =>
+          logRejected(
+            s"Invalid action ${actionType(action)} from player ${actorId(action)}: $error"
+          ).as(rejected)
       }
 
   /** The seat that issued `action`. */

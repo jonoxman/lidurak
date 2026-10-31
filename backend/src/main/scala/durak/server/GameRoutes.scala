@@ -111,7 +111,10 @@ object GameRoutes:
                 .evalMap { text =>
                   parser.decode[GameAction](text) match
                     case Right(action) => GameActor.applyAction(room, action).void
-                    case Left(_)       => IO.unit
+                    case Left(error) =>
+                      GameActor.logRejected(
+                        s"Invalid action payload in game $gameId from player $playerId: ${describe(error)}"
+                      )
                 }
             webSockets.build(views, commands)
         }
