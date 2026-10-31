@@ -49,7 +49,7 @@ describe('LobbyPage', () => {
     submitForm();
 
     await waitFor(() =>
-      expect(createGame).toHaveBeenCalledWith(3, ['Zoe', 'Bob', 'Carol'], false),
+      expect(createGame).toHaveBeenCalledWith(3, ['Zoe', 'Bob', 'Carol'], false, false),
     );
 
     const alice = await screen.findByRole('link', { name: 'Zoe (p0)' });
@@ -59,6 +59,40 @@ describe('LobbyPage', () => {
     );
     expect(screen.getByRole('link', { name: 'Carol (p2)' }).getAttribute('href')).toBe(
       '#/g/game-1?player=p2',
+    );
+  });
+
+  it('offers chaos mode only for three or more players and sends it on create', async () => {
+    createGame.mockResolvedValue({ gameId: 'game-1', players: ['p0', 'p1', 'p2'] });
+    render(<LobbyPage />);
+
+    expect(screen.queryByLabelText('Chaos mode (attack any player)')).toBeNull();
+
+    fireEvent.change(screen.getByLabelText('Players'), { target: { value: '3' } });
+    const chaos = await screen.findByLabelText('Chaos mode (attack any player)');
+    expect((chaos as HTMLInputElement).checked).toBe(false);
+
+    fireEvent.click(chaos);
+    submitForm();
+
+    await waitFor(() =>
+      expect(createGame).toHaveBeenCalledWith(3, ['Alice', 'Bob', 'Carol'], true, true),
+    );
+  });
+
+  it('drops chaos mode when the player count returns to two', async () => {
+    createGame.mockResolvedValue({ gameId: 'game-1', players: ['p0', 'p1'] });
+    render(<LobbyPage />);
+
+    fireEvent.change(screen.getByLabelText('Players'), { target: { value: '4' } });
+    fireEvent.click(await screen.findByLabelText('Chaos mode (attack any player)'));
+    fireEvent.change(screen.getByLabelText('Players'), { target: { value: '2' } });
+
+    expect(screen.queryByLabelText('Chaos mode (attack any player)')).toBeNull();
+    submitForm();
+
+    await waitFor(() =>
+      expect(createGame).toHaveBeenCalledWith(2, ['Alice', 'Bob'], true, false),
     );
   });
 

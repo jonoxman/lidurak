@@ -13,12 +13,15 @@ export function LobbyPage() {
   const [playerCount, setPlayerCount] = useState(2);
   const [names, setNames] = useState<string[]>(DEFAULT_NAMES.slice(0, 2));
   const [allowRedirect, setAllowRedirect] = useState(true);
+  const [chaosMode, setChaosMode] = useState(false);
   const [creating, setCreating] = useState(false);
   const [created, setCreated] = useState<CreatedRoom | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const changeCount = (count: number) => {
     setPlayerCount(count);
+    // Chaos Mode needs at least three players, so drop it when shrinking.
+    if (count <= 2) setChaosMode(false);
     setNames((previous) =>
       Array.from(
         { length: count },
@@ -37,7 +40,7 @@ export function LobbyPage() {
     setCreating(true);
     setError(null);
     setCreated(null);
-    createGame(playerCount, names, allowRedirect)
+    createGame(playerCount, names, allowRedirect, playerCount > 2 && chaosMode)
       .then((room: CreatedGame) => {
         setCreated({
           gameId: room.gameId,
@@ -92,6 +95,17 @@ export function LobbyPage() {
           />
           Allow redirects
         </label>
+
+        {playerCount > 2 ? (
+          <label class="checkbox-field">
+            <input
+              type="checkbox"
+              checked={chaosMode}
+              onChange={(event) => setChaosMode((event.target as HTMLInputElement).checked)}
+            />
+            Chaos mode (attack any player)
+          </label>
+        ) : null}
 
         <button type="submit" class="action-button green" disabled={creating}>
           {creating ? 'Creating…' : 'Create Game'}

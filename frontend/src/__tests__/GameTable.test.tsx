@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/preact';
 import {
   GameTable,
@@ -355,6 +355,250 @@ describe('turn nudges', () => {
     expect(
       container.querySelector('[data-zone="player-hand"]')!.classList.contains('turn-pulse'),
     ).toBe(false);
+  });
+});
+
+const activeOpponents: OpponentSummary[] = [
+  { id: 'p1', name: 'Bob', cardCount: 4, hasPassed: false, finishRank: null },
+  { id: 'p2', name: 'Carol', cardCount: 4, hasPassed: false, finishRank: null },
+];
+
+const uncoveredPair: TablePairData[] = [
+  { attack: { suit: 'spades', rank: 'six' }, defense: null },
+];
+
+describe('bout outlines and anchoring', () => {
+  it('renders one target outline for the clockwise defender in standard mode', () => {
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={[]}
+        talonCount={20}
+        trumpSuit="diamonds"
+        defenderId="p1"
+        awaitingAttack
+      />,
+    );
+
+    expect(screen.getByTestId('target-outline-p1')).toBeTruthy();
+    expect(screen.queryByTestId('target-outline-p2')).toBeNull();
+  });
+
+  it('renders a target outline for every legal opponent in chaos mode', () => {
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={[]}
+        talonCount={20}
+        trumpSuit="diamonds"
+        defenderId="p1"
+        chaosMode
+        awaitingAttack
+      />,
+    );
+
+    expect(screen.getByTestId('target-outline-p1')).toBeTruthy();
+    expect(screen.getByTestId('target-outline-p2')).toBeTruthy();
+  });
+
+  it('removes the target outlines once the first card of the bout is played', () => {
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={uncoveredPair}
+        talonCount={20}
+        trumpSuit="diamonds"
+        defenderId="p1"
+        awaitingAttack
+      />,
+    );
+
+    expect(screen.queryByTestId('target-outline-p1')).toBeNull();
+    expect(screen.queryByTestId('target-outline-p2')).toBeNull();
+  });
+
+  it('anchors the active bout in front of the defending player', () => {
+    const { container } = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={uncoveredPair}
+        talonCount={20}
+        trumpSuit="diamonds"
+        defenderId="p1"
+      />,
+    );
+
+    expect(
+      container.querySelector('.bout-area')!.getAttribute('data-anchor'),
+    ).toBe('top-left');
+  });
+
+  it('anchors the bout at the bottom when the viewer is defending', () => {
+    const { container } = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={uncoveredPair}
+        talonCount={20}
+        trumpSuit="diamonds"
+        defenderId="p0"
+        defending
+      />,
+    );
+
+    expect(
+      container.querySelector('.bout-area')!.getAttribute('data-anchor'),
+    ).toBe('bottom');
+  });
+
+  it('renders a card-shaped redirect outline with an arrow toward the next seat', () => {
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={uncoveredPair}
+        talonCount={20}
+        trumpSuit="diamonds"
+        defenderId="p1"
+        canRedirect
+      />,
+    );
+
+    const outline = screen.getByTestId('redirect-outline');
+    expect(outline.getAttribute('data-direction')).toBe('top-right');
+    expect(outline.querySelector('svg')).not.toBeNull();
+    expect(outline.textContent).not.toMatch(/PEREVODZHU/i);
+  });
+
+  it('renders a shuffle icon for chaos-mode redirects', () => {
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={uncoveredPair}
+        talonCount={20}
+        trumpSuit="diamonds"
+        defenderId="p1"
+        chaosMode
+        canRedirect
+      />,
+    );
+
+    const outline = screen.getByTestId('redirect-outline');
+    expect(outline.getAttribute('data-direction')).toBe('shuffle');
+    expect(outline.querySelector('svg')!.getAttribute('data-icon')).toBe('shuffle');
+  });
+
+  it('hides the redirect outline when redirection is not legal', () => {
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={uncoveredPair}
+        talonCount={20}
+        trumpSuit="diamonds"
+        defenderId="p1"
+      />,
+    );
+
+    expect(screen.queryByTestId('redirect-outline')).toBeNull();
+  });
+});
+
+describe('drag-snap and double-click', () => {
+  it('reports a double-clicked hand card', () => {
+    const onCardDoubleClick = vi.fn();
+    renderSortableTable({ onCardDoubleClick });
+
+    fireEvent.dblClick(screen.getByLabelText('six of hearts'));
+
+    expect(onCardDoubleClick).toHaveBeenCalledWith({ suit: 'hearts', rank: 'six' });
+  });
+
+  it('drops a dragged card onto a chaos attack target', () => {
+    const onAttackDrop = vi.fn();
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={[]}
+        talonCount={20}
+        trumpSuit="diamonds"
+        defenderId="p1"
+        chaosMode
+        awaitingAttack
+        onAttackDrop={onAttackDrop}
+      />,
+    );
+
+    fireEvent.dragStart(screen.getByLabelText('six of spades'), {
+      dataTransfer: { setData: vi.fn() },
+    });
+    fireEvent.drop(screen.getByTestId('target-outline-p2'), {
+      dataTransfer: { getData: () => '' },
+    });
+
+    expect(onAttackDrop).toHaveBeenCalledWith({ suit: 'spades', rank: 'six' }, 'p2');
+  });
+
+  it('drops a dragged card onto an uncovered attack to cover it', () => {
+    const onCoverDrop = vi.fn();
+    const { container } = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={uncoveredPair}
+        talonCount={20}
+        trumpSuit="diamonds"
+        defenderId="p0"
+        defending
+        onCoverDrop={onCoverDrop}
+      />,
+    );
+    const zone = container.querySelector('[data-drop-zone="cover:0"]') as HTMLElement;
+
+    fireEvent.dragStart(screen.getByLabelText('king of clubs'), {
+      dataTransfer: { setData: vi.fn() },
+    });
+    fireEvent.drop(zone, { dataTransfer: { getData: () => '' } });
+
+    expect(onCoverDrop).toHaveBeenCalledWith({ suit: 'clubs', rank: 'king' }, 0);
+  });
+
+  it('highlights the nearest drop slot while a card hovers it', () => {
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={[]}
+        talonCount={20}
+        trumpSuit="diamonds"
+        defenderId="p1"
+        chaosMode
+        awaitingAttack
+        onAttackDrop={() => {}}
+      />,
+    );
+    const outline = screen.getByTestId('target-outline-p1');
+
+    fireEvent.dragOver(outline, { dataTransfer: { getData: () => '' } });
+
+    expect(outline.classList.contains('snap-active')).toBe(true);
   });
 });
 

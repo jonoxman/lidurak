@@ -9,6 +9,24 @@ vi.mock('../api/client', () => ({
 
 const wsState = vi.hoisted(() => ({ onUpdate: null as ((view: unknown) => void) | null }));
 
+const audio = vi.hoisted(() => ({
+  playAttackCard: vi.fn(),
+  playDefendCard: vi.fn(),
+  playRedirect: vi.fn(),
+  playSurrender: vi.fn(),
+  playTalonDraw: vi.fn(),
+  playClockTick: vi.fn(),
+  playGameOver: vi.fn(),
+  installUnlockListeners: vi.fn(),
+  removeUnlockListeners: vi.fn(),
+}));
+
+vi.mock('../audio/SoundEngine', () => ({
+  soundEngine: audio,
+  SoundEngine: class {},
+  default: audio,
+}));
+
 vi.mock('../api/websocket', () => ({
   GameWebSocket: class {
     constructor(_gameId: string, _playerId: string, onUpdate: (view: unknown) => void) {
@@ -51,6 +69,7 @@ describe('GamePage', () => {
     getGameView.mockReset();
     sendAction.mockReset();
     wsState.onUpdate = null;
+    Object.values(audio).forEach((spy) => spy.mockClear());
   });
 
   it('loads the view and sends actions through REST when the socket is closed', async () => {
@@ -251,6 +270,134 @@ describe('GamePage', () => {
 
     await waitFor(() => expect(screen.getByText('Connected')).toBeTruthy());
     expect(screen.getByText('Surrender')).toBeTruthy();
+  });
+
+  it('counts the clock down from the turn deadline and ticks in the last five seconds', async () => {
+    getGameView.mockResolvedValue({
+      ...view,
+      turnDeadlineMs: Date.now() + 4_000,
+      turnSecondsRemaining: 4,
+    });
+
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('turn-clock').textContent?.trim()).toBe('00:04'),
+    );
+    await waitFor(() => expect(audio.playClockTick).toHaveBeenCalled());
+  });
+
+  it('shows 00:00 without ticking once the deadline has passed', async () => {
+    getGameView.mockResolvedValue({
+      ...view,
+      turnDeadlineMs: Date.now() - 5_000,
+      turnSecondsRemaining: 0,
+    });
+
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('turn-clock').textContent?.trim()).toBe('00:00'),
+    );
+    expect(audio.playClockTick).not.toHaveBeenCalled();
+  });
+
+  it('never renders an invalid action banner and warns instead', async () => {
+    getGameView.mockResolvedValue(view);
+    sendAction.mockResolvedValue({ error: 'Moving is not legal right now' });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    await waitFor(() => expect(screen.getByText('Pass')).toBeTruthy());
+    fireEvent.click(screen.getByText('Pass'));
+
+    await waitFor(() =>
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('Action rejected')),
+    );
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByText(/Moving is not legal/)).toBeNull();
+    warn.mockRestore();
+  });
+
+  it('double-click plays a card when there is only one legal attack target', async () => {
+    const attackView: PlayerGameView = {
+      ...view,
+      myHand: [{ suit: 'spades', rank: 'six' }],
+      tablePairs: [],
+      boutPhase: 'initialAttack',
+      attackerIdx: 0,
+      defenderIdx: 1,
+      legalActions: ['attack'],
+    };
+    getGameView.mockResolvedValue(attackView);
+    sendAction.mockResolvedValue(attackView);
+
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    await waitFor(() => expect(screen.getByText('Attack')).toBeTruthy());
+    fireEvent.dblClick(screen.getByLabelText('six of spades'));
+
+    await waitFor(() =>
+      expect(sendAction).toHaveBeenCalledWith('game-1', {
+        type: 'initialAttack',
+        playerId: 'p0',
+        cards: [{ suit: 'spades', rank: 'six' }],
+      }),
+    );
+  });
+
+  it('ignores a double-click when the chaos attack target is ambiguous', async () => {
+    const chaosView: PlayerGameView = {
+      ...view,
+      chaosMode: true,
+      myHand: [{ suit: 'spades', rank: 'six' }],
+      opponents: [
+        { id: 'p1', name: 'Bob', cardCount: 6, hasPassed: false, finishRank: null },
+        { id: 'p2', name: 'Carol', cardCount: 6, hasPassed: false, finishRank: null },
+      ],
+      tablePairs: [],
+      boutPhase: 'initialAttack',
+      attackerIdx: 0,
+      defenderIdx: 1,
+      legalActions: ['attack'],
+    };
+    getGameView.mockResolvedValue(chaosView);
+
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    await waitFor(() => expect(screen.getByText('Attack')).toBeTruthy());
+    fireEvent.dblClick(screen.getByLabelText('six of spades'));
+
+    expect(sendAction).not.toHaveBeenCalled();
+  });
+
+  it('plays attack, defense and game-over sounds from state changes', async () => {
+    getGameView.mockResolvedValue(view);
+
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    await waitFor(() => expect(wsState.onUpdate).not.toBeNull());
+    await waitFor(() => expect(screen.getByText('Pass')).toBeTruthy());
+
+    wsState.onUpdate?.({
+      ...view,
+      tablePairs: [{ attack: { suit: 'spades', rank: 'six' }, defense: null }],
+      legalActions: ['cover', 'surrender'],
+    });
+    await waitFor(() => expect(audio.playAttackCard).toHaveBeenCalledWith(1));
+
+    wsState.onUpdate?.({
+      ...view,
+      tablePairs: [
+        { attack: { suit: 'spades', rank: 'six' }, defense: { suit: 'spades', rank: 'seven' } },
+      ],
+      legalActions: ['surrender'],
+    });
+    await waitFor(() => expect(audio.playDefendCard).toHaveBeenCalled());
+
+    wsState.onUpdate?.({ ...view, boutPhase: 'GameOver', legalActions: [] });
+    await waitFor(() => expect(audio.playGameOver).toHaveBeenCalled());
   });
 
   it('applies the view returned by the REST fallback', async () => {

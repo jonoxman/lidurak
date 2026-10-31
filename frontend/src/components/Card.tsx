@@ -13,6 +13,10 @@ export interface CardProps {
   /** Draws the golden trump glow and corner badge. */
   trump?: boolean;
   onClick?: () => void;
+  onDoubleClick?: () => void;
+  draggable?: boolean;
+  onDragStart?: (event: DragEvent) => void;
+  onDragEnd?: () => void;
 }
 
 const SUIT_SYMBOLS: Record<string, string> = {
@@ -63,6 +67,10 @@ export function Card({
   selected = false,
   trump = false,
   onClick,
+  onDoubleClick,
+  draggable = false,
+  onDragStart,
+  onDragEnd,
 }: CardProps) {
   const classes = ['card-slot'];
   if (selected) classes.push('selected');
@@ -75,6 +83,7 @@ export function Card({
         class={classes.join(' ')}
         data-selected={selected ? 'true' : 'false'}
         onClick={onClick}
+        onDblClick={onDoubleClick}
       >
         <CardBack />
       </div>
@@ -93,6 +102,10 @@ export function Card({
       data-suit={suit.toLowerCase()}
       data-rank={rank.toLowerCase()}
       onClick={onClick}
+      onDblClick={onDoubleClick}
+      draggable={draggable}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
     >
       <svg
         class="playing-card"
