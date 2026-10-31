@@ -1,6 +1,8 @@
 export interface ActionBarProps {
   legalActions: string[];
   onAction: (action: { type: string }) => void;
+  /** Seconds left before the automatic surrender, shown on the Surrender button. */
+  surrenderSeconds?: number | null;
 }
 
 interface ActionButton {
@@ -20,7 +22,11 @@ const BUTTONS: ActionButton[] = [
  * throw-ins, `Surrender` for a defender facing uncovered cards. Only actions the
  * server lists as legal are rendered.
  */
-export function ActionBar({ legalActions, onAction }: ActionBarProps) {
+export function ActionBar({
+  legalActions,
+  onAction,
+  surrenderSeconds = null,
+}: ActionBarProps) {
   const buttons = BUTTONS.filter((button) => legalActions.includes(button.action));
 
   if (buttons.length === 0) return null;
@@ -35,6 +41,11 @@ export function ActionBar({ legalActions, onAction }: ActionBarProps) {
           onClick={() => onAction({ type: button.type })}
         >
           {button.label}
+          {button.action === 'surrender' && surrenderSeconds != null ? (
+            <span class="surrender-countdown" data-testid="surrender-countdown">
+              {surrenderSeconds}
+            </span>
+          ) : null}
         </button>
       ))}
     </div>

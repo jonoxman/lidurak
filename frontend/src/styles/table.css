@@ -521,35 +521,50 @@
   min-width: 0;
 }
 
+/* Item 11: one compact dropdown replaces the three sort buttons. */
 .sort-bar {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
 }
 
-.sort-button {
+.sort-label {
+  flex: 0 1 auto;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+
+.sort-select {
+  flex: 1 1 auto;
   min-width: 0;
-  padding: 7px 8px;
-  background: var(--durak-panel);
+  padding: 7px 26px 7px 10px;
+  background-color: var(--durak-panel);
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: calc(100% - 15px) 55%, calc(100% - 10px) 55%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
   border: 1px solid var(--durak-border);
   border-radius: 6px;
   color: var(--durak-text);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+  appearance: none;
+  transition: border-color 120ms ease;
 }
 
-.sort-button:hover {
+.sort-select:hover {
   border-color: var(--durak-accent);
-  color: #f5f1e6;
 }
 
-.sort-button.active {
-  background: rgba(98, 153, 36, 0.16);
-  border-color: var(--durak-accent);
-  color: #f5f1e6;
+.sort-select:focus-visible {
+  outline: 2px solid var(--durak-accent);
+  outline-offset: 2px;
 }
 
 .action-bar {
@@ -884,4 +899,45 @@
    preference UI applies this class to a dedicated felt surface when it exists. */
 .table-texture-filtered {
   filter: var(--table-filter);
+}
+
+/* --- Interaction polish (Items 11, 12, 18, 19) --- */
+
+/* Item 12: hand cards that are legal right now lift off the baseline. */
+.hand-cards .card-slot.legal-playable {
+  transform: translateY(-8px);
+}
+
+.hand-cards .card-slot.legal-playable:hover {
+  transform: translateY(-10px);
+}
+
+/* Item 19: the whole gesture keeps the pointer finger, never the slashed
+   "no drop" circle, because every drop surface opts into the drag. */
+.card-slot[draggable='true'],
+.table-pair-attack[data-drop-zone],
+.target-outline,
+.redirect-outline,
+.bout-area[data-drop-zone] {
+  cursor: pointer;
+}
+
+.table-arena.dragging,
+.table-arena.dragging * {
+  cursor: pointer;
+}
+
+/* Item 18: the 3-second auto-surrender countdown rides on the button. */
+.surrender-countdown {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  margin-left: 6px;
+  border-radius: 999px;
+  background: rgba(22, 21, 18, 0.45);
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  vertical-align: middle;
 }
