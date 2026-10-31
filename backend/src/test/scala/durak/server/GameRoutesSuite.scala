@@ -49,9 +49,11 @@ class GameRoutesSuite extends munit.FunSuite:
       )
     )
     assertEquals(status, Status.Ok)
-    json.hcursor
-      .get[String]("gameId")
-      .getOrElse(fail(s"missing gameId in ${json.noSpaces}"))
+    json.hcursor.get[String]("gameId") match
+      case Right(gameId) =>
+        assert(gameId.matches("^[A-Za-z0-9]{8}$"), s"invalid game id: $gameId")
+        gameId
+      case Left(error) => fail(s"missing gameId in ${json.noSpaces}: $error")
 
   test("POST /api/game/create returns a game id and the players") {
     val manager = newManager
@@ -67,7 +69,10 @@ class GameRoutesSuite extends munit.FunSuite:
     )
 
     assertEquals(status, Status.Ok)
-    assert(json.hcursor.get[String]("gameId").exists(_.nonEmpty))
+    val gameId = json.hcursor
+      .get[String]("gameId")
+      .getOrElse(fail(s"missing gameId in ${json.noSpaces}"))
+    assert(gameId.matches("^[A-Za-z0-9]{8}$"), s"invalid game id: $gameId")
     assertEquals(json.hcursor.downField("players").as[List[Json]].map(_.size).toOption, Some(2))
   }
 

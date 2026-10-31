@@ -10,6 +10,8 @@ lazy val root = (project in file("."))
       "org.typelevel" %% "cats-effect" % "3.5.4",
       "io.circe" %% "circe-generic" % "0.14.7",
       "io.circe" %% "circe-parser" % "0.14.7",
+      // Real SLF4J binding, so server logs are emitted instead of the NOP logger.
+      "org.slf4j" % "slf4j-simple" % "1.7.36",
       "org.scalameta" %% "munit" % "1.0.0" % Test,
       "org.typelevel" %% "munit-cats-effect" % "2.0.0" % Test
     ),

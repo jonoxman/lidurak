@@ -5,8 +5,6 @@ import durak.engine.*
 import fs2.concurrent.Topic
 import org.slf4j.LoggerFactory
 
-import java.util.UUID
-
 /** A live game: its authoritative state, its broadcast topic, and its seats. */
 case class GameRoom(
   gameId: String,
@@ -42,7 +40,7 @@ object GameActor:
         stateRef <- Ref.of[IO, GameState](initialState)
         topic <- Topic[IO, GameState]
       yield GameRoom(
-        gameId = UUID.randomUUID().toString,
+        gameId = GameManager.generateGameId(),
         stateRef = stateRef,
         topic = topic,
         playerIds = initialState.players.map(_.id)
