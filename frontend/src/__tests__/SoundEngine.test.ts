@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SOUND_STORAGE_KEY, SoundEngine } from '../audio/SoundEngine';
+import {
+  DEFAULT_VOLUME,
+  PACK_STORAGE_KEY,
+  SOUND_STORAGE_KEY,
+  VOLUME_STORAGE_KEY,
+  SoundEngine,
+  type SoundEvent,
+} from '../audio/SoundEngine';
 
 class MockAudioParam {
   value = 0;
@@ -327,5 +334,206 @@ describe('SoundEngine', () => {
 
     expect(engineWithoutStorage.isEnabled()).toBe(true);
     expect(() => engineWithoutStorage.setMuted(true)).not.toThrow();
+  });
+});
+
+describe('SoundEngine sound packs, volume and clock', () => {
+  let context: MockAudioContext;
+  let engine: SoundEngine;
+
+  const newEngine = () =>
+    new SoundEngine({ context: asContext(context), storage: window.localStorage });
+
+  const EVENT_NAMES: SoundEvent[] = [
+    'cardPlay',
+    'cardDefend',
+    'cardRedirect',
+    'pass',
+    'surrender',
+    'boutWon',
+    'gameWin',
+    'gameDurak',
+    'invalid',
+    'clockTick',
+    'talonDraw',
+  ];
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    context = new MockAudioContext();
+    engine = newEngine();
+  });
+
+  afterEach(() => {
+    window.localStorage.clear();
+  });
+
+  it('offers five distinct named sound packs', () => {
+    const packs = SoundEngine.soundPacks();
+
+    expect(packs).toHaveLength(5);
+    expect(new Set(packs.map((pack) => pack.id)).size).toBe(5);
+    expect(packs.map((pack) => pack.name)).toEqual([
+      'Classic Felt',
+      'Arcade 8-Bit',
+      'Sci-Fi Synth',
+      'Acoustic Pluck',
+      'Modern Minimal',
+    ]);
+  });
+
+  it('defaults to Classic Felt at 0.7 master volume', () => {
+    engine.playClockTick();
+
+    expect(DEFAULT_VOLUME).toBeCloseTo(0.7);
+    expect(engine.getSoundPack()).toBe('classic-felt');
+    expect(engine.getVolume()).toBeCloseTo(0.7);
+    expect(context.gains[0].gain.value).toBeCloseTo(0.7);
+  });
+
+  it('scales every generated gain through the master volume', () => {
+    engine.playClockTick();
+
+    engine.setVolume(0.25);
+
+    expect(engine.getVolume()).toBeCloseTo(0.25);
+    expect(context.gains[0].gain.value).toBeCloseTo(0.25);
+  });
+
+  it('is completely silent at volume 0', () => {
+    engine.setVolume(0);
+    context.oscillators = [];
+    context.sources = [];
+
+    engine.playCardPlay(3);
+    engine.playGameWin();
+    engine.playClockTick(3);
+
+    expect(context.oscillators).toHaveLength(0);
+    expect(context.sources).toHaveLength(0);
+  });
+
+  it('clamps the volume to 0..1 and persists it', () => {
+    engine.setVolume(3);
+    expect(engine.getVolume()).toBe(1);
+    expect(window.localStorage.getItem('durak_sound_volume')).toBe('1');
+
+    engine.setVolume(-2);
+    expect(engine.getVolume()).toBe(0);
+    expect(window.localStorage.getItem(VOLUME_STORAGE_KEY)).toBe('0');
+
+    engine.setVolume(Number.NaN);
+    expect(engine.getVolume()).toBe(0);
+
+    engine.setVolume(0.4);
+    expect(newEngine().getVolume()).toBeCloseTo(0.4);
+  });
+
+  it('switches packs, changing the synthesized voice, and persists the choice', () => {
+    engine.playCardPlay();
+    expect(context.oscillators[0].type).toBe('triangle');
+
+    expect(engine.setSoundPack('arcade-8bit')).toBe(true);
+    expect(engine.getSoundPack()).toBe('arcade-8bit');
+
+    context.oscillators = [];
+    engine.playCardPlay();
+
+    expect(context.oscillators[0].type).toBe('square');
+    expect(window.localStorage.getItem('durak_sound_pack')).toBe('arcade-8bit');
+    expect(window.localStorage.getItem(PACK_STORAGE_KEY)).toBe('arcade-8bit');
+    expect(newEngine().getSoundPack()).toBe('arcade-8bit');
+  });
+
+  it('ignores unknown pack ids and falls back from a stale stored value', () => {
+    expect(engine.setSoundPack('kazoo')).toBe(false);
+    expect(engine.getSoundPack()).toBe('classic-felt');
+
+    window.localStorage.setItem(PACK_STORAGE_KEY, 'not-a-pack');
+
+    expect(newEngine().getSoundPack()).toBe('classic-felt');
+  });
+
+  it('gives every pack a distinct attack voice and clock tick', () => {
+    const attackVoices = SoundEngine.soundPacks().map((pack) => {
+      engine.setSoundPack(pack.id);
+      context.oscillators = [];
+      engine.playCardPlay();
+      return requestedFrequencies(context)[0];
+    });
+    expect(new Set(attackVoices).size).toBe(5);
+
+    const ticks = SoundEngine.soundPacks().map((pack) => {
+      engine.setSoundPack(pack.id);
+      context.oscillators = [];
+      engine.playClockTick(3);
+      return requestedFrequencies(context)[0];
+    });
+    expect(new Set(ticks).size).toBe(5);
+  });
+
+  it('synthesizes every game event in every pack', () => {
+    for (const pack of SoundEngine.soundPacks()) {
+      engine.setSoundPack(pack.id);
+      for (const event of EVENT_NAMES) {
+        context.oscillators = [];
+        context.sources = [];
+
+        engine.playSound(event, 2);
+
+        const nodes = context.oscillators.length + context.sources.length;
+        expect(nodes, `${pack.id}/${event}`).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('repeats per-card events once per card and skips an empty count', () => {
+    engine.setSoundPack('acoustic-pluck');
+
+    engine.playCardPlay(3);
+    expect(context.oscillators).toHaveLength(3);
+
+    context.oscillators = [];
+    engine.playCardDefend();
+    expect(context.oscillators).toHaveLength(1);
+
+    context.oscillators = [];
+    engine.playSurrender(0);
+    expect(context.oscillators).toHaveLength(0);
+  });
+
+  it('ticks only inside the final five seconds of the turn', () => {
+    for (const remaining of [1, 2, 3, 4, 5]) {
+      context.oscillators = [];
+      engine.playClockTick(remaining);
+      expect(context.oscillators.length, `remaining ${remaining}`).toBeGreaterThan(0);
+    }
+
+    for (const remaining of [0, 6, 15, -1]) {
+      context.oscillators = [];
+      engine.playClockTick(remaining);
+      expect(context.oscillators).toHaveLength(0);
+    }
+  });
+
+  it('survives storage failures while reading and writing preferences', () => {
+    const storage = {
+      getItem: () => {
+        throw new Error('blocked');
+      },
+      setItem: () => {
+        throw new Error('blocked');
+      },
+    } as unknown as Storage;
+    const resilient = new SoundEngine({ context: asContext(context), storage });
+
+    expect(resilient.getVolume()).toBeCloseTo(DEFAULT_VOLUME);
+    expect(resilient.getSoundPack()).toBe('classic-felt');
+    expect(() => {
+      resilient.setVolume(0.5);
+      resilient.setSoundPack('arcade-8bit');
+    }).not.toThrow();
+    expect(resilient.getVolume()).toBeCloseTo(0.5);
+    expect(resilient.getSoundPack()).toBe('arcade-8bit');
   });
 });
