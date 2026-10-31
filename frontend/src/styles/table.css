@@ -19,7 +19,7 @@
   min-width: 0;
   min-height: 620px;
   padding: 20px;
-  background-color: #1e2923;
+  background-color: var(--table-felt, #1e2923);
   border-radius: 8px;
   box-sizing: border-box;
 }
@@ -181,10 +181,11 @@
 }
 
 /* Item 12: one dashed target outline in front of each legal attack target. */
+/* Item 5: outlines match the card size exactly, so drops never distort a card. */
 .target-outline,
 .redirect-outline {
-  width: 72px;
-  height: 104px;
+  width: 80px;
+  height: 114px;
   border-radius: 8px;
   box-sizing: border-box;
 }
@@ -234,8 +235,8 @@
 
 .table-pair {
   display: grid;
-  grid-template-columns: 70px;
-  grid-template-rows: 100px;
+  grid-template-columns: 80px;
+  grid-template-rows: 114px;
   flex: 0 0 auto;
   gap: 0;
   padding: 0 20px 15px 0;
@@ -288,16 +289,16 @@
 
 .talon-stack {
   display: grid;
-  grid-template-columns: 70px;
-  grid-template-rows: 100px;
+  grid-template-columns: 80px;
+  grid-template-rows: 114px;
   flex: 0 0 auto;
 }
 
 .talon-back {
   grid-column: 1;
   grid-row: 1;
-  width: 70px;
-  height: 100px;
+  width: 80px;
+  height: 114px;
 }
 
 .talon-back-second {
@@ -324,8 +325,8 @@
   display: grid;
   place-items: center;
   flex: 0 0 auto;
-  width: 100px;
-  height: 70px;
+  width: 114px;
+  height: 80px;
 }
 
 .bottom-trump-card {
@@ -363,8 +364,9 @@
 .card-slot {
   position: relative;
   flex: 0 0 auto;
-  width: 70px;
-  height: 100px;
+  /* Item 5: 80x114 base size, scaled by the SVG's 70x100 viewBox. */
+  width: 80px;
+  height: 114px;
   border-radius: 6px;
   transition: transform 120ms ease, box-shadow 120ms ease;
 }
@@ -663,4 +665,93 @@
     padding: 8px 16px;
     font-size: 14px;
   }
+}
+
+/* --- Table felt textures (Item 9) ---
+   Six selectable surfaces. A preset only sets the felt colour and its overlay,
+   so layout never changes; brightness/contrast/hue ride on custom properties. */
+
+[data-zone='table-arena'] {
+  --table-felt: #1e2923;
+  --table-felt-overlay: none;
+  --table-brightness: 1;
+  --table-contrast: 1;
+  --table-hue: 0deg;
+  --table-filter: brightness(var(--table-brightness)) contrast(var(--table-contrast))
+    hue-rotate(var(--table-hue));
+  background-image: var(--table-felt-overlay);
+}
+
+[data-zone='table-arena'][data-texture='emerald-felt'] {
+  --table-felt: #123f2b;
+  --table-felt-overlay: repeating-linear-gradient(
+      45deg,
+      rgba(255, 255, 255, 0.035) 0 2px,
+      transparent 2px 7px
+    ),
+    radial-gradient(circle at 50% 30%, rgba(255, 255, 255, 0.06), transparent 65%);
+}
+
+[data-zone='table-arena'][data-texture='midnight-navy'] {
+  --table-felt: #16203a;
+  --table-felt-overlay: repeating-linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.03) 0 2px,
+      transparent 2px 8px
+    ),
+    radial-gradient(circle at 50% 25%, rgba(140, 170, 255, 0.08), transparent 70%);
+}
+
+[data-zone='table-arena'][data-texture='burgundy-velvet'] {
+  --table-felt: #3a1620;
+  --table-felt-overlay: radial-gradient(
+      ellipse at 50% 20%,
+      rgba(255, 170, 170, 0.09),
+      transparent 60%
+    ),
+    repeating-radial-gradient(
+      circle at 50% 50%,
+      rgba(0, 0, 0, 0.06) 0 3px,
+      transparent 3px 9px
+    );
+}
+
+[data-zone='table-arena'][data-texture='charcoal-slate'] {
+  --table-felt: #232629;
+  --table-felt-overlay: repeating-linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.025) 0 1px,
+      transparent 1px 9px
+    ),
+    radial-gradient(circle at 50% 30%, rgba(255, 255, 255, 0.05), transparent 70%);
+}
+
+[data-zone='table-arena'][data-texture='forest-moss'] {
+  --table-felt: #243222;
+  --table-felt-overlay: radial-gradient(
+      circle at 20% 30%,
+      rgba(150, 190, 120, 0.07),
+      transparent 55%
+    ),
+    radial-gradient(circle at 80% 70%, rgba(120, 160, 100, 0.06), transparent 60%);
+}
+
+[data-zone='table-arena'][data-texture='vintage-oak'] {
+  --table-felt: #3a2b1c;
+  --table-felt-overlay: repeating-linear-gradient(
+      90deg,
+      rgba(0, 0, 0, 0.14) 0 3px,
+      transparent 3px 11px
+    ),
+    repeating-linear-gradient(
+      88deg,
+      rgba(255, 220, 160, 0.05) 0 2px,
+      transparent 2px 26px
+    );
+}
+
+/* Opt-in filter layer: filtering the whole arena also tints the cards, so the
+   preference UI applies this class to a dedicated felt surface when it exists. */
+.table-texture-filtered {
+  filter: var(--table-filter);
 }
