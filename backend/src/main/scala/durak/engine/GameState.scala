@@ -13,7 +13,8 @@ case class GameState(
   boutPhase: BoutPhase,
   defenderInitialHandSize: Int,
   finishOrder: Vector[String],   // Player IDs in order of finishing
-  isDraw: Boolean = false
+  isDraw: Boolean = false,
+  turnDeadlineMs: Long = 0L      // Epoch ms when the acting player's clock expires (0 = idle)
 ):
 
   /** Players still in the game (have not finished). */
@@ -71,3 +72,59 @@ case class GameState(
   /** True while the player may still be handed the attack or the defense. */
   private def isInRotation(player: PlayerState): Boolean =
     player.isActive && (talon.nonEmpty || player.hasCards)
+
+  // --- Turn clock ---
+
+  /** True while a turn clock is running (it is cleared once the game is over). */
+  def hasTurnClock: Boolean = turnDeadlineMs > 0L
+
+  /**
+   * The seat the clock is waiting on this turn: the attacker while an initial
+   * attack is pending, the defender while a defense is pending, and the next
+   * non-defender who has not passed during surrender throw-ins.
+   */
+  def turnPlayerIdx: Option[Int] =
+    boutPhase match
+      case BoutPhase.InitialAttack => Some(attackerIdx)
+      case BoutPhase.Defense       => Some(defenderIdx)
+      case BoutPhase.SurrenderThrowIn =>
+        players.indices.find(idx =>
+          idx != defenderIdx && players(idx).isActive && !players(idx).hasPassed
+        )
+      case BoutPhase.BoutOver | BoutPhase.GameOver => None
+
+  /** The id of the player the clock is waiting on, if any. */
+  def turnPlayerId: Option[String] = turnPlayerIdx.flatMap(players.lift).map(_.id)
+
+  // --- Defense availability ---
+
+  /**
+   * True when the defender could reflect the attack onto the next active
+   * player: redirects are enabled, nothing on the table is covered yet, the
+   * defender holds a card of the attacking rank, and the next player can take
+   * the combined attack.
+   */
+  def canDefenderRedirect: Boolean =
+    val combinedSize = tablePairs.size + 1
+    val defender = players.lift(defenderIdx)
+    val nextDefender = players.lift(nextActivePlayerIdx(defenderIdx))
+
+    config.allowRedirect &&
+      tablePairs.nonEmpty &&
+      tablePairs.forall(_.defense.isEmpty) &&
+      combinedSize <= 6 &&
+      defender.exists(_.hand.exists(card => tablePairs.forall(_.attack.rank == card.rank))) &&
+      nextDefender.exists(_.hand.size >= combinedSize)
+
+  /**
+   * True when the defender is under attack and cannot cover a single uncovered
+   * card nor redirect: the only legal defensive move left is to surrender.
+   */
+  def defenderIsDefenseless: Boolean =
+    boutPhase == BoutPhase.Defense &&
+      players.lift(defenderIdx).exists { defender =>
+        val uncovered = tablePairs.filter(_.defense.isEmpty)
+        uncovered.nonEmpty &&
+          !uncovered.exists(pair => defender.hand.exists(_.covers(pair.attack, trumpSuit))) &&
+          !canDefenderRedirect
+      }

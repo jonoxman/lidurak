@@ -305,6 +305,49 @@ class PlayerViewSuite extends munit.FunSuite:
     intercept[IllegalArgumentException](PlayerGameView.forViewer(gs, "ghost"))
   }
 
+  // --- Turn clock & defenseless state ---
+
+  test("the view exposes the turn deadline, remaining seconds and turn flag") {
+    val gs = state(
+      Vector(
+        player("p0", List(card(Rank.King))),
+        player("p1", List(card(Rank.Six, Suit.Hearts)))
+      ),
+      tablePairs = Vector(TablePair(card(Rank.Ace, Suit.Clubs)))
+    ).copy(turnDeadlineMs = 10_000L)
+
+    val view = PlayerGameView.forViewer(gs, "p0", nowMs = 4_000L)
+
+    assertEquals(view.turnPlayerId, Some("p1"))
+    assertEquals(view.turnDeadlineMs, 10_000L)
+    assertEquals(view.turnSecondsRemaining, 6)
+    assertEquals(view.opponents.map(_.isTurn), List(true))
+    assertEquals(view.defenderDefenseless, true)
+  }
+
+  test("an idle clock reports no deadline and zero seconds remaining") {
+    val gs = state(
+      Vector(player("p0", List(card(Rank.Six))), player("p1", List(card(Rank.Seven))))
+    )
+
+    val view = PlayerGameView.forViewer(gs, "p0", nowMs = 1_000L)
+
+    assertEquals(view.turnDeadlineMs, 0L)
+    assertEquals(view.turnSecondsRemaining, 0)
+  }
+
+  test("a defender who can cover is not flagged defenseless") {
+    val gs = state(
+      Vector(
+        player("p0", List(card(Rank.King))),
+        player("p1", List(card(Rank.Eight, Suit.Clubs)))
+      ),
+      tablePairs = Vector(TablePair(card(Rank.Six, Suit.Clubs)))
+    )
+
+    assertEquals(PlayerGameView.forViewer(gs, "p0").defenderDefenseless, false)
+  }
+
   // --- Hidden information ---
 
   test("the serialized view never exposes opponent hands, the talon or the discard pile") {

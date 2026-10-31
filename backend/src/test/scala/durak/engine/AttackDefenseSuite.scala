@@ -279,3 +279,79 @@ class AttackDefenseSuite extends munit.FunSuite:
       Vector(first, TablePair(second, Some(cover)))
     )
   }
+
+  // --- Defenseless detection ---
+
+  test("a defender who can neither cover nor redirect is defenseless") {
+    val gs = defending(List(card(Rank.Ace, Suit.Clubs)), List(card(Rank.Six, Suit.Hearts)))
+
+    assert(gs.defenderIsDefenseless)
+  }
+
+  test("a defender holding a legal cover is not defenseless") {
+    val gs = defending(List(card(Rank.Six, Suit.Clubs)), List(card(Rank.Eight, Suit.Clubs)))
+
+    assert(!gs.defenderIsDefenseless)
+  }
+
+  test("a defender who can redirect is not defenseless even without a cover") {
+    val sixSpades = card(Rank.Six, Suit.Spades)
+    val gs = state(
+      Vector(
+        player("p0", List(card(Rank.Seven, Suit.Clubs), card(Rank.Nine, Suit.Hearts))),
+        player("p1", List(card(Rank.Six, Suit.Hearts)))
+      ),
+      tablePairs = Vector(TablePair(sixSpades)),
+      boutPhase = BoutPhase.Defense
+    )
+
+    assert(gs.canDefenderRedirect)
+    assert(!gs.defenderIsDefenseless)
+  }
+
+  test("a fully covered table is never defenseless") {
+    val gs = state(
+      Vector(
+        player("p0", List(card(Rank.Six))),
+        player("p1", List(card(Rank.King, Suit.Clubs)))
+      ),
+      tablePairs = Vector(
+        TablePair(card(Rank.Ace, Suit.Clubs), Some(card(Rank.Six, Suit.Spades)))
+      ),
+      boutPhase = BoutPhase.Defense
+    )
+
+    assert(!gs.defenderIsDefenseless)
+  }
+
+  // --- Random legal moves (turn-clock auto-play) ---
+
+  test("randomLegalAction only returns moves the engine accepts") {
+    val gs = defending(
+      List(card(Rank.Six, Suit.Clubs)),
+      List(card(Rank.Seven, Suit.Clubs), card(Rank.Eight, Suit.Clubs))
+    )
+    val random = new scala.util.Random(11L)
+
+    val actions = (1 to 20).flatMap(_ => GameEngine.randomLegalAction(gs, "p1", random))
+
+    assert(actions.nonEmpty)
+    actions.foreach(action => assert(GameEngine.applyAction(gs, action).isRight, action))
+  }
+
+  test("randomLegalAction returns None when the player has no legal move") {
+    val gs = attacking(List(card(Rank.Six)))
+
+    assertEquals(GameEngine.randomLegalAction(gs, "p1", new scala.util.Random(3L)), None)
+  }
+
+  test("the turn clock waits on the attacker, then on the defender") {
+    val gs = attacking(List(card(Rank.Six, Suit.Clubs)))
+    assertEquals(gs.turnPlayerId, Some("p0"))
+
+    val afterAttack = GameEngine
+      .applyAction(gs, GameAction.InitialAttack("p0", List(card(Rank.Six, Suit.Clubs))))
+      .getOrElse(fail("expected a valid attack"))
+
+    assertEquals(afterAttack.turnPlayerId, Some("p1"))
+  }

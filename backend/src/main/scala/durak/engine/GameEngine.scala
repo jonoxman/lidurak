@@ -76,6 +76,62 @@ object GameEngine:
       case GameAction.PassTurn(playerId) =>
         applyPassTurn(state, playerId)
 
+  /**
+   * Every action `playerId` could legally take right now, generated from their
+   * role in the current phase and filtered through [[applyAction]], so each
+   * returned action is guaranteed to be accepted by the engine.
+   */
+  def legalActions(state: GameState, playerId: String): List[GameAction] =
+    candidateActions(state, playerId).filter(action => applyAction(state, action).isRight)
+
+  /**
+   * A random legal action for `playerId`, used when their turn clock expires.
+   * Returns `None` when the player has no legal move at all.
+   */
+  def randomLegalAction(
+      state: GameState,
+      playerId: String,
+      random: Random = Random()
+  ): Option[GameAction] =
+    val actions = legalActions(state, playerId)
+    if actions.isEmpty then None else Some(actions(random.nextInt(actions.size)))
+
+  /** Plausible moves for the player's role and phase; legality is checked by the caller. */
+  private def candidateActions(state: GameState, playerId: String): List[GameAction] =
+    val playerIdx = state.players.indexWhere(_.id == playerId)
+    if playerIdx == -1 then Nil
+    else
+      val player = state.players(playerIdx)
+      if !player.isActive then Nil
+      else
+        state.boutPhase match
+          case BoutPhase.InitialAttack if playerIdx == state.attackerIdx =>
+            player.hand.toList.map(card => GameAction.InitialAttack(playerId, List(card)))
+          case BoutPhase.Defense if playerIdx == state.defenderIdx =>
+            val covers = for
+              (pair, index) <- state.tablePairs.zipWithIndex.toList
+              if pair.defense.isEmpty
+              card <- player.hand.toList
+              if card.covers(pair.attack, state.trumpSuit)
+            yield GameAction.CoverCard(playerId, index, card)
+            val redirects = player.hand.toList
+              .filter(card => state.tablePairs.nonEmpty && state.tablePairs.forall(_.attack.rank == card.rank))
+              .map(card => GameAction.RedirectAttack(playerId, List(card)))
+            val surrenders =
+              if state.tablePairs.exists(_.defense.isEmpty) then
+                List(GameAction.DeclareSurrender(playerId))
+              else Nil
+            covers ++ redirects ++ surrenders
+          case BoutPhase.Defense | BoutPhase.SurrenderThrowIn =>
+            val tableRanks = state.tablePairs
+              .flatMap(pair => pair.attack.rank :: pair.defense.map(_.rank).toList)
+              .toSet
+            val throwIns = player.hand.toList
+              .filter(card => tableRanks.contains(card.rank))
+              .map(card => GameAction.ThrowInCards(playerId, List(card)))
+            GameAction.PassTurn(playerId) :: throwIns
+          case _ => Nil
+
   private def applyInitialAttack(
       state: GameState,
       playerId: String,
@@ -461,8 +517,7 @@ object GameEngine:
 
   /** Legal cover: same suit with a higher rank, or a trump against a non-trump. */
   private def isLegalCover(attack: Card, defense: Card, trumpSuit: Suit): Boolean =
-    (defense.suit == attack.suit && defense.rank.value > attack.rank.value) ||
-      (defense.suit == trumpSuit && attack.suit != trumpSuit)
+    defense.covers(attack, trumpSuit)
 
   private def check(condition: Boolean, error: String): Either[String, Unit] =
     Either.cond(condition, (), error)

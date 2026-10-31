@@ -7,7 +7,8 @@ case class PublicPlayerSummary(
   cardCount: Int,
   hasPassed: Boolean,
   finishRank: Option[Int],
-  status: String = PlayerStatus.Active
+  status: String = PlayerStatus.Active,
+  isTurn: Boolean = false
 )
 
 /**
@@ -33,7 +34,13 @@ case class PlayerGameView(
   myStatus: String,
   myFinishRank: Option[Int],
   winners: List[String],
-  durak: Option[String]
+  durak: Option[String],
+  // Turn clock: absolute epoch-ms deadline (0 when idle) plus a rounded-down view of it.
+  turnPlayerId: Option[String] = None,
+  turnDeadlineMs: Long = 0L,
+  turnSecondsRemaining: Int = 0,
+  // True while the defender has no cover and no redirect, so only surrender is legal.
+  defenderDefenseless: Boolean = false
 )
 
 object PlayerGameView:
@@ -47,11 +54,16 @@ object PlayerGameView:
    * player is reduced to a [[PublicPlayerSummary]], and the talon is exposed
    * only as a count plus the (public) bottom trump card.
    */
-  def forViewer(state: GameState, viewerId: String): PlayerGameView =
+  def forViewer(
+      state: GameState,
+      viewerId: String,
+      nowMs: Long = System.currentTimeMillis()
+  ): PlayerGameView =
     val viewerIdx = state.players.indexWhere(_.id == viewerId)
     if viewerIdx == -1 then
       throw new IllegalArgumentException(s"Unknown player: $viewerId")
     val viewer = state.players(viewerIdx)
+    val turnIdx = state.turnPlayerIdx
 
     PlayerGameView(
       myId = viewer.id,
@@ -64,7 +76,8 @@ object PlayerGameView:
             cardCount = other.hand.size,
             hasPassed = other.hasPassed,
             finishRank = other.finishRank,
-            status = other.status
+            status = other.status,
+            isTurn = turnIdx.contains(idx)
           )
       }.toList,
       tablePairs = state.tablePairs,
@@ -82,8 +95,17 @@ object PlayerGameView:
       myStatus = viewer.status,
       myFinishRank = viewer.finishRank,
       winners = state.winners,
-      durak = state.durak
+      durak = state.durak,
+      turnPlayerId = state.turnPlayerId,
+      turnDeadlineMs = state.turnDeadlineMs,
+      turnSecondsRemaining = secondsRemaining(state, nowMs),
+      defenderDefenseless = state.defenderIsDefenseless
     )
+
+  /** Whole seconds left on the turn clock, rounded up and never negative. */
+  private def secondsRemaining(state: GameState, nowMs: Long): Int =
+    if state.turnDeadlineMs <= 0L then 0
+    else Math.max(0L, (state.turnDeadlineMs - nowMs + 999L) / 1000L).toInt
 
   private def legalActionsFor(
       state: GameState,
@@ -134,16 +156,9 @@ object PlayerGameView:
       defender.hand.exists(card => isLegalCover(pair.attack, card, state.trumpSuit))
     }
 
-  /** True when a single-card redirect is legal right now. */
+  /** True when the defender can reflect the attack onto the next active player. */
   private def canRedirect(state: GameState, defender: PlayerState): Boolean =
-    val nextDefIdx = state.nextActivePlayerIdx(state.defenderIdx)
-    val nextDefender = state.players.lift(nextDefIdx)
-    state.config.allowRedirect &&
-    state.tablePairs.nonEmpty &&
-    state.tablePairs.forall(_.defense.isEmpty) &&
-    state.tablePairs.size + 1 <= 6 &&
-    defender.hand.exists(card => state.tablePairs.forall(_.attack.rank == card.rank)) &&
-    nextDefender.exists(_.hand.size >= state.tablePairs.size + 1)
+    defender.isActive && state.canDefenderRedirect
 
   /** Passing is only possible once the table is covered or the bout is full. */
   private def canPassDefense(state: GameState, player: PlayerState): Boolean =
@@ -167,5 +182,4 @@ object PlayerGameView:
 
   /** Legal cover: same suit with a higher rank, or a trump against a non-trump. */
   private def isLegalCover(attack: Card, defense: Card, trumpSuit: Suit): Boolean =
-    (defense.suit == attack.suit && defense.rank.value > attack.rank.value) ||
-      (defense.suit == trumpSuit && attack.suit != trumpSuit)
+    defense.covers(attack, trumpSuit)
