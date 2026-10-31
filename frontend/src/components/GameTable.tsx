@@ -1,6 +1,8 @@
+import { useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { Card, isRedSuit, suitSymbol, type CardData } from './Card';
 import { CardBack } from './CardBack';
+import { SortBar, type SortMode } from './SortBar';
 import { TablePair } from './TablePair';
 import '../styles/table.css';
 
@@ -36,6 +38,10 @@ export interface GameTableProps {
   trumpSuit: string;
   attackerId?: string;
   defenderId?: string;
+  /** True while the viewer is the attacker who owes an attack or throw-in. */
+  awaitingAttack?: boolean;
+  /** True while the viewer is the defender facing uncovered attacks. */
+  defending?: boolean;
   selectedKeys?: string[];
   onCardClick?: (card: CardData) => void;
   onTableCardClick?: (attackIndex: number) => void;
@@ -71,17 +77,47 @@ const VIEWER_SEAT = 0;
 export const cardKey = (card: CardData): string =>
   `${card.suit.toLowerCase()}:${card.rank.toLowerCase()}`;
 
-const sortHand = (hand: CardData[]): CardData[] =>
-  [...hand].sort((left, right) => {
-    const suitDiff =
-      (SUIT_ORDER[left.suit.toLowerCase()] ?? 9) -
-      (SUIT_ORDER[right.suit.toLowerCase()] ?? 9);
-    if (suitDiff !== 0) return suitDiff;
-    return (
-      (RANK_ORDER[left.rank.toLowerCase()] ?? 0) -
-      (RANK_ORDER[right.rank.toLowerCase()] ?? 0)
-    );
-  });
+const suitIndex = (suit: string): number => SUIT_ORDER[suit.toLowerCase()] ?? 9;
+
+const rankValue = (rank: string): number => RANK_ORDER[rank.toLowerCase()] ?? 0;
+
+const isTrumpCard = (card: CardData, trumpSuit: string): boolean =>
+  trumpSuit.length > 0 && card.suit.toLowerCase() === trumpSuit.toLowerCase();
+
+/**
+ * Reorders the viewer's hand for display only.
+ * - `suit`: grouped by suit, ascending rank inside each suit, trump suit last.
+ * - `pairs`: pure ascending rank, so equal ranks (pairs) sit together.
+ * - `rank`: ascending rank with every trump card ranked above every non-trump.
+ */
+export function sortHand(
+  hand: CardData[],
+  mode: SortMode = 'suit',
+  trumpSuit = '',
+): CardData[] {
+  const cards = [...hand];
+  const byRank = (left: CardData, right: CardData): number =>
+    rankValue(left.rank) - rankValue(right.rank) || suitIndex(left.suit) - suitIndex(right.suit);
+
+  switch (mode) {
+    case 'pairs':
+      return cards.sort(byRank);
+    case 'rank':
+      return cards.sort((left, right) => {
+        const trumpDiff =
+          (isTrumpCard(left, trumpSuit) ? 1 : 0) - (isTrumpCard(right, trumpSuit) ? 1 : 0);
+        return trumpDiff !== 0 ? trumpDiff : byRank(left, right);
+      });
+    case 'suit':
+    default:
+      return cards.sort((left, right) => {
+        const trumpDiff =
+          (isTrumpCard(left, trumpSuit) ? 1 : 0) - (isTrumpCard(right, trumpSuit) ? 1 : 0);
+        if (trumpDiff !== 0) return trumpDiff;
+        return suitIndex(left.suit) - suitIndex(right.suit) || byRank(left, right);
+      });
+  }
+}
 
 /**
  * Relative clockwise distance from `viewerIndex` to `seatIndex`:
@@ -140,13 +176,21 @@ export function GameTable({
   trumpSuit,
   attackerId,
   defenderId,
+  awaitingAttack = false,
+  defending = false,
   selectedKeys = [],
   onCardClick,
   onTableCardClick,
   children,
 }: GameTableProps) {
-  const hand = sortHand(myHand);
+  const [sortMode, setSortMode] = useState<SortMode>('suit');
+  const hand = sortHand(myHand, sortMode, trumpSuit);
   const seats = assignSeats(opponents);
+
+  // Rhythm nudges go only to the client that has to act: uncovered attacks for
+  // the defender, the whole hand for the attacker who owes a play.
+  const handClasses = ['player-hand'];
+  if (awaitingAttack) handClasses.push('turn-pulse');
 
   return (
     <div class="table-arena" data-zone="table-arena" data-my-id={myId}>
@@ -192,6 +236,8 @@ export function GameTable({
             key={index}
             attack={pair.attack}
             defense={pair.defense}
+            trumpSuit={trumpSuit}
+            pulse={defending && !pair.defense}
             onAttackClick={
               onTableCardClick && !pair.defense ? () => onTableCardClick(index) : undefined
             }
@@ -211,7 +257,7 @@ export function GameTable({
           {talonCount > 0 && bottomTrumpCard ? (
             <div class="bottom-trump" aria-label="Bottom trump card">
               <div class="bottom-trump-card">
-                <Card suit={bottomTrumpCard.suit} rank={bottomTrumpCard.rank} />
+                <Card suit={bottomTrumpCard.suit} rank={bottomTrumpCard.rank} trump />
               </div>
             </div>
           ) : null}
@@ -225,12 +271,13 @@ export function GameTable({
         </div>
       </aside>
 
-      <section class="player-hand" data-zone="player-hand" aria-label="Your hand">
+      <section class={handClasses.join(' ')} data-zone="player-hand" aria-label="Your hand">
         {hand.map((card, index) => (
           <Card
             key={`${cardKey(card)}-${index}`}
             suit={card.suit}
             rank={card.rank}
+            trump={isTrumpCard(card, trumpSuit)}
             selected={selectedKeys.includes(cardKey(card))}
             onClick={onCardClick ? () => onCardClick(card) : undefined}
           />
@@ -238,6 +285,7 @@ export function GameTable({
       </section>
 
       <div class="player-controls" data-zone="player-controls" aria-label="Actions">
+        <SortBar mode={sortMode} onModeChange={setSortMode} />
         {children}
       </div>
     </div>
