@@ -1,13 +1,51 @@
+:root {
+  --app-bg: #161512;
+  --app-bg-soft: #1b1a17;
+  --app-header: #201f1c;
+  --app-panel: #262421;
+  --app-text: #bababa;
+  --app-text-strong: #f5f1e6;
+  --app-border: #3a3733;
+  --app-accent: #629924;
+  --app-accent-soft: rgba(98, 153, 36, 0.18);
+  --app-profile-hover: #6cb2e8;
+  --app-roundness: 8px;
+}
+
+/* Light durak palette: same structure, softer surfaces, readable contrast. */
+html[data-theme='light'] {
+  --app-bg: #f4f1ea;
+  --app-bg-soft: #ece7dc;
+  --app-header: #fffdf7;
+  --app-panel: #ffffff;
+  --app-text: #3a3833;
+  --app-text-strong: #1d1c19;
+  --app-border: #d7d2c6;
+  --app-accent: #4f7d1c;
+  --app-accent-soft: rgba(98, 153, 36, 0.14);
+  --app-profile-hover: #1f6fa8;
+  /* Consumed by table.css via the --durak-* variables. */
+  --durak-bg: #f4f1ea;
+  --durak-panel: #ffffff;
+  --durak-felt: #dfe8dc;
+  --durak-text: #3a3833;
+  --durak-border: #d7d2c6;
+  --durak-accent: #4f7d1c;
+  --durak-danger: #b3261e;
+  --durak-amber: #a9761b;
+}
+
 body {
   margin: 0;
-  background-color: #161512;
-  color: #bababa;
+  background-color: var(--app-bg);
+  color: var(--app-text);
   font-family: 'Segoe UI', system-ui, sans-serif;
 }
 
 .app {
   min-height: 100vh;
-  background: #161512;
+  /* Seamless transition from the header shade into the page background. */
+  background: linear-gradient(180deg, var(--app-header) 0, var(--app-bg) 220px);
 }
 
 .app-title {
@@ -377,4 +415,456 @@ body {
   margin: 0;
   padding-left: 18px;
   text-align: left;
+}
+
+/* --- Universal site header (Item 6) --- */
+
+.site-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 10px 18px;
+  background: var(--app-header);
+  border-bottom: 1px solid var(--app-border);
+}
+
+.header-logo {
+  flex: 0 0 auto;
+  margin-left: 6px;
+  padding: 6px 4px;
+  color: var(--app-text-strong);
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-decoration: none;
+  border-radius: calc(var(--app-roundness) * 0.5);
+  transition: color 120ms ease;
+}
+
+.header-logo:hover {
+  color: var(--app-accent);
+}
+
+.header-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  min-width: 0;
+}
+
+.header-menu {
+  position: relative;
+}
+
+.header-menu-trigger {
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  border-radius: var(--app-roundness);
+  color: var(--app-text);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease;
+}
+
+.header-menu-trigger:hover {
+  color: var(--app-text-strong);
+  background: var(--app-accent-soft);
+}
+
+/* Hover opens the menu; the data-open flag mirrors it for keyboard users. */
+.header-menu-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 190px;
+  margin: 0;
+  padding: 8px;
+  list-style: none;
+  background: var(--app-panel);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-roundness);
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.35);
+  visibility: hidden;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 120ms ease, transform 120ms ease, visibility 120ms;
+}
+
+.header-menu:hover .header-menu-dropdown,
+.header-menu[data-open='true'] .header-menu-dropdown {
+  visibility: visible;
+  opacity: 1;
+  transform: none;
+}
+
+.header-menu-dropdown a {
+  display: block;
+  padding: 8px 10px;
+  color: var(--app-text);
+  font-size: 13px;
+  text-decoration: none;
+  border-radius: calc(var(--app-roundness) * 0.75);
+}
+
+.header-menu-dropdown a:hover {
+  color: var(--app-text-strong);
+  background: var(--app-accent-soft);
+}
+
+.header-profile {
+  position: relative;
+  flex: 0 0 auto;
+  margin-left: auto;
+  margin-right: 6px;
+}
+
+.profile-button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--app-roundness);
+  color: var(--app-text);
+  font-size: 13px;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.profile-button:hover {
+  color: var(--app-profile-hover);
+  border-color: var(--app-profile-hover);
+  background: rgba(108, 178, 232, 0.12);
+}
+
+.profile-icon {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+}
+
+.profile-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  display: grid;
+  grid-template-columns: minmax(210px, auto) auto;
+  gap: 10px;
+  min-width: 240px;
+  max-width: min(560px, 92vw);
+  padding: 10px;
+  background: var(--app-panel);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-roundness);
+  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.42);
+}
+
+.profile-menu-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.profile-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 10px;
+  background: transparent;
+  border: none;
+  border-radius: calc(var(--app-roundness) * 0.75);
+  color: var(--app-text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.profile-item:hover,
+.profile-item.active {
+  color: var(--app-text-strong);
+  background: var(--app-accent-soft);
+}
+
+.profile-item-label {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menu-icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+/* Right-facing chevron marks rows that open a secondary submenu. */
+.menu-chevron {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  color: var(--app-accent);
+}
+
+.profile-submenu-panel {
+  min-width: 0;
+  padding-left: 10px;
+  border-left: 1px solid var(--app-border);
+}
+
+.settings-submenu {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: min(250px, 74vw);
+  padding: 4px 6px;
+  box-sizing: border-box;
+}
+
+.setting-row {
+  display: grid;
+  grid-template-columns: 88px minmax(110px, 1fr) 46px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.setting-label {
+  color: var(--app-text);
+}
+
+.setting-row input[type='range'] {
+  width: 100%;
+  accent-color: var(--app-accent);
+}
+
+.setting-value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--app-text-strong);
+}
+
+.pack-grid,
+.theme-grid,
+.texture-grid,
+.cardback-grid {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.pack-grid {
+  grid-template-columns: 1fr;
+}
+
+.theme-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.texture-grid,
+.cardback-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.pack-option,
+.theme-option,
+.texture-option,
+.cardback-option {
+  min-width: 0;
+  padding: 7px 9px;
+  background: var(--app-bg-soft);
+  border: 1px solid var(--app-border);
+  border-radius: calc(var(--app-roundness) * 0.75);
+  color: var(--app-text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+/* Pale green highlight for the sound packs and every settings grid. */
+.pack-option:hover,
+.theme-option:hover,
+.texture-option:hover,
+.cardback-option:hover {
+  background: var(--app-accent-soft);
+  color: var(--app-text-strong);
+}
+
+.pack-option.active,
+.theme-option.active,
+.texture-option.active,
+.cardback-option.active,
+.pack-option[aria-pressed='true'],
+.theme-option[aria-pressed='true'],
+.texture-option[aria-pressed='true'],
+.cardback-option[aria-pressed='true'] {
+  border-color: var(--app-accent);
+  background: var(--app-accent-soft);
+  color: var(--app-text-strong);
+}
+
+.texture-swatch {
+  display: block;
+  height: 18px;
+  margin-bottom: 5px;
+  border-radius: calc(var(--app-roundness) * 0.4);
+  border: 1px solid rgba(0, 0, 0, 0.25);
+}
+
+.texture-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cardback-option {
+  display: grid;
+  justify-items: center;
+  padding: 6px;
+}
+
+.cardback-preview {
+  display: block;
+  width: 34px;
+  height: 48px;
+}
+
+.cardback-preview .playing-card {
+  width: 34px;
+  height: 48px;
+}
+
+.connection-tracker {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--app-border);
+  font-size: 12px;
+}
+
+.connection-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  color: var(--app-text);
+}
+
+.signal-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 18px;
+}
+
+.signal-bar {
+  width: 4px;
+  border-radius: 1px;
+  background: var(--app-border);
+}
+
+.signal-bar[data-bar='1'] {
+  height: 5px;
+}
+
+.signal-bar[data-bar='2'] {
+  height: 8px;
+}
+
+.signal-bar[data-bar='3'] {
+  height: 12px;
+}
+
+.signal-bar[data-bar='4'] {
+  height: 16px;
+}
+
+.signal-bar[data-active='true'] {
+  background: var(--app-accent);
+  animation: signalPulse 1.6s ease-in-out infinite;
+}
+
+@keyframes signalPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* --- Table felt driven by header settings ---
+   Settings write --table-* on <html>. The felt is painted by a decorative
+   background layer so the brightness/contrast/hue filter never tints the cards
+   above it; grid content stays in normal flow and is untouched. */
+
+html [data-zone='table-arena'] {
+  position: relative;
+  background-color: transparent;
+  background-image: none;
+}
+
+html [data-zone='table-arena']::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background-color: var(--table-felt, var(--durak-felt));
+  background-image: var(--table-felt-overlay, none);
+  filter: var(--table-filter, none);
+  pointer-events: none;
+}
+
+@media (max-width: 900px) {
+  .site-header {
+    gap: 4px;
+    padding: 8px 10px;
+  }
+
+  .header-logo {
+    margin-left: 0;
+    font-size: 15px;
+  }
+
+  .header-menu-trigger {
+    padding: 7px 8px;
+    font-size: 11px;
+  }
+
+  .header-profile {
+    margin-right: 0;
+  }
+
+  .profile-dropdown {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: 92vw;
+  }
+
+  .profile-submenu-panel {
+    padding-left: 0;
+    padding-top: 8px;
+    border-left: none;
+    border-top: 1px solid var(--app-border);
+  }
 }

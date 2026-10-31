@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
+import { HeaderBar } from './components/HeaderBar';
+import { initSettings } from './state/settings';
 import { GamePage } from './pages/GamePage';
 import { LobbyPage } from './pages/LobbyPage';
 
@@ -51,8 +53,13 @@ export function App() {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
+  // Applies theme, roundness and surface preferences to <html>, and keeps
+  // "Device theme" in sync with the OS colour scheme.
+  useEffect(() => initSettings(), []);
+
   return (
     <div class="app">
+      <HeaderBar />
       <h1 class="app-title">Lidurak</h1>
       {route.name === 'game' ? (
         <GamePage
