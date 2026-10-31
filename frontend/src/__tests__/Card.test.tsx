@@ -40,6 +40,26 @@ describe('Card', () => {
     expect(container.querySelector('.card-slot')!.getAttribute('data-selected')).toBe('true');
   });
 
+  it('marks a trump card with the golden glow class and a corner badge', () => {
+    const { container } = render(<Card suit="spades" rank="ace" trump />);
+
+    const slot = container.querySelector('.card-slot')!;
+    expect(slot.classList.contains('trump')).toBe(true);
+    expect(slot.getAttribute('data-trump')).toBe('true');
+
+    const marker = screen.getByTestId('trump-marker');
+    expect(marker.querySelector('circle')!.getAttribute('fill')).toBe('#d4af37');
+    expect(marker.querySelector('text')!.textContent).toBe('♠');
+  });
+
+  it('leaves a non-trump card unglowed without a badge', () => {
+    const { container } = render(<Card suit="clubs" rank="nine" />);
+
+    expect(container.querySelector('.card-slot')!.classList.contains('trump')).toBe(false);
+    expect(container.querySelector('.card-slot')!.getAttribute('data-trump')).toBe('false');
+    expect(container.querySelector('[data-testid="trump-marker"]')).toBeNull();
+  });
+
   it('fires the click handler when the card is clicked', () => {
     const onClick = vi.fn();
     const { container } = render(<Card suit="diamonds" rank="six" onClick={onClick} />);
