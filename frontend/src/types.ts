@@ -36,6 +36,8 @@ export interface PlayerGameView {
   /** Absolute epoch-ms deadline of the 15-second turn clock (0 = idle). */
   turnDeadlineMs?: number;
   turnSecondsRemaining?: number;
+  /** Id of the player the clock is waiting on, for per-seat clocks. */
+  turnPlayerId?: string;
 }
 
 export interface GameAction {
@@ -120,6 +122,10 @@ export function parsePlayerGameView(value: unknown): PlayerGameView {
   if (turnSecondsRemaining !== undefined && typeof turnSecondsRemaining !== 'number') {
     fail('turnSecondsRemaining must be a number');
   }
+  const turnPlayerId = raw.turnPlayerId;
+  if (turnPlayerId !== undefined && typeof turnPlayerId !== 'string') {
+    fail('turnPlayerId must be a string');
+  }
   if (typeof myId !== 'string') fail('myId must be a string');
   if (!Array.isArray(raw.myHand)) fail('myHand must be an array of cards');
   if (!Array.isArray(raw.opponents)) fail('opponents must be an array');
@@ -155,6 +161,7 @@ export function parsePlayerGameView(value: unknown): PlayerGameView {
     chaosMode: (chaosMode as boolean | undefined) ?? false,
     turnDeadlineMs: (turnDeadlineMs as number | undefined) ?? 0,
     turnSecondsRemaining: (turnSecondsRemaining as number | undefined) ?? 15,
+    turnPlayerId: turnPlayerId as string | undefined,
   };
 }
 

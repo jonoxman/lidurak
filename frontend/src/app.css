@@ -868,3 +868,28 @@ html [data-zone='table-arena']::before {
     border-top: 1px solid var(--app-border);
   }
 }
+
+/* --- Game page selection rules (Item 20) ---
+   Nothing in the play area may be text-selected while dragging or clicking.
+   Game id, display names and the HOW TO PLAY panel stay selectable. */
+
+.game-page,
+.game-page * {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.game-page .game-id,
+.game-page .opponent-name,
+.game-page .status-name,
+.game-page .hotseat-name,
+.game-page [aria-label='How to Play'],
+.game-page [aria-label='How to Play'] * {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.game-page .back-to-lobby {
+  padding: 8px 16px;
+  font-size: 14px;
+}

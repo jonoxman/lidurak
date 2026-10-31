@@ -76,6 +76,21 @@ export function formatClock(seconds: number): string {
   return `00:${String(seconds).padStart(2, '0')}`;
 }
 
+/** Numeric part of a `p<seat>` id, used to keep every list in fixed seat order. */
+export function seatNumber(id: string): number {
+  const match = /^p(\d+)$/.exec(id);
+  return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
+}
+
+/**
+ * Every player id in fixed seat order (`p0`, `p1`, ...). No list ever moves the
+ * active player to the top.
+ */
+export function seatOrderedPlayerIds(view: PlayerGameView): string[] {
+  const ids = [view.myId, ...view.opponents.map((opponent) => opponent.id)];
+  return [...ids].sort((left, right) => seatNumber(left) - seatNumber(right));
+}
+
 /** Seconds left on the 15-second clock, clamped to `0..15`. */
 export function clockSeconds(view: PlayerGameView, nowMs: number): number {
   const deadline = view.turnDeadlineMs ?? 0;
@@ -217,7 +232,15 @@ export function GamePage({ gameId, playerId, onSwitchPlayer }: GamePageProps) {
       <div class="page game-page">
         <header class="game-header">
           <span class="game-id">Game {gameId}</span>
-          <a href="#/">Back to lobby</a>
+          <button
+            type="button"
+            class="action-button back-to-lobby"
+            onClick={() => {
+              window.location.hash = '/';
+            }}
+          >
+            Back to lobby
+          </button>
         </header>
         <p class="loading">Loading game {gameId}…</p>
       </div>
@@ -254,6 +277,14 @@ export function GamePage({ gameId, playerId, onSwitchPlayer }: GamePageProps) {
     if (seatIdx === viewerIndex) return view.myId;
     return view.opponents[seatIdx < viewerIndex ? seatIdx : seatIdx - 1]?.id;
   };
+
+  // The player the clock is waiting on. Older views only carry the phase, so
+  // fall back to the attacker (initial attack) or defender (defense) seat.
+  const turnPlayerId =
+    view.turnPlayerId ??
+    playerIdForSeat(
+      isInitialAttackPhase(view.boutPhase) ? view.attackerIdx : view.defenderIdx,
+    );
 
   const isAttackerTurn =
     isInitialAttackPhase(view.boutPhase) && hasLegalAction(view.legalActions, 'attack');
@@ -406,7 +437,19 @@ export function GamePage({ gameId, playerId, onSwitchPlayer }: GamePageProps) {
     dispatch(buildRedirectAttack(playerId, [card]));
   };
 
-  const playerOptions = [view.myId, ...view.opponents.map((opponent) => opponent.id)];
+  // Fixed seat order: the hotseat switcher never reorders the active player.
+  const playerOptions = seatOrderedPlayerIds(view);
+  const playersInSeatOrder = playerOptions.map((id) => {
+    const opponent = view.opponents.find((candidate) => candidate.id === id);
+    const mine = id === view.myId;
+    return {
+      id,
+      name: mine ? nameFor(id) : opponent?.name ?? id,
+      cardCount: mine ? view.myHand.length : opponent?.cardCount ?? 0,
+      finishRank: opponent?.finishRank ?? null,
+      mine,
+    };
+  });
 
   const winnerId = view.finishOrder[0];
   const durakId = view.finishOrder[view.finishOrder.length - 1];
@@ -421,7 +464,15 @@ export function GamePage({ gameId, playerId, onSwitchPlayer }: GamePageProps) {
             {live ? 'Connected' : 'Connecting…'}
           </span>
         </div>
-        <a href="#/">Back to lobby</a>
+        <button
+          type="button"
+          class="action-button back-to-lobby"
+          onClick={() => {
+            window.location.hash = '/';
+          }}
+        >
+          Back to lobby
+        </button>
       </header>
 
       <div class="game-shell">
@@ -470,6 +521,8 @@ export function GamePage({ gameId, playerId, onSwitchPlayer }: GamePageProps) {
           defending={isDefender && view.tablePairs.some((pair) => !pair.defense)}
           canRedirect={hasLegalAction(view.legalActions, 'redirect')}
           canThrowIn={hasLegalAction(view.legalActions, 'throwIn')}
+          turnPlayerId={turnPlayerId}
+          turnSecondsRemaining={seconds}
           selectedKeys={selectedKeys}
           onCardClick={toggleCard}
           onCardDoubleClick={playCard}
@@ -517,17 +570,17 @@ export function GamePage({ gameId, playerId, onSwitchPlayer }: GamePageProps) {
           <section class="panel" aria-label="Player status">
             <h2>Players</h2>
             <ul class="status-badges">
-              <li class="status-badge mine">
-                <span class="status-name">{nameFor(view.myId)}</span>
-                <span class="status-count">{view.myHand.length} cards</span>
-              </li>
-              {view.opponents.map((opponent) => (
-                <li key={opponent.id} class="status-badge">
-                  <span class="status-name">{opponent.name}</span>
-                  <span class="status-count">{opponent.cardCount} cards</span>
-                  {opponent.finishRank != null ? (
+              {playersInSeatOrder.map((player) => (
+                <li
+                  key={player.id}
+                  class={`status-badge${player.mine ? ' mine' : ''}`}
+                  data-player-id={player.id}
+                >
+                  <span class="status-name">{player.name}</span>
+                  <span class="status-count">{player.cardCount} cards</span>
+                  {player.finishRank != null ? (
                     <span class="status-rank">
-                      {opponent.finishRank === 1 ? 'WINNER' : 'OUT'}
+                      {player.finishRank === 1 ? 'WINNER' : 'OUT'}
                     </span>
                   ) : null}
                 </li>

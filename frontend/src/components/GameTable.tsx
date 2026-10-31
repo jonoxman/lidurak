@@ -53,6 +53,10 @@ export interface GameTableProps {
   canRedirect?: boolean;
   /** True while the viewer may throw in a matching card. */
   canThrowIn?: boolean;
+  /** Id of the player whose turn clock is running. */
+  turnPlayerId?: string;
+  /** Seconds left on the active turn clock (0..15). */
+  turnSecondsRemaining?: number;
   selectedKeys?: string[];
   onCardClick?: (card: CardData) => void;
   onCardDoubleClick?: (card: CardData) => void;
@@ -105,6 +109,15 @@ const VIEWER_SEAT = 0;
 
 /** Snap radius for magnetic drag-and-drop. */
 export const SNAP_DISTANCE_PX = 48;
+
+/** Every opponent box is exactly this size, so no seat looks bigger. */
+export const SEAT_BOX = { width: 240, height: 140 } as const;
+
+/** Small `00:XX` label used by the per-player clocks. */
+export function formatSeatClock(seconds: number): string {
+  const clamped = Math.max(0, Math.min(99, Math.round(seconds)));
+  return `00:${String(clamped).padStart(2, '0')}`;
+}
 
 export const cardKey = (card: CardData): string =>
   `${card.suit.toLowerCase()}:${card.rank.toLowerCase()}`;
@@ -291,6 +304,8 @@ export function GameTable({
   defending = false,
   canRedirect = false,
   canThrowIn = false,
+  turnPlayerId,
+  turnSecondsRemaining = 15,
   selectedKeys = [],
   onCardClick,
   onCardDoubleClick,
@@ -310,9 +325,17 @@ export function GameTable({
   const seats = assignSeats(opponents);
 
   // Rhythm nudges go only to the client that has to act: uncovered attacks for
-  // the defender, the whole hand for the attacker who owes a play.
+  // the defender, the whole hand for the attacker who owes a play. The pulse
+  // sits on the cards container so the highlight hugs the cards tightly.
   const handClasses = ['player-hand'];
-  if (awaitingAttack) handClasses.push('turn-pulse');
+  const handCardClasses = ['hand-cards'];
+  if (awaitingAttack) {
+    handClasses.push('turn-pulse');
+    handCardClasses.push('attacker-turn');
+  }
+  if (defending) handCardClasses.push('defender-turn');
+  const activeSeconds = Math.max(0, Math.min(15, turnSecondsRemaining));
+  const viewerOnClock = turnPlayerId === myId;
 
   // Target outlines appear before the first card of a bout: one in front of the
   // clockwise defender, or every legal opponent under Chaos Mode.
@@ -420,8 +443,7 @@ export function GameTable({
         if (opponent.id === attackerId) classes.push('active-attacker');
         if (opponent.id === defenderId) classes.push('active-defender');
         if (opponent.finishRank != null) classes.push('finished');
-        const isTarget = attackTargets.some((target) => target.id === opponent.id);
-        const zone = `target:${opponent.id}`;
+        const onClock = turnPlayerId === opponent.id;
         return (
           <div
             key={opponent.id}
@@ -429,40 +451,40 @@ export function GameTable({
             data-seat={position}
             data-offset={offset}
             data-testid="opponent"
+            style={{
+              '--seat-width': `${SEAT_BOX.width}px`,
+              '--seat-height': `${SEAT_BOX.height}px`,
+            }}
           >
-            <div class="seat-head">
-              <span class="opponent-avatar" aria-hidden="true">
-                {initials(opponent.name)}
-              </span>
-              <span class="opponent-name">{opponent.name}</span>
-            </div>
-            <div class="opponent-cards" aria-label={`${opponent.name}'s cards`}>
-              {Array.from({ length: opponent.cardCount }, (_, index) => (
-                <CardBack key={index} />
-              ))}
-            </div>
-            <div class="seat-meta">
-              <span class="opponent-count">{opponent.cardCount} cards</span>
-              {opponent.finishRank != null ? (
-                <span class="opponent-rank">
-                  {opponent.finishRank === 1 ? 'WINNER' : 'OUT'}
+            <span
+              class={`seat-clock${onClock ? ' active' : ''}`}
+              data-testid={`seat-clock-${opponent.id}`}
+              data-active={onClock ? 'true' : 'false'}
+            >
+              {formatSeatClock(onClock ? activeSeconds : 15)}
+            </span>
+            <div class="seat-box">
+              <div class="seat-head">
+                <span class="opponent-avatar" aria-hidden="true">
+                  {initials(opponent.name)}
                 </span>
-              ) : null}
-              {opponent.hasPassed ? <span class="opponent-passed">Passed</span> : null}
+                <span class="opponent-name">{opponent.name}</span>
+              </div>
+              <div class="opponent-cards" aria-label={`${opponent.name}'s cards`}>
+                {Array.from({ length: opponent.cardCount }, (_, index) => (
+                  <CardBack key={index} />
+                ))}
+              </div>
+              <div class="seat-meta">
+                <span class="opponent-count">{opponent.cardCount} cards</span>
+                {opponent.finishRank != null ? (
+                  <span class="opponent-rank">
+                    {opponent.finishRank === 1 ? 'WINNER' : 'OUT'}
+                  </span>
+                ) : null}
+                {opponent.hasPassed ? <span class="opponent-passed">Passed</span> : null}
+              </div>
             </div>
-            {isTarget ? (
-              <div
-                class={`target-outline${snapZone === zone ? ' snap-active' : ''}`}
-                data-testid={`target-outline-${opponent.id}`}
-                data-drop-zone={zone}
-                aria-label={`Attack ${opponent.name}`}
-                onDragOver={hoverZone(zone)}
-                onDragLeave={clearSnap}
-                onDrop={(event) =>
-                  dropOn(zone, event, (card) => onAttackDrop?.(card, opponent.id))
-                }
-              />
-            ) : null}
           </div>
         );
       })}
@@ -481,6 +503,31 @@ export function GameTable({
             : undefined
         }
       >
+        {/* Row 2 anchors the drop targets in front of each legal defender, so
+            every seat box keeps identical dimensions. */}
+        {attackTargets.map((target) => {
+          const zone = `target:${target.id}`;
+          const anchor =
+            seats.find((seat) => seat.opponent.id === target.id)?.position ?? 'top-center';
+          return (
+            <div
+              key={`target-${target.id}`}
+              class={`target-outline bout-target${
+                snapZone === zone ? ' snap-active' : ''
+              }`}
+              data-testid={`target-outline-${target.id}`}
+              data-drop-zone={zone}
+              data-anchor={anchor}
+              aria-label={`Attack ${target.name}`}
+              onDragOver={hoverZone(zone)}
+              onDragLeave={clearSnap}
+              onDrop={(event) =>
+                dropOn(zone, event, (card) => onAttackDrop?.(card, target.id))
+              }
+            />
+          );
+        })}
+
         {tablePairs.map((pair, index) => {
           const zone = `cover:${index}`;
           const coverable = !pair.defense && Boolean(onCoverDrop);
@@ -526,7 +573,7 @@ export function GameTable({
       </section>
 
       <aside class="table-deck" data-zone="table-deck" aria-label="Talon">
-        <div class="deck-stack">
+        <div class="deck-stack" data-testid="deck-t-shape" data-layout="t-shape">
           <div class="talon-stack">
             <CardBack class="talon-back talon-back-second" />
             <CardBack class="talon-back" />
@@ -536,7 +583,7 @@ export function GameTable({
           </div>
           {talonCount > 0 && bottomTrumpCard ? (
             <div class="bottom-trump" aria-label="Bottom trump card">
-              <div class="bottom-trump-card">
+              <div class="bottom-trump-card" data-rotated="true">
                 <Card suit={bottomTrumpCard.suit} rank={bottomTrumpCard.rank} trump />
               </div>
             </div>
@@ -552,6 +599,14 @@ export function GameTable({
       </aside>
 
       <section class={handClasses.join(' ')} data-zone="player-hand" aria-label="Your hand">
+        <span
+          class={`hand-clock${viewerOnClock ? ' active' : ''}`}
+          data-testid="hand-clock"
+          data-active={viewerOnClock ? 'true' : 'false'}
+        >
+          {formatSeatClock(viewerOnClock ? activeSeconds : 15)}
+        </span>
+        <div class={handCardClasses.join(' ')}>
         {hand.map((card, index) => (
           <Card
             key={`${cardKey(card)}-${index}`}
@@ -572,6 +627,7 @@ export function GameTable({
             }}
           />
         ))}
+        </div>
       </section>
 
       <div class="player-controls" data-zone="player-controls" aria-label="Actions">
