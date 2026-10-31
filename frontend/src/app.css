@@ -113,7 +113,7 @@ body {
 }
 
 .game-page {
-  max-width: 1100px;
+  max-width: 1440px;
   padding: 0;
 }
 
@@ -123,7 +123,162 @@ body {
   gap: 10px;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 16px 0;
+  padding: 10px 16px;
+}
+
+/* Lichess 3-column desktop shell. */
+.game-shell {
+  display: grid;
+  grid-template-columns: 240px minmax(640px, 1fr) 260px;
+  gap: 16px;
+  align-items: start;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 16px;
+  box-sizing: border-box;
+}
+
+.game-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  background: #262421;
+  border: 1px solid #3a3733;
+  border-radius: 8px;
+  box-sizing: border-box;
+}
+
+.panel h2 {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #bababa;
+  opacity: 0.8;
+}
+
+.hotseat-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.hotseat-tab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px;
+  background: #161512;
+  border: 1px solid #3a3733;
+  border-radius: 6px;
+  color: #bababa;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hotseat-tab:hover {
+  border-color: #629924;
+  color: #f5f1e6;
+}
+
+.hotseat-tab.active {
+  border-color: #629924;
+  background: rgba(98, 153, 36, 0.16);
+  color: #f5f1e6;
+}
+
+.hotseat-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hotseat-id {
+  flex: 0 0 auto;
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.how-to-play {
+  margin: 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.turn-clock-panel {
+  align-items: center;
+}
+
+.turn-clock {
+  font-size: 2.25rem;
+  font-family: monospace;
+  line-height: 1.1;
+  color: #f5f1e6;
+}
+
+.status-badges {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.status-badge {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 8px;
+  background: #161512;
+  border: 1px solid #3a3733;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.status-badge.mine {
+  border-color: #629924;
+}
+
+.status-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #f5f1e6;
+}
+
+.status-count {
+  flex: 0 0 auto;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.status-rank {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #d9a326;
 }
 
 .game-meta {
@@ -174,36 +329,48 @@ body {
   padding: 24px 16px;
 }
 
-.game-controls {
+.game-buttons {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  align-items: center;
+  min-width: 0;
 }
 
-.game-hint {
-  margin: 0;
-  font-size: 13px;
-  opacity: 0.85;
-}
-
-.game-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  justify-content: center;
+.game-buttons .action-button {
+  width: 100%;
 }
 
 .game-result {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  align-items: center;
+  align-items: flex-start;
 }
 
 .game-result h2 {
   margin: 0;
+  font-size: 16px;
+  letter-spacing: normal;
+  text-transform: none;
   color: #f5f1e6;
+  opacity: 1;
+}
+
+.durak-line {
+  margin: 0;
+  font-size: 13px;
+}
+
+/* Below the desktop shell width the three columns stack. */
+@media (max-width: 1100px) {
+  .game-shell {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .game-sidebar.sidebar-right {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    align-items: start;
+  }
 }
 
 .finish-order {
