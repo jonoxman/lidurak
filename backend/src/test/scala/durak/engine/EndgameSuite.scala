@@ -245,6 +245,72 @@ class EndgameSuite extends munit.FunSuite:
     assertEquals(next.finishOrder, Vector("p0", "p2", "p1"))
   }
 
+  test("the game records the finishers as winners and the last player as the Durak") {
+    val gs = state(
+      Vector(
+        player("p0", Nil),
+        player("p1", List(card(Rank.King, Suit.Hearts))),
+        player("p2", Nil)
+      ),
+      tablePairs = coveredTable
+    )
+
+    val next = applyOrFail(gs, GameAction.PassTurn("p2"))
+
+    assertEquals(next.winners, List("p0", "p2"))
+    assertEquals(next.durak, Some("p1"))
+  }
+
+  test("a three-player game keeps playing after the first player goes out") {
+    // Bout 1: p0 plays its last card, p1 covers it and p2 passes. p0 is out but
+    // the game continues between p1 and p2.
+    val gs = state(
+      Vector(
+        player("p0", List(card(Rank.Six, Suit.Spades))),
+        player("p1", List(card(Rank.Seven, Suit.Spades), card(Rank.Nine, Suit.Clubs))),
+        player("p2", List(card(Rank.Eight, Suit.Diamonds), card(Rank.Ten, Suit.Hearts)))
+      ),
+      boutPhase = BoutPhase.InitialAttack,
+      defenderInitialHandSize = 2
+    )
+
+    val attacked = applyOrFail(
+      gs,
+      GameAction.InitialAttack("p0", List(card(Rank.Six, Suit.Spades)))
+    )
+    val covered = applyOrFail(
+      attacked,
+      GameAction.CoverCard("p1", 0, card(Rank.Seven, Suit.Spades))
+    )
+    val afterFirstPass = applyOrFail(covered, GameAction.PassTurn("p0"))
+    assertEquals(afterFirstPass.boutPhase, BoutPhase.Defense)
+
+    val afterFirstBout = applyOrFail(afterFirstPass, GameAction.PassTurn("p2"))
+
+    assertEquals(afterFirstBout.finishOrder, Vector("p0"))
+    assertEquals(afterFirstBout.winners, List("p0"))
+    assertEquals(afterFirstBout.durak, None)
+    assertEquals(afterFirstBout.boutPhase, BoutPhase.InitialAttack)
+    assertEquals(afterFirstBout.players(afterFirstBout.attackerIdx).id, "p1")
+    assertEquals(afterFirstBout.players(afterFirstBout.defenderIdx).id, "p2")
+    assertEquals(afterFirstBout.players(0).finishRank, Some(1))
+
+    // Bout 2: p1 attacks with its last card and p2 surrenders, ending the game
+    // with p2 as the Durak.
+    val secondAttack = applyOrFail(
+      afterFirstBout,
+      GameAction.InitialAttack("p1", List(card(Rank.Nine, Suit.Clubs)))
+    )
+    val secondSurrender = applyOrFail(secondAttack, GameAction.DeclareSurrender("p2"))
+    val finished = applyOrFail(secondSurrender, GameAction.PassTurn("p1"))
+
+    assertEquals(finished.boutPhase, BoutPhase.GameOver)
+    assertEquals(finished.finishOrder, Vector("p0", "p1", "p2"))
+    assertEquals(finished.winners, List("p0", "p1"))
+    assertEquals(finished.durak, Some("p2"))
+    assert(finished.activePlayersWithCards.isEmpty)
+  }
+
   test("the Durak has the highest finish rank") {
     val gs = state(
       Vector(
@@ -284,6 +350,8 @@ class EndgameSuite extends munit.FunSuite:
     val next = applyOrFail(defended, GameAction.PassTurn("p0"))
 
     assert(next.isDraw)
+    assertEquals(next.durak, None)
+    assertEquals(next.winners.toSet, Set("p0", "p1"))
     assertEquals(next.players(0).finishRank, Some(1))
     assertEquals(next.players(1).finishRank, Some(1))
     assertEquals(next.finishOrder.toSet, Set("p0", "p1"))

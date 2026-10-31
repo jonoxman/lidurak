@@ -28,7 +28,36 @@ case class GameState(
   def maxBoutAttacks: Int =
     Math.min(6, defenderInitialHandSize)
 
-  /** Next seat clockwise from `fromIdx` that is still active, wrapping around. */
+  /** True once the game has reached its final state. */
+  def isGameOver: Boolean = boutPhase == BoutPhase.GameOver
+
+  /**
+   * The last player still holding cards once the game is over, i.e. the Durak.
+   * `None` while the game is still running, and `None` for a draw (the final
+   * players emptied their hands at the same time, so nobody is last).
+   */
+  def durak: Option[String] =
+    if !isGameOver || isDraw then None
+    else
+      finishOrder.lastOption.filter { id =>
+        players.exists(player => player.id == id && player.hasCards)
+      }
+
+  /**
+   * Players who finished ahead of the Durak, in the order they went out (first
+   * out = 1st place). While the game is still running this is every finisher
+   * so far; for a draw every finisher is a winner.
+   */
+  def winners: List[String] =
+    durak match
+      case Some(lastPlace) => finishOrder.filterNot(_ == lastPlace).toList
+      case None            => finishOrder.toList
+
+  /**
+   * Next seat clockwise from `fromIdx` that is still part of the turn rotation,
+   * wrapping around. Finished players are always skipped; once the talon is
+   * depleted a player with no cards left can no longer attack or defend either.
+   */
   def nextActivePlayerIdx(fromIdx: Int): Int =
     val n = players.size
     if n == 0 then fromIdx
@@ -36,5 +65,9 @@ case class GameState(
       val start = Math.floorMod(fromIdx, n)
       (1 until n)
         .map(offset => (start + offset) % n)
-        .find(idx => players(idx).finishRank.isEmpty)
+        .find(idx => isInRotation(players(idx)))
         .getOrElse(start)
+
+  /** True while the player may still be handed the attack or the defense. */
+  private def isInRotation(player: PlayerState): Boolean =
+    player.isActive && (talon.nonEmpty || player.hasCards)

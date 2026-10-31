@@ -84,7 +84,59 @@ class SurrenderThrowInSuite extends munit.FunSuite:
       defenderInitialHandSize = defenderInitialHandSize
     )
 
+  private def pass(gs: GameState, playerId: String): GameState =
+    GameEngine.applyAction(gs, GameAction.PassTurn(playerId)) match
+      case Right(next) => next
+      case Left(error) => fail(s"pass by $playerId was rejected: $error")
+
   // --- Surrender ---
+
+  test("a defender surrendering with one card picks up the attack card") {
+    val attack = card(Rank.Six, Suit.Spades)
+    val heldCard = card(Rank.Seven, Suit.Hearts)
+    val gs = twoPlayer(
+      attackerHand = List(card(Rank.Ace, Suit.Clubs), card(Rank.King, Suit.Clubs)),
+      defenderHand = List(heldCard),
+      tablePairs = Vector(TablePair(attack)),
+      defenderInitialHandSize = 1
+    )
+
+    val surrendered = GameEngine
+      .applyAction(gs, GameAction.DeclareSurrender("p1"))
+      .getOrElse(fail("expected a valid surrender"))
+    val next = pass(surrendered, "p0")
+
+    assertEquals(next.tablePairs, Vector.empty)
+    assertEquals(next.discardPile, Vector.empty)
+    assertEquals(next.players(1).hand.toSet, Set(heldCard, attack))
+    assertEquals(next.players(1).hand.size, 2)
+    // The defender must not be mistaken for a finished player next turn.
+    assertEquals(next.players(1).finishRank, None)
+    assert(next.boutPhase != BoutPhase.GameOver)
+  }
+
+  test("a surrendering defender picks up covered and uncovered table cards") {
+    val six = card(Rank.Six, Suit.Spades)
+    val cover = card(Rank.Seven, Suit.Spades)
+    val secondAttack = card(Rank.Six, Suit.Hearts)
+    val heldCard = card(Rank.Nine, Suit.Diamonds)
+    val gs = twoPlayer(
+      attackerHand = List(card(Rank.Ace, Suit.Clubs)),
+      defenderHand = List(heldCard),
+      tablePairs = Vector(TablePair(six, Some(cover)), TablePair(secondAttack)),
+      defenderInitialHandSize = 2
+    )
+
+    val surrendered = GameEngine
+      .applyAction(gs, GameAction.DeclareSurrender("p1"))
+      .getOrElse(fail("expected a valid surrender"))
+    val next = pass(surrendered, "p0")
+
+    assertEquals(next.tablePairs, Vector.empty)
+    assertEquals(next.discardPile, Vector.empty)
+    assertEquals(next.players(1).hand.toSet, Set(heldCard, six, cover, secondAttack))
+    assertEquals(next.players(1).hand.size, 4)
+  }
 
   test("a valid surrender opens the surrender throw-in phase") {
     val attack = card(Rank.Six, Suit.Spades)
