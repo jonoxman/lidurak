@@ -226,10 +226,29 @@ describe('hand sorting', () => {
     ]);
   });
 
+  it('exposes every sort mode through one compact dropdown', () => {
+    const { container } = renderSortableTable();
+    const sortBar = container.querySelector('[data-testid="sort-bar"]') as HTMLElement;
+    const select = within(sortBar).getByRole('combobox') as HTMLSelectElement;
+
+    expect(sortBar.querySelectorAll('button')).toHaveLength(0);
+    expect(Array.from(select.options).map((option) => option.value)).toEqual([
+      'suit',
+      'pairs',
+      'rank',
+    ]);
+    expect(Array.from(select.options).map((option) => option.textContent)).toEqual([
+      'Suit',
+      'Pairs',
+      'Rank',
+    ]);
+    expect(select.value).toBe('suit');
+  });
+
   it('switches to pairs mode so matching ranks sit together', () => {
     renderSortableTable();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Pairs' }));
+    fireEvent.change(screen.getByLabelText('Sort hand'), { target: { value: 'pairs' } });
 
     expect(handOrder()).toEqual([
       'hearts:six',
@@ -237,14 +256,13 @@ describe('hand sorting', () => {
       'hearts:king',
       'clubs:ace',
     ]);
-    expect(screen.getByRole('button', { name: 'Pairs' }).getAttribute('aria-pressed')).toBe('true');
-    expect(screen.getByRole('button', { name: 'Suit' }).getAttribute('aria-pressed')).toBe('false');
+    expect((screen.getByLabelText('Sort hand') as HTMLSelectElement).value).toBe('pairs');
   });
 
   it('switches to rank mode where all trumps rank above non-trumps', () => {
     renderSortableTable();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Rank' }));
+    fireEvent.change(screen.getByLabelText('Sort hand'), { target: { value: 'rank' } });
 
     expect(handOrder()).toEqual([
       'hearts:six',
@@ -518,6 +536,35 @@ describe('bout outlines and anchoring', () => {
   });
 });
 
+describe('playable lift and drag cursor', () => {
+  it('lifts only the hand cards that are legal to play', () => {
+    const { container } = renderSortableTable({ playableKeys: ['hearts:six', 'clubs:ace'] });
+
+    const lifted = Array.from(container.querySelectorAll('.card-slot.legal-playable')).map(
+      (slot) => `${slot.getAttribute('data-suit')}:${slot.getAttribute('data-rank')}`,
+    );
+    expect(lifted.sort()).toEqual(['clubs:ace', 'hearts:six']);
+    expect(container.querySelectorAll('.card-slot[data-playable="true"]')).toHaveLength(2);
+    expect(container.querySelectorAll('.card-slot[data-playable="false"]')).toHaveLength(2);
+  });
+
+  it('keeps the pointer cursor on the arena for the whole drag gesture', () => {
+    const { container } = renderSortableTable({ onAttackDrop: () => {} });
+    const arena = container.querySelector('[data-zone="table-arena"]') as HTMLElement;
+
+    expect(arena.classList.contains('dragging')).toBe(false);
+
+    fireEvent.dragStart(screen.getByLabelText('six of hearts'), {
+      dataTransfer: { setData: vi.fn(), effectAllowed: 'none' },
+    });
+    expect(arena.classList.contains('dragging')).toBe(true);
+    expect(arena.getAttribute('data-dragging')).toBe('true');
+
+    fireEvent.dragEnd(screen.getByLabelText('six of hearts'));
+    expect(arena.classList.contains('dragging')).toBe(false);
+  });
+});
+
 describe('drag-snap and double-click', () => {
   it('reports a double-clicked hand card', () => {
     const onCardDoubleClick = vi.fn();
@@ -617,7 +664,11 @@ describe('minimalist controls', () => {
 
     const controls = container.querySelector('[data-zone="player-controls"]') as HTMLElement;
     expect(controls.querySelector('[data-testid="sort-bar"]')).not.toBeNull();
-    expect(within(controls).getByRole('button', { name: 'Suit' })).toBeTruthy();
+    expect(within(controls).getByRole('combobox', { name: 'Sort hand' })).toBeTruthy();
+    // The three separate sort buttons are gone.
+    expect(within(controls).queryByRole('button', { name: 'Suit' })).toBeNull();
+    expect(within(controls).queryByRole('button', { name: 'Pairs' })).toBeNull();
+    expect(within(controls).queryByRole('button', { name: 'Rank' })).toBeNull();
     expect(within(controls).getByRole('button', { name: 'Surrender' })).toBeTruthy();
     expect(within(controls).queryByRole('button', { name: 'Redirect' })).toBeNull();
   });

@@ -11,30 +11,34 @@ const MODES: { mode: SortMode; label: string; title: string }[] = [
   { mode: 'rank', label: 'Rank', title: 'Ascending rank, trumps last' },
 ];
 
+const isSortMode = (value: string): value is SortMode =>
+  MODES.some((option) => option.mode === value);
+
 /**
- * Client-side hand sorting switcher, rendered in the controls column beside the
+ * Compact hand-sorting dropdown, rendered in the controls column beside the
  * hand. The chosen mode never leaves the browser: it only reorders the viewer's
  * own cards.
  */
 export function SortBar({ mode, onModeChange }: SortBarProps) {
   return (
-    <div class="sort-bar" role="group" aria-label="Sort hand" data-testid="sort-bar">
-      {MODES.map((option) => {
-        const active = option.mode === mode;
-        return (
-          <button
-            key={option.mode}
-            type="button"
-            class={`sort-button${active ? ' active' : ''}`}
-            aria-pressed={active}
-            title={option.title}
-            data-sort-mode={option.mode}
-            onClick={() => onModeChange(option.mode)}
-          >
+    <label class="sort-bar" data-testid="sort-bar" title="Sort the cards in your hand">
+      <span class="sort-label">Sort</span>
+      <select
+        class="sort-select"
+        aria-label="Sort hand"
+        value={mode}
+        data-sort-mode={mode}
+        onChange={(event) => {
+          const next = (event.currentTarget as HTMLSelectElement).value;
+          if (isSortMode(next)) onModeChange(next);
+        }}
+      >
+        {MODES.map((option) => (
+          <option key={option.mode} value={option.mode} title={option.title}>
             {option.label}
-          </button>
-        );
-      })}
-    </div>
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }

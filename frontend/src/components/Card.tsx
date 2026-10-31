@@ -10,6 +10,8 @@ export interface CardProps {
   rank: string;
   faceUp?: boolean;
   selected?: boolean;
+  /** True when this card can legally be played right now; lifts it off the hand. */
+  playable?: boolean;
   /** Draws the golden trump glow and corner badge. */
   trump?: boolean;
   onClick?: () => void;
@@ -161,6 +163,7 @@ export function Card({
   rank,
   faceUp = true,
   selected = false,
+  playable = false,
   trump = false,
   onClick,
   onDoubleClick,
@@ -170,6 +173,7 @@ export function Card({
 }: CardProps) {
   const classes = ['card-slot'];
   if (selected) classes.push('selected');
+  if (playable) classes.push('legal-playable');
   if (trump) classes.push('trump');
   if (onClick) classes.push('clickable');
 
@@ -199,6 +203,7 @@ export function Card({
     <div
       class={classes.join(' ')}
       data-selected={selected ? 'true' : 'false'}
+      data-playable={playable ? 'true' : 'false'}
       data-trump={trump ? 'true' : 'false'}
       data-suit={suit.toLowerCase()}
       data-rank={rank.toLowerCase()}

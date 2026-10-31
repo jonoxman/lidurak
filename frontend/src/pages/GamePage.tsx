@@ -100,6 +100,41 @@ export function clockSeconds(view: PlayerGameView, nowMs: number): number {
   return Math.max(0, Math.min(15, view.turnSecondsRemaining ?? 15));
 }
 
+/** Default grace period before a defenceless defender surrenders. */
+export const AUTO_SURRENDER_MS = 3000;
+
+/** `p<seat>` id of the player sitting at `seatIdx`. */
+export function seatIdFor(view: PlayerGameView, seatIdx: number): string | undefined {
+  const viewerIndex = viewerSeatIndex(view);
+  if (seatIdx === viewerIndex) return view.myId;
+  return view.opponents[seatIdx < viewerIndex ? seatIdx : seatIdx - 1]?.id;
+}
+
+/** Id of the player whose turn clock is running (older views omit it). */
+export function turnPlayerIdFor(view: PlayerGameView): string {
+  if (view.turnPlayerId) return view.turnPlayerId;
+  const seatIdx = isInitialAttackPhase(view.boutPhase) ? view.attackerIdx : view.defenderIdx;
+  return seatIdFor(view, seatIdx) ?? view.myId;
+}
+
+/**
+ * True when the viewer is the defender, faces at least one uncovered attack and
+ * has no legal answer (no cover for any of them, no redirect).
+ */
+export function isDefenselessDefender(view: PlayerGameView): boolean {
+  if (view.defenderIdx !== viewerSeatIndex(view)) return false;
+  if (isGameOverPhase(view.boutPhase)) return false;
+  const uncovered = view.tablePairs
+    .filter((pair) => !pair.defense)
+    .map((pair) => pair.attack);
+  if (uncovered.length === 0) return false;
+  if (!hasLegalAction(view.legalActions, 'surrender')) return false;
+  if (hasLegalAction(view.legalActions, 'redirect')) return false;
+  return !view.myHand.some((card) =>
+    uncovered.some((attack) => isLegalCover(attack, card, view.trumpSuit)),
+  );
+}
+
 const isSurrenderPhase = (phase: string): boolean =>
   normalizeToken(phase) === 'surrenderthrowin';
 
@@ -107,9 +142,16 @@ export interface GamePageProps {
   gameId: string;
   playerId: string;
   onSwitchPlayer: (playerId: string) => void;
+  /** Grace period before a defenceless defender surrenders automatically. */
+  autoSurrenderMs?: number;
 }
 
-export function GamePage({ gameId, playerId, onSwitchPlayer }: GamePageProps) {
+export function GamePage({
+  gameId,
+  playerId,
+  onSwitchPlayer,
+  autoSurrenderMs = AUTO_SURRENDER_MS,
+}: GamePageProps) {
   const [view, setView] = useState<PlayerGameView | null>(null);
   // Hand indices are kept together with the view they were picked against, so
   // a new authoritative view invalidates the selection without an effect that
@@ -123,6 +165,9 @@ export function GamePage({ gameId, playerId, onSwitchPlayer }: GamePageProps) {
   const socketRef = useRef<GameWebSocket | null>(null);
   const previousViewRef = useRef<PlayerGameView | null>(null);
   const tickedSecondRef = useRef(0);
+  // Latest dispatch function, so timers can send without re-subscribing.
+  const dispatchRef = useRef<(action: GameAction) => void>(() => {});
+  const [autoSurrenderRemaining, setAutoSurrenderRemaining] = useState<number | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -216,16 +261,46 @@ export function GamePage({ gameId, playerId, onSwitchPlayer }: GamePageProps) {
   }, [deadlineMs]);
 
   const seconds = view ? clockSeconds(view, now) : 15;
+  const timedPlayerId = view ? turnPlayerIdFor(view) : undefined;
 
-  // A subtle tick on each of the final five seconds, for the player on the clock.
+  // A subtle tick on each of the final five seconds, only for the player whose
+  // own clock is the one running.
   useEffect(() => {
     if (!view || deadlineMs <= 0) return;
+    if (timedPlayerId !== view.myId) return;
     if (seconds < 1 || seconds > 5) return;
-    if (view.legalActions.length === 0) return;
     if (tickedSecondRef.current === seconds) return;
     tickedSecondRef.current = seconds;
-    soundEngine.playClockTick();
-  }, [seconds, deadlineMs, view]);
+    soundEngine.playClockTick(seconds);
+  }, [seconds, deadlineMs, timedPlayerId, view]);
+
+  // Item 18: a defender who cannot answer surrenders after a short grace
+  // period, leaving enough time to click Surrender first.
+  const defenseless = view ? isDefenselessDefender(view) : false;
+  const uncoveredCount = view
+    ? view.tablePairs.filter((pair) => !pair.defense).length
+    : 0;
+
+  useEffect(() => {
+    if (!defenseless) {
+      setAutoSurrenderRemaining(null);
+      return;
+    }
+    const gracePeriod = Math.max(1, autoSurrenderMs);
+    setAutoSurrenderRemaining(Math.max(1, Math.ceil(gracePeriod / 1000)));
+    const surrenderAt = setTimeout(() => {
+      dispatchRef.current(buildDeclareSurrender(playerId));
+    }, gracePeriod);
+    const ticker = setInterval(() => {
+      setAutoSurrenderRemaining((remaining) =>
+        remaining == null ? null : Math.max(0, remaining - 1),
+      );
+    }, 1000);
+    return () => {
+      clearTimeout(surrenderAt);
+      clearInterval(ticker);
+    };
+  }, [defenseless, uncoveredCount, autoSurrenderMs, playerId]);
 
   if (!view) {
     return (
@@ -271,20 +346,9 @@ export function GamePage({ gameId, playerId, onSwitchPlayer }: GamePageProps) {
   const viewerIndex = viewerSeatIndex(view);
   const isDefender = view.defenderIdx === viewerIndex;
 
-  // Opponents arrive in seat order without the viewer, so map a seat index onto
-  // its player id by skipping the viewer's own seat.
-  const playerIdForSeat = (seatIdx: number): string | undefined => {
-    if (seatIdx === viewerIndex) return view.myId;
-    return view.opponents[seatIdx < viewerIndex ? seatIdx : seatIdx - 1]?.id;
-  };
-
-  // The player the clock is waiting on. Older views only carry the phase, so
-  // fall back to the attacker (initial attack) or defender (defense) seat.
-  const turnPlayerId =
-    view.turnPlayerId ??
-    playerIdForSeat(
-      isInitialAttackPhase(view.boutPhase) ? view.attackerIdx : view.defenderIdx,
-    );
+  // Opponents arrive in seat order without the viewer, so a seat index maps
+  // onto its player id by skipping the viewer's own seat.
+  const playerIdForSeat = (seatIdx: number): string | undefined => seatIdFor(view, seatIdx);
 
   const isAttackerTurn =
     isInitialAttackPhase(view.boutPhase) && hasLegalAction(view.legalActions, 'attack');
@@ -298,6 +362,32 @@ export function GamePage({ gameId, playerId, onSwitchPlayer }: GamePageProps) {
     selectedCards.length > 0 &&
     view.tablePairs.length + selectedCards.length <= view.maxBoutAttacks &&
     selectedCards.every((card) => tableRanks.has(card.rank.toLowerCase()));
+
+  // Item 12: every hand card the player could legally play right now lifts up.
+  const uncoveredAttacks = view.tablePairs
+    .filter((pair) => !pair.defense)
+    .map((pair) => pair.attack);
+  const playableKeys = (() => {
+    if (isAttackerTurn) return view.myHand.map(cardKey);
+    if (isDefender && hasLegalAction(view.legalActions, 'cover')) {
+      return view.myHand
+        .filter((card) =>
+          uncoveredAttacks.some((attack) => isLegalCover(attack, card, view.trumpSuit)),
+        )
+        .map(cardKey);
+    }
+    if (isDefender && hasLegalAction(view.legalActions, 'redirect')) {
+      return view.myHand
+        .filter((card) => tableRanks.has(card.rank.toLowerCase()))
+        .map(cardKey);
+    }
+    if (hasLegalAction(view.legalActions, 'throwIn')) {
+      return view.myHand
+        .filter((card) => tableRanks.has(card.rank.toLowerCase()))
+        .map(cardKey);
+    }
+    return [];
+  })();
 
   const dispatch = (action: GameAction) => {
     const socket = socketRef.current;
@@ -320,6 +410,9 @@ export function GamePage({ gameId, playerId, onSwitchPlayer }: GamePageProps) {
         console.warn('Action failed', reason);
       });
   };
+
+  // Timers must always send through the dispatch of the latest render.
+  dispatchRef.current = dispatch;
 
   const toggleCard = (card: GameCard) => {
     // Durak cards are unique, so suit + rank identifies the selected hand card.
@@ -521,9 +614,10 @@ export function GamePage({ gameId, playerId, onSwitchPlayer }: GamePageProps) {
           defending={isDefender && view.tablePairs.some((pair) => !pair.defense)}
           canRedirect={hasLegalAction(view.legalActions, 'redirect')}
           canThrowIn={hasLegalAction(view.legalActions, 'throwIn')}
-          turnPlayerId={turnPlayerId}
+          turnPlayerId={timedPlayerId}
           turnSecondsRemaining={seconds}
           selectedKeys={selectedKeys}
+          playableKeys={playableKeys}
           onCardClick={toggleCard}
           onCardDoubleClick={playCard}
           onTableCardClick={hasLegalAction(view.legalActions, 'cover') ? coverAttack : undefined}
@@ -554,7 +648,11 @@ export function GamePage({ gameId, playerId, onSwitchPlayer }: GamePageProps) {
                   Throw In
                 </button>
               ) : null}
-              <ActionBar legalActions={view.legalActions} onAction={handleActionBar} />
+              <ActionBar
+                legalActions={view.legalActions}
+                onAction={handleActionBar}
+                surrenderSeconds={autoSurrenderRemaining}
+              />
             </div>
           )}
         </GameTable>

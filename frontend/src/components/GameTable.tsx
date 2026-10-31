@@ -58,6 +58,8 @@ export interface GameTableProps {
   /** Seconds left on the active turn clock (0..15). */
   turnSecondsRemaining?: number;
   selectedKeys?: string[];
+  /** Keys of hand cards that are legal to play right now; they lift off the hand. */
+  playableKeys?: string[];
   onCardClick?: (card: CardData) => void;
   onCardDoubleClick?: (card: CardData) => void;
   onTableCardClick?: (attackIndex: number) => void;
@@ -76,7 +78,10 @@ export interface GameTableProps {
 interface DragLike {
   preventDefault(): void;
   stopPropagation(): void;
-  dataTransfer: { getData(format: string): string } | null;
+  dataTransfer: {
+    getData(format: string): string;
+    dropEffect?: string;
+  } | null;
   clientX: number;
   clientY: number;
 }
@@ -307,6 +312,7 @@ export function GameTable({
   turnPlayerId,
   turnSecondsRemaining = 15,
   selectedKeys = [],
+  playableKeys = [],
   onCardClick,
   onCardDoubleClick,
   onTableCardClick,
@@ -407,6 +413,10 @@ export function GameTable({
 
   /** Magnetic snap: highlight the nearest drop zone within 48px of the pointer. */
   const magnetize = (event: DragLike) => {
+    // Accept the drag across the whole arena. Without this the browser paints
+    // its "no drop" cursor over the felt during the gesture.
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
     const arena = arenaRef.current;
     if (!arena || typeof arena.querySelectorAll !== 'function') return;
     const zones = Array.from(arena.querySelectorAll('[data-drop-zone]')) as HTMLElement[];
@@ -430,10 +440,11 @@ export function GameTable({
 
   return (
     <div
-      class="table-arena"
+      class={`table-arena${dragCard ? ' dragging' : ''}`}
       data-zone="table-arena"
       data-my-id={myId}
       data-chaos={chaosMode ? 'true' : 'false'}
+      data-dragging={dragCard ? 'true' : 'false'}
       ref={arenaRef}
       onDragOver={draggable ? magnetize : undefined}
       onDragEnd={draggable ? clearSnap : undefined}
@@ -614,12 +625,17 @@ export function GameTable({
             rank={card.rank}
             trump={isTrumpCard(card, trumpSuit)}
             selected={selectedKeys.includes(cardKey(card))}
+            playable={playableKeys.includes(cardKey(card))}
             onClick={onCardClick ? () => onCardClick(card) : undefined}
             onDoubleClick={onCardDoubleClick ? () => onCardDoubleClick(card) : undefined}
             draggable={draggable}
             onDragStart={(event) => {
               setDragCard(card);
-              event.dataTransfer?.setData('text/plain', cardKey(card));
+              if (event.dataTransfer) {
+                // A move drag keeps the pointer cursor instead of the copy arrow.
+                event.dataTransfer.effectAllowed = 'move';
+                event.dataTransfer.setData('text/plain', cardKey(card));
+              }
             }}
             onDragEnd={() => {
               setDragCard(null);

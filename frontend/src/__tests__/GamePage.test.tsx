@@ -532,4 +532,178 @@ describe('GamePage', () => {
     expect(defenderSeat.classList.contains('active-attacker')).toBe(false);
     expect(container.querySelector('.seat-box')).not.toBeNull();
   });
+
+  it('lifts only the hand cards that can legally answer the attack', async () => {
+    getGameView.mockResolvedValue({
+      ...view,
+      myHand: [
+        { suit: 'spades', rank: 'ace' },
+        { suit: 'hearts', rank: 'two' },
+      ],
+      tablePairs: [{ attack: { suit: 'spades', rank: 'six' }, defense: null }],
+      attackerIdx: 1,
+      defenderIdx: 0,
+      boutPhase: 'defense',
+      legalActions: ['cover', 'surrender'],
+    });
+
+    const { container } = render(
+      <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
+    );
+
+    await waitFor(() => expect(screen.getByText('Surrender')).toBeTruthy());
+
+    const lifted = Array.from(
+      container.querySelectorAll('.card-slot.legal-playable'),
+    ) as HTMLElement[];
+    expect(lifted).toHaveLength(1);
+    expect(lifted[0].getAttribute('data-rank')).toBe('ace');
+  });
+
+  it('auto-surrenders after the grace period when the defender cannot answer', async () => {
+    const hopelessView: PlayerGameView = {
+      ...view,
+      myHand: [{ suit: 'clubs', rank: 'two' }],
+      tablePairs: [{ attack: { suit: 'spades', rank: 'six' }, defense: null }],
+      attackerIdx: 1,
+      defenderIdx: 0,
+      boutPhase: 'defense',
+      legalActions: ['surrender'],
+    };
+    getGameView.mockResolvedValue(hopelessView);
+    sendAction.mockResolvedValue({
+      ...hopelessView,
+      boutPhase: 'surrenderThrowIn',
+      legalActions: [],
+    });
+
+    render(
+      <GamePage
+        gameId="game-1"
+        playerId="p0"
+        onSwitchPlayer={() => {}}
+        autoSurrenderMs={40}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(sendAction).toHaveBeenCalledWith(
+        'game-1',
+        expect.objectContaining({ type: 'declareSurrender', playerId: 'p0' }),
+      ),
+    );
+  });
+
+  it('shows the 3-second countdown on the Surrender button', async () => {
+    getGameView.mockResolvedValue({
+      ...view,
+      myHand: [{ suit: 'clubs', rank: 'two' }],
+      tablePairs: [{ attack: { suit: 'spades', rank: 'six' }, defense: null }],
+      attackerIdx: 1,
+      defenderIdx: 0,
+      boutPhase: 'defense',
+      legalActions: ['surrender'],
+    });
+
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    await waitFor(() => expect(screen.getByTestId('surrender-countdown')).toBeTruthy());
+    expect(screen.getByTestId('surrender-countdown').textContent).toBe('3');
+    expect(screen.queryByTestId('auto-surrender-sent')).toBeNull();
+  });
+
+  it('does not auto-surrender while a legal cover exists', async () => {
+    getGameView.mockResolvedValue({
+      ...view,
+      myHand: [{ suit: 'spades', rank: 'ace' }],
+      tablePairs: [{ attack: { suit: 'spades', rank: 'six' }, defense: null }],
+      attackerIdx: 1,
+      defenderIdx: 0,
+      boutPhase: 'defense',
+      legalActions: ['cover', 'surrender'],
+    });
+
+    render(
+      <GamePage
+        gameId="game-1"
+        playerId="p0"
+        onSwitchPlayer={() => {}}
+        autoSurrenderMs={60}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText('Surrender')).toBeTruthy());
+    expect(screen.queryByTestId('surrender-countdown')).toBeNull();
+
+    await new Promise((resolve) => setTimeout(resolve, 160));
+    expect(sendAction).not.toHaveBeenCalled();
+  });
+
+  it('lets the defender surrender manually before the countdown ends', async () => {
+    const hopelessView: PlayerGameView = {
+      ...view,
+      myHand: [{ suit: 'clubs', rank: 'two' }],
+      tablePairs: [{ attack: { suit: 'spades', rank: 'six' }, defense: null }],
+      attackerIdx: 1,
+      defenderIdx: 0,
+      boutPhase: 'defense',
+      legalActions: ['surrender'],
+    };
+    getGameView.mockResolvedValue(hopelessView);
+    sendAction.mockResolvedValue({
+      ...hopelessView,
+      boutPhase: 'surrenderThrowIn',
+      legalActions: [],
+    });
+
+    render(
+      <GamePage
+        gameId="game-1"
+        playerId="p0"
+        onSwitchPlayer={() => {}}
+        autoSurrenderMs={300}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText('Surrender')).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: /Surrender/ }));
+
+    await waitFor(() => expect(sendAction).toHaveBeenCalledTimes(1));
+    await new Promise((resolve) => setTimeout(resolve, 320));
+    expect(sendAction).toHaveBeenCalledTimes(1);
+    expect(sendAction).toHaveBeenCalledWith(
+      'game-1',
+      expect.objectContaining({ type: 'declareSurrender', playerId: 'p0' }),
+    );
+  });
+
+  it('ticks only for the player whose own clock is running', async () => {
+    getGameView.mockResolvedValue({
+      ...view,
+      turnDeadlineMs: Date.now() + 4_000,
+      turnSecondsRemaining: 4,
+      turnPlayerId: 'p1',
+    });
+
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('turn-clock').textContent?.trim()).toBe('00:04'),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 160));
+    expect(audio.playClockTick).not.toHaveBeenCalled();
+  });
+
+  it('passes the remaining seconds to the tick sound', async () => {
+    getGameView.mockResolvedValue({
+      ...view,
+      turnDeadlineMs: Date.now() + 4_000,
+      turnSecondsRemaining: 4,
+      turnPlayerId: 'p0',
+    });
+
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    await waitFor(() => expect(audio.playClockTick).toHaveBeenCalledWith(4));
+  });
 });
