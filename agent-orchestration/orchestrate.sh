@@ -62,7 +62,6 @@ if [ "$USE_GITHUB_PRS" -eq 1 ]; then
   git fetch origin main 2>/dev/null || true
 fi
 
-# Launch FreeBuff with IPv4-first DNS and wait until it is past login/waiting-room/admission screens
 wait_until_worker_tui_ready() {
   local WORKER_ID=$1
   local CONTAINER="freebuff_worker_${WORKER_ID}"
@@ -96,7 +95,6 @@ wait_until_worker_tui_ready() {
       continue
     fi
 
-    # 1. If admission attempt was closed (409) or timed out before prompt was sent, restart TUI cleanly
     if echo "$SCREEN" | grep -qiE "admission_attempt_closed|session POST failed|This session start was cancelled|operation timed out"; then
       STABLE_READY_CHECKS=0
       echo "[Worker ${WORKER_ID}] 🔄 Admission attempt closed/timed out during startup; restarting fresh FreeBuff session..."
@@ -107,7 +105,6 @@ wait_until_worker_tui_ready() {
       continue
     fi
 
-    # 2. If on Login screen, wait calmly without sending any keys
     if echo "$SCREEN" | grep -qiE "Log in|Sign in|visit https://|Press Enter to login|Waiting for login|authenticate|Open this link|not authenticated"; then
       STABLE_READY_CHECKS=0
       echo "🔐 Log in inside Worker-${WORKER_ID} (Tab ${WORKER_ID}: Ctrl+A then ${WORKER_ID})" > "$STATUS_FILE"
@@ -116,11 +113,9 @@ wait_until_worker_tui_ready() {
       continue
     fi
 
-    # 3. If in Waiting Room or "Starting your model session", wait patiently!
     if echo "$SCREEN" | grep -qiE "waiting room|queued|position in queue|Starting your model session|Connecting to|Initializing"; then
       STABLE_READY_CHECKS=0
       echo "⏳ Admitting FreeBuff model session (Worker-${WORKER_ID})..." > "$STATUS_FILE"
-      echo "[Worker ${WORKER_ID}] ⏳ FreeBuff is admitting model session; waiting..."
       sleep 4
       continue
     fi
@@ -297,10 +292,8 @@ run_worker_freebuff() {
   rm -f "${WT_DIR}/.tickets/STATUS"
 
   while true; do
-    # 1. Wait until TUI is authenticated and ready
     wait_until_worker_tui_ready "$WORKER_ID"
 
-    # 2. Send prompt with a SINGLE Enter keystroke (never double-Enter during session admission!)
     echo "[Worker ${WORKER_ID}] 📨 Sending ticket prompt to FreeBuff TUI..."
     docker exec "$CONTAINER" tmux send-keys -t buff -l -- "${PROMPT}"
     sleep 1
@@ -324,7 +317,6 @@ run_worker_freebuff() {
 
       SCREEN=$(docker exec "$CONTAINER" tmux capture-pane -t buff -p 2>/dev/null || true)
 
-      # If FreeBuff says "Starting your model session, your message is saved", DO NOT touch keys or kill it—wait!
       if echo "$SCREEN" | grep -qiE "Starting your model session"; then
         if [ $((ELAPSED % 30)) -eq 0 ]; then
           echo "[Worker ${WORKER_ID}] ⏳ FreeBuff is starting model session (message is saved and queued)..."
@@ -332,7 +324,6 @@ run_worker_freebuff() {
         continue
       fi
 
-      # If admission attempt closed (409) or operation timed out, we MUST restart the freebuff CLI process!
       if echo "$SCREEN" | grep -qiE "admission_attempt_closed|session POST failed|This session start was cancelled|operation timed out|not authenticated|Failed to start agent run|AI_APICallError|Message not sent|Session ended|superseded|Log in to continue"; then
         echo "[Worker ${WORKER_ID}] 🔄 FreeBuff session admission closed or timed out. Restarting clean FreeBuff session in 6s..."
         docker exec "$CONTAINER" tmux kill-session -t buff 2>/dev/null || true
@@ -508,14 +499,17 @@ $(cat "$REVIEW_FILE")" >/dev/null 2>&1 || true
     ROUND=$((ROUND + 1))
   done
 
+  # === STAGE 3: BULLETPROOF SERIALIZED MERGE INTO MAIN & REMOTE BRANCH CLEANUP ===
   echo "🔒 Acquiring merge lock for ${TICKET_NAME}..." > "$STATUS_FILE"
   (
     flock -x 200
-    echo "[Worker ${WORKER_ID}] 🔀 Merging latest main into ${BRANCH_NAME}..."
+    echo "[Worker ${WORKER_ID}] 🔀 Reconciling ${BRANCH_NAME} with latest main..."
 
+    cd ~/agent-project
+    git checkout main >/dev/null 2>&1
     if [ "$USE_GITHUB_PRS" -eq 1 ]; then
       git fetch origin main >/dev/null 2>&1 || true
-      git branch -f main origin/main 2>/dev/null || true
+      git merge --ff-only origin/main >/dev/null 2>&1 || true
     fi
 
     cd "$WT_DIR"
@@ -524,7 +518,7 @@ $(cat "$REVIEW_FILE")" >/dev/null 2>&1 || true
       cd ~/agent-project
       local CONFLICT_PROMPT="🚨 GIT MERGE CONFLICT WITH MAIN: Another parallel worker merged changes to 'main' that conflict with your branch. Run 'git status' and 'git diff' to find all <<<<<<< HEAD conflict markers, resolve them cleanly so both features work together, run the test suite ('sbt -batch test' and 'npm test -- --run') until 100% green, and run: echo DONE > .tickets/STATUS"
       run_worker_freebuff "$WORKER_ID" "$CONFLICT_PROMPT"
-      run_worker_test_gate "$WORKER_ID" "$TICKET_FILE"
+      run_worker_test_gate "$WORKER_ID" "$TICKET_FILE" || exit 1
       cd "$WT_DIR"
       rm -f .tickets/STATUS
       git add -A
@@ -532,29 +526,30 @@ $(cat "$REVIEW_FILE")" >/dev/null 2>&1 || true
       git commit -m "chore(${TICKET_NAME}): resolve merge conflicts with main" >/dev/null 2>&1 || true
     else
       cd ~/agent-project
-      run_worker_test_gate "$WORKER_ID" "$TICKET_FILE"
+      run_worker_test_gate "$WORKER_ID" "$TICKET_FILE" || exit 1
       cd "$WT_DIR"
     fi
 
-    cd ~/agent-project
-    if [ "$USE_GITHUB_PRS" -eq 1 ] && [ -n "$PR_NUMBER" ]; then
-      (cd "$WT_DIR" && git push origin "$BRANCH_NAME" >/dev/null 2>&1)
-      echo "[Worker ${WORKER_ID}] 🚀 Merging GitHub PR #${PR_NUMBER} into main..."
-      gh pr merge "$PR_NUMBER" --merge --delete-branch >/dev/null 2>&1 || true
-      git checkout main >/dev/null 2>&1
-      git pull --rebase origin main >/dev/null 2>&1 || true
-    else
-      git checkout main >/dev/null 2>&1
-      git merge --no-ff "$BRANCH_NAME" -m "Merge ${TICKET_NAME}" >/dev/null 2>&1
-    fi
+    # Detach worktree HEAD so the branch is unlocked and can be cleanly merged & deleted
+    git checkout --detach HEAD >/dev/null 2>&1
 
+    cd ~/agent-project
+    git checkout main >/dev/null 2>&1
+    # Merge the verified feature branch directly into main
+    git merge --no-ff "$BRANCH_NAME" -m "Merge ${TICKET_NAME} (PR #${PR_NUMBER:-local})" >/dev/null 2>&1
     touch "$DONE_MARKER"
     git add "$DONE_MARKER" "$TICKET_FILE" 2>/dev/null || true
     git commit -m "chore(tickets): mark ${TICKET_NAME} completed" >/dev/null 2>&1 || true
+
     if [ "$USE_GITHUB_PRS" -eq 1 ]; then
-      git push origin main >/dev/null 2>&1 || true
+      # Push updated branch first so GitHub marks PR as Merged when main is pushed, then delete remote branch
+      git push origin "$BRANCH_NAME" >/dev/null 2>&1 || true
+      git push origin main >/dev/null 2>&1
+      git push origin --delete "$BRANCH_NAME" >/dev/null 2>&1 || true
     fi
-    echo "[Worker ${WORKER_ID}] ✅ ${TICKET_NAME} merged to main and synced to GitHub!"
+
+    git branch -D "$BRANCH_NAME" >/dev/null 2>&1 || true
+    echo "[Worker ${WORKER_ID}] ✅ ${TICKET_NAME} merged into main and feature branch deleted!"
   ) 200>.reviews/merge.lock
 
   echo "💤 Idle (Last completed: ${TICKET_NAME})" > "$STATUS_FILE"
@@ -656,7 +651,6 @@ RESET_EOF
   [ "$USE_GITHUB_PRS" -eq 1 ] && (git push origin main >/dev/null 2>&1 || true)
 }
 
-# === PHASE 2: DYNAMIC REAL-TIME WORKER POOL ===
 while true; do
   check_and_compile_human_feedback
 

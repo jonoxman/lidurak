@@ -26,13 +26,11 @@ if ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
   fi
 fi
 
-# Seed freebuff_auth_1 from existing freebuff_auth so Worker 1 keeps your current login
 docker volume create freebuff_auth >/dev/null 2>&1 || true
 docker volume create freebuff_auth_1 >/dev/null 2>&1 || true
 docker run --rm -v "freebuff_auth:/from:ro" -v "freebuff_auth_1:/to" "$IMAGE_NAME" \
   bash -c 'cp -rn /from/. /to/ 2>/dev/null || true' >/dev/null 2>&1 || true
 
-# Base container for play-local.sh (:8080 and :5173)
 if [ "$(docker inspect -f '{{.State.Running}}' freebuff_worker 2>/dev/null || true)" != "true" ]; then
   docker start freebuff_worker 2>/dev/null || \
   docker run -d --name freebuff_worker \
@@ -65,7 +63,6 @@ for w in $(seq 1 "$NUM_WORKERS"); do
   docker volume create "$SBT_VOL" >/dev/null 2>&1 || true
 
   if ! docker inspect "$C_NAME" >/dev/null 2>&1; then
-    echo "🐳 Creating container $C_NAME (isolated auth volume: $AUTH_VOL, IPv4-first enabled)..."
     docker run -d --name "$C_NAME" \
       --cap-drop=ALL --cap-add=CHOWN --cap-add=SETUID --cap-add=SETGID --cap-add=DAC_OVERRIDE \
       --security-opt no-new-privileges:true \
@@ -79,7 +76,6 @@ for w in $(seq 1 "$NUM_WORKERS"); do
     docker start "$C_NAME" >/dev/null
   fi
 
-  # Persist any dot-directories created in /root inside this worker's own dedicated auth volume
   docker exec "$C_NAME" bash -c '
     grep -q "precedence ::ffff:0:0/96  100" /etc/gai.conf 2>/dev/null || echo "precedence ::ffff:0:0/96  100" >> /etc/gai.conf
     for dir in .local .codebuff .freebuff .manicode; do
