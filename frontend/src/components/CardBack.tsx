@@ -1,3 +1,5 @@
+import { useSettings } from '../state/settings';
+
 export type CardBackPattern =
   | 'classic-hatch'
   | 'royal-diamond'
@@ -123,8 +125,12 @@ function PatternTile({ pattern }: { pattern: CardBackPattern }) {
 }
 
 /** The dark patterned back of a playing card, sized like a [[Card]]. */
-export function CardBack({ class: className, pattern = DEFAULT_CARD_BACK_PATTERN }: CardBackProps) {
-  const id = `card-back-${pattern}`;
+export function CardBack({ class: className, pattern }: CardBackProps) {
+  // Without an explicit pattern, follow the user's Card Back preference, so the
+  // header setting reaches every face-down card in the app.
+  const settings = useSettings();
+  const activePattern = pattern ?? settings.cardBack;
+  const id = `card-back-${activePattern}`;
 
   return (
     <svg
@@ -132,10 +138,10 @@ export function CardBack({ class: className, pattern = DEFAULT_CARD_BACK_PATTERN
       viewBox="0 0 70 100"
       role="img"
       aria-label="Card back"
-      data-pattern={pattern}
+      data-pattern={activePattern}
     >
       <defs>
-        <PatternTile pattern={pattern} />
+        <PatternTile pattern={activePattern} />
       </defs>
       <rect
         x="1"
@@ -149,7 +155,7 @@ export function CardBack({ class: className, pattern = DEFAULT_CARD_BACK_PATTERN
         stroke-width={2}
       />
       <rect
-        data-pattern-fill={pattern}
+        data-pattern-fill={activePattern}
         x="6"
         y="6"
         width="58"

@@ -12,6 +12,15 @@ describe('App', () => {
     render(<App />);
     expect(screen.getByRole('button', { name: 'Create Game' })).toBeTruthy();
   });
+
+  it('mounts the universal site header above the lobby', () => {
+    render(<App />);
+
+    const header = screen.getByRole('banner');
+    expect(header.getAttribute('data-zone')).toBe('site-header');
+    expect(screen.getByRole('link', { name: 'LIDURAK' }).getAttribute('href')).toBe('#/');
+    expect(screen.getByRole('button', { name: 'Account menu' })).toBeTruthy();
+  });
 });
 
 describe('parseRoute', () => {
