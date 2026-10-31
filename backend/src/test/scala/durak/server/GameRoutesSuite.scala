@@ -88,6 +88,8 @@ class GameRoutesSuite extends munit.FunSuite:
     assertEquals(view.myHand.size, 6)
     assertEquals(view.opponents.size, 2)
     assert(view.talonCount > 0)
+    assert(view.turnDeadlineMs > 0L, s"missing turn clock: ${json.noSpaces}")
+    assert(view.turnSecondsRemaining > 0, s"missing clock seconds: ${json.noSpaces}")
     assert(!json.noSpaces.contains("\"talon\""), json.noSpaces)
   }
 
