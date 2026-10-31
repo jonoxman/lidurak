@@ -2,12 +2,11 @@
 set -u
 cd ~/agent-project
 
-# === PARSE ARGUMENTS ===
-MAX_WORKERS=3
+INITIAL_WORKERS=3
 while [ $# -gt 0 ]; do
   case "$1" in
     --workers|-w)
-      MAX_WORKERS="$2"
+      INITIAL_WORKERS="$2"
       shift 2
       ;;
     *)
@@ -16,11 +15,14 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# === FAIL-SAFE CTRL+C TRAP ===
+mkdir -p .tickets .reviews .reviews/feedback_archive
+echo "$INITIAL_WORKERS" > .reviews/target_workers
+
 cleanup_on_interrupt() {
   echo ""
   echo "🛑 Interrupted by user (Ctrl+C). Terminating active worker jobs safely..."
-  kill $(jobs -p) 2>/dev/null || true
+  pkill -9 -P $$ 2>/dev/null || true
+  rm -f .reviews/worker_*.pid .reviews/worker_*.ticket
   if [ -f FEEDBACK.in_progress.md ]; then
     cp FEEDBACK.in_progress.md FEEDBACK.md
     rm -f FEEDBACK.in_progress.md
@@ -30,10 +32,8 @@ cleanup_on_interrupt() {
 }
 trap cleanup_on_interrupt INT TERM
 
-# Boot Docker & isolated worktrees for N workers
-./agent-orchestration/start-workspace.sh "$MAX_WORKERS"
+./agent-orchestration/start-workspace.sh "$INITIAL_WORKERS"
 
-# === CONFIGURATION ===
 PRIMARY_ARCHITECT_MODEL="claude-opus-4-6-thinking"
 PRIMARY_REVIEWER_MODEL="claude-sonnet-4-6"
 FALLBACK_MODEL="gemini-3.8-flash-high"
@@ -43,28 +43,32 @@ SESSION_TIMEOUT_SEC=3300
 POLL_INTERVAL_SEC=10
 MAX_REVIEW_ROUNDS=4
 
-mkdir -p .tickets .reviews .reviews/feedback_archive
-
-# Check if GitHub remote is configured and gh is authenticated
 USE_GITHUB_PRS=0
 if git remote get-url origin >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
   USE_GITHUB_PRS=1
   echo "🌐 GitHub Integration : ENABLED ($(git remote get-url origin))"
 else
-  echo "⚠️  GitHub Integration : LOCAL-ONLY (Run 'gh auth login' and add 'origin' remote to enable GitHub PRs)"
+  echo "⚠️  GitHub Integration : LOCAL-ONLY"
 fi
 
 echo "=================================================================="
-echo "⚙️  Parallel Workers   : Up to ${MAX_WORKERS} concurrent FreeBuff containers"
+echo "⚙️  Dynamic Workers    : ${INITIAL_WORKERS} (Scale live: ./agent-orchestration/scale-workers.sh <N>)"
 echo "⚙️  Architect Routing  : ${PRIMARY_ARCHITECT_MODEL} -> Fallback: ${FALLBACK_MODEL}"
 echo "⚙️  Reviewer Routing   : ${PRIMARY_REVIEWER_MODEL} -> Fallback: ${FALLBACK_MODEL}"
 echo "=================================================================="
 
-# Sync latest main from GitHub on startup
+# Commit any local state changes cleanly before syncing with origin/main
+git checkout main 2>/dev/null || true
 if [ "$USE_GITHUB_PRS" -eq 1 ]; then
-  git checkout main 2>/dev/null || true
-  git pull --rebase origin main 2>/dev/null || true
+  git fetch origin main 2>/dev/null || true
 fi
+
+# Non-blocking Antigravity caller: uses SIGKILL (-9) on child tree and never hangs on wait!
+kill_agy_tree() {
+  local PID=$1
+  pkill -9 -P "$PID" 2>/dev/null || true
+  kill -9 "$PID" 2>/dev/null || true
+}
 
 try_agy_call() {
   local MODEL=$1
@@ -90,20 +94,20 @@ try_agy_call() {
     local BYTES
     BYTES=$(wc -c < "$OUT_FILE" 2>/dev/null || echo 0)
 
+    # 1. Immediate completion when sentinel is written
     if [ "$BYTES" -gt 0 ] && grep -qE "$END_SENTINEL" "$OUT_FILE" 2>/dev/null; then
-      sleep 2
-      kill -TERM "$AGY_PID" 2>/dev/null || true
-      wait "$AGY_PID" 2>/dev/null || true
+      sleep 1
+      kill_agy_tree "$AGY_PID"
       echo "✅ ${MODEL} completed output in ${ELAPSED}s (${BYTES} bytes)."
       return 0
     fi
 
+    # 2. Idle stream completion if CLI hangs after writing valid output
     if [ "$BYTES" -gt 500 ] && [ "$BYTES" -eq "$LAST_BYTES" ]; then
       STAGNANT_SEC=$((STAGNANT_SEC + 5))
       if [ $STAGNANT_SEC -ge 25 ] && grep -qE "$EXPECT_PATTERN" "$OUT_FILE" 2>/dev/null; then
-        echo "✅ ${MODEL} stream idle for 25s with valid output (${BYTES} bytes). Closing CLI..."
-        kill -TERM "$AGY_PID" 2>/dev/null || true
-        wait "$AGY_PID" 2>/dev/null || true
+        echo "✅ ${MODEL} stream idle for 25s with valid output (${BYTES} bytes). Force-closing CLI..."
+        kill_agy_tree "$AGY_PID"
         return 0
       fi
     else
@@ -111,9 +115,12 @@ try_agy_call() {
     fi
     LAST_BYTES=$BYTES
 
+    if [ $((ELAPSED % 15)) -eq 0 ]; then
+      echo "   ⏳ ${MODEL} streaming... (${ELAPSED}s / ${AGY_TIMEOUT_SEC}s | ${BYTES} bytes)"
+    fi
+
     if [ $ELAPSED -ge $AGY_TIMEOUT_SEC ]; then
-      kill -9 "$AGY_PID" 2>/dev/null || true
-      wait "$AGY_PID" 2>/dev/null || true
+      kill_agy_tree "$AGY_PID"
       if [ -s "$OUT_FILE" ] && grep -qE "$EXPECT_PATTERN" "$OUT_FILE"; then
         echo "♻️  Salvaged valid output written before timeout!"
         return 0
@@ -122,7 +129,6 @@ try_agy_call() {
     fi
   done
 
-  wait "$AGY_PID" 2>/dev/null || true
   if [ -s "$OUT_FILE" ] && grep -qE "$EXPECT_PATTERN" "$OUT_FILE"; then
     echo "✅ ${MODEL} succeeded in ${ELAPSED}s."
     return 0
@@ -152,7 +158,6 @@ run_agy_with_fallback() {
   done
 }
 
-# Run deterministic local test gate inside a specific worker container & worktree
 run_worker_test_gate() {
   local WORKER_ID=$1
   local CURRENT_TICKET=$2
@@ -215,12 +220,14 @@ REPORT_EOF
   return 0
 }
 
-# Drive FreeBuff inside a specific worker container until its worktree .tickets/STATUS == DONE
 run_worker_freebuff() {
   local WORKER_ID=$1
   local PROMPT=$2
   local WT_DIR=".worktrees/worker-${WORKER_ID}"
   local CONTAINER="freebuff_worker_${WORKER_ID}"
+  local STATUS_FILE=".reviews/worker_${WORKER_ID}.status"
+  local PREV_STATUS
+  PREV_STATUS=$(cat "$STATUS_FILE" 2>/dev/null || echo "🔨 Working...")
 
   rm -f "${WT_DIR}/.tickets/STATUS"
 
@@ -228,17 +235,42 @@ run_worker_freebuff() {
     if ! docker exec "$CONTAINER" tmux has-session -t buff 2>/dev/null; then
       echo "[Worker ${WORKER_ID}] 🚀 Launching FreeBuff session inside ${CONTAINER}..."
       docker exec "$CONTAINER" tmux new-session -d -s buff "freebuff"
-      sleep 15
-    else
-      echo "[Worker ${WORKER_ID}] ♻️  Reusing active FreeBuff session in ${CONTAINER}..."
-      sleep 2
+      sleep 6
     fi
 
+    while true; do
+      local INIT_SCREEN
+      INIT_SCREEN=$(docker exec "$CONTAINER" tmux capture-pane -t buff -p 2>/dev/null || true)
+      if [ -z "$(echo "$INIT_SCREEN" | tr -d '[:space:]')" ]; then
+        sleep 2
+        continue
+      fi
+
+      if echo "$INIT_SCREEN" | grep -qiE "Log in|Sign in|visit https://|Press Enter to login|Waiting for login|authenticate"; then
+        echo "🔐 Action Required: Log in inside Worker-${WORKER_ID} tab (Ctrl+A then ${WORKER_ID})" > "$STATUS_FILE"
+        echo "[Worker ${WORKER_ID}] 🔐 FreeBuff is displaying the login screen. Complete login in Worker-${WORKER_ID} tab..."
+        sleep 4
+        continue
+      fi
+
+      if echo "$INIT_SCREEN" | grep -qiE "waiting room|queued|position in queue"; then
+        echo "⏳ In FreeBuff waiting room queue (Worker-${WORKER_ID})..." > "$STATUS_FILE"
+        sleep 5
+        continue
+      fi
+
+      echo "$PREV_STATUS" > "$STATUS_FILE"
+      sleep 2
+      break
+    done
+
+    echo "[Worker ${WORKER_ID}] 📨 Sending ticket prompt to FreeBuff TUI..."
     docker exec "$CONTAINER" tmux send-keys -t buff $'\e[200~'"${PROMPT}"$'\e[201~'
     sleep 1
     docker exec "$CONTAINER" tmux send-keys -t buff Enter
 
     local ELAPSED=0
+    local RESENT_COUNT=0
     while [ $ELAPSED -lt $SESSION_TIMEOUT_SEC ]; do
       sleep $POLL_INTERVAL_SEC
       ELAPSED=$((ELAPSED + POLL_INTERVAL_SEC))
@@ -255,11 +287,26 @@ run_worker_freebuff() {
       fi
 
       SCREEN=$(docker exec "$CONTAINER" tmux capture-pane -t buff -p 2>/dev/null || true)
-      if echo "$SCREEN" | grep -qiE "Failed to start agent run|AI_APICallError|Message not sent|Session ended|Log in to continue"; then
-        echo "[Worker ${WORKER_ID}] ⚠️  FreeBuff soft-crashed or dropped. Respawning..."
-        docker exec "$CONTAINER" tmux kill-session -t buff 2>/dev/null || true
-        sleep 5
+
+      if echo "$SCREEN" | grep -qiE "Log in to continue|Press Enter to login|Waiting for login"; then
         break
+      fi
+
+      if echo "$SCREEN" | grep -qiE "Failed to start agent run|AI_APICallError|Message not sent|Session ended|superseded"; then
+        echo "[Worker ${WORKER_ID}] ⚠️  FreeBuff session interrupted/dropped. Respawning in 10s..."
+        docker exec "$CONTAINER" tmux kill-session -t buff 2>/dev/null || true
+        sleep 10
+        break
+      fi
+
+      if [ $ELAPSED -ge 20 ] && [ $RESENT_COUNT -lt 3 ]; then
+        if ! echo "$SCREEN" | grep -qiE "STATUS|AGENTS\.md|Thinking|Read |Edit |Write |Bash"; then
+          echo "[Worker ${WORKER_ID}] 🔁 Re-sending prompt to FreeBuff input box..."
+          docker exec "$CONTAINER" tmux send-keys -t buff $'\e[200~'"${PROMPT}"$'\e[201~'
+          sleep 1
+          docker exec "$CONTAINER" tmux send-keys -t buff Enter
+          RESENT_COUNT=$((RESENT_COUNT + 1))
+        fi
       fi
     done
 
@@ -272,7 +319,6 @@ run_worker_freebuff() {
   done
 }
 
-# === COMPLETE LIFECYCLE FOR ONE TICKET ON ONE ISOLATED WORKER (WITH GITHUB PR & AUTO CONFLICT RESOLUTION) ===
 process_ticket_on_worker() {
   local WORKER_ID=$1
   local TICKET_FILE=$2
@@ -286,7 +332,6 @@ process_ticket_on_worker() {
   echo "🔨 Implementing ${TICKET_NAME}" > "$STATUS_FILE"
   echo "[Worker ${WORKER_ID}] 🎬 Starting ${TICKET_NAME} on branch ${BRANCH_NAME}..."
 
-  # 1. Prepare clean branch in Worker's isolated git worktree based on latest main
   (
     cd "$WT_DIR"
     git checkout -f -B "$BRANCH_NAME" main >/dev/null 2>&1
@@ -297,7 +342,6 @@ process_ticket_on_worker() {
     rm -f .tickets/STATUS .reviews/agent_notes.md
   )
 
-  # 2. Run FreeBuff implementation
   local WORK_PROMPT="Implement @.tickets/${TICKET_NAME}.md following all rules in @AGENTS.md and @SPEC.md. Write a concise summary of your implementation into .reviews/agent_notes.md, verify all unit tests pass, and then run: echo DONE > .tickets/STATUS"
   run_worker_freebuff "$WORKER_ID" "$WORK_PROMPT"
 
@@ -308,7 +352,6 @@ process_ticket_on_worker() {
   while true; do
     echo "🧪 Testing ${TICKET_NAME} (Round ${ROUND})" > "$STATUS_FILE"
 
-    # STAGE 1: Deterministic Local Test Gate inside Worker container
     if ! run_worker_test_gate "$WORKER_ID" "$TICKET_FILE"; then
       TEST_RETRIES=$((TEST_RETRIES + 1))
       if [ $TEST_RETRIES -gt $MAX_REVIEW_ROUNDS ]; then
@@ -320,7 +363,6 @@ process_ticket_on_worker() {
       continue
     fi
 
-    # Commit verified work on worker branch & open/update GitHub Pull Request
     (
       cd "$WT_DIR"
       rm -f .tickets/STATUS
@@ -356,7 +398,6 @@ ${NOTES_BODY}" >/dev/null 2>&1 || true
       fi
     fi
 
-    # STAGE 2: AI Code Review of the Branch/PR Diff
     echo "🔍 Reviewing ${TICKET_NAME} (PR #${PR_NUMBER:-local}, Round ${ROUND})" > "$STATUS_FILE"
     local DIFF_FILE="${WT_DIR}/.reviews/current.diff"
     (
@@ -414,7 +455,6 @@ PROMPT_EOF
       "$PROMPT_FILE" "$REVIEW_FILE" "VERDICT: (APPROVED|CHANGES_REQUESTED)"
     cp "$REVIEW_FILE" "${WT_DIR}/.reviews/${TICKET_NAME}-review-${ROUND}.md"
 
-    # Post the AI Code Review directly to the GitHub Pull Request timeline!
     if [ "$USE_GITHUB_PRS" -eq 1 ] && [ -n "$PR_NUMBER" ]; then
       gh pr comment "$PR_NUMBER" --body "### 🤖 Automated Code Review (Round ${ROUND} by \`${ACTIVE_MODEL_USED}\`)
 
@@ -437,11 +477,10 @@ $(cat "$REVIEW_FILE")" >/dev/null 2>&1 || true
     ROUND=$((ROUND + 1))
   done
 
-  # STAGE 3: Serialized Merge Lock, Conflict Check against Latest Main & GitHub PR Merge
   echo "🔒 Acquiring merge lock for ${TICKET_NAME}..." > "$STATUS_FILE"
   (
     flock -x 200
-    echo "[Worker ${WORKER_ID}] 🔀 Merging latest main into ${BRANCH_NAME} and verifying no conflicts..."
+    echo "[Worker ${WORKER_ID}] 🔀 Merging latest main into ${BRANCH_NAME}..."
 
     if [ "$USE_GITHUB_PRS" -eq 1 ]; then
       git fetch origin main >/dev/null 2>&1 || true
@@ -450,7 +489,7 @@ $(cat "$REVIEW_FILE")" >/dev/null 2>&1 || true
 
     cd "$WT_DIR"
     if ! git merge --no-edit main >/dev/null 2>&1; then
-      echo "[Worker ${WORKER_ID}] ⚠️  Merge conflict detected with main! Dispatching FreeBuff to resolve conflict markers..."
+      echo "[Worker ${WORKER_ID}] ⚠️  Merge conflict detected with main! Dispatching FreeBuff to resolve..."
       cd ~/agent-project
       local CONFLICT_PROMPT="🚨 GIT MERGE CONFLICT WITH MAIN: Another parallel worker merged changes to 'main' that conflict with your branch. Run 'git status' and 'git diff' to find all <<<<<<< HEAD conflict markers, resolve them cleanly so both features work together, run the test suite ('sbt -batch test' and 'npm test -- --run') until 100% green, and run: echo DONE > .tickets/STATUS"
       run_worker_freebuff "$WORKER_ID" "$CONFLICT_PROMPT"
@@ -461,7 +500,6 @@ $(cat "$REVIEW_FILE")" >/dev/null 2>&1 || true
       git reset -- .reviews/ .tickets/ 2>/dev/null || true
       git commit -m "chore(${TICKET_NAME}): resolve merge conflicts with main" >/dev/null 2>&1 || true
     else
-      # Even if git merge succeeded cleanly, run test gate if main had new commits
       cd ~/agent-project
       run_worker_test_gate "$WORKER_ID" "$TICKET_FILE"
       cd "$WT_DIR"
@@ -473,7 +511,7 @@ $(cat "$REVIEW_FILE")" >/dev/null 2>&1 || true
       echo "[Worker ${WORKER_ID}] 🚀 Merging GitHub PR #${PR_NUMBER} into main..."
       gh pr merge "$PR_NUMBER" --merge --delete-branch >/dev/null 2>&1 || true
       git checkout main >/dev/null 2>&1
-      git pull --rebase origin main >/dev/null 2>&1
+      git pull --rebase origin main >/dev/null 2>&1 || true
     else
       git checkout main >/dev/null 2>&1
       git merge --no-ff "$BRANCH_NAME" -m "Merge ${TICKET_NAME}" >/dev/null 2>&1
@@ -492,7 +530,6 @@ $(cat "$REVIEW_FILE")" >/dev/null 2>&1 || true
   return 0
 }
 
-# === HELPER: EXTRACT TICKETS & WAVE METADATA ===
 extract_tickets_with_waves() {
   local RAW_FILE=$1
   sed '/===END_OF_TICKETS===/d' "$RAW_FILE" | awk '
@@ -516,40 +553,6 @@ extract_tickets_with_waves() {
   '
 }
 
-# === PHASE 1: DECOMPOSE SPEC ===
-if [ -z "$(ls -A .tickets/T-*.md 2>/dev/null)" ]; then
-  echo "🏗️  Phase 1: Decomposing SPEC.md into wave-scheduled atomic tickets..."
-  cat << PROMPT_EOF > .reviews/phase1_prompt.txt
-You are a Principal Systems Architect. DO NOT use any internal tools, DO NOT run bash commands, and DO NOT read external files.
-
-Break the CURRENT ACTIVE MILESTONE in <spec> down into atomic implementation tickets grouped into PARALLEL EXECUTION WAVES (WAVE:1, WAVE:2, etc.).
-Tickets given the same WAVE number will be executed concurrently by separate agents in separate Git worktrees and merged via Pull Requests. Therefore:
-- Put tickets that touch independent files/subsystems into the SAME wave so they run in parallel!
-- Put tickets that depend on earlier tickets or heavily edit the exact same file into sequential waves (WAVE:1, then WAVE:2, then WAVE:3).
-
-<spec>
-$(cat SPEC.md)
-</spec>
-
-<agents>
-$(cat AGENTS.md)
-</agents>
-
-Output each ticket using this EXACT delimiter format on its own line (including |WAVE:N), and end your entire response with ===END_OF_TICKETS===:
-===TICKET:T-01-setup.md|WAVE:1===
-[Full Markdown content of ticket 1]
-===TICKET:T-02-models.md|WAVE:2===
-[Full Markdown content of ticket 2]
-===END_OF_TICKETS===
-
-Do NOT output any text before the first ===TICKET:...=== marker.
-PROMPT_EOF
-
-  run_agy_with_fallback "$PRIMARY_ARCHITECT_MODEL" "$FALLBACK_MODEL" ".reviews/phase1_prompt.txt" ".reviews/raw_tickets.txt" "===TICKET:"
-  extract_tickets_with_waves ".reviews/raw_tickets.txt"
-fi
-
-# === PHASE 1.5: HUMAN FEEDBACK PRIORITY QUEUE (WITH WAVE TAGS) ===
 check_and_compile_human_feedback() {
   if [ ! -f FEEDBACK.md ]; then return 0; fi
   local ACTIVE_FEEDBACK
@@ -577,7 +580,7 @@ check_and_compile_human_feedback() {
 You are a Principal Systems Architect. DO NOT use any internal tools, DO NOT run bash commands, and DO NOT read external files.
 
 Decompose ALL requirements in <human_feedback> into 5 to 7 atomic implementation tickets grouped into PARALLEL EXECUTION WAVES (WAVE:1, WAVE:2, WAVE:3).
-Tickets in the same wave run concurrently on up to ${MAX_WORKERS} parallel FreeBuff workers:
+Tickets in the same wave run concurrently on parallel FreeBuff workers:
 - Assign independent subsystems (e.g., Backend Scala rules/clock vs. Frontend Web Audio synthesizer + SortBar vs. Frontend CSS Grid / Lobby settings) to the SAME wave so they run simultaneously!
 - Assign tickets that build directly on earlier tickets to the next wave number.
 
@@ -616,18 +619,16 @@ PROMPT_EOF
 
 RESET_EOF
 
-  # Commit and push newly generated tickets so state is saved to GitHub immediately
   git checkout main 2>/dev/null || true
   git add .tickets/ FEEDBACK.md FEEDBACK.backup.md 2>/dev/null || true
   git commit -m "chore(tickets): add feedback wave tickets ${TIMESTAMP}" >/dev/null 2>&1 || true
   [ "$USE_GITHUB_PRS" -eq 1 ] && (git push origin main >/dev/null 2>&1 || true)
 }
 
-# === PHASE 2: PARALLEL WAVE DISPATCHER ===
+# === PHASE 2: DYNAMIC REAL-TIME WORKER POOL SCHEDULER ===
 while true; do
   check_and_compile_human_feedback
 
-  # Collect all uncompleted tickets and sort by Wave number
   mapfile -t ALL_TICKETS < <(ls -1 .tickets/T-*.md 2>/dev/null | sort)
   PENDING_WAVES=()
 
@@ -644,59 +645,86 @@ while true; do
     mapfile -t UNIQUE_WAVES < <(printf "%s\n" "${PENDING_WAVES[@]}" | sort -n -u)
 
     for WAVE_NUM in "${UNIQUE_WAVES[@]}"; do
-      WAVE_TICKETS=()
-      for tf in "${ALL_TICKETS[@]}"; do
-        tname=$(basename "$tf" .md)
-        if [ ! -f ".tickets/.completed_${tname}" ]; then
-          w=$(grep -oE "WAVE:[0-9]+" "$tf" 2>/dev/null | head -n 1 | cut -d: -f2 || true)
-          [ -z "$w" ] && w="1"
-          [ "$w" = "$WAVE_NUM" ] && WAVE_TICKETS+=("$tf")
-        fi
-      done
-
       echo "=================================================================="
-      echo "🌊 EXECUTING PARALLEL WAVE ${WAVE_NUM} (${#WAVE_TICKETS[@]} ticket(s) across ${MAX_WORKERS} workers)"
+      echo "🌊 EXECUTING PARALLEL WAVE ${WAVE_NUM} (Dynamic Worker Pool Active)"
+      echo "   Tip: Run './agent-orchestration/scale-workers.sh <N>' in Window 4 to add/remove workers live!"
       echo "=================================================================="
 
-      # Dispatch tickets in chunks of MAX_WORKERS
-      idx=0
-      total_in_wave=${#WAVE_TICKETS[@]}
-      while [ $idx -lt $total_in_wave ]; do
-        PIDS=()
-        for w_id in $(seq 1 "$MAX_WORKERS"); do
-          if [ $idx -lt $total_in_wave ]; then
-            t_file="${WAVE_TICKETS[$idx]}"
-            process_ticket_on_worker "$w_id" "$t_file" &
-            PIDS+=("$!")
-            idx=$((idx + 1))
-            sleep 2
+      rm -f .reviews/worker_*.pid .reviews/worker_*.ticket
+
+      while true; do
+        TARGET_WORKERS=$(cat .reviews/target_workers 2>/dev/null || echo "$INITIAL_WORKERS")
+
+        ACTIVE_COUNT=0
+        for pid_file in .reviews/worker_*.pid; do
+          [ -e "$pid_file" ] || continue
+          w_id=$(basename "$pid_file" .pid | cut -d_ -f2)
+          w_pid=$(cat "$pid_file" 2>/dev/null || true)
+          if [ -n "$w_pid" ] && kill -0 "$w_pid" 2>/dev/null; then
+            ACTIVE_COUNT=$((ACTIVE_COUNT + 1))
+          else
+            rm -f "$pid_file" ".reviews/worker_${w_id}.ticket"
           fi
         done
 
-        # Wait for all concurrent workers in this sub-batch to finish
-        BATCH_FAIL=0
-        for pid in "${PIDS[@]}"; do
-          if ! wait "$pid"; then
-            BATCH_FAIL=1
+        UNASSIGNED_TICKETS=()
+        REMAINING_IN_WAVE=0
+        for tf in "${ALL_TICKETS[@]}"; do
+          tname=$(basename "$tf" .md)
+          if [ ! -f ".tickets/.completed_${tname}" ]; then
+            w=$(grep -oE "WAVE:[0-9]+" "$tf" 2>/dev/null | head -n 1 | cut -d: -f2 || true)
+            [ -z "$w" ] && w="1"
+            if [ "$w" = "$WAVE_NUM" ]; then
+              REMAINING_IN_WAVE=$((REMAINING_IN_WAVE + 1))
+              ALREADY_ASSIGNED=0
+              for tk_file in .reviews/worker_*.ticket; do
+                [ -e "$tk_file" ] || continue
+                if [ "$(cat "$tk_file" 2>/dev/null)" = "$tf" ]; then
+                  ALREADY_ASSIGNED=1
+                  break
+                fi
+              done
+              [ "$ALREADY_ASSIGNED" -eq 0 ] && UNASSIGNED_TICKETS+=("$tf")
+            fi
           fi
         done
 
-        if [ "$BATCH_FAIL" -ne 0 ]; then
-          echo "🛑 One or more parallel workers failed verification in Wave ${WAVE_NUM}. Check Window 3 (.reviews/worker_*.status)."
-          exit 1
+        if [ "$REMAINING_IN_WAVE" -eq 0 ] && [ "$ACTIVE_COUNT" -eq 0 ]; then
+          echo "✅ Wave ${WAVE_NUM} completely merged!"
+          break
         fi
+
+        for next_tf in "${UNASSIGNED_TICKETS[@]}"; do
+          DISPATCHED=0
+          for w_id in $(seq 1 "$TARGET_WORKERS"); do
+            if [ ! -f ".reviews/worker_${w_id}.pid" ]; then
+              if ! docker inspect "freebuff_worker_${w_id}" >/dev/null 2>&1; then
+                ./agent-orchestration/start-workspace.sh "$TARGET_WORKERS"
+              fi
+              echo "$next_tf" > ".reviews/worker_${w_id}.ticket"
+              process_ticket_on_worker "$w_id" "$next_tf" &
+              echo "$!" > ".reviews/worker_${w_id}.pid"
+              ACTIVE_COUNT=$((ACTIVE_COUNT + 1))
+              DISPATCHED=1
+              sleep 5
+              break
+            fi
+          done
+          [ "$DISPATCHED" -eq 0 ] && break
+        done
+
+        sleep 3
       done
     done
   fi
 
   rm -f FEEDBACK.in_progress.md
 
-  # === PHASE 3: INTERACTIVE HUMAN ACCEPTANCE GATE ===
   echo "=================================================================="
   echo "🏆 ALL CURRENT WAVES COMPLETED, PRs MERGED, AND SYNCED TO GITHUB!"
   echo "=================================================================="
   echo "👉 How to test & review your build right now:"
-  echo "   1. Run './agent-orchestration/play-local.sh' in Window 4 and open http://localhost:5173"
+  echo "   1. Run './agent-orchestration/play-local.sh' and open http://localhost:5173"
   echo "   2. View PR history on GitHub: gh pr list --state all"
   echo "   3. To request UI/UX or functional fixes, write them in 'FEEDBACK.md'"
   echo "------------------------------------------------------------------"
