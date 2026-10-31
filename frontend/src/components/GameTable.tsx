@@ -17,6 +17,15 @@ export interface TablePairData {
   defense?: CardData | null;
 }
 
+export type SeatPosition = 'top-left' | 'top-center' | 'top-right';
+
+export interface SeatAssignment {
+  opponent: OpponentSummary;
+  /** Clockwise distance from the viewer, `1` being the next player. */
+  offset: number;
+  position: SeatPosition;
+}
+
 export interface GameTableProps {
   myId: string;
   myHand: CardData[];
@@ -56,6 +65,9 @@ const RANK_ORDER: Record<string, number> = {
   ace: 14,
 };
 
+/** The viewer always occupies relative seat 0; opponents follow clockwise. */
+const VIEWER_SEAT = 0;
+
 export const cardKey = (card: CardData): string =>
   `${card.suit.toLowerCase()}:${card.rank.toLowerCase()}`;
 
@@ -72,8 +84,51 @@ const sortHand = (hand: CardData[]): CardData[] =>
   });
 
 /**
- * The responsive game table: opponents and talon on top, the battle area in the
- * middle, the viewer's sorted hand at the bottom, and an action slot below it.
+ * Relative clockwise distance from `viewerIndex` to `seatIndex`:
+ * `(seatIndex - viewerIndex + N) % N`.
+ */
+export function clockwiseOffset(
+  seatIndex: number,
+  viewerIndex: number,
+  playerCount: number,
+): number {
+  if (playerCount <= 1) return 0;
+  return (((seatIndex - viewerIndex) % playerCount) + playerCount) % playerCount;
+}
+
+/**
+ * Maps a clockwise offset onto the single opponent row of the felt:
+ * 2 players put the sole opponent top-center, 3 players split them
+ * top-left/top-right, and 4 players fill the row left to right.
+ */
+export function seatForOffset(offset: number, playerCount: number): SeatPosition {
+  if (playerCount <= 2) return 'top-center';
+  if (playerCount === 3) return offset === 1 ? 'top-left' : 'top-right';
+  const seats: SeatPosition[] = ['top-left', 'top-center', 'top-right'];
+  return seats[offset - 1] ?? 'top-right';
+}
+
+/** Assigns every opponent a deterministic seat relative to the viewer. */
+export function assignSeats(opponents: OpponentSummary[]): SeatAssignment[] {
+  const playerCount = opponents.length + 1;
+  return opponents.map((opponent, index) => {
+    const offset = clockwiseOffset(index + 1, VIEWER_SEAT, playerCount);
+    return { opponent, offset, position: seatForOffset(offset, playerCount) };
+  });
+}
+
+const initials = (name: string): string =>
+  name
+    .split(/\s+/)
+    .filter((part) => part.length > 0)
+    .slice(0, 2)
+    .map((part) => part[0].toUpperCase())
+    .join('');
+
+/**
+ * The felt arena as a 3x3 CSS Grid: opponents across the top row, the active
+ * bout in the middle row, and the talon deck, the viewer's hand, and the
+ * contextual controls in the bottom row.
  */
 export function GameTable({
   myId,
@@ -91,34 +146,61 @@ export function GameTable({
   children,
 }: GameTableProps) {
   const hand = sortHand(myHand);
+  const seats = assignSeats(opponents);
 
   return (
-    <div class="game-table" data-my-id={myId}>
-      <header class="table-top">
-        <section class="opponents" aria-label="Opponents">
-          {opponents.map((opponent) => {
-            const classes = ['opponent'];
-            if (opponent.id === attackerId) classes.push('active-attacker');
-            if (opponent.id === defenderId) classes.push('active-defender');
-            return (
-              <div key={opponent.id} class={classes.join(' ')} data-testid="opponent">
-                <span class="opponent-name">{opponent.name}</span>
-                <div class="opponent-cards" aria-label={`${opponent.name}'s cards`}>
-                  {Array.from({ length: opponent.cardCount }, (_, index) => (
-                    <CardBack key={index} />
-                  ))}
-                </div>
-                <span class="opponent-count">{opponent.cardCount} cards</span>
-                {opponent.finishRank != null ? (
-                  <span class="opponent-rank">Finished #{opponent.finishRank}</span>
-                ) : null}
-                {opponent.hasPassed ? <span class="opponent-passed">Passed</span> : null}
-              </div>
-            );
-          })}
-        </section>
+    <div class="table-arena" data-zone="table-arena" data-my-id={myId}>
+      {seats.map(({ opponent, offset, position }) => {
+        const classes = ['seat', `seat-${position}`];
+        if (opponent.id === attackerId) classes.push('active-attacker');
+        if (opponent.id === defenderId) classes.push('active-defender');
+        return (
+          <div
+            key={opponent.id}
+            class={classes.join(' ')}
+            data-seat={position}
+            data-offset={offset}
+            data-testid="opponent"
+          >
+            <div class="seat-head">
+              <span class="opponent-avatar" aria-hidden="true">
+                {initials(opponent.name)}
+              </span>
+              <span class="opponent-name">{opponent.name}</span>
+            </div>
+            <div class="opponent-cards" aria-label={`${opponent.name}'s cards`}>
+              {Array.from({ length: opponent.cardCount }, (_, index) => (
+                <CardBack key={index} />
+              ))}
+            </div>
+            <div class="seat-meta">
+              <span class="opponent-count">{opponent.cardCount} cards</span>
+              {opponent.finishRank != null ? (
+                <span class="opponent-rank">
+                  {opponent.finishRank === 1 ? 'WINNER' : 'OUT'}
+                </span>
+              ) : null}
+              {opponent.hasPassed ? <span class="opponent-passed">Passed</span> : null}
+            </div>
+          </div>
+        );
+      })}
 
-        <aside class="table-status" aria-label="Talon">
+      <section class="bout-area" aria-label="Battle">
+        {tablePairs.map((pair, index) => (
+          <TablePair
+            key={index}
+            attack={pair.attack}
+            defense={pair.defense}
+            onAttackClick={
+              onTableCardClick && !pair.defense ? () => onTableCardClick(index) : undefined
+            }
+          />
+        ))}
+      </section>
+
+      <aside class="table-deck" data-zone="table-deck" aria-label="Talon">
+        <div class="deck-stack">
           <div class="talon-stack">
             <CardBack class="talon-back talon-back-second" />
             <CardBack class="talon-back" />
@@ -133,36 +215,17 @@ export function GameTable({
               </div>
             </div>
           ) : null}
-          <div
-            class={`trump-badge ${isRedSuit(trumpSuit) ? 'red' : 'black'}`}
-            data-suit={trumpSuit.toLowerCase()}
-          >
-            <span>Trump</span>
-            <span class="trump-symbol">{suitSymbol(trumpSuit)}</span>
-          </div>
-        </aside>
-      </header>
+        </div>
+        <div
+          class={`trump-badge ${isRedSuit(trumpSuit) ? 'red' : 'black'}`}
+          data-suit={trumpSuit.toLowerCase()}
+        >
+          <span>Trump</span>
+          <span class="trump-symbol">{suitSymbol(trumpSuit)}</span>
+        </div>
+      </aside>
 
-      <section class="battle" aria-label="Battle">
-        {tablePairs.length === 0 ? (
-          <p class="battle-empty">Waiting for the first attack…</p>
-        ) : (
-          tablePairs.map((pair, index) => (
-            <TablePair
-              key={index}
-              attack={pair.attack}
-              defense={pair.defense}
-              onAttackClick={
-                onTableCardClick && !pair.defense
-                  ? () => onTableCardClick(index)
-                  : undefined
-              }
-            />
-          ))
-        )}
-      </section>
-
-      <section class="hand" aria-label="Your hand">
+      <section class="player-hand" data-zone="player-hand" aria-label="Your hand">
         {hand.map((card, index) => (
           <Card
             key={`${cardKey(card)}-${index}`}
@@ -174,9 +237,9 @@ export function GameTable({
         ))}
       </section>
 
-      <footer class="actions-slot" aria-label="Actions">
+      <div class="player-controls" data-zone="player-controls" aria-label="Actions">
         {children}
-      </footer>
+      </div>
     </div>
   );
 }
