@@ -1,10 +1,6 @@
+agent-orchestration/
+.worktrees/
 .reviews/
-orchestrate.sh
+.tickets/
 Dockerfile.sandbox
-docker-compose.yml
-oversee-freebuff.sh
-autopilot.sh
-start-workspace.sh
-next-milestone.sh
-watch-reviews.sh
-mission-control.sh
+FEEDBACK*.md
