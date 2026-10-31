@@ -31,6 +31,11 @@ export interface PlayerGameView {
   finishOrder: string[];
   isDraw: boolean;
   maxBoutAttacks: number;
+  /** Chaos Mode variant: the attacker may choose any active defender. */
+  chaosMode?: boolean;
+  /** Absolute epoch-ms deadline of the 15-second turn clock (0 = idle). */
+  turnDeadlineMs?: number;
+  turnSecondsRemaining?: number;
 }
 
 export interface GameAction {
@@ -103,6 +108,18 @@ export function parsePlayerGameView(value: unknown): PlayerGameView {
 
   const { myId, talonCount, trumpSuit, attackerIdx, defenderIdx, boutPhase, isDraw, maxBoutAttacks } =
     raw;
+  const chaosMode = raw.chaosMode;
+  if (chaosMode !== undefined && typeof chaosMode !== 'boolean') {
+    fail('chaosMode must be a boolean');
+  }
+  const turnDeadlineMs = raw.turnDeadlineMs;
+  if (turnDeadlineMs !== undefined && typeof turnDeadlineMs !== 'number') {
+    fail('turnDeadlineMs must be a number');
+  }
+  const turnSecondsRemaining = raw.turnSecondsRemaining;
+  if (turnSecondsRemaining !== undefined && typeof turnSecondsRemaining !== 'number') {
+    fail('turnSecondsRemaining must be a number');
+  }
   if (typeof myId !== 'string') fail('myId must be a string');
   if (!Array.isArray(raw.myHand)) fail('myHand must be an array of cards');
   if (!Array.isArray(raw.opponents)) fail('opponents must be an array');
@@ -135,6 +152,9 @@ export function parsePlayerGameView(value: unknown): PlayerGameView {
     finishOrder: parseStringArray(raw.finishOrder, 'finishOrder'),
     isDraw,
     maxBoutAttacks,
+    chaosMode: (chaosMode as boolean | undefined) ?? false,
+    turnDeadlineMs: (turnDeadlineMs as number | undefined) ?? 0,
+    turnSecondsRemaining: (turnSecondsRemaining as number | undefined) ?? 15,
   };
 }
 
@@ -171,8 +191,17 @@ export function hasLegalAction(legalActions: string[], action: string): boolean 
 
 // --- GameAction builders: one per backend action variant ---
 
-export function buildInitialAttack(playerId: string, cards: Card[]): GameAction {
-  return { type: 'initialAttack', playerId, cards };
+export function buildInitialAttack(
+  playerId: string,
+  cards: Card[],
+  targetDefender?: string,
+): GameAction {
+  return {
+    type: 'initialAttack',
+    playerId,
+    cards,
+    ...(targetDefender ? { targetDefender } : {}),
+  };
 }
 
 export function buildCoverCard(playerId: string, attackIndex: number, defenseCard: Card): GameAction {

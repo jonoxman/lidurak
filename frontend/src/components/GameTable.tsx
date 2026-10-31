@@ -1,4 +1,4 @@
-import { useState } from 'preact/hooks';
+import { useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { Card, isRedSuit, suitSymbol, type CardData } from './Card';
 import { CardBack } from './CardBack';
@@ -21,6 +21,11 @@ export interface TablePairData {
 
 export type SeatPosition = 'top-left' | 'top-center' | 'top-right';
 
+/** Where the active bout is anchored: a seat, or the viewer's own edge. */
+export type BoutAnchor = SeatPosition | 'bottom';
+
+export type RedirectDirection = SeatPosition | 'bottom' | 'shuffle';
+
 export interface SeatAssignment {
   opponent: OpponentSummary;
   /** Clockwise distance from the viewer, `1` being the next player. */
@@ -38,14 +43,38 @@ export interface GameTableProps {
   trumpSuit: string;
   attackerId?: string;
   defenderId?: string;
+  /** Chaos Mode: the attacker may target any active opponent. */
+  chaosMode?: boolean;
   /** True while the viewer is the attacker who owes an attack or throw-in. */
   awaitingAttack?: boolean;
   /** True while the viewer is the defender facing uncovered attacks. */
   defending?: boolean;
+  /** True while a redirect is legal for the viewer. */
+  canRedirect?: boolean;
+  /** True while the viewer may throw in a matching card. */
+  canThrowIn?: boolean;
   selectedKeys?: string[];
   onCardClick?: (card: CardData) => void;
+  onCardDoubleClick?: (card: CardData) => void;
   onTableCardClick?: (attackIndex: number) => void;
+  /** A hand card was dropped on a legal attack target. */
+  onAttackDrop?: (card: CardData, targetDefender?: string) => void;
+  /** A hand card was dropped on an uncovered attack. */
+  onCoverDrop?: (card: CardData, attackIndex: number) => void;
+  /** A hand card was dropped on the throw-in slot. */
+  onThrowInDrop?: (card: CardData) => void;
+  /** A hand card was dropped on the reflection outline. */
+  onRedirectDrop?: (card: CardData) => void;
   children?: ComponentChildren;
+}
+
+/** Minimal structural view of a drag event so handlers stay testable. */
+interface DragLike {
+  preventDefault(): void;
+  stopPropagation(): void;
+  dataTransfer: { getData(format: string): string } | null;
+  clientX: number;
+  clientY: number;
 }
 
 const SUIT_ORDER: Record<string, number> = {
@@ -73,6 +102,9 @@ const RANK_ORDER: Record<string, number> = {
 
 /** The viewer always occupies relative seat 0; opponents follow clockwise. */
 const VIEWER_SEAT = 0;
+
+/** Snap radius for magnetic drag-and-drop. */
+export const SNAP_DISTANCE_PX = 48;
 
 export const cardKey = (card: CardData): string =>
   `${card.suit.toLowerCase()}:${card.rank.toLowerCase()}`;
@@ -161,10 +193,88 @@ const initials = (name: string): string =>
     .map((part) => part[0].toUpperCase())
     .join('');
 
+/** Card-shaped reflection icon: arrows toward the receiving seat, or a shuffle. */
+function RedirectIcon({
+  chaosMode,
+  direction,
+}: {
+  chaosMode: boolean;
+  direction: RedirectDirection;
+}) {
+  if (chaosMode) {
+    return (
+      <svg
+        class="redirect-arrows"
+        data-icon="shuffle"
+        viewBox="0 0 72 104"
+        role="img"
+        aria-label="Random redirect"
+      >
+        <path
+          d="M18 38 L54 50 M54 50 L41 49 M54 50 L45 41"
+          fill="none"
+          stroke="#d9a326"
+          stroke-width="4"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        />
+        <path
+          d="M18 50 L54 38 M54 38 L41 39 M54 38 L45 47"
+          fill="none"
+          stroke="#d9a326"
+          stroke-width="4"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          opacity="0.6"
+        />
+      </svg>
+    );
+  }
+
+  const rotation =
+    direction === 'top-left'
+      ? -35
+      : direction === 'top-right'
+        ? 35
+        : direction === 'bottom'
+          ? 180
+          : 0;
+
+  return (
+    <svg
+      class="redirect-arrows"
+      data-icon="arrow"
+      viewBox="0 0 72 104"
+      role="img"
+      aria-label="Redirect to the next player"
+    >
+      <g transform={`rotate(${rotation} 36 46)`}>
+        <path d="M36 16 L47 32 L41 32 L41 58 L31 58 L31 32 L25 32 Z" fill="#d9a326" />
+        <path
+          d="M20 68 L52 68"
+          fill="none"
+          stroke="#d9a326"
+          stroke-width="3"
+          stroke-linecap="round"
+          opacity="0.8"
+        />
+        <path
+          d="M20 76 L52 76"
+          fill="none"
+          stroke="#d9a326"
+          stroke-width="3"
+          stroke-linecap="round"
+          opacity="0.45"
+        />
+      </g>
+    </svg>
+  );
+}
+
 /**
  * The felt arena as a 3x3 CSS Grid: opponents across the top row, the active
- * bout in the middle row, and the talon deck, the viewer's hand, and the
- * contextual controls in the bottom row.
+ * bout in the middle row anchored to the defender, and the talon deck, the
+ * viewer's hand, and the contextual controls in the bottom row.
  */
 export function GameTable({
   myId,
@@ -176,14 +286,26 @@ export function GameTable({
   trumpSuit,
   attackerId,
   defenderId,
+  chaosMode = false,
   awaitingAttack = false,
   defending = false,
+  canRedirect = false,
+  canThrowIn = false,
   selectedKeys = [],
   onCardClick,
+  onCardDoubleClick,
   onTableCardClick,
+  onAttackDrop,
+  onCoverDrop,
+  onThrowInDrop,
+  onRedirectDrop,
   children,
 }: GameTableProps) {
   const [sortMode, setSortMode] = useState<SortMode>('suit');
+  const [dragCard, setDragCard] = useState<CardData | null>(null);
+  const [snapZone, setSnapZone] = useState<string | null>(null);
+  const arenaRef = useRef<HTMLDivElement>(null);
+
   const hand = sortHand(myHand, sortMode, trumpSuit);
   const seats = assignSeats(opponents);
 
@@ -192,12 +314,114 @@ export function GameTable({
   const handClasses = ['player-hand'];
   if (awaitingAttack) handClasses.push('turn-pulse');
 
+  // Target outlines appear before the first card of a bout: one in front of the
+  // clockwise defender, or every legal opponent under Chaos Mode.
+  const attackTargets =
+    awaitingAttack && tablePairs.length === 0
+      ? chaosMode
+        ? opponents.filter((opponent) => opponent.finishRank == null && opponent.cardCount > 0)
+        : opponents.filter((opponent) => opponent.id === defenderId)
+      : [];
+
+  const boutAnchor: BoutAnchor =
+    defenderId === myId
+      ? 'bottom'
+      : seats.find((seat) => seat.opponent.id === defenderId)?.position ?? 'top-center';
+
+  const activeSeats = seats.filter((seat) => seat.opponent.finishRank == null);
+  const redirectDirection: RedirectDirection = chaosMode
+    ? 'shuffle'
+    : defenderId === myId
+      ? (activeSeats[0]?.position ?? 'top-center')
+      : (() => {
+          const defenderSeatIdx = activeSeats.findIndex(
+            (seat) => seat.opponent.id === defenderId,
+          );
+          const next =
+            defenderSeatIdx >= 0
+              ? activeSeats[(defenderSeatIdx + 1) % activeSeats.length]
+              : activeSeats[0];
+          return next?.position ?? 'top-center';
+        })();
+
+  const draggable = Boolean(onAttackDrop || onCoverDrop || onThrowInDrop || onRedirectDrop);
+
+  const readDraggedCard = (event: DragLike): CardData | null => {
+    if (dragCard) return dragCard;
+    const transfer =
+      event.dataTransfer && typeof event.dataTransfer.getData === 'function'
+        ? event.dataTransfer.getData('text/plain')
+        : '';
+    const [suit, rank] = transfer.split(':');
+    return (
+      myHand.find(
+        (card) =>
+          card.suit.toLowerCase() === suit && card.rank.toLowerCase() === rank,
+      ) ?? null
+    );
+  };
+
+  const clearSnap = () => setSnapZone(null);
+
+  const hoverZone = (zone: string) => (event: DragLike) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setSnapZone(zone);
+  };
+
+  const dropOn = (zone: string, event: DragLike, handler: (card: CardData) => void) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const card = readDraggedCard(event);
+    setDragCard(null);
+    setSnapZone(null);
+    if (!card) {
+      console.warn(`Ignored drop on ${zone}: no card was dragged`);
+      return;
+    }
+    handler(card);
+  };
+
+  /** Magnetic snap: highlight the nearest drop zone within 48px of the pointer. */
+  const magnetize = (event: DragLike) => {
+    const arena = arenaRef.current;
+    if (!arena || typeof arena.querySelectorAll !== 'function') return;
+    const zones = Array.from(arena.querySelectorAll('[data-drop-zone]')) as HTMLElement[];
+    let nearest: string | null = null;
+    let nearestDistance = SNAP_DISTANCE_PX;
+    for (const zone of zones) {
+      const rect = zone.getBoundingClientRect ? zone.getBoundingClientRect() : null;
+      if (!rect || (rect.width === 0 && rect.height === 0)) continue;
+      const dx = event.clientX - (rect.left + rect.width / 2);
+      const dy = event.clientY - (rect.top + rect.height / 2);
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      if (distance <= nearestDistance) {
+        nearest = zone.getAttribute('data-drop-zone');
+        nearestDistance = distance;
+      }
+    }
+    if (nearest) setSnapZone(nearest);
+  };
+
+  const boutClasses = ['bout-area'];
+
   return (
-    <div class="table-arena" data-zone="table-arena" data-my-id={myId}>
+    <div
+      class="table-arena"
+      data-zone="table-arena"
+      data-my-id={myId}
+      data-chaos={chaosMode ? 'true' : 'false'}
+      ref={arenaRef}
+      onDragOver={draggable ? magnetize : undefined}
+      onDragEnd={draggable ? clearSnap : undefined}
+    >
       {seats.map(({ opponent, offset, position }) => {
         const classes = ['seat', `seat-${position}`];
         if (opponent.id === attackerId) classes.push('active-attacker');
         if (opponent.id === defenderId) classes.push('active-defender');
+        if (opponent.finishRank != null) classes.push('finished');
+        const isTarget = attackTargets.some((target) => target.id === opponent.id);
+        const zone = `target:${opponent.id}`;
         return (
           <div
             key={opponent.id}
@@ -226,23 +450,79 @@ export function GameTable({
               ) : null}
               {opponent.hasPassed ? <span class="opponent-passed">Passed</span> : null}
             </div>
+            {isTarget ? (
+              <div
+                class={`target-outline${snapZone === zone ? ' snap-active' : ''}`}
+                data-testid={`target-outline-${opponent.id}`}
+                data-drop-zone={zone}
+                aria-label={`Attack ${opponent.name}`}
+                onDragOver={hoverZone(zone)}
+                onDragLeave={clearSnap}
+                onDrop={(event) =>
+                  dropOn(zone, event, (card) => onAttackDrop?.(card, opponent.id))
+                }
+              />
+            ) : null}
           </div>
         );
       })}
 
-      <section class="bout-area" aria-label="Battle">
-        {tablePairs.map((pair, index) => (
-          <TablePair
-            key={index}
-            attack={pair.attack}
-            defense={pair.defense}
-            trumpSuit={trumpSuit}
-            pulse={defending && !pair.defense}
-            onAttackClick={
-              onTableCardClick && !pair.defense ? () => onTableCardClick(index) : undefined
+      <section
+        class={boutClasses.join(' ')}
+        data-zone="bout"
+        data-anchor={boutAnchor}
+        aria-label="Battle"
+        data-drop-zone={canThrowIn ? 'throw-in' : undefined}
+        onDragOver={canThrowIn ? hoverZone('throw-in') : undefined}
+        onDragLeave={canThrowIn ? clearSnap : undefined}
+        onDrop={
+          canThrowIn
+            ? (event) => dropOn('throw-in', event, (card) => onThrowInDrop?.(card))
+            : undefined
+        }
+      >
+        {tablePairs.map((pair, index) => {
+          const zone = `cover:${index}`;
+          const coverable = !pair.defense && Boolean(onCoverDrop);
+          return (
+            <TablePair
+              key={index}
+              attack={pair.attack}
+              defense={pair.defense}
+              trumpSuit={trumpSuit}
+              pulse={defending && !pair.defense}
+              snap={snapZone === zone}
+              dropZone={coverable ? zone : undefined}
+              onAttackClick={
+                onTableCardClick && !pair.defense ? () => onTableCardClick(index) : undefined
+              }
+              onDragOverCard={coverable ? hoverZone(zone) : undefined}
+              onDragLeaveCard={coverable ? clearSnap : undefined}
+              onDropCard={
+                coverable
+                  ? (event) => dropOn(zone, event, (card) => onCoverDrop?.(card, index))
+                  : undefined
+              }
+            />
+          );
+        })}
+
+        {canRedirect && tablePairs.length > 0 ? (
+          <div
+            class={`redirect-outline${snapZone === 'redirect' ? ' snap-active' : ''}`}
+            data-testid="redirect-outline"
+            data-drop-zone="redirect"
+            data-direction={redirectDirection}
+            aria-label="Reflect the attack"
+            onDragOver={hoverZone('redirect')}
+            onDragLeave={clearSnap}
+            onDrop={(event) =>
+              dropOn('redirect', event, (card) => onRedirectDrop?.(card))
             }
-          />
-        ))}
+          >
+            <RedirectIcon chaosMode={chaosMode} direction={redirectDirection} />
+          </div>
+        ) : null}
       </section>
 
       <aside class="table-deck" data-zone="table-deck" aria-label="Talon">
@@ -280,6 +560,16 @@ export function GameTable({
             trump={isTrumpCard(card, trumpSuit)}
             selected={selectedKeys.includes(cardKey(card))}
             onClick={onCardClick ? () => onCardClick(card) : undefined}
+            onDoubleClick={onCardDoubleClick ? () => onCardDoubleClick(card) : undefined}
+            draggable={draggable}
+            onDragStart={(event) => {
+              setDragCard(card);
+              event.dataTransfer?.setData('text/plain', cardKey(card));
+            }}
+            onDragEnd={() => {
+              setDragCard(null);
+              setSnapZone(null);
+            }}
           />
         ))}
       </section>

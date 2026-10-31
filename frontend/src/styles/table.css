@@ -155,6 +155,83 @@
   box-sizing: border-box;
 }
 
+/* Item 12: the bout sits directly in front of the defending player. */
+.bout-area[data-anchor='top-left'] {
+  justify-self: start;
+  align-self: start;
+  justify-content: flex-start;
+}
+
+.bout-area[data-anchor='top-center'] {
+  justify-self: center;
+  align-self: start;
+  justify-content: center;
+}
+
+.bout-area[data-anchor='top-right'] {
+  justify-self: end;
+  align-self: start;
+  justify-content: flex-end;
+}
+
+.bout-area[data-anchor='bottom'] {
+  justify-self: center;
+  align-self: end;
+  justify-content: center;
+}
+
+/* Item 12: one dashed target outline in front of each legal attack target. */
+.target-outline,
+.redirect-outline {
+  width: 72px;
+  height: 104px;
+  border-radius: 8px;
+  box-sizing: border-box;
+}
+
+.target-outline {
+  margin-top: 10px;
+  border: 2px dashed #629924;
+  background: rgba(98, 153, 36, 0.1);
+  cursor: copy;
+}
+
+/* Item 14: single-card reflection outline to the right of the attacks. */
+.redirect-outline {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  margin-left: 16px;
+  border: 2px dashed #d9a326;
+  background: rgba(217, 163, 38, 0.08);
+  cursor: copy;
+}
+
+.redirect-arrows {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Item 3: magnetic snap preview on whichever slot the dragged card is near. */
+.target-outline.snap-active,
+.redirect-outline.snap-active {
+  border-style: solid;
+  background: rgba(98, 153, 36, 0.3);
+  box-shadow: 0 0 12px rgba(98, 153, 36, 0.7);
+}
+
+.redirect-outline.snap-active {
+  background: rgba(217, 163, 38, 0.3);
+  box-shadow: 0 0 12px rgba(217, 163, 38, 0.75);
+}
+
+.table-pair.snap-active .table-pair-attack .card-slot,
+.table-pair-attack[data-drop-zone] .card-slot {
+  box-shadow: 0 0 0 3px var(--durak-accent);
+  border-radius: 6px;
+}
+
 .table-pair {
   display: grid;
   grid-template-columns: 70px;
@@ -557,6 +634,21 @@
     grid-template-columns: 48px;
     grid-template-rows: 68px;
     padding: 0 14px 10px 0;
+  }
+
+  .bout-area[data-anchor] {
+    justify-self: stretch;
+    justify-content: center;
+  }
+
+  .target-outline,
+  .redirect-outline {
+    width: 48px;
+    height: 68px;
+  }
+
+  .redirect-outline {
+    margin-left: 12px;
   }
 
   .table-pair-defense {

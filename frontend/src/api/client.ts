@@ -25,11 +25,12 @@ export async function createGame(
   playerCount: number,
   playerNames: string[],
   allowRedirect = true,
+  chaosMode = false,
 ): Promise<CreatedGame> {
   const response = await fetch('/api/game/create', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ playerCount, playerNames, allowRedirect }),
+    body: JSON.stringify({ playerCount, playerNames, allowRedirect, chaosMode }),
   });
   const body = await readJson(response);
 
