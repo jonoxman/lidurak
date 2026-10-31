@@ -186,6 +186,59 @@ describe('GamePage', () => {
     expect(container.querySelector('.game-hint')).toBeNull();
   });
 
+  it('shows only contextual pass controls and the sort bar in the third column', async () => {
+    getGameView.mockResolvedValue({
+      ...view,
+      attackerIdx: 0,
+      defenderIdx: 1,
+      legalActions: ['pass', 'redirect'],
+    });
+
+    const { container } = render(
+      <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
+    );
+
+    await waitFor(() => expect(screen.getByText('Pass')).toBeTruthy());
+
+    const controls = container.querySelector('[data-zone="player-controls"]') as HTMLElement;
+    expect(controls.querySelector('[data-testid="sort-bar"]')).not.toBeNull();
+    expect(within(controls).getByRole('button', { name: 'Pass' })).toBeTruthy();
+    expect(screen.queryByText('Redirect')).toBeNull();
+    expect(within(controls).queryByRole('button', { name: 'Surrender' })).toBeNull();
+
+    // The hand stays calm because the viewer is not the one being waited on.
+    expect(
+      container.querySelector('[data-zone="player-hand"]')!.classList.contains('turn-pulse'),
+    ).toBe(false);
+  });
+
+  it('pulses the defender hand and never the table banners while defending', async () => {
+    const defenseView: PlayerGameView = {
+      ...view,
+      myHand: [{ suit: 'hearts', rank: 'ace' }],
+      tablePairs: [{ attack: { suit: 'spades', rank: 'six' }, defense: null }],
+      attackerIdx: 1,
+      defenderIdx: 0,
+      boutPhase: 'defense',
+      legalActions: ['cover', 'surrender'],
+    };
+    getGameView.mockResolvedValue(defenseView);
+
+    const { container } = render(
+      <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
+    );
+
+    await waitFor(() => expect(screen.getByText('Surrender')).toBeTruthy());
+
+    const controls = container.querySelector('[data-zone="player-controls"]') as HTMLElement;
+    expect(within(controls).queryByRole('button', { name: 'Pass' })).toBeNull();
+    expect(screen.queryByText('Redirect')).toBeNull();
+    expect(container.querySelector('.table-pair.turn-pulse .card-slot')).not.toBeNull();
+    expect(container.querySelector('[data-zone="player-hand"]')!.textContent).not.toMatch(
+      /Your turn|Waiting for/i,
+    );
+  });
+
   it('marks the connection live once the socket delivers a view', async () => {
     getGameView.mockResolvedValue(view);
 

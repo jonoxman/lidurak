@@ -8,7 +8,6 @@ import {
   buildDeclareSurrender,
   buildInitialAttack,
   buildPassTurn,
-  buildRedirectAttack,
   buildThrowInCards,
   hasLegalAction,
   isGameOverPhase,
@@ -121,6 +120,14 @@ export function GamePage({ gameId, playerId, onSwitchPlayer }: GamePageProps) {
 
   const isAttackerTurn =
     isInitialAttackPhase(view.boutPhase) && hasLegalAction(view.legalActions, 'attack');
+  // The attacker's hand pulses while they owe a play: the opening attack or a
+  // throw-in during the defense.
+  const awaitingAttack = isAttackerTurn || hasLegalAction(view.legalActions, 'throwIn');
+  // Covering or surrendering can only be offered to the defender, and only
+  // while uncovered attacks sit on the table.
+  const defending =
+    hasLegalAction(view.legalActions, 'cover') ||
+    hasLegalAction(view.legalActions, 'surrender');
   const canAttack =
     isAttackerTurn &&
     selectedCards.length > 0 &&
@@ -192,14 +199,6 @@ export function GamePage({ gameId, playerId, onSwitchPlayer }: GamePageProps) {
       case 'declareSurrender':
         dispatch(buildDeclareSurrender(playerId));
         break;
-      case 'redirect':
-        if (!hasLegalAction(view.legalActions, 'redirect')) return;
-        if (selectedCards.length === 0) {
-          setError('Select cards matching the attack rank to redirect.');
-          return;
-        }
-        dispatch(buildRedirectAttack(playerId, selectedCards));
-        break;
       default:
         break;
     }
@@ -268,6 +267,8 @@ export function GamePage({ gameId, playerId, onSwitchPlayer }: GamePageProps) {
           talonCount={view.talonCount}
           bottomTrumpCard={view.bottomTrumpCard}
           trumpSuit={view.trumpSuit}
+          awaitingAttack={awaitingAttack}
+          defending={defending}
           selectedKeys={selectedKeys}
           onCardClick={toggleCard}
           onTableCardClick={

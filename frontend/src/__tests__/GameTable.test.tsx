@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { render, screen, within } from '@testing-library/preact';
+import { fireEvent, render, screen, within } from '@testing-library/preact';
 import {
   GameTable,
   assignSeats,
   clockwiseOffset,
   seatForOffset,
+  sortHand,
   type OpponentSummary,
   type TablePairData,
 } from '../components/GameTable';
@@ -183,5 +184,196 @@ describe('GameTable', () => {
     expect(table.textContent).not.toMatch(/Waiting for/i);
     expect(table.querySelector('.battle-empty')).toBeNull();
     expect(table.querySelector('.game-hint')).toBeNull();
+  });
+});
+
+const sortableHand: CardData[] = [
+  { suit: 'clubs', rank: 'ace' },
+  { suit: 'hearts', rank: 'six' },
+  { suit: 'spades', rank: 'king' },
+  { suit: 'hearts', rank: 'king' },
+];
+
+const handOrder = (): string[] =>
+  Array.from(screen.getByLabelText('Your hand').querySelectorAll('.card-slot')).map(
+    (slot) => `${slot.getAttribute('data-suit')}:${slot.getAttribute('data-rank')}`,
+  );
+
+function renderSortableTable(props: Partial<Parameters<typeof GameTable>[0]> = {}) {
+  return render(
+    <GameTable
+      myId="p0"
+      myHand={sortableHand}
+      opponents={[opponents[0]]}
+      tablePairs={[]}
+      talonCount={0}
+      trumpSuit="spades"
+      {...props}
+    />,
+  );
+}
+
+describe('hand sorting', () => {
+  it('sorts by suit by default, with the trump suit rightmost', () => {
+    renderSortableTable();
+
+    expect(handOrder()).toEqual([
+      'hearts:six',
+      'hearts:king',
+      'clubs:ace',
+      'spades:king',
+    ]);
+  });
+
+  it('switches to pairs mode so matching ranks sit together', () => {
+    renderSortableTable();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pairs' }));
+
+    expect(handOrder()).toEqual([
+      'hearts:six',
+      'spades:king',
+      'hearts:king',
+      'clubs:ace',
+    ]);
+    expect(screen.getByRole('button', { name: 'Pairs' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Suit' }).getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('switches to rank mode where all trumps rank above non-trumps', () => {
+    renderSortableTable();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Rank' }));
+
+    expect(handOrder()).toEqual([
+      'hearts:six',
+      'hearts:king',
+      'clubs:ace',
+      'spades:king',
+    ]);
+  });
+
+  it('does not mutate the source hand while sorting', () => {
+    const original: CardData[] = [
+      { suit: 'spades', rank: 'king' },
+      { suit: 'hearts', rank: 'six' },
+    ];
+
+    const sorted = sortHand(original, 'rank', 'spades');
+
+    expect(sorted).toEqual([
+      { suit: 'hearts', rank: 'six' },
+      { suit: 'spades', rank: 'king' },
+    ]);
+    expect(original[0]).toEqual({ suit: 'spades', rank: 'king' });
+  });
+});
+
+describe('trump highlighting', () => {
+  it('gives trump cards the golden glow and corner badge', () => {
+    renderSortableTable();
+
+    const hand = screen.getByLabelText('Your hand');
+    const trumps = Array.from(hand.querySelectorAll('.card-slot.trump'));
+    expect(trumps).toHaveLength(1);
+    expect(trumps[0].getAttribute('data-suit')).toBe('spades');
+    expect(trumps[0].getAttribute('data-trump')).toBe('true');
+    expect(trumps[0].querySelector('[data-testid="trump-marker"]')).not.toBeNull();
+    expect(hand.querySelectorAll('[data-testid="trump-marker"]')).toHaveLength(1);
+  });
+
+  it('highlights trump cards on the table too', () => {
+    const { container } = render(
+      <GameTable
+        myId="p0"
+        myHand={[]}
+        opponents={[opponents[0]]}
+        tablePairs={[
+          { attack: { suit: 'spades', rank: 'nine' }, defense: { suit: 'hearts', rank: 'ten' } },
+        ]}
+        talonCount={0}
+        trumpSuit="spades"
+      />,
+    );
+
+    const battle = container.querySelector('.bout-area') as HTMLElement;
+    expect(battle.querySelectorAll('.card-slot.trump')).toHaveLength(1);
+  });
+});
+
+describe('turn nudges', () => {
+  it('pulses only the uncovered attacks for the defending viewer', () => {
+    const { container } = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={[opponents[0]]}
+        tablePairs={tablePairs}
+        talonCount={24}
+        trumpSuit="diamonds"
+        attackerId="p1"
+        defenderId="p0"
+        defending
+      />,
+    );
+
+    const pairs = Array.from(container.querySelectorAll('.table-pair'));
+    expect(pairs).toHaveLength(2);
+    expect(pairs[0].classList.contains('turn-pulse')).toBe(false);
+    expect(pairs[1].classList.contains('turn-pulse')).toBe(true);
+  });
+
+  it('never pulses the table for a non-defending viewer', () => {
+    const { container } = render(
+      <GameTable
+        myId="p1"
+        myHand={hand}
+        opponents={[opponents[1]]}
+        tablePairs={tablePairs}
+        talonCount={24}
+        trumpSuit="diamonds"
+        attackerId="p1"
+        defenderId="p0"
+        defending={false}
+      />,
+    );
+
+    expect(container.querySelectorAll('.table-pair.turn-pulse')).toHaveLength(0);
+  });
+
+  it('pulses the hand of the attacker who owes a play', () => {
+    const { container } = renderSortableTable({ awaitingAttack: true });
+
+    expect(
+      container.querySelector('[data-zone="player-hand"]')!.classList.contains('turn-pulse'),
+    ).toBe(true);
+  });
+
+  it('leaves the hand calm when nobody is waiting on the viewer', () => {
+    const { container } = renderSortableTable();
+
+    expect(
+      container.querySelector('[data-zone="player-hand"]')!.classList.contains('turn-pulse'),
+    ).toBe(false);
+  });
+});
+
+describe('minimalist controls', () => {
+  it('renders the SortBar and contextual buttons in the third column', () => {
+    const { container } = renderSortableTable({
+      children: (
+        <div class="action-bar">
+          <button type="button" class="action-button red">
+            Surrender
+          </button>
+        </div>
+      ),
+    });
+
+    const controls = container.querySelector('[data-zone="player-controls"]') as HTMLElement;
+    expect(controls.querySelector('[data-testid="sort-bar"]')).not.toBeNull();
+    expect(within(controls).getByRole('button', { name: 'Suit' })).toBeTruthy();
+    expect(within(controls).getByRole('button', { name: 'Surrender' })).toBeTruthy();
+    expect(within(controls).queryByRole('button', { name: 'Redirect' })).toBeNull();
   });
 });

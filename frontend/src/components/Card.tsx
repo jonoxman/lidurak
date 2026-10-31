@@ -10,6 +10,8 @@ export interface CardProps {
   rank: string;
   faceUp?: boolean;
   selected?: boolean;
+  /** Draws the golden trump glow and corner badge. */
+  trump?: boolean;
   onClick?: () => void;
 }
 
@@ -54,9 +56,17 @@ export function rankLabel(rank: string): string {
 }
 
 /** An inline SVG playing card, roughly 70x100px and scalable via CSS. */
-export function Card({ suit, rank, faceUp = true, selected = false, onClick }: CardProps) {
+export function Card({
+  suit,
+  rank,
+  faceUp = true,
+  selected = false,
+  trump = false,
+  onClick,
+}: CardProps) {
   const classes = ['card-slot'];
   if (selected) classes.push('selected');
+  if (trump) classes.push('trump');
   if (onClick) classes.push('clickable');
 
   if (!faceUp) {
@@ -79,6 +89,7 @@ export function Card({ suit, rank, faceUp = true, selected = false, onClick }: C
     <div
       class={classes.join(' ')}
       data-selected={selected ? 'true' : 'false'}
+      data-trump={trump ? 'true' : 'false'}
       data-suit={suit.toLowerCase()}
       data-rank={rank.toLowerCase()}
       onClick={onClick}
@@ -109,6 +120,14 @@ export function Card({ suit, rank, faceUp = true, selected = false, onClick }: C
         <text x="35" y="62" fontSize={30} textAnchor="middle" fill={color}>
           {symbol}
         </text>
+        {trump ? (
+          <g class="trump-marker" data-testid="trump-marker">
+            <circle cx="56" cy="15" r="9" fill="#d4af37" />
+            <text x="56" y="19.5" fontSize={11} textAnchor="middle" fill="#161512">
+              {symbol}
+            </text>
+          </g>
+        ) : null}
         <text x="64" y="94" fontSize={15} fontWeight={700} textAnchor="end" fill={color}>
           {label}
         </text>
