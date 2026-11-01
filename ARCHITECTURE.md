@@ -76,11 +76,11 @@ All core rules reside in side-effect-free Scala 3 case classes and enums:
 - **`GamePage.tsx`** renders three non-overlapping top-level CSS Grid columns:
   1. `[data-zone="sidebar-left"]`: How-to-Play reference card & hotseat player-switcher tabs.
   2. `[data-zone="table-arena"]`: The central felt table (`GameTable.tsx`).
-  3. `[data-zone="sidebar-right"]`: Monospace digital turn clock (`00:XX`) and match winner/Durak badges.
+  3. `[data-zone="sidebar-right"]`: Monospace digital turn clock (`00:XX`), the `PLAYERS` list with presence dots, the `TableDeck` (talon + horizontal trump + `TRUMP` badge) and the match winner/Durak badges.
 - **`GameTable.tsx`** uses a 3-column x 3-row CSS Grid without freeform `position: absolute` layout:
   - **Row 1 (Clockwise Opponent Seats):** Computes relative seat offset `(seatIdx - myIdx + N) % N` to map opponents into `data-seat="top-left"`, `data-seat="top-center"`, and `data-seat="top-right"`.
   - **Row 2 (Defender-Anchored Battlefield):** Positions target outlines (`data-testid="target-outline-<playerId>"`), active `TablePair` cards, and the single-card SVG arrow reflection outline (`data-testid="redirect-outline"`) directly in front of the defending player's seat.
-  - **Row 3 (Player Controls):** Places `[data-zone="table-deck"]` at `Col 1`, `[data-zone="player-hand"]` at `Col 2`, and the client-side `SortBar` (`Suit` / `Pairs` / `Rank`) + contextual `Surrender` / `Pass` button at `Col 3`.
+  - **Row 3 (Player Controls):** Places `[data-zone="player-hand"]` at `Col 2` and the client-side `SortBar` (`Suit` / `Pairs` / `Rank`) + contextual `Surrender` / `Pass` button at `Col 3`. The talon no longer sits on the felt: `TableDeck` renders in `sidebar-right` as a vertical deck with the horizontal trump sharing one grid cell (left edges aligned) and a `TRUMP` badge below it in normal flow.
 
 ### 3.2 Header Bar, Settings Store & Appearance Subsystems
 - **`HeaderBar.tsx`:** Owns the brand link (inline SVG mark followed by the `LIDURAK` wordmark inside one `<a class="header-brand">`), the hover navigation menus, and the profile dropdown with its live connection tracker.
@@ -113,3 +113,9 @@ All core rules reside in side-effect-free Scala 3 case classes and enums:
   - `sendPresence(isPresent)` emits `{"type":"presence", isPresent}`, queues the latest value until `onopen`, and re-sends it after an automatic reconnect.
   - Reconnects with 1s/2s/4s exponential backoff, at most three retries.
 - **`types.ts` presence fields:** `PlayerType = 'human' | 'randomBot'`; `PublicPlayerSummary.isPresent` and `PlayerGameView.presentPlayers` are optional, validated by the parser when present.
+
+### 3.6 Hand Layout, Felt Filters & Presence
+- **Hand geometry (`GameTable.tsx`):** `handLayout(count, availableWidth, cursorFraction, cardWidth)` returns `{ overlap, visibleCount, hiddenLeft, hiddenRight }`. Overlap starts at `HAND_MIN_OVERLAP = 8px` and tightens only up to `cardWidth - max(12px, 28% of the card width)`, so the top-left rank/suit index stays readable; past that capacity the surplus stacks at 100% overlap on the ends. `handMargins()` turns the layout into per-slot negative margins, `.hand-slot[data-hidden='true']` drops behind the visible row (`z-index: 0`, no pointer events), and pointer movement across `.hand-cards` moves cards between the hidden left/right stacks. `handOffsets()`/`handMargins()` never wrap: `.hand-cards` is `flex-wrap: nowrap`. Opponent seats use `opponentOverlap()` inside a fixed `208×32` row that reacts only to card count. Widths are measured with a `ResizeObserver` on the hand column, falling back to `HAND_FALLBACK_WIDTH` when layout is unavailable.
+- **Felt layer:** the arena carries `data-texture` plus `--table-filter` from `useSettings()`, and `[data-zone='table-arena']::before` paints `--table-felt`/`--table-felt-overlay` across the whole grid while `filter: var(--table-filter)` applies brightness/contrast/hue to the surface only — cards stay untinted and match the header's live previews.
+- **Presence:** `GamePage` tracks `document.hasFocus()` plus 30-second mouse/keyboard activity (`PRESENCE_IDLE_MS`), reports changes through `GameWebSocket.sendPresence`, and renders `presence-dot` in every `PLAYERS` row from `PlayerGameView.presentPlayers`, `PublicPlayerSummary.isPresent`, or the local activity state for the viewer. Dots are green (`--durak-accent`) when present and grey otherwise.
+- **Frozen clocks:** `viewerOnClock` compares `turnPlayerId` with `myId`; the right-sidebar clock renders `00:15` with `data-active="false"` unless the viewer is the timed player, while each seat and hand clock shows its own player's remaining seconds.

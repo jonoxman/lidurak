@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { ActionBar } from '../components/ActionBar';
-import { GameTable, cardKey } from '../components/GameTable';
+import { GameTable, TableDeck, cardKey } from '../components/GameTable';
 import { getGameView, sendAction as sendActionRest } from '../api/client';
 import { GameWebSocket } from '../api/websocket';
 import { soundEngine } from '../audio/SoundEngine';
@@ -103,6 +103,9 @@ export function clockSeconds(view: PlayerGameView, nowMs: number): number {
 /** Default grace period before a defenceless defender surrenders. */
 export const AUTO_SURRENDER_MS = 3000;
 
+/** A seat counts as present while focused and active within this window. */
+export const PRESENCE_IDLE_MS = 30_000;
+
 /** `p<seat>` id of the player sitting at `seatIdx`. */
 export function seatIdFor(view: PlayerGameView, seatIdx: number): string | undefined {
   const viewerIndex = viewerSeatIndex(view);
@@ -168,6 +171,8 @@ export function GamePage({
   // Latest dispatch function, so timers can send without re-subscribing.
   const dispatchRef = useRef<(action: GameAction) => void>(() => {});
   const [autoSurrenderRemaining, setAutoSurrenderRemaining] = useState<number | null>(null);
+  const [selfPresent, setSelfPresent] = useState(true);
+  const lastActivityRef = useRef(Date.now());
 
   useEffect(() => {
     let active = true;
@@ -206,6 +211,45 @@ export function GamePage({
     soundEngine.installUnlockListeners();
     return () => soundEngine.removeUnlockListeners();
   }, []);
+
+  // Presence: green while this window is focused and the mouse/keyboard moved
+  // within the last 30 seconds, grey otherwise. The 1s tick notices inactivity.
+  useEffect(() => {
+    const markActive = () => {
+      lastActivityRef.current = Date.now();
+    };
+    const evaluate = () => {
+      const focused =
+        typeof document === 'undefined' || typeof document.hasFocus !== 'function'
+          ? true
+          : document.hasFocus();
+      setSelfPresent(focused && Date.now() - lastActivityRef.current < PRESENCE_IDLE_MS);
+    };
+    window.addEventListener('mousemove', markActive, { passive: true });
+    window.addEventListener('keydown', markActive);
+    window.addEventListener('mousedown', markActive);
+    window.addEventListener('focus', markActive);
+    window.addEventListener('blur', evaluate);
+    document.addEventListener('visibilitychange', evaluate);
+    const timer = setInterval(evaluate, 1000);
+    evaluate();
+    return () => {
+      window.removeEventListener('mousemove', markActive);
+      window.removeEventListener('keydown', markActive);
+      window.removeEventListener('mousedown', markActive);
+      window.removeEventListener('focus', markActive);
+      window.removeEventListener('blur', evaluate);
+      document.removeEventListener('visibilitychange', evaluate);
+      clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    const socket = socketRef.current;
+    if (socket != null && typeof socket.sendPresence === 'function') {
+      socket.sendPresence(selfPresent);
+    }
+  }, [selfPresent, playerId]);
 
   // Sound effects follow the authoritative state diffs, never local clicks.
   useEffect(() => {
@@ -262,6 +306,10 @@ export function GamePage({
 
   const seconds = view ? clockSeconds(view, now) : 15;
   const timedPlayerId = view ? turnPlayerIdFor(view) : undefined;
+  // Feedback #8: only the player being waited on sees the clock tick; every
+  // other seat keeps a frozen 00:15 display.
+  const viewerOnClock = view != null && timedPlayerId === view.myId;
+  const displayedSeconds = viewerOnClock ? seconds : 15;
 
   // A subtle tick on each of the final five seconds, only for the player whose
   // own clock is the one running.
@@ -604,8 +652,6 @@ export function GamePage({
           myHand={view.myHand}
           opponents={view.opponents}
           tablePairs={view.tablePairs}
-          talonCount={view.talonCount}
-          bottomTrumpCard={view.bottomTrumpCard}
           trumpSuit={view.trumpSuit}
           attackerId={playerIdForSeat(view.attackerIdx)}
           defenderId={playerIdForSeat(view.defenderIdx)}
@@ -660,21 +706,42 @@ export function GamePage({
         <aside class="game-sidebar sidebar-right" data-zone="sidebar-right">
           <section class="panel turn-clock-panel" aria-label="Turn clock">
             <h2>Turn</h2>
-            <span class="turn-clock" data-testid="turn-clock">
-              {formatClock(seconds)}
+            <span
+              class={`turn-clock${viewerOnClock ? ' active' : ''}`}
+              data-testid="turn-clock"
+              data-active={viewerOnClock ? 'true' : 'false'}
+            >
+              {formatClock(displayedSeconds)}
             </span>
           </section>
 
           <section class="panel" aria-label="Player status">
             <h2>Players</h2>
             <ul class="status-badges">
-              {playersInSeatOrder.map((player) => (
+              {playersInSeatOrder.map((player) => {
+                const present =
+                  player.id === view.myId
+                    ? selfPresent
+                    : view.presentPlayers
+                      ? view.presentPlayers.includes(player.id)
+                      : (view.opponents.find((opponent) => opponent.id === player.id)?.isPresent ??
+                        false);
+                return (
                 <li
                   key={player.id}
                   class={`status-badge${player.mine ? ' mine' : ''}`}
                   data-player-id={player.id}
                 >
-                  <span class="status-name">{player.name}</span>
+                  <span class="status-player">
+                    <span
+                      class={`presence-dot${present ? ' present' : ''}`}
+                      data-testid={`presence-dot-${player.id}`}
+                      data-present={present ? 'true' : 'false'}
+                      role="img"
+                      aria-label={present ? 'Present' : 'Away'}
+                    />
+                    <span class="status-name">{player.name}</span>
+                  </span>
                   <span class="status-count">{player.cardCount} cards</span>
                   {player.finishRank != null ? (
                     <span class="status-rank">
@@ -682,9 +749,16 @@ export function GamePage({
                     </span>
                   ) : null}
                 </li>
-              ))}
+                );
+              })}
             </ul>
           </section>
+
+          <TableDeck
+            talonCount={view.talonCount}
+            bottomTrumpCard={view.bottomTrumpCard}
+            trumpSuit={view.trumpSuit}
+          />
 
           {gameOver ? (
             <section class="panel game-result" aria-label="Game over">

@@ -7,7 +7,10 @@ vi.mock('../api/client', () => ({
   sendAction: vi.fn(),
 }));
 
-const wsState = vi.hoisted(() => ({ onUpdate: null as ((view: unknown) => void) | null }));
+const wsState = vi.hoisted(() => ({
+  onUpdate: null as ((view: unknown) => void) | null,
+  presence: [] as boolean[],
+}));
 
 const audio = vi.hoisted(() => ({
   playAttackCard: vi.fn(),
@@ -38,6 +41,9 @@ vi.mock('../api/websocket', () => ({
       return false;
     }
     sendAction(): void {}
+    sendPresence(isPresent: boolean): void {
+      wsState.presence.push(isPresent);
+    }
   },
 }));
 
@@ -69,6 +75,7 @@ describe('GamePage', () => {
     getGameView.mockReset();
     sendAction.mockReset();
     wsState.onUpdate = null;
+    wsState.presence = [];
     Object.values(audio).forEach((spy) => spy.mockClear());
   });
 
@@ -111,7 +118,14 @@ describe('GamePage', () => {
     expect(within(left as HTMLElement).getByText('How to Play')).toBeTruthy();
     expect(within(left as HTMLElement).getByRole('tablist')).toBeTruthy();
     expect(screen.getByTestId('turn-clock').textContent?.trim()).toBe('00:15');
-    expect(container.querySelector('[data-zone="table-deck"]')).not.toBeNull();
+    // The deck, trump and TRUMP badge sit in the right sidebar under the clock
+    // and PLAYERS list, never on the felt.
+    expect(
+      (right as HTMLElement).querySelector('[data-zone="table-deck"]'),
+    ).not.toBeNull();
+    expect(within(right as HTMLElement).getByTestId('talon-count').textContent).toBe('10');
+    expect(within(right as HTMLElement).getByTestId('trump-indicator')).toBeTruthy();
+    expect(within(arena as HTMLElement).queryByTestId('talon-count')).toBeNull();
   });
 
   it('switches the hotseat player from the left sidebar tabs', async () => {
@@ -677,7 +691,7 @@ describe('GamePage', () => {
     );
   });
 
-  it('ticks only for the player whose own clock is running', async () => {
+  it('freezes the clock at 00:15 for the player who is not being waited on', async () => {
     getGameView.mockResolvedValue({
       ...view,
       turnDeadlineMs: Date.now() + 4_000,
@@ -688,10 +702,30 @@ describe('GamePage', () => {
     render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
 
     await waitFor(() =>
+      expect(screen.getByTestId('turn-clock').textContent?.trim()).toBe('00:15'),
+    );
+    expect(screen.getByTestId('turn-clock').getAttribute('data-active')).toBe('false');
+
+    // It stays frozen instead of counting down while another player is timed.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(screen.getByTestId('turn-clock').textContent?.trim()).toBe('00:15');
+    expect(audio.playClockTick).not.toHaveBeenCalled();
+  });
+
+  it('counts down and marks the clock active for the player being waited on', async () => {
+    getGameView.mockResolvedValue({
+      ...view,
+      turnDeadlineMs: Date.now() + 4_000,
+      turnSecondsRemaining: 4,
+      turnPlayerId: 'p0',
+    });
+
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    await waitFor(() =>
       expect(screen.getByTestId('turn-clock').textContent?.trim()).toBe('00:04'),
     );
-    await new Promise((resolve) => setTimeout(resolve, 160));
-    expect(audio.playClockTick).not.toHaveBeenCalled();
+    expect(screen.getByTestId('turn-clock').getAttribute('data-active')).toBe('true');
   });
 
   it('passes the remaining seconds to the tick sound', async () => {
@@ -705,5 +739,38 @@ describe('GamePage', () => {
     render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
 
     await waitFor(() => expect(audio.playClockTick).toHaveBeenCalledWith(4));
+  });
+
+  it('shows a green presence dot only while the window is focused and active', async () => {
+    getGameView.mockResolvedValue(view);
+    const focus = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    await waitFor(() => expect(screen.getByTestId('presence-dot-p0')).toBeTruthy());
+    expect(screen.getByTestId('presence-dot-p0').getAttribute('data-present')).toBe('true');
+    // Opponents without presence data read as away.
+    expect(screen.getByTestId('presence-dot-p1').getAttribute('data-present')).toBe('false');
+    expect(wsState.presence).toContain(true);
+
+    focus.mockReturnValue(false);
+    window.dispatchEvent(new Event('blur'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('presence-dot-p0').getAttribute('data-present')).toBe('false'),
+    );
+    await waitFor(() => expect(wsState.presence).toContain(false));
+    focus.mockRestore();
+  });
+
+  it('uses the server presentPlayers list for opponent dots', async () => {
+    getGameView.mockResolvedValue({ ...view, presentPlayers: ['p1'] });
+
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('presence-dot-p1').getAttribute('data-present')).toBe('true'),
+    );
+    expect(screen.getByTestId('presence-dot-p1').classList.contains('present')).toBe(true);
   });
 });

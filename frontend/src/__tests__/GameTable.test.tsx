@@ -2,14 +2,22 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/preact';
 import {
   GameTable,
+  HAND_CARD_WIDTH,
+  HAND_MIN_OVERLAP,
+  OPPONENT_MIN_OVERLAP,
   SEAT_BOX,
+  TableDeck,
   assignSeats,
   clockwiseOffset,
+  handLayout,
+  handMargins,
+  opponentOverlap,
   seatForOffset,
   sortHand,
   type OpponentSummary,
   type TablePairData,
 } from '../components/GameTable';
+import { DEFAULT_SETTINGS, setSettings } from '../state/settings';
 import type { CardData } from '../components/Card';
 
 const hand: CardData[] = [
@@ -35,8 +43,6 @@ function renderTable() {
       myHand={hand}
       opponents={opponents}
       tablePairs={tablePairs}
-      talonCount={24}
-      bottomTrumpCard={{ suit: 'diamonds', rank: 'ace' }}
       trumpSuit="diamonds"
       attackerId="p1"
       defenderId="p0"
@@ -127,15 +133,20 @@ describe('GameTable', () => {
     expect(areas[1].querySelector('.opponent-rank')!.textContent).toBe('WINNER');
   });
 
-  it('renders the talon deck and perpendicular trump card in the bottom-left deck zone', () => {
-    const { container } = renderTable();
+  it('renders the talon deck, horizontal trump and TRUMP badge in one stack', () => {
+    const { container } = render(
+      <TableDeck
+        talonCount={24}
+        bottomTrumpCard={{ suit: 'diamonds', rank: 'ace' }}
+        trumpSuit="diamonds"
+      />,
+    );
 
-    const deck = container.querySelector('[data-zone="table-deck"]');
-    expect(deck).not.toBeNull();
-    expect(deck!.querySelector('[data-testid="talon-count"]')!.textContent).toBe('24');
-    expect(deck!.querySelector('.bottom-trump')).not.toBeNull();
-    expect(deck!.querySelector('.trump-badge .trump-symbol')!.textContent).toBe('♦');
-    expect(deck!.querySelector('.trump-badge')!.classList.contains('red')).toBe(true);
+    expect(container.querySelector('[data-zone="table-deck"]')).not.toBeNull();
+    expect(screen.getByTestId('talon-count').textContent).toBe('24');
+    expect(container.querySelector('.table-trump')).not.toBeNull();
+    expect(container.querySelector('.trump-badge .trump-symbol')!.textContent).toBe('♦');
+    expect(container.querySelector('.trump-badge')!.classList.contains('red')).toBe(true);
     expect(screen.getByLabelText('Bottom trump card')).toBeTruthy();
   });
 
@@ -146,7 +157,6 @@ describe('GameTable', () => {
         myHand={hand}
         opponents={opponents}
         tablePairs={[]}
-        talonCount={0}
         trumpSuit="diamonds"
       >
         <button type="button">Pass</button>
@@ -162,11 +172,7 @@ describe('GameTable', () => {
 
   it('hides the bottom trump card once the talon is empty', () => {
     const { container } = render(
-      <GameTable
-        myId="p0"
-        myHand={hand}
-        opponents={opponents}
-        tablePairs={[]}
+      <TableDeck
         talonCount={0}
         bottomTrumpCard={{ suit: 'diamonds', rank: 'ace' }}
         trumpSuit="diamonds"
@@ -174,8 +180,7 @@ describe('GameTable', () => {
     );
 
     expect(screen.getByTestId('talon-count').textContent).toBe('0');
-    expect(container.querySelector('.bottom-trump')).toBeNull();
-    expect(screen.getByLabelText('Battle').querySelectorAll('.table-pair')).toHaveLength(0);
+    expect(container.querySelector('.table-trump')).toBeNull();
   });
 
   it('renders no table text clutter', () => {
@@ -207,7 +212,6 @@ function renderSortableTable(props: Partial<Parameters<typeof GameTable>[0]> = {
       myHand={sortableHand}
       opponents={[opponents[0]]}
       tablePairs={[]}
-      talonCount={0}
       trumpSuit="spades"
       {...props}
     />,
@@ -310,7 +314,6 @@ describe('trump highlighting', () => {
         tablePairs={[
           { attack: { suit: 'spades', rank: 'nine' }, defense: { suit: 'hearts', rank: 'ten' } },
         ]}
-        talonCount={0}
         trumpSuit="spades"
       />,
     );
@@ -328,7 +331,6 @@ describe('turn nudges', () => {
         myHand={hand}
         opponents={[opponents[0]]}
         tablePairs={tablePairs}
-        talonCount={24}
         trumpSuit="diamonds"
         attackerId="p1"
         defenderId="p0"
@@ -349,7 +351,6 @@ describe('turn nudges', () => {
         myHand={hand}
         opponents={[opponents[1]]}
         tablePairs={tablePairs}
-        talonCount={24}
         trumpSuit="diamonds"
         attackerId="p1"
         defenderId="p0"
@@ -394,7 +395,6 @@ describe('bout outlines and anchoring', () => {
         myHand={hand}
         opponents={activeOpponents}
         tablePairs={[]}
-        talonCount={20}
         trumpSuit="diamonds"
         defenderId="p1"
         awaitingAttack
@@ -412,7 +412,6 @@ describe('bout outlines and anchoring', () => {
         myHand={hand}
         opponents={activeOpponents}
         tablePairs={[]}
-        talonCount={20}
         trumpSuit="diamonds"
         defenderId="p1"
         chaosMode
@@ -431,7 +430,6 @@ describe('bout outlines and anchoring', () => {
         myHand={hand}
         opponents={activeOpponents}
         tablePairs={uncoveredPair}
-        talonCount={20}
         trumpSuit="diamonds"
         defenderId="p1"
         awaitingAttack
@@ -449,7 +447,6 @@ describe('bout outlines and anchoring', () => {
         myHand={hand}
         opponents={activeOpponents}
         tablePairs={uncoveredPair}
-        talonCount={20}
         trumpSuit="diamonds"
         defenderId="p1"
       />,
@@ -467,7 +464,6 @@ describe('bout outlines and anchoring', () => {
         myHand={hand}
         opponents={activeOpponents}
         tablePairs={uncoveredPair}
-        talonCount={20}
         trumpSuit="diamonds"
         defenderId="p0"
         defending
@@ -486,7 +482,6 @@ describe('bout outlines and anchoring', () => {
         myHand={hand}
         opponents={activeOpponents}
         tablePairs={uncoveredPair}
-        talonCount={20}
         trumpSuit="diamonds"
         defenderId="p1"
         canRedirect
@@ -506,7 +501,6 @@ describe('bout outlines and anchoring', () => {
         myHand={hand}
         opponents={activeOpponents}
         tablePairs={uncoveredPair}
-        talonCount={20}
         trumpSuit="diamonds"
         defenderId="p1"
         chaosMode
@@ -526,7 +520,6 @@ describe('bout outlines and anchoring', () => {
         myHand={hand}
         opponents={activeOpponents}
         tablePairs={uncoveredPair}
-        talonCount={20}
         trumpSuit="diamonds"
         defenderId="p1"
       />,
@@ -583,7 +576,6 @@ describe('drag-snap and double-click', () => {
         myHand={hand}
         opponents={activeOpponents}
         tablePairs={[]}
-        talonCount={20}
         trumpSuit="diamonds"
         defenderId="p1"
         chaosMode
@@ -610,7 +602,6 @@ describe('drag-snap and double-click', () => {
         myHand={hand}
         opponents={activeOpponents}
         tablePairs={uncoveredPair}
-        talonCount={20}
         trumpSuit="diamonds"
         defenderId="p0"
         defending
@@ -634,7 +625,6 @@ describe('drag-snap and double-click', () => {
         myHand={hand}
         opponents={activeOpponents}
         tablePairs={[]}
-        talonCount={20}
         trumpSuit="diamonds"
         defenderId="p1"
         chaosMode
@@ -674,36 +664,140 @@ describe('minimalist controls', () => {
   });
 });
 
-describe('seat boxes, clocks and the T-shaped deck', () => {
+describe('single-row hand overlap', () => {
+  const bigHand: CardData[] = Array.from({ length: 36 }, (_, index) => ({
+    suit: ['spades', 'hearts', 'diamonds', 'clubs'][index % 4],
+    rank: 'six',
+  }));
+
+  it('keeps a hand that fits at the default 8px overlap', () => {
+    const layout = handLayout(4, 720);
+
+    expect(layout.hiddenLeft + layout.hiddenRight).toBe(0);
+    expect(layout.overlap).toBe(HAND_MIN_OVERLAP);
+    expect(handMargins(layout, 4)[1]).toBe(-HAND_MIN_OVERLAP);
+  });
+
+  it('tightens the overlap before hiding any cards', () => {
+    const layout = handLayout(12, 500);
+
+    expect(layout.hiddenLeft + layout.hiddenRight).toBe(0);
+    expect(layout.overlap).toBeGreaterThan(HAND_MIN_OVERLAP);
+    // The top-left rank/suit index stays visible at the maximum overlap.
+    expect(HAND_CARD_WIDTH - layout.overlap).toBeGreaterThanOrEqual(22);
+  });
+
+  it('slides the hidden stack from right to left as the cursor moves', () => {
+    const centered = handLayout(36, 300);
+    const hidden = centered.hiddenLeft + centered.hiddenRight;
+    expect(hidden).toBeGreaterThan(0);
+
+    const atLeft = handLayout(36, 300, 0);
+    expect(atLeft.hiddenLeft).toBe(0);
+    expect(atLeft.hiddenRight).toBe(hidden);
+
+    const atRight = handLayout(36, 300, 1);
+    expect(atRight.hiddenLeft).toBe(hidden);
+    expect(atRight.hiddenRight).toBe(0);
+
+    // Hidden cards are stacked at 100% overlap on the ends.
+    expect(handMargins(atRight, 36)[1]).toBe(-HAND_CARD_WIDTH);
+  });
+
+  it('renders every overflow card in one row with hidden stacks marked', () => {
+    const { container } = render(
+      <GameTable
+        myId="p0"
+        myHand={bigHand}
+        opponents={[opponents[0]]}
+        tablePairs={[]}
+        trumpSuit="spades"
+      />,
+    );
+
+    const row = container.querySelector('.hand-cards') as HTMLElement;
+    expect(row.querySelectorAll('.hand-slot')).toHaveLength(36);
+    expect(row.querySelectorAll('.card-slot')).toHaveLength(36);
+    const hiddenLeft = Number(row.getAttribute('data-hidden-left'));
+    const hiddenRight = Number(row.getAttribute('data-hidden-right'));
+    expect(hiddenLeft + hiddenRight).toBeGreaterThan(0);
+    expect(row.querySelectorAll('.hand-slot[data-hidden="true"]')).toHaveLength(
+      hiddenLeft + hiddenRight,
+    );
+    expect(Number(row.getAttribute('data-overlap'))).toBeGreaterThan(HAND_MIN_OVERLAP);
+  });
+
+  it('overlaps opponent card backs inside a fixed box without cursor input', () => {
+    const { container } = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={[{ id: 'p1', name: 'Bob', cardCount: 12, hasPassed: false, finishRank: null }]}
+        tablePairs={[]}
+        trumpSuit="spades"
+      />,
+    );
+
+    const cards = Array.from(container.querySelectorAll('.opponent-card')) as HTMLElement[];
+    expect(cards).toHaveLength(12);
+    expect(cards[0].style.marginLeft).toBe('0px');
+    for (const card of cards.slice(1)) {
+      expect(card.style.marginLeft).toBe(`-${opponentOverlap(12)}px`);
+    }
+    expect(opponentOverlap(12)).toBeGreaterThanOrEqual(OPPONENT_MIN_OVERLAP);
+    expect(container.querySelector('[data-zone="table-arena"]')).not.toBeNull();
+  });
+});
+
+describe('felt texture and filters', () => {
+  it('paints the arena with the active texture and live filter settings', () => {
+    setSettings({
+      tableTexture: 'burgundy-velvet',
+      tableFilters: { brightness: 1.4, contrast: 1.1, hue: 40 },
+    });
+    const { container } = renderSortableTable();
+
+    const arena = container.querySelector('[data-zone="table-arena"]') as HTMLElement;
+    expect(arena.getAttribute('data-texture')).toBe('burgundy-velvet');
+    expect(arena.style.getPropertyValue('--table-filter')).toBe(
+      'brightness(1.4) contrast(1.1) hue-rotate(40deg)',
+    );
+
+    setSettings(DEFAULT_SETTINGS);
+  });
+});
+
+describe('seat boxes, clocks and the deck stack', () => {
   const seatedOpponents: OpponentSummary[] = [
     { id: 'p1', name: 'Bob', cardCount: 3, hasPassed: false, finishRank: null },
     { id: 'p2', name: 'Carol', cardCount: 5, hasPassed: false, finishRank: null },
   ];
 
-  it('overlaps the perpendicular trump card with the talon in one grid cell', () => {
+  it('stacks the vertical deck and the horizontal trump in one grid cell', () => {
     const { container } = render(
-      <GameTable
-        myId="p0"
-        myHand={hand}
-        opponents={seatedOpponents}
-        tablePairs={[]}
+      <TableDeck
         talonCount={12}
         bottomTrumpCard={{ suit: 'diamonds', rank: 'six' }}
         trumpSuit="diamonds"
       />,
     );
 
-    const stack = within(
-      container.querySelector('[data-zone="table-deck"]') as HTMLElement,
-    ).getByTestId('deck-t-shape');
-    expect(stack.getAttribute('data-layout')).toBe('t-shape');
+    const deckZone = container.querySelector('[data-zone="table-deck"]') as HTMLElement;
+    const stack = within(deckZone).getByTestId('talon-deck');
+    expect(stack.getAttribute('data-layout')).toBe('horizontal-trump');
     expect(stack.querySelector('.talon-stack')).not.toBeNull();
 
     // The trump is rotated a quarter turn and shares the deck's grid cell.
-    const trump = stack.querySelector('.bottom-trump') as HTMLElement;
+    const trump = stack.querySelector('.table-trump') as HTMLElement;
     expect(trump).not.toBeNull();
     expect(trump.querySelector('[data-rotated="true"]')).not.toBeNull();
     expect(trump.parentElement).toBe(stack);
+
+    // The TRUMP badge follows the deck, so flex order keeps it clear of both.
+    const badge = within(deckZone).getByTestId('trump-indicator');
+    expect(badge.textContent).toContain('Trump');
+    expect(badge.textContent).toContain('♦');
+    expect(stack.compareDocumentPosition(badge) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('gives every opponent box identical dimensions with a clock above it', () => {
@@ -713,7 +807,6 @@ describe('seat boxes, clocks and the T-shaped deck', () => {
         myHand={hand}
         opponents={seatedOpponents}
         tablePairs={[]}
-        talonCount={12}
         trumpSuit="diamonds"
       />,
     );
@@ -743,7 +836,6 @@ describe('seat boxes, clocks and the T-shaped deck', () => {
         myHand={hand}
         opponents={seatedOpponents}
         tablePairs={[]}
-        talonCount={12}
         trumpSuit="diamonds"
         attackerId="p1"
         defenderId="p2"
@@ -769,7 +861,6 @@ describe('seat boxes, clocks and the T-shaped deck', () => {
         myHand={hand}
         opponents={seatedOpponents}
         tablePairs={[]}
-        talonCount={12}
         trumpSuit="diamonds"
         attackerId="p0"
         defenderId="p1"
@@ -798,7 +889,6 @@ describe('seat boxes, clocks and the T-shaped deck', () => {
         myHand={hand}
         opponents={seatedOpponents}
         tablePairs={uncoveredPair}
-        talonCount={12}
         trumpSuit="diamonds"
         attackerId="p1"
         defenderId="p0"
@@ -825,7 +915,6 @@ describe('seat boxes, clocks and the T-shaped deck', () => {
         myHand={hand}
         opponents={seatedOpponents}
         tablePairs={uncoveredPair}
-        talonCount={12}
         trumpSuit="diamonds"
         attackerId="p1"
         defenderId="p2"
