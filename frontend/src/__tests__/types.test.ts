@@ -71,6 +71,33 @@ describe('PlayerGameView', () => {
     expect(() => parsePlayerGameView({ ...sampleView, isDraw: 'no' })).toThrow();
   });
 
+  it('parses optional player presence fields', () => {
+    const view = parsePlayerGameView({
+      ...sampleView,
+      opponents: [{ ...sampleView.opponents[0], isPresent: false }],
+      presentPlayers: ['p0'],
+    });
+
+    expect(view.opponents[0].isPresent).toBe(false);
+    expect(view.presentPlayers).toEqual(['p0']);
+
+    const withoutPresence = parsePlayerGameView(sampleView);
+    expect(withoutPresence.opponents[0].isPresent).toBeUndefined();
+    expect(withoutPresence.presentPlayers).toBeUndefined();
+  });
+
+  it('rejects malformed presence fields', () => {
+    expect(() =>
+      parsePlayerGameView({
+        ...sampleView,
+        opponents: [{ ...sampleView.opponents[0], isPresent: 'yes' }],
+      }),
+    ).toThrow(/isPresent/);
+    expect(() => parsePlayerGameView({ ...sampleView, presentPlayers: [1] })).toThrow(
+      /presentPlayers/,
+    );
+  });
+
   it('rejects payloads missing a required numeric field', () => {
     const withoutAttacker = { ...sampleView } as Record<string, unknown>;
     delete withoutAttacker.attackerIdx;
