@@ -7,7 +7,10 @@ Build a fast, lightweight, browser-based online multiplayer implementation of th
 - **Authoritative Server & Zero-Trust Anti-Cheat:** The Scala 3 backend is the sole source of truth. Opponent hands and the remaining deck (`talon`) order MUST NEVER be serialized or transmitted over WebSockets to any client. Each player receives a strictly filtered `PlayerGameView` projection.
 
 ## 2. Repository Layout & Tech Stack
-The monorepo resides in `/workspace` with two primary directories:
+The monorepo resides in `/workspace` with two primary directories and three living root files:
+- `play-local.sh` — **Local Development Server Launcher**: Starts both the Scala backend (`:8080`) and Vite frontend (`:5173`).
+- `README.md` — **Human-Readable Setup & User Interface Guide**: Maintained in real time alongside code changes; documents installation, startup, gameplay rules, and step-by-step UI controls.
+- `ARCHITECTURE.md` — **Technical Architecture Reference**: Maintained in real time alongside code changes; documents module structure, state machines, WebSocket/REST schemas, and UI layout invariants.
 - `backend/` — **Scala 3.3.3** (`sbt` build):
   - `Http4s Ember` (`org.http4s::http4s-ember-server`, `http4s-dsl`, `http4s-circe`) for REST & WebSockets on `0.0.0.0:8080`.
   - `Cats Effect 3` (`org.typelevel::cats-effect`) for concurrent game actors (`Ref`, `Queue`, `Topic`) and bot tournament fibers.
@@ -124,4 +127,4 @@ Implement the full **Glicko-2** algorithm ($\mu, \phi, \sigma$, system constant 
 
 ## 9. ACTIVE MILESTONE DIRECTIVE (FOR ORCHESTRATOR)
 **CURRENT ACTIVE MILESTONE: M1**
-When decomposing this specification into `.tickets/T-XX.md`, generate atomic tickets ONLY for **Milestone M1** (Scaffolding `backend/` & `frontend/`, Pure Durak Rules Engine & Unit Tests, Local/WebSocket Game Controller, and Interactive SVG Table UI). Ensure every ticket includes exact `sbt test` or `npm test -- --run` verification commands.
+When decomposing this specification into `.tickets/T-XX.md`, generate atomic tickets ONLY for **Milestone M1** (Scaffolding `backend/` & `frontend/`, Pure Durak Rules Engine & Unit Tests, Local/WebSocket Game Controller, and Interactive SVG Table UI). Ensure every ticket includes exact `sbt test` or `npm test -- --run` verification commands, and ensure `README.md`, `ARCHITECTURE.md`, and `play-local.sh` are updated in the final wave of each milestone or feedback batch so documentation stays synchronized in real time.

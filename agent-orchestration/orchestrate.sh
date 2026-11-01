@@ -19,10 +19,9 @@ done
 mkdir -p .tickets .reviews .reviews/feedback_archive
 echo "$INITIAL_WORKERS" > .reviews/target_workers
 
-# Load local .env if present
 if [ -f "$PROJECT_ROOT/agent-orchestration/.env" ]; then
   set -a
-  # shellcheck disable=SC1091
+  # shellcheck disable=SC1090
   source <(grep -v "^FREEBUFF_AUTH_B64=" "$PROJECT_ROOT/agent-orchestration/.env") 2>/dev/null || true
   set +a
 fi
@@ -30,7 +29,6 @@ fi
 AGENT_GIT_NAME="${AGENT_GIT_NAME:-Lidurak Agent Bot}"
 AGENT_GIT_EMAIL="${AGENT_GIT_EMAIL:-agent-bot@lidurak.local}"
 
-# Dedicated Git wrapper so agent commits are clearly separated from human commits (Task 8)
 agent_git() {
   GIT_AUTHOR_NAME="$AGENT_GIT_NAME" \
   GIT_AUTHOR_EMAIL="$AGENT_GIT_EMAIL" \
@@ -39,7 +37,6 @@ agent_git() {
   git "$@"
 }
 
-# Dedicated GitHub CLI wrapper (uses AGENT_GH_TOKEN if configured, otherwise host gh auth)
 agent_gh() {
   if [ -n "${AGENT_GH_TOKEN:-}" ]; then
     GH_TOKEN="$AGENT_GH_TOKEN" gh "$@"
@@ -48,14 +45,15 @@ agent_gh() {
   fi
 }
 
-# Network-resilient git push with exponential backoff
 retry_git_push() {
   local attempt=1
-  while [ $attempt -le 4 ]; do
+  while [ "$attempt" -le 4 ]; do
     if git push "$@"; then return 0; fi
-    echo "⚠️  git push failed (attempt ${attempt}/4). Retrying in $((attempt * 4))s..."
-    sleep $((attempt * 4))
-    attempt=$((attempt + 1))
+    local wait_s
+    wait_s=$(expr "$attempt" \* 4)
+    echo "⚠️  git push failed (attempt ${attempt}/4). Retrying in ${wait_s}s..."
+    sleep "$wait_s"
+    attempt=$(expr "$attempt" + 1)
   done
   return 1
 }
@@ -75,8 +73,7 @@ trap cleanup_on_interrupt INT TERM
 
 ./agent-orchestration/start-workspace.sh "$INITIAL_WORKERS"
 
-# === THREE-POOL ANTIGRAVITY MODEL ROUTING (Task 1) ===
-# Pool A: Claude 5.5 / GPT-OSS | Pool B: Gemini 4 Argon | Pool C: Gemini 3.8 Flash (Unlimited Backup)
+# === THREE-POOL ANTIGRAVITY MODEL ROUTING ===
 ARCHITECT_CHAIN=("claude-opus-5-5-high" "gemini-4-argon-high" "claude-sonnet-5-5-high" "gemini-3.8-flash-high")
 REVIEWER_R1_CHAIN=("gemini-4-argon-high" "claude-sonnet-5-5-high" "gemini-4-argon-medium" "gemini-3.8-flash-high")
 REVIEWER_ESCALATED_CHAIN=("claude-opus-5-5-high" "gemini-4-argon-high" "claude-sonnet-5-5-high" "gemini-3.8-flash-high")
@@ -119,7 +116,7 @@ try_agy_call() {
   local PROMPT_FILE=$2
   local OUT_FILE=$3
   local EXPECT_PATTERN=$4
-  local END_SENTINEL=${5:-"VERDICT: (APPROVED|CHANGES_REQUESTED)|===END_OF_TICKETS===|===END_OF_FILES==="}
+  local END_SENTINEL=${5:-"VERDICT: (APPROVED|CHANGES_REQUESTED)|===END_OF_TICKETS===|===END_OF_FILES===|===NO_TICKETS_NEEDED==="}
   local ERR_LOG="${OUT_FILE}.err"
 
   rm -f "$OUT_FILE" "$ERR_LOG"
@@ -134,7 +131,7 @@ try_agy_call() {
 
   while kill -0 "$AGY_PID" 2>/dev/null; do
     sleep 5
-    ELAPSED=$((ELAPSED + 5))
+    ELAPSED=$(expr "$ELAPSED" + 5)
     local BYTES
     BYTES=$(wc -c < "$OUT_FILE" 2>/dev/null || echo 0)
 
@@ -146,8 +143,8 @@ try_agy_call() {
     fi
 
     if [ "$BYTES" -gt 500 ] && [ "$BYTES" -eq "$LAST_BYTES" ]; then
-      STAGNANT_SEC=$((STAGNANT_SEC + 5))
-      if [ $STAGNANT_SEC -ge 25 ] && grep -qE "$EXPECT_PATTERN" "$OUT_FILE" 2>/dev/null; then
+      STAGNANT_SEC=$(expr "$STAGNANT_SEC" + 5)
+      if [ "$STAGNANT_SEC" -ge 25 ] && grep -qE "$EXPECT_PATTERN" "$OUT_FILE" 2>/dev/null; then
         kill_agy_tree "$AGY_PID"
         echo "✅ ${MODEL} stream idle for 25s with valid output (${BYTES} bytes)."
         return 0
@@ -157,11 +154,13 @@ try_agy_call() {
     fi
     LAST_BYTES=$BYTES
 
-    if [ $((ELAPSED % 15)) -eq 0 ]; then
+    local MOD15
+    MOD15=$(expr "$ELAPSED" % 15 || true)
+    if [ "$MOD15" -eq 0 ]; then
       echo "   ⏳ ${MODEL} streaming... (${ELAPSED}s / ${AGY_TIMEOUT_SEC}s | ${BYTES} bytes)"
     fi
 
-    if [ $ELAPSED -ge $AGY_TIMEOUT_SEC ]; then
+    if [ "$ELAPSED" -ge "$AGY_TIMEOUT_SEC" ]; then
       kill_agy_tree "$AGY_PID"
       if [ -s "$OUT_FILE" ] && grep -qE "$EXPECT_PATTERN" "$OUT_FILE"; then
         echo "♻️  Salvaged valid output written before timeout!"
@@ -177,7 +176,6 @@ try_agy_call() {
   return 1
 }
 
-# Multi-Pool Waterfall Router: cycles through the role's model chain before sleeping
 run_agy_pool() {
   local ROLE=$1
   local PROMPT_FILE=$2
@@ -210,7 +208,6 @@ run_agy_pool() {
   done
 }
 
-# Serialized FreeBuff admission: ensures workers join the shared /home/node/.config session one at a time
 admit_and_send_prompt() {
   local WORKER_ID=$1
   local PROMPT=$2
@@ -271,14 +268,13 @@ admit_and_send_prompt() {
         continue
       fi
 
-      READY_CHECKS=$((READY_CHECKS + 1))
-      if [ $READY_CHECKS -ge 2 ]; then
+      READY_CHECKS=$(expr "$READY_CHECKS" + 1)
+      if [ "$READY_CHECKS" -ge 2 ]; then
         break
       fi
       sleep 2
     done
 
-    # If the user just logged in during this check, automatically persist the token into gitignored .env!
     if [ "$LOGGED_IN_NOW" -eq 1 ]; then
       ./agent-orchestration/save-auth.sh >/dev/null 2>&1 || true
     fi
@@ -290,9 +286,9 @@ admit_and_send_prompt() {
     docker exec "$CONTAINER" tmux send-keys -t buff Enter
 
     local ADMIT_WAIT=0
-    while [ $ADMIT_WAIT -lt 45 ]; do
+    while [ "$ADMIT_WAIT" -lt 45 ]; do
       sleep 3
-      ADMIT_WAIT=$((ADMIT_WAIT + 3))
+      ADMIT_WAIT=$(expr "$ADMIT_WAIT" + 3)
       local S_AFTER
       S_AFTER=$(docker exec "$CONTAINER" tmux capture-pane -t buff -p 2>/dev/null || true)
       if echo "$S_AFTER" | grep -qiE "Starting your model session"; then
@@ -315,9 +311,9 @@ run_worker_freebuff() {
     admit_and_send_prompt "$WORKER_ID" "$PROMPT"
 
     local ELAPSED=0
-    while [ $ELAPSED -lt $SESSION_TIMEOUT_SEC ]; do
-      sleep $POLL_INTERVAL_SEC
-      ELAPSED=$((ELAPSED + POLL_INTERVAL_SEC))
+    while [ "$ELAPSED" -lt "$SESSION_TIMEOUT_SEC" ]; do
+      sleep "$POLL_INTERVAL_SEC"
+      ELAPSED=$(expr "$ELAPSED" + "$POLL_INTERVAL_SEC")
 
       if [ -f "${WT_DIR}/.tickets/STATUS" ] && grep -q "DONE" "${WT_DIR}/.tickets/STATUS" 2>/dev/null; then
         echo "[Worker ${WORKER_ID}] ✅ FreeBuff signaled DONE after ${ELAPSED}s!"
@@ -344,7 +340,7 @@ run_worker_freebuff() {
       fi
     done
 
-    if [ $ELAPSED -ge $SESSION_TIMEOUT_SEC ]; then
+    if [ "$ELAPSED" -ge "$SESSION_TIMEOUT_SEC" ]; then
       echo "[Worker ${WORKER_ID}] 🔄 1-Hour limit reached. Restarting session with continuation prompt..."
       docker exec "$CONTAINER" tmux kill-session -t buff 2>/dev/null || true
       PROMPT="Your previous 1-hour session timed out. Run 'git status' and 'git diff' to inspect existing progress, finish remaining work, verify all tests pass, write .reviews/agent_notes.md, and run: echo DONE > .tickets/STATUS"
@@ -374,14 +370,14 @@ run_worker_test_gate() {
 - **Failed Stage:** Backend Scala Test Suite (\`cd /workspace/backend && sbt -batch test\`)
 
 ## Extracted Failing Tests & Compiler Errors
-\`\`\`text
+~~~text
 $(grep -E '(\[error\]|==> X|FAILED|Exception|Error:)' "$CLEAN_LOG" | tail -n 60 || echo "See tail output below.")
-\`\`\`
+~~~
 
 ## Last 90 Lines of Output
-\`\`\`text
+~~~text
 $(tail -n 90 "$CLEAN_LOG")
-\`\`\`
+~~~
 REPORT_EOF
       echo "[Worker ${WORKER_ID}] ❌ Backend 'sbt test' FAILED!"
       return 1
@@ -397,14 +393,14 @@ REPORT_EOF
 - **Failed Stage:** Frontend Test Suite (\`cd /workspace/frontend && npm test -- --run\`)
 
 ## Extracted Failing Suites & Assertions
-\`\`\`text
+~~~text
 $(grep -E '(FAIL|AssertionError|Error:|TS[0-9]+:|✕|×)' "$CLEAN_LOG" | tail -n 60 || echo "See tail output below.")
-\`\`\`
+~~~
 
 ## Last 90 Lines of Output
-\`\`\`text
+~~~text
 $(tail -n 90 "$CLEAN_LOG")
-\`\`\`
+~~~
 REPORT_EOF
       echo "[Worker ${WORKER_ID}] ❌ Frontend 'npm test' FAILED!"
       return 1
@@ -426,7 +422,7 @@ process_ticket_on_worker() {
   local STATUS_FILE=".reviews/worker_${WORKER_ID}.status"
 
   echo "🔨 Implementing ${TICKET_NAME}" > "$STATUS_FILE"
-  echo "[Worker ${WORKER_ID}] 🎬 Starting ${TICKET_NAME} on branch ${BRANCH_NAME}..."
+  echo "[Worker ${WORKER_ID}] 🎬 Starting ${TICKET_NAME} on branch${BRANCH_NAME}..."
 
   (
     cd "$WT_DIR"
@@ -435,11 +431,13 @@ process_ticket_on_worker() {
     cp "../../${TICKET_FILE}" ".tickets/${TICKET_NAME}.md"
     cp ../../AGENTS.md ./AGENTS.md 2>/dev/null || true
     cp ../../SPEC.md ./SPEC.md 2>/dev/null || true
+    cp ../../README.md ./README.md 2>/dev/null || true
+    cp ../../ARCHITECTURE.md ./ARCHITECTURE.md 2>/dev/null || true
     cp ../../play-local.sh ./play-local.sh 2>/dev/null || true
     rm -f .tickets/STATUS .reviews/agent_notes.md
   )
 
-  local WORK_PROMPT="Implement @.tickets/${TICKET_NAME}.md following all rules in @AGENTS.md and @SPEC.md (including keeping ./play-local.sh updated if startup/ports change). Write a concise summary of your implementation into .reviews/agent_notes.md, verify all unit tests pass, and then run: echo DONE > .tickets/STATUS"
+  local WORK_PROMPT="Implement @.tickets/${TICKET_NAME}.md following all rules in @AGENTS.md and @SPEC.md (including keeping ./README.md, ./ARCHITECTURE.md, and ./play-local.sh updated as specified). Write a concise summary of your implementation into .reviews/agent_notes.md, verify all unit tests pass, and then run: echo DONE > .tickets/STATUS"
   run_worker_freebuff "$WORKER_ID" "$WORK_PROMPT"
 
   local PR_NUMBER=""
@@ -450,8 +448,8 @@ process_ticket_on_worker() {
     echo "🧪 Testing ${TICKET_NAME} (Round ${ROUND})" > "$STATUS_FILE"
 
     if ! run_worker_test_gate "$WORKER_ID" "$TICKET_FILE"; then
-      TEST_RETRIES=$((TEST_RETRIES + 1))
-      if [ $TEST_RETRIES -gt $MAX_REVIEW_ROUNDS ]; then
+      TEST_RETRIES=$(expr "$TEST_RETRIES" + 1)
+      if [ "$TEST_RETRIES" -gt "$MAX_REVIEW_ROUNDS" ]; then
         echo "❌ Failed test gate on ${TICKET_NAME}" > "$STATUS_FILE"
         return 1
       fi
@@ -466,7 +464,7 @@ process_ticket_on_worker() {
       git add -A
       git reset -- .reviews/ .tickets/ 2>/dev/null || true
       if ! git diff --cached --quiet; then
-        agent_git commit -m "feat(${TICKET_NAME}): round ${ROUND} implementation" >/dev/null
+        agent_git commit -m "feat(${TICKET_NAME}): round${ROUND} implementation" >/dev/null
       fi
     )
 
@@ -534,7 +532,7 @@ $(cat "$DIFF_FILE")
 
 REVIEW GUIDELINES:
 1. Carefully read <implementer_notes_and_rebuttals> to see how the implementer addressed previous feedback.
-2. Only request changes (VERDICT: CHANGES_REQUESTED) for genuine High/Medium severity logic bugs, security flaws, missing core requirements, or UI layout violations.
+2. Only request changes (VERDICT: CHANGES_REQUESTED) for genuine High/Medium severity logic bugs, security flaws, missing core requirements (including required updates to README.md or ARCHITECTURE.md if specified in the ticket), or UI layout violations.
 3. Do NOT block approval over Low-severity nitpicks or valid scope rebuttals.
 
 End your response with EXACTLY one of:
@@ -556,20 +554,20 @@ PROMPT_EOF
 $(cat "$REVIEW_FILE")" >/dev/null 2>&1 || true
     fi
 
-    if grep -q "VERDICT: APPROVED" "\$REVIEW_FILE"; then
-      echo "[Worker \${WORKER_ID}] 🎉 ${TICKET_NAME} APPROVED by${ACTIVE_MODEL_USED}!"
+    if grep -q "VERDICT: APPROVED" "$REVIEW_FILE"; then
+      echo "[Worker ${WORKER_ID}] 🎉 ${TICKET_NAME} APPROVED by ${ACTIVE_MODEL_USED}!"
       break
     fi
 
-    if [ $ROUND -ge$MAX_REVIEW_ROUNDS ]; then
+    if [ "$ROUND" -ge "$MAX_REVIEW_ROUNDS" ]; then
       echo "🛑 Max review rounds exceeded on ${TICKET_NAME}" > "$STATUS_FILE"
       return 1
     fi
 
-    echo "🔧 Fixing review feedback on \${TICKET_NAME} (Round ${ROUND})" > "$STATUS_FILE"
-    local FIX_PROMPT="🚨 PR CODE REVIEW FEEDBACK (Round \${ROUND}): Read the reviewer feedback in @.reviews/${TICKET_NAME}-review-${ROUND}.md and the ticket @.tickets/\${TICKET_NAME}.md. Fix valid issues in your scope, or write a clear technical rebuttal in .reviews/agent_notes.md. Re-run tests until green, and run: echo DONE > .tickets/STATUS"
+    echo "🔧 Fixing review feedback on ${TICKET_NAME} (Round ${ROUND})" > "$STATUS_FILE"
+    local FIX_PROMPT="🚨 PR CODE REVIEW FEEDBACK (Round ${ROUND}): Read the reviewer feedback in @.reviews/${TICKET_NAME}-review-${ROUND}.md and the ticket @.tickets/${TICKET_NAME}.md. Fix valid issues in your scope, or write a clear technical rebuttal in .reviews/agent_notes.md. Re-run tests until green, and run: echo DONE > .tickets/STATUS"
     run_worker_freebuff "$WORKER_ID" "$FIX_PROMPT"
-    ROUND=\$((ROUND + 1))
+    ROUND=$(expr "$ROUND" + 1)
   done
 
   echo "🔒 Acquiring merge lock for ${TICKET_NAME}..." > "$STATUS_FILE"
@@ -577,48 +575,48 @@ $(cat "$REVIEW_FILE")" >/dev/null 2>&1 || true
     flock -x 200
     echo "[Worker ${WORKER_ID}] 🔀 Reconciling ${BRANCH_NAME} with latest main..."
 
-    cd "\$PROJECT_ROOT"
+    cd "$PROJECT_ROOT"
     git checkout main >/dev/null 2>&1
-    if [ "\$USE_GITHUB_PRS" -eq 1 ]; then
+    if [ "$USE_GITHUB_PRS" -eq 1 ]; then
       git fetch origin main >/dev/null 2>&1 || true
       git merge --ff-only origin/main >/dev/null 2>&1 || true
     fi
 
-    cd "\$WT_DIR"
+    cd "$WT_DIR"
     if ! agent_git merge --no-edit main >/dev/null 2>&1; then
-      echo "[Worker \${WORKER_ID}] ⚠️  Merge conflict detected with main! Dispatching FreeBuff to resolve..."
-      cd "\$PROJECT_ROOT"
+      echo "[Worker ${WORKER_ID}] ⚠️  Merge conflict detected with main! Dispatching FreeBuff to resolve..."
+      cd "$PROJECT_ROOT"
       local CONFLICT_PROMPT="🚨 GIT MERGE CONFLICT WITH MAIN: Another parallel worker merged changes to 'main' that conflict with your branch. Run 'git status' and 'git diff' to find all <<<<<<< HEAD conflict markers, resolve them cleanly so both features work together, run the test suite ('sbt -batch test' and 'npm test -- --run') until 100% green, and run: echo DONE > .tickets/STATUS"
       run_worker_freebuff "$WORKER_ID" "$CONFLICT_PROMPT"
       run_worker_test_gate "$WORKER_ID" "$TICKET_FILE" || exit 1
-      cd "\$WT_DIR"
+      cd "$WT_DIR"
       rm -f .tickets/STATUS
       git add -A
       git reset -- .reviews/ .tickets/ 2>/dev/null || true
-      agent_git commit -m "chore(\${TICKET_NAME}): resolve merge conflicts with main" >/dev/null 2>&1 || true
+      agent_git commit -m "chore(${TICKET_NAME}): resolve merge conflicts with main" >/dev/null 2>&1 || true
     else
-      cd "\$PROJECT_ROOT"
+      cd "$PROJECT_ROOT"
       run_worker_test_gate "$WORKER_ID" "$TICKET_FILE" || exit 1
-      cd "\$WT_DIR"
+      cd "$WT_DIR"
     fi
 
     git checkout --detach HEAD >/dev/null 2>&1
 
-    cd "\$PROJECT_ROOT"
+    cd "$PROJECT_ROOT"
     git checkout main >/dev/null 2>&1
-    agent_git merge --no-ff "\$BRANCH_NAME" -m "Merge ${TICKET_NAME} (PR #${PR_NUMBER:-local})" >/dev/null 2>&1
-    touch "\$DONE_MARKER"
+    agent_git merge --no-ff "$BRANCH_NAME" -m "Merge ${TICKET_NAME} (PR #${PR_NUMBER:-local})" >/dev/null 2>&1
+    touch "$DONE_MARKER"
     git add "$DONE_MARKER" "$TICKET_FILE" 2>/dev/null || true
-    agent_git commit -m "chore(tickets): mark \${TICKET_NAME} completed" >/dev/null 2>&1 || true
+    agent_git commit -m "chore(tickets): mark ${TICKET_NAME} completed" >/dev/null 2>&1 || true
 
-    if [ "\$USE_GITHUB_PRS" -eq 1 ]; then
-      retry_git_push origin "\$BRANCH_NAME" >/dev/null 2>&1 || true
+    if [ "$USE_GITHUB_PRS" -eq 1 ]; then
+      retry_git_push origin "$BRANCH_NAME" >/dev/null 2>&1 || true
       retry_git_push origin main >/dev/null 2>&1 || true
-      git push origin --delete "\$BRANCH_NAME" >/dev/null 2>&1 || true
+      git push origin --delete "$BRANCH_NAME" >/dev/null 2>&1 || true
     fi
 
-    git branch -D "\$BRANCH_NAME" >/dev/null 2>&1 || true
-    echo "[Worker ${WORKER_ID}] ✅${TICKET_NAME} merged into main and feature branch deleted!"
+    git branch -D "$BRANCH_NAME" >/dev/null 2>&1 || true
+    echo "[Worker ${WORKER_ID}] ✅ ${TICKET_NAME} merged into main and feature branch deleted!"
   ) 200>.reviews/merge.lock
 
   echo "💤 Idle (Last completed: ${TICKET_NAME})" > "$STATUS_FILE"
@@ -626,10 +624,10 @@ $(cat "$REVIEW_FILE")" >/dev/null 2>&1 || true
 }
 
 extract_tickets_with_waves() {
-  local RAW_FILE=\$1
-  sed '/===END_OF_TICKETS===/d' "\$RAW_FILE" | awk '
+  local RAW_FILE=$1
+  sed '/===END_OF_TICKETS===/d; /===NO_TICKETS_NEEDED===/d' "$RAW_FILE" | awk '
     /===TICKET:.*===/ {
-      line=\$0;
+      line=$0;
       gsub(/.*===TICKET:/, "", line);
       gsub(/===.*/, "", line);
       gsub(/[ \t\r]/, "", line);
@@ -650,30 +648,30 @@ extract_tickets_with_waves() {
 
 # === PHASE 1: DECOMPOSE CURRENT ACTIVE MILESTONE IN SPEC.md ===
 ensure_milestone_tickets_exist() {
-  if [ -n "\$(ls -A .tickets/T-*.md 2>/dev/null)" ]; then
+  if [ -n "$(ls -A .tickets/T-*.md 2>/dev/null)" ]; then
     return 0
   fi
 
   local ACTIVE_M
-  ACTIVE_M=\$(grep -oE "CURRENT ACTIVE MILESTONE: M[0-9]+" SPEC.md 2>/dev/null | head -n 1 | awk '{print \$NF}' || echo "M1")
+  ACTIVE_M=$(grep -oE "CURRENT ACTIVE MILESTONE: M[0-9]+" SPEC.md 2>/dev/null | head -n 1 | awk '{print $NF}' || echo "M1")
   echo "=================================================================="
-  echo "🏗️  Phase 1: Decomposing SPEC.md (\${ACTIVE_M}) into wave-scheduled tickets..."
+  echo "🏗️  Phase 1: Decomposing SPEC.md (${ACTIVE_M}) into wave-scheduled tickets..."
   echo "=================================================================="
 
   cat << PROMPT_EOF > .reviews/phase1_prompt.txt
 You are a Principal Systems Architect. DO NOT use any internal tools, DO NOT run bash commands, and DO NOT read external files.
 
-Break the CURRENT ACTIVE MILESTONE (\${ACTIVE_M}) in <spec> down into atomic implementation tickets grouped into PARALLEL EXECUTION WAVES (WAVE:1, WAVE:2, etc.).
+Break the CURRENT ACTIVE MILESTONE (${ACTIVE_M}) in <spec> down into atomic implementation tickets grouped into PARALLEL EXECUTION WAVES (WAVE:1, WAVE:2, etc.).
 - Put tickets that touch independent files/subsystems into the SAME wave so they run in parallel!
 - Put tickets that depend on earlier tickets or edit the exact same files into sequential waves.
-- Ensure ./play-local.sh in the project root is updated if server startup commands or ports change.
+- REAL-TIME DOCUMENTATION REQUIREMENT: Ensure the final wave of this milestone includes updating ./README.md (installation, startup, and user interface instructions for all new features), ./ARCHITECTURE.md (technical structure, state machine, and protocol documentation), and ./play-local.sh (if startup commands or ports changed). To prevent Git merge conflicts between parallel workers, only ONE ticket in any given wave should modify README.md and ARCHITECTURE.md.
 
 <spec>
-\$(cat SPEC.md)
+$(cat SPEC.md)
 </spec>
 
 <agents>
-\$(cat AGENTS.md)
+$(cat AGENTS.md)
 </agents>
 
 Output each ticket using this EXACT delimiter format on its own line (including |WAVE:N), and end your entire response with ===END_OF_TICKETS===:
@@ -689,25 +687,35 @@ PROMPT_EOF
 
   git checkout main 2>/dev/null || true
   git add .tickets/ 2>/dev/null || true
-  agent_git commit -m "chore(tickets): generate wave tickets for \${ACTIVE_M}" >/dev/null 2>&1 || true
-  [ "\$USE_GITHUB_PRS" -eq 1 ] && (retry_git_push origin main >/dev/null 2>&1 || true)
+  agent_git commit -m "chore(tickets): generate wave tickets for ${ACTIVE_M}" >/dev/null 2>&1 || true
+  [ "$USE_GITHUB_PRS" -eq 1 ] && (retry_git_push origin main >/dev/null 2>&1 || true)
 }
 
 # === PHASE 1.5: HUMAN FEEDBACK PRIORITY QUEUE ===
 check_and_compile_human_feedback() {
   if [ ! -f FEEDBACK.md ]; then return 0; fi
   local ACTIVE_FEEDBACK
-  ACTIVE_FEEDBACK=\$(sed '/<!--.*-->/d' FEEDBACK.md | tr -d '[:space:]')
-  if [ -z "\$ACTIVE_FEEDBACK" ]; then return 0; fi
+  ACTIVE_FEEDBACK=$(sed '/<!--.*-->/d' FEEDBACK.md | tr -d '[:space:]')
+  if [ -z "$ACTIVE_FEEDBACK" ]; then return 0; fi
+
+  if grep -qiE "placeholder feedback document|without spawning any agents" FEEDBACK.md 2>/dev/null; then
+    echo "ℹ️  Placeholder note detected in FEEDBACK.md; skipping agent spawn and proceeding to human review."
+    cat << 'RESET_EOF' > FEEDBACK.md
+<!-- Write your plain-English UI/UX feedback, bugs, or usability requests below this line. -->
+<!-- Note: Your previous feedback is always backed up in FEEDBACK.backup.md and .reviews/feedback_archive/ -->
+
+RESET_EOF
+    return 0
+  fi
 
   local TIMESTAMP
-  TIMESTAMP=\$(date +%Y%m%d_%H%M%S)
+  TIMESTAMP=$(date +%Y%m%d_%H%M%S)
   cp FEEDBACK.md FEEDBACK.backup.md
-  cp FEEDBACK.md ".reviews/feedback_archive/FEEDBACK_\${TIMESTAMP}.md"
+  cp FEEDBACK.md ".reviews/feedback_archive/FEEDBACK_${TIMESTAMP}.md"
   cp FEEDBACK.md FEEDBACK.in_progress.md
 
   for old_fb in .tickets/T-9*-feedback-*.md; do
-    [ -e "\$old_fb" ] || continue
+    [ -e "$old_fb" ] || continue
     local bname
     bname=$(basename "$old_fb" .md)
     [ ! -f ".tickets/.completed_${bname}" ] && rm -f "$old_fb"
@@ -720,37 +728,37 @@ check_and_compile_human_feedback() {
   cat << PROMPT_EOF > .reviews/feedback_prompt.txt
 You are a Principal Systems Architect. DO NOT use any internal tools, DO NOT run bash commands, and DO NOT read external files.
 
-Decompose ALL requirements in <human_feedback> into 4 to 7 atomic implementation tickets grouped into PARALLEL EXECUTION WAVES (WAVE:1, WAVE:2, WAVE:3).
+Decompose ALL requirements in <human_feedback> into atomic implementation tickets grouped into PARALLEL EXECUTION WAVES (WAVE:1, WAVE:2, WAVE:3).
 Tickets in the same wave run concurrently on parallel FreeBuff workers:
 - Assign independent subsystems to the SAME wave so they run simultaneously!
 - Assign tickets that modify the exact same files or build on earlier tickets to sequential wave numbers so they never cause Git merge conflicts.
-- Remember that ./play-local.sh in the project root is an official project file and must be kept updated if server startup or ports change.
+- REAL-TIME DOCUMENTATION REQUIREMENT: Ensure that the final wave of tickets updates ./README.md (installation, startup, and user interface instructions), ./ARCHITECTURE.md (technical structure and component/protocol reference), and ./play-local.sh (if server startup or ports change) to reflect all changes made in this feedback batch. Only ONE ticket in any given wave may edit README.md and ARCHITECTURE.md so parallel workers never conflict on documentation files.
 
 <agents_rules>
-\$(cat AGENTS.md)
+$(cat AGENTS.md)
 </agents_rules>
 
 <human_feedback>
-\$(cat FEEDBACK.md)
+$(cat FEEDBACK.md)
 </human_feedback>
 
 <existing_project_files>
-\$(find backend/src frontend/src play-local.sh -type f 2>/dev/null | sort)
+$(find backend/src frontend/src play-local.sh README.md ARCHITECTURE.md -type f 2>/dev/null | sort)
 </existing_project_files>
 
 <current_code_context>
-\$(head -n 120 play-local.sh backend/src/main/scala/**/*.scala frontend/src/app.tsx frontend/src/pages/*.tsx frontend/src/components/*.tsx 2>/dev/null | head -c 28000)
+$(head -n 120 README.md ARCHITECTURE.md play-local.sh backend/src/main/scala/**/*.scala frontend/src/app.tsx frontend/src/pages/*.tsx frontend/src/components/*.tsx 2>/dev/null | head -c 28000)
 </current_code_context>
 
 Output each ticket using this EXACT delimiter format on its own line (including |WAVE:N), and end your entire response with ===END_OF_TICKETS===:
-===TICKET:T-90-feedback-\${TIMESTAMP}-1-backend.md|WAVE:1===
+===TICKET:T-90-feedback-${TIMESTAMP}-1-backend.md|WAVE:1===
 [Full Markdown content of ticket 1]
 ===END_OF_TICKETS===
 
 Do NOT output any text before the first ===TICKET:...=== marker.
 PROMPT_EOF
 
-  run_agy_pool "ARCHITECT" ".reviews/feedback_prompt.txt" ".reviews/raw_feedback_tickets.txt" "===TICKET:"
+  run_agy_pool "ARCHITECT" ".reviews/feedback_prompt.txt" ".reviews/raw_feedback_tickets.txt" "===TICKET:|===NO_TICKETS_NEEDED==="
   extract_tickets_with_waves ".reviews/raw_feedback_tickets.txt"
 
   cat << 'RESET_EOF' > FEEDBACK.md
@@ -761,48 +769,48 @@ RESET_EOF
 
   git checkout main 2>/dev/null || true
   git add .tickets/ FEEDBACK.md FEEDBACK.backup.md 2>/dev/null || true
-  agent_git commit -m "chore(tickets): add feedback wave tickets \${TIMESTAMP}" >/dev/null 2>&1 || true
-  [ "\$USE_GITHUB_PRS" -eq 1 ] && (retry_git_push origin main >/dev/null 2>&1 || true)
+  agent_git commit -m "chore(tickets): add feedback wave tickets ${TIMESTAMP}" >/dev/null 2>&1 || true
+  [ "$USE_GITHUB_PRS" -eq 1 ] && (retry_git_push origin main >/dev/null 2>&1 || true)
 }
 
-# === HELPER: AUTOMATIC MILESTONE ADVANCEMENT ON "accept" ===
 advance_to_next_milestone() {
   local CURRENT_M
-  CURRENT_M=\$(grep -oE "CURRENT ACTIVE MILESTONE: M[0-9]+" SPEC.md 2>/dev/null | head -n 1 | awk '{print \$NF}' || true)
-  if [ -z "\$CURRENT_M" ]; then
-    CURRENT_M=\$(grep -oE "Milestone M[0-9]+" SPEC.md 2>/dev/null | head -n 1 | awk '{print \$NF}' || echo "M1")
+  CURRENT_M=$(grep -oE "CURRENT ACTIVE MILESTONE: M[0-9]+" SPEC.md 2>/dev/null | head -n 1 | awk '{print $NF}' || true)
+  if [ -z "$CURRENT_M" ]; then
+    CURRENT_M=$(grep -oE "Milestone M[0-9]+" SPEC.md 2>/dev/null | head -n 1 | awk '{print $NF}' || echo "M1")
   fi
 
-  local CUR_NUM="\${CURRENT_M#M}"
-  local NEXT_NUM=\$((CUR_NUM + 1))
-  local NEXT_M="M\${NEXT_NUM}"
+  local CUR_NUM="${CURRENT_M#M}"
+  local NEXT_NUM
+  NEXT_NUM=$(expr "$CUR_NUM" + 1)
+  local NEXT_M="M${NEXT_NUM}"
 
-  if ! grep -qiE "Milestone \${NEXT_M}|${NEXT_M}:" SPEC.md 2>/dev/null && [ "$NEXT_NUM" -gt 5 ]; then
-    echo "🏆 All Milestones in SPEC.md (up through \${CURRENT_M}) are complete!"
+  if ! grep -qiE "Milestone ${NEXT_M}|${NEXT_M}:" SPEC.md 2>/dev/null && [ "$NEXT_NUM" -gt 5 ]; then
+    echo "🏆 All Milestones in SPEC.md (up through ${CURRENT_M}) are complete!"
     return 1
   fi
 
   local ARCHIVE_DIR=".tickets/archive_${CURRENT_M}_$(date +%Y%m%d_%H%M%S)"
-  mkdir -p "\$ARCHIVE_DIR"
-  mv .tickets/T-*.md "\$ARCHIVE_DIR"/ 2>/dev/null || true
-  mv .tickets/.completed_* "\$ARCHIVE_DIR"/ 2>/dev/null || true
+  mkdir -p "$ARCHIVE_DIR"
+  mv .tickets/T-*.md "$ARCHIVE_DIR"/ 2>/dev/null || true
+  mv .tickets/.completed_* "$ARCHIVE_DIR"/ 2>/dev/null || true
   rm -f .reviews/raw_tickets.txt .tickets/STATUS
 
   if grep -q "CURRENT ACTIVE MILESTONE:" SPEC.md 2>/dev/null; then
-    sed -i "s/CURRENT ACTIVE MILESTONE: M[0-9]\+/CURRENT ACTIVE MILESTONE: \${NEXT_M}/g" SPEC.md
+    sed -i "s/CURRENT ACTIVE MILESTONE: M[0-9]\+/CURRENT ACTIVE MILESTONE: ${NEXT_M}/g" SPEC.md
   else
-    sed -i "1i <!-- CURRENT ACTIVE MILESTONE: \${NEXT_M} -->" SPEC.md
+    sed -i "1i <!-- CURRENT ACTIVE MILESTONE: ${NEXT_M} -->" SPEC.md
   fi
-  sed -i "s/generate atomic tickets ONLY for \*\*Milestone M[0-9]\+\*\*/generate atomic tickets ONLY for **Milestone \${NEXT_M}**/g" SPEC.md 2>/dev/null || true
+  sed -i "s/generate atomic tickets ONLY for \*\*Milestone M[0-9]\+\*\*/generate atomic tickets ONLY for **Milestone ${NEXT_M}**/g" SPEC.md 2>/dev/null || true
 
   git checkout main 2>/dev/null || true
   git add SPEC.md .tickets/ 2>/dev/null || true
-  agent_git commit -m "chore(milestone): sign off ${CURRENT_M} and advance active milestone to${NEXT_M}" >/dev/null 2>&1 || true
-  [ "\$USE_GITHUB_PRS" -eq 1 ] && (retry_git_push origin main >/dev/null 2>&1 || true)
+  agent_git commit -m "chore(milestone): sign off ${CURRENT_M} and advance active milestone to ${NEXT_M}" >/dev/null 2>&1 || true
+  [ "$USE_GITHUB_PRS" -eq 1 ] && (retry_git_push origin main >/dev/null 2>&1 || true)
 
   echo "=================================================================="
-  echo "🚀 Milestone ${CURRENT_M} archived to${ARCHIVE_DIR}!"
-  echo "🎯 SPEC.md automatically updated to target Milestone \${NEXT_M}!"
+  echo "🚀 Milestone ${CURRENT_M} archived to ${ARCHIVE_DIR}!"
+  echo "🎯 SPEC.md automatically updated to target Milestone ${NEXT_M}!"
   echo "=================================================================="
   return 0
 }
@@ -843,7 +851,7 @@ while true; do
           w_id=$(basename "$pid_file" .pid | cut -d_ -f2)
           w_pid=$(cat "$pid_file" 2>/dev/null || true)
           if [ -n "$w_pid" ] && kill -0 "$w_pid" 2>/dev/null; then
-            ACTIVE_COUNT=$((ACTIVE_COUNT + 1))
+            ACTIVE_COUNT=$(expr "$ACTIVE_COUNT" + 1)
           else
             rm -f "$pid_file" ".reviews/worker_${w_id}.ticket"
           fi
@@ -857,7 +865,7 @@ while true; do
             w=$(grep -oE "WAVE:[0-9]+" "$tf" 2>/dev/null | head -n 1 | cut -d: -f2 || true)
             [ -z "$w" ] && w="1"
             if [ "$w" = "$WAVE_NUM" ]; then
-              REMAINING_IN_WAVE=$((REMAINING_IN_WAVE + 1))
+              REMAINING_IN_WAVE=$(expr "$REMAINING_IN_WAVE" + 1)
               ALREADY_ASSIGNED=0
               for tk_file in .reviews/worker_*.ticket; do
                 [ -e "$tk_file" ] || continue
@@ -886,7 +894,7 @@ while true; do
               echo "$next_tf" > ".reviews/worker_${w_id}.ticket"
               process_ticket_on_worker "$w_id" "$next_tf" &
               echo "$!" > ".reviews/worker_${w_id}.pid"
-              ACTIVE_COUNT=$((ACTIVE_COUNT + 1))
+              ACTIVE_COUNT=$(expr "$ACTIVE_COUNT" + 1)
               DISPATCHED=1
               sleep 3
               break
@@ -907,9 +915,10 @@ while true; do
   echo "=================================================================="
   echo "👉 How to test & review your build right now:"
   echo "   1. Run './play-local.sh' in Window 4 and open http://localhost:5173"
-  echo "   2. Ask codebase questions: ./agent-orchestration/ask-architect.sh \"Your question\""
-  echo "   3. To request UI/UX or bug fixes, write them in 'FEEDBACK.md' and press [ENTER]"
-  echo "   4. To sign off on this milestone and auto-start the next milestone, type 'accept'"
+  echo "   2. Read live docs: ./README.md (User Guide) & ./ARCHITECTURE.md (Technical Docs)"
+  echo "   3. Ask codebase questions: ./agent-orchestration/ask-architect.sh \"Your question\""
+  echo "   4. To request UI/UX or bug fixes, write them in 'FEEDBACK.md' and press [ENTER]"
+  echo "   5. To sign off on this milestone and auto-start the next milestone, type 'accept'"
   echo "------------------------------------------------------------------"
   read -r -p "Press [ENTER] after saving FEEDBACK.md, or type 'accept' to advance to the next milestone: " USER_CHOICE
 

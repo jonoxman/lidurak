@@ -20,6 +20,11 @@
    - `[data-zone="sidebar-right"]`: Large digital `00:XX` turn clock (`00:15` default) & game winner/durak results.
 3. **Zero Table Text Clutter:** Never render text banners like "Waiting for first attack...", "Your turn to defend", or invalid-move error strings on the table or below the hand.
 
-## Local Server Launcher Maintenance (`./play-local.sh`)
-- `./play-local.sh` in the repository root is an official project file used to launch the backend and frontend locally.
-- Whenever a ticket modifies server ports, environment variables, build targets, or startup commands in `backend/` or `frontend/`, you MUST update `./play-local.sh` accordingly so `./play-local.sh` always starts the full application cleanly.
+## Real-Time Documentation & Launcher Maintenance (MANDATORY)
+The repository root contains three living project files that MUST be kept synchronized with the codebase as features evolve:
+1. **`./README.md` (Installation, Startup & User Interface Guide):**
+   - Must always provide accurate instructions on how to install dependencies, launch the application locally (`./play-local.sh`), run backend/frontend test suites, and use every current UI feature in the browser (Lobby settings, player views, card dragging/snapping, double-clicking, hand sorting, reflection outlines, contextual buttons, and turn clock).
+2. **`./ARCHITECTURE.md` (Technical Structure & System Reference):**
+   - Must always document the current directory layout, backend Scala 3 engine/state machine (`durak.engine`), server actors & WebSocket/REST protocol (`durak.server`), frontend Preact components, CSS Grid zones, and audio/interaction subsystems.
+3. **`./play-local.sh` (Local Server Launcher):**
+   - Whenever a ticket modifies server ports, environment variables, build targets, or startup commands in `backend/` or `frontend/`, you MUST update `./play-local.sh` (and `./README.md`) so `./play-local.sh` starts the full stack cleanly.

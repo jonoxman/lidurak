@@ -20,7 +20,8 @@ if [ "$NEW_COUNT" -gt "$OLD_COUNT" ]; then
   echo "📈 Scaling UP from ${OLD_COUNT} to ${NEW_COUNT} FreeBuff workers..."
   ./agent-orchestration/start-workspace.sh "$NEW_COUNT"
   if tmux has-session -t worker_viewer 2>/dev/null; then
-    for w in $(seq $((OLD_COUNT + 1)) "$NEW_COUNT"); do
+    START_W=$(expr "$OLD_COUNT" + 1)
+    for w in $(seq "$START_W" "$NEW_COUNT"); do
       CMD="echo '⏳ Waiting for FreeBuff task on freebuff_worker_${w}...'; while true; do if docker exec freebuff_worker_${w} tmux has-session -t buff 2>/dev/null; then docker exec -it freebuff_worker_${w} tmux attach -t buff || true; fi; sleep 2; done"
       tmux new-window -t "worker_viewer:${w}" -n "Worker-${w}" "$CMD" 2>/dev/null || true
     done
@@ -29,7 +30,8 @@ if [ "$NEW_COUNT" -gt "$OLD_COUNT" ]; then
   echo "✅ Workers 1..${NEW_COUNT} are live!"
 elif [ "$NEW_COUNT" -lt "$OLD_COUNT" ]; then
   if [ "$MODE" = "--now" ]; then
-    for w in $(seq $((NEW_COUNT + 1)) "$OLD_COUNT"); do
+    START_W=$(expr "$NEW_COUNT" + 1)
+    for w in $(seq "$START_W" "$OLD_COUNT"); do
       if [ -f ".reviews/worker_${w}.pid" ]; then
         WPID=$(cat ".reviews/worker_${w}.pid" 2>/dev/null || true)
         [ -n "$WPID" ] && kill -TERM "$WPID" 2>/dev/null || true
