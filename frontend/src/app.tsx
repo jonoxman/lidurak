@@ -59,8 +59,8 @@ export function App() {
 
   return (
     <div class="app">
+      {/* The LIDURAK brand link in HeaderBar already titles every page. */}
       <HeaderBar />
-      <h1 class="app-title">Lidurak</h1>
       {route.name === 'game' ? (
         <GamePage
           gameId={route.gameId}
