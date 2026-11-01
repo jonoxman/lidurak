@@ -38,28 +38,35 @@
 ### 2.1 Pure Game Engine (`durak.engine`)
 All core rules reside in side-effect-free Scala 3 case classes and enums:
 - **`Card`, `Suit`, `Rank`:** Models suits (`Clubs`, `Diamonds`, `Hearts`, `Spades`) and ranks (`Two` through `Ace`, supporting 36-card decks for 2–3 players and 52-card decks for 4 players).
-- **`GameConfig`:** Stores `playerCount`, `playerNames`, `allowRedirect`, and `chaosMode`.
+- **`GameConfig`:** Stores `playerCount`, `allowRedirect`, `seed`, and `playerTypes` (per-seat `"human"` / `"randomBot"`; any seat the vector does not name is human). `config.isBotSeat(idx)` marks computer-controlled seats and `GameConfig.normalizePlayerTypes(playerCount, types)` pads or truncates a request's seat list.
 - **`GameState` & `BoutPhase`:**
-  - Tracks `players: Vector[PlayerState]`, `talon: Vector[Card]`, `bottomTrumpCard: Option[Card]`, `trumpSuit: Suit`, `discardPile: Vector[Card]`, `tablePairs: Vector[TablePair]`, `attackerIdx: Int`, `defenderIdx: Int`, `boutPhase: BoutPhase`, `winners: Vector[String]`, and `durak: Option[String]`.
+  - Tracks `players: Vector[PlayerState]`, `talon: Vector[Card]`, `bottomTrumpCard: Option[Card]`, `trumpSuit: Suit`, `discardPile: Vector[Card]`, `tablePairs: Vector[TablePair]`, `attackerIdx: Int`, `defenderIdx: Int`, `boutPhase: BoutPhase`, `winners: Vector[String]`, `durak: Option[String]`, and `presentPlayers: Set[String]` (human seats that reported an open connection). Presence is derived through `isPresentSeat(idx)` / `isPlayerPresent(id)` / `presentPlayerIds`, and bot seats are always present.
   - **Card Conservation Invariant:** Across all transitions (`InitialAttack`, `CoverCard`, `RedirectAttack`, `ThrowInCards`, `DeclareSurrender`, `PassTurn`, and bout resolution draws), total cards across `talon + discardPile + hands + tablePairs` remains strictly constant (`36` or `52`).
   - **Last-Player-Standing Victory:** Players who empty their hands once `talon.isEmpty` are appended to `winners` in order of finish and skipped by clockwise turn helpers (`nextActivePlayer`). Play continues until `activePlayersWithCards.size <= 1`, designating the final remaining player holding cards as `durak`.
-  - **Chaos Mode Variant:** When `config.chaosMode == true`, `InitialAttack` accepts an explicit `targetPlayerId` allowing the attacker to open a bout against any active player with cards, and `RedirectAttack` selects a random eligible active player (excluding the reflector) with sufficient hand capacity.
+  - **Chaos Mode Variant (not implemented in the engine yet):** `GameAction.InitialAttack` carries no target seat, so an opening attack always aims at the clockwise defender. Selecting an arbitrary target still requires a target-aware variant in `GameAction` / `GameEngine`.
 
 ### 2.2 Anti-Cheat State Projection (`PlayerGameView`)
 - `PlayerGameView.forViewer(state, viewerId)` strips all hidden information before serialization.
-- A connected client receives only their own `myHand: Vector[Card]`, public summaries for opponents (`id`, `name`, `cardCount`, `hasPassed`, `finishRank`), `talonCount`, `bottomTrumpCard`, `trumpSuit`, `tablePairs`, `legalActions`, and `turnDeadlineMs`.
+- A connected client receives only their own `myHand: Vector[Card]`, public summaries for opponents (`id`, `name`, `cardCount`, `hasPassed`, `finishRank`, `isPresent`), `talonCount`, `bottomTrumpCard`, `trumpSuit`, `tablePairs`, `legalActions`, `turnDeadlineMs`, and `presentPlayers` (ids of every present seat, in seat order) so the UI can draw green/grey presence dots.
 
 ### 2.3 Concurrent Server Actors & Turn Clock (`durak.server`)
-- **`GameActor`:** Wraps each match's `GameState` in a `Cats Effect` `Ref[IO, ...]` and broadcasts personalized `PlayerGameView` snapshots over a `Topic[IO, ...]` to connected WebSocket clients.
+- **`GameActor`:** Wraps each match's `GameState` in a `Cats Effect` `Ref[IO, ...]` and broadcasts personalized `PlayerGameView` snapshots over a `Topic[IO, ...]` to connected WebSocket clients. `setPresence(room, playerId, isPresent)` stores presence in the state and re-publishes it whenever the value changes, so presence dots update without anyone having to play a move.
+- **`RandomBot` seat driver (`engine/RandomBot` + `GameActor.startBots`):**
+  - `RandomBot.legalActionsFor(state, playerId)` enumerates opening attacks (every hand card), covers, redirects, surrenders, throw-ins and passes for the seat's role and phase, then keeps only the actions `GameEngine.applyAction` accepts; `RandomBot.chooseAction(state, playerId, rng)` picks one uniformly.
+  - One driver fiber per room (started only when a seat is a bot) waits a random `500 ms`–`2000 ms` — constructor-overridable for fast tests — and submits the chosen move through the same `applyAction` pipeline as a client, so clock restarts, validation and broadcasts are shared. The pause races a state-change watch, so a move for a superseded position is dropped instead of played.
+  - The prompted seat is the attacker during `InitialAttack`, the defender while an attack is uncovered, and otherwise any un-passed thrower — the same ordering the turn clock uses. Human seats are only ever animated by the turn clock.
 - **15-Second Turn Clock & 3-Second Auto-Action Delay:**
   - Every valid state transition resets `turnDeadlineMs = now + 15000`.
   - Background fibers monitor the turn deadline and execute the default timeout move (`InitialAttack` with a random card, `DeclareSurrender` for a defender, or `PassTurn` for a thrower) if 15 seconds elapse without input.
   - Forced automatic actions wait 3 seconds before firing so players can visually read the table state.
 - **`GameRoutes`:**
-  - `POST /api/games`: Creates a new match with `playerCount`, `playerNames`, `allowRedirect`, and `chaosMode`.
-  - `GET /api/games/:gameId/view?player=:playerId`: Returns the current `PlayerGameView` JSON.
-  - `POST /api/games/:gameId/action`: Submits a `GameAction` for a player.
-  - `GET /ws/games/:gameId?player=:playerId`: Bi-directional WebSocket streaming real-time `PlayerGameView` updates.
+  - `GET /api/health`: Readiness probe returning `200 {"status":"ok"}`; the frontend polls it before offering game creation.
+  - `POST /api/games` (alias `POST /api/game/create`): Creates a match with `playerCount`, `playerNames`, `allowRedirect`, and `playerTypes` (`"human"` / `"randomBot"` per seat, normalized to exactly `playerCount` entries). The response is `{ gameId, players, playerTypes }`.
+  - `GET /api/games/:gameId/view?player=:playerId` (alias `GET /api/game/:gameId/view/:playerId`): Returns that seat's `PlayerGameView` JSON.
+  - `POST /api/games/:gameId/action` (alias `POST /api/game/:gameId/action`): Submits a `GameAction` for a player.
+  - `POST /api/games/:gameId/presence`: Body `{ "playerId": "p0", "isPresent": true }` (an `"active"` flag is also accepted) records human presence and returns that seat's view.
+  - `GET /ws/game/:gameId/:playerId`: Bi-directional WebSocket streaming `PlayerGameView` updates. Text frames are `{"type":"ping"}`, `{"type":"presence","isPresent":…}` or a `GameAction`; incoming `Ping` / `Pong` frames are ignored silently. Opening the socket marks the seat present and closing it marks it absent.
+  - **Keepalive & idle timeout:** the outbound stream merges a `WebSocketFrame.Ping()` every `20 s`, and `Main` raises Ember's idle timeout to `10 minutes` (from the 60-second default), which is what stopped idle tables from dying with `java.util.concurrent.TimeoutException`.
 
 ---
 
@@ -102,7 +109,7 @@ All core rules reside in side-effect-free Scala 3 case classes and enums:
   - `getGameView()` and `sendAction()` validate every payload with `parsePlayerGameView`.
 - **`websocket.ts` (`GameWebSocket`):**
   - Validates each frame through `parsePlayerGameView` and ignores control/malformed frames (`{"type":"pong"}`, bare pings, empty payloads) without touching UI state.
-  - Sends `{"type":"ping"}` every `20_000ms` while `OPEN` (keeping clear of the server's 60-second idle timeout); the timer is cleared on close and `disconnect()`.
+  - Sends `{"type":"ping"}` every `20_000ms` while `OPEN` as an application-level heartbeat (the server also pushes a WebSocket `Ping` every 20 s and now allows a 10-minute idle timeout instead of Ember's 60-second default); the timer is cleared on close and `disconnect()`.
   - `sendPresence(isPresent)` emits `{"type":"presence", isPresent}`, queues the latest value until `onopen`, and re-sends it after an automatic reconnect.
   - Reconnects with 1s/2s/4s exponential backoff, at most three retries.
 - **`types.ts` presence fields:** `PlayerType = 'human' | 'randomBot'`; `PublicPlayerSummary.isPresent` and `PlayerGameView.presentPlayers` are optional, validated by the parser when present.

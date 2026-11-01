@@ -11,6 +11,14 @@ Lidurak is a fast, minimalist, browser-based implementation of the classic Russi
 - **Frontend:** Node.js 22+ and `npm`
 - *(Optional)* Docker (if running inside the preconfigured sandbox container)
 
+### Installing Dependencies
+- **Frontend:** the Vite/Preact/Vitest packages are not committed, so install them once (and again after `package.json` changes):
+  ~~~bash
+  cd frontend && npm ci
+  ~~~
+  Without `node_modules` the frontend suite exits with `sh: 1: vitest: not found`.
+- **Backend:** `sbt` resolves its Scala dependencies itself on the first `sbt run` or `sbt -batch test`.
+
 ### Launching the Local Server (`./play-local.sh`)
 From the repository root, run:
 ~~~bash
@@ -27,7 +35,7 @@ Press `Ctrl+C` to stop both servers cleanly.
   ~~~bash
   cd backend && sbt -batch test
   ~~~
-- **Frontend (TypeScript / Preact / Vitest):**
+- **Frontend (TypeScript / Preact / Vitest):** run `cd frontend && npm ci` first if you have never installed the frontend packages.
   ~~~bash
   cd frontend && npm test -- --run
   ~~~
