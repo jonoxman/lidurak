@@ -60,12 +60,14 @@ Press `Ctrl+C` to stop both servers cleanly.
 
 ### Creating a Match (Lobby Page)
 1. Open [http://localhost:5173](http://localhost:5173) in your browser.
-2. Select the **Number of Players** (`2`, `3`, or `4` players).
-3. Enter custom player names (defaults to `Alice`, `Bob`, `Carol`, `Dave`).
-4. Configure match variants:
+2. If the backend is still starting, the lobby shows a **loading panel** (`Starting game server, please wait…`) and re-checks `GET /api/health` every second. The Create Game form appears automatically once the server answers, so a click can never land on a proxy `HTTP 500`.
+3. Select the **Number of Players** (`2`, `3`, or `4` players).
+4. Enter custom player names (defaults to `Alice`, `Bob`, `Carol`, `Dave`).
+5. Pick who plays each seat from the **Type** dropdown next to every name — `Human` or `RandomBot`. Bots play legal moves on their own after a short random pause; seat choices survive changing the player count, and new seats default to `Human`.
+6. Configure match variants:
    - **Allow redirects (`Perevod`):** Enables reflecting an unopened attack to the next player using a card of matching rank.
    - **Chaos Mode** *(available for 3 or 4 players)*: Allows the initial attacker to target *any* active player who still holds cards (instead of strictly attacking clockwise), and sends reflections (`Perevod`) to a randomly chosen eligible player.
-5. Click **Create Game** and select any player link (or use the left-sidebar player switcher tabs during local hotseat inspection) to view the table from that player's seat.
+7. Click **Create Game** and select any player link (or use the left-sidebar player switcher tabs during local hotseat inspection) to view the table from that player's seat.
 
 ### Table Layout (Lichess 3-Column Shell)
 - **Left Sidebar:** Displays the **How to Play** quick-reference guide and the **Player Switcher** tabs (`p0`, `p1`, etc.) for testing multi-seat perspectives locally.
