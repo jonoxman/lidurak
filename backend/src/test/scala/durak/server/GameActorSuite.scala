@@ -220,3 +220,103 @@ class GameActorSuite extends munit.FunSuite:
       s"the auto-surrender did not restart the clock: ${after.turnDeadlineMs}"
     )
   }
+
+  /** Polls the room until `predicate` holds, failing once `timeout` elapses. */
+  private def awaitState(room: GameRoom, timeout: FiniteDuration)(
+      predicate: GameState => Boolean
+  ): GameState =
+    val deadline = System.currentTimeMillis() + timeout.toMillis
+    var current = room.stateRef.get.unsafeRunSync()
+    while !predicate(current) && System.currentTimeMillis() < deadline do
+      IO.sleep(25.millis).unsafeRunSync()
+      current = room.stateRef.get.unsafeRunSync()
+    assert(
+      predicate(current),
+      s"state did not arrive within $timeout (phase ${current.boutPhase})"
+    )
+    current
+
+  // --- Bots ---
+
+  test("a RandomBot seat plays a legal move after its configured delay") {
+    val seed = (0L until 200L)
+      .find { candidate =>
+        GameEngine
+          .createGame(GameConfig(playerCount = 2, seed = candidate), Vector("Bot", "Alice"))
+          .attackerIdx == 0
+      }
+      .getOrElse(fail("no seed seats p0 as the first attacker"))
+
+    val room = GameActor
+      .create(
+        GameConfig(playerCount = 2, seed = seed, playerTypes = Vector("randomBot", "human")),
+        Vector("Bot", "Alice"),
+        turnSeconds = 15,
+        botDelayMin = 20.millis,
+        botDelayMax = 40.millis
+      )
+      .unsafeRunSync()
+    val start = room.stateRef.get.unsafeRunSync()
+    assertEquals(start.turnPlayerId, Some("p0"))
+
+    val after = awaitState(room, 3000.millis)(_.tablePairs.nonEmpty)
+    GameActor.stopClock(room).unsafeRunSync()
+
+    assertEquals(after.boutPhase, BoutPhase.Defense)
+    assert(
+      start.players.head.hand.contains(after.tablePairs.head.attack),
+      s"the bot attacked with a card it does not hold: ${after.tablePairs.head.attack}"
+    )
+  }
+
+  test("the bot driver never plays for an all-human table") {
+    val room = newRoom()
+    val start = room.stateRef.get.unsafeRunSync()
+
+    val after = (IO.sleep(400.millis) *> room.stateRef.get).unsafeRunSync()
+    GameActor.stopClock(room).unsafeRunSync()
+
+    assertEquals(after, start)
+  }
+
+  // --- Presence ---
+
+  test("presence updates are stored, published and visible to the other seats") {
+    val room = newRoom()
+    val start = room.stateRef.get.unsafeRunSync()
+    assertEquals(start.isPlayerPresent("p1"), false)
+
+    val published = room.topic
+      .subscribe(16)
+      .take(1)
+      .concurrently(Stream.eval(IO.sleep(100.millis) *> GameActor.setPresence(room, "p1", true)))
+      .compile
+      .last
+      .unsafeRunSync()
+    val after = room.stateRef.get.unsafeRunSync()
+    GameActor.stopClock(room).unsafeRunSync()
+
+    assertEquals(after.isPlayerPresent("p1"), true)
+    assertEquals(published.map(_.presentPlayers), Some(Set("p1")))
+    val view = PlayerGameView.forViewer(after, "p0")
+    assert(view.presentPlayers.contains("p1"), view.presentPlayers.toString)
+    assert(view.opponents.exists(seat => seat.id == "p1" && seat.isPresent), view.opponents.toString)
+  }
+
+  test("clearing presence drops the seat, while bot seats are always present") {
+    val room = GameActor
+      .create(
+        GameConfig(playerCount = 2, seed = 5L, playerTypes = Vector("randomBot", "human")),
+        Vector("Bot", "Alice")
+      )
+      .unsafeRunSync()
+    GameActor.stopClock(room).unsafeRunSync()
+
+    GameActor.setPresence(room, "p1", true).unsafeRunSync()
+    assertEquals(room.stateRef.get.unsafeRunSync().presentPlayerIds, Vector("p0", "p1"))
+
+    GameActor.setPresence(room, "p1", false).unsafeRunSync()
+    val absent = room.stateRef.get.unsafeRunSync()
+    assertEquals(absent.presentPlayerIds, Vector("p0"))
+    assert(!PlayerGameView.forViewer(absent, "p0").opponents.head.isPresent)
+  }

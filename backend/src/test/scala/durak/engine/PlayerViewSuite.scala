@@ -373,3 +373,33 @@ class PlayerViewSuite extends munit.FunSuite:
     assert(keys.contains("myHand"), keys.toString)
     assert(keys.contains("talonCount"), keys.toString)
   }
+
+  // --- Presence ---
+
+  test("present seats are projected to the opponents and the present list") {
+    val gs = state(
+      Vector(
+        player("p0", List(card(Rank.Six))),
+        player("p1", List(card(Rank.Seven))),
+        player("p2", List(card(Rank.Eight)))
+      ),
+      boutPhase = BoutPhase.InitialAttack
+    ).copy(presentPlayers = Set("p0", "p2"))
+
+    val view = PlayerGameView.forViewer(gs, "p0")
+
+    assertEquals(view.presentPlayers, Vector("p0", "p2"))
+    assertEquals(view.opponents.map(seat => seat.id -> seat.isPresent).toMap, Map("p1" -> false, "p2" -> true))
+  }
+
+  test("bot seats are always present, even before they report anything") {
+    val gs = state(
+      Vector(player("p0", List(card(Rank.Six))), player("p1", List(card(Rank.Seven))))
+    ).copy(config = GameConfig(2, seed = 42L, playerTypes = Vector("randomBot", "human")))
+
+    val view = PlayerGameView.forViewer(gs, "p1")
+
+    assertEquals(view.presentPlayers, Vector("p0"))
+    assertEquals(view.opponents.map(_.isPresent), List(true))
+    assertEquals(gs.isPlayerPresent("p1"), false)
+  }
