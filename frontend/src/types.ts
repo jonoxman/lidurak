@@ -8,12 +8,17 @@ export interface TablePair {
   defense?: Card | null;
 }
 
+/** Seat kind: a human client or a server-driven bot. */
+export type PlayerType = 'human' | 'randomBot';
+
 export interface PublicPlayerSummary {
   id: string;
   name: string;
   cardCount: number;
   hasPassed: boolean;
   finishRank?: number | null;
+  /** False while the opponent's socket is disconnected. */
+  isPresent?: boolean;
 }
 
 export interface PlayerGameView {
@@ -38,6 +43,8 @@ export interface PlayerGameView {
   turnSecondsRemaining?: number;
   /** Id of the player the clock is waiting on, for per-seat clocks. */
   turnPlayerId?: string;
+  /** Ids of players whose sockets are currently connected. */
+  presentPlayers?: string[];
 }
 
 export interface GameAction {
@@ -80,12 +87,17 @@ function parsePublicPlayerSummary(value: unknown): PublicPlayerSummary {
   if (finishRank !== undefined && finishRank !== null && typeof finishRank !== 'number') {
     fail('opponent finishRank must be a number or null');
   }
+  const isPresent = raw.isPresent;
+  if (isPresent !== undefined && typeof isPresent !== 'boolean') {
+    fail('opponent isPresent must be a boolean');
+  }
   return {
     id,
     name,
     cardCount,
     hasPassed,
     finishRank: (finishRank as number | null | undefined) ?? null,
+    ...(isPresent === undefined ? {} : { isPresent }),
   };
 }
 
@@ -126,6 +138,8 @@ export function parsePlayerGameView(value: unknown): PlayerGameView {
   if (turnPlayerId !== undefined && typeof turnPlayerId !== 'string') {
     fail('turnPlayerId must be a string');
   }
+  const presentPlayers = raw.presentPlayers;
+  if (presentPlayers !== undefined) parseStringArray(presentPlayers, 'presentPlayers');
   if (typeof myId !== 'string') fail('myId must be a string');
   if (!Array.isArray(raw.myHand)) fail('myHand must be an array of cards');
   if (!Array.isArray(raw.opponents)) fail('opponents must be an array');
@@ -162,6 +176,7 @@ export function parsePlayerGameView(value: unknown): PlayerGameView {
     turnDeadlineMs: (turnDeadlineMs as number | undefined) ?? 0,
     turnSecondsRemaining: (turnSecondsRemaining as number | undefined) ?? 15,
     turnPlayerId: turnPlayerId as string | undefined,
+    ...(presentPlayers === undefined ? {} : { presentPlayers: presentPlayers as string[] }),
   };
 }
 

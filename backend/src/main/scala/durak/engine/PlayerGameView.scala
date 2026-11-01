@@ -8,7 +8,9 @@ case class PublicPlayerSummary(
   hasPassed: Boolean,
   finishRank: Option[Int],
   status: String = PlayerStatus.Active,
-  isTurn: Boolean = false
+  isTurn: Boolean = false,
+  // True while the opponent is connected (bots are always present).
+  isPresent: Boolean = false
 )
 
 /**
@@ -40,7 +42,9 @@ case class PlayerGameView(
   turnDeadlineMs: Long = 0L,
   turnSecondsRemaining: Int = 0,
   // True while the defender has no cover and no redirect, so only surrender is legal.
-  defenderDefenseless: Boolean = false
+  defenderDefenseless: Boolean = false,
+  // Ids of every seat currently present, for the green/grey presence dots.
+  presentPlayers: Vector[String] = Vector.empty
 )
 
 object PlayerGameView:
@@ -77,7 +81,8 @@ object PlayerGameView:
             hasPassed = other.hasPassed,
             finishRank = other.finishRank,
             status = other.status,
-            isTurn = turnIdx.contains(idx)
+            isTurn = turnIdx.contains(idx),
+            isPresent = state.isPresentSeat(idx)
           )
       }.toList,
       tablePairs = state.tablePairs,
@@ -99,7 +104,8 @@ object PlayerGameView:
       turnPlayerId = state.turnPlayerId,
       turnDeadlineMs = state.turnDeadlineMs,
       turnSecondsRemaining = secondsRemaining(state, nowMs),
-      defenderDefenseless = state.defenderIsDefenseless
+      defenderDefenseless = state.defenderIsDefenseless,
+      presentPlayers = state.presentPlayerIds
     )
 
   /** Whole seconds left on the turn clock, rounded up and never negative. */

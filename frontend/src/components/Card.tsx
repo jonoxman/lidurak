@@ -126,13 +126,48 @@ const PIP_LAYOUTS: Record<string, ReadonlyArray<{ x: number; y: number }>> = {
   ],
 };
 
-/** Decorative pips arranged around a face card's central letter. */
-const FACE_DECORATIONS: ReadonlyArray<{ x: number; y: number }> = [
-  { x: 35, y: 30 },
-  { x: 23, y: 56 },
-  { x: 47, y: 56 },
-  { x: 35, y: 84 },
-];
+/** Corner of the central letter a face pip sits on. */
+export type FaceCorner = 'top-left' | 'top-right' | 'bottom-right' | 'bottom-left';
+
+/** Pips sit at the ends of the face letter (`J`, `Q`, `K`) around `(35, 50)`. */
+const FACE_PIPS: Record<string, ReadonlyArray<{ x: number; y: number; corner: FaceCorner }>> = {
+  jack: [
+    { x: 24, y: 33, corner: 'top-left' },
+    { x: 46, y: 33, corner: 'top-right' },
+    { x: 24, y: 67, corner: 'bottom-left' },
+  ],
+  queen: [{ x: 46, y: 67, corner: 'bottom-right' }],
+  king: [
+    { x: 24, y: 33, corner: 'top-left' },
+    { x: 46, y: 33, corner: 'top-right' },
+    { x: 24, y: 67, corner: 'bottom-left' },
+    { x: 46, y: 67, corner: 'bottom-right' },
+  ],
+};
+
+/**
+ * Rotation that points a pip's distinguishing half away from the letter: the
+ * top half of a heart/club, or the bottom half of a spade/diamond, faces out.
+ * Angles are clockwise degrees from upright, pivoting around the pip itself.
+ */
+const FACE_PIP_ANGLES: Record<'upper' | 'lower', Record<FaceCorner, number>> = {
+  upper: { 'top-left': -45, 'top-right': 45, 'bottom-right': 135, 'bottom-left': -135 },
+  lower: { 'top-left': 135, 'top-right': -135, 'bottom-right': -45, 'bottom-left': 45 },
+};
+
+/** Decorative pips for a face rank, or `null` for every other rank. */
+export function facePips(
+  rank: string,
+): ReadonlyArray<{ x: number; y: number; corner: FaceCorner }> | null {
+  return FACE_PIPS[rank.toLowerCase()] ?? null;
+}
+
+/** Outward rotation, in degrees, for one face pip of a given suit. */
+export function facePipAngle(suit: string, corner: FaceCorner): number {
+  const normalized = suit.toLowerCase();
+  const facing = normalized === 'hearts' || normalized === 'clubs' ? 'upper' : 'lower';
+  return FACE_PIP_ANGLES[facing][corner];
+}
 
 export function isRedSuit(suit: string): boolean {
   const normalized = suit.toLowerCase();
@@ -197,6 +232,7 @@ export function Card({
   const pips = pipLayout(normalizedRank);
   const isAce = normalizedRank === 'ace';
   const isFace = FACE_RANKS.has(normalizedRank);
+  const decorations = facePips(normalizedRank);
   const pipSize = pips && pips.length > 6 ? 15 : 17;
 
   return (
@@ -273,26 +309,35 @@ export function Card({
 
         {isFace ? (
           <g class="face-card">
-            {FACE_DECORATIONS.map((pip) => (
-              <text
-                key={`${pip.x}-${pip.y}`}
-                data-pip="decor"
-                x={pip.x}
-                y={pip.y}
-                font-size={11}
-                text-anchor="middle"
-                fill={color}
-              >
-                {symbol}
-              </text>
-            ))}
+            {(decorations ?? []).map((pip) => {
+              const angle = facePipAngle(suit, pip.corner);
+              return (
+                <text
+                  key={pip.corner}
+                  class="card-pip face-pip"
+                  data-pip="decor"
+                  data-corner={pip.corner}
+                  data-rotation={angle}
+                  x={pip.x}
+                  y={pip.y}
+                  font-size={11}
+                  text-anchor="middle"
+                  dominant-baseline="central"
+                  transform={`rotate(${angle} ${pip.x} ${pip.y})`}
+                  fill={color}
+                >
+                  {symbol}
+                </text>
+              );
+            })}
             <text
               data-pip="face"
               x="35"
-              y="64"
+              y="50"
               font-size={30}
               font-weight={700}
               text-anchor="middle"
+              dominant-baseline="central"
               fill={color}
             >
               {label}

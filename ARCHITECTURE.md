@@ -89,3 +89,20 @@ All core rules reside in side-effect-free Scala 3 case classes and enums:
 ### 3.3 Interaction & Web Audio Subsystems
 - **Magnetic Drag-Snap & Double-Click:** Pointer drag handlers compute Euclidean distance to valid drop zones, snapping a preview highlight when within `48px`. Double-clicking a hand card evaluates all legal actions for that card and dispatches immediately if and only if exactly one target/action is legal.
 - **`SoundEngine.ts`:** Synthesizes procedural sound effects via the browser Web Audio API (card slap thuds at distinct pitches for attack/cover/redirect/surrender, player-specific page-turn brushes on talon draw, 5-second clock warning ticks, and a Lichess-style two-note game-over chime). Five packs (`SOUND_PACKS`) each voice every `SoundEvent`; `playSampleSound(pack?, volume?)` previews a random effect from `SAMPLE_EVENTS`, optionally through a one-off preview gain bus at the supplied volume, without mutating the persisted pack or volume.
+
+### 3.4 Card Rendering (`components/Card.tsx`)
+- `Card.tsx` draws every face in an inline SVG `viewBox="0 0 70 100"`. Number ranks map to fixed pip tables; aces get one large ornate pip; `J`/`Q`/`K` render a center letter at `(35, 50)` with `dominant-baseline="central"`.
+- **Face pips (`class="card-pip face-pip"`):** `judge`-style corner tables place pips at the ends of the letter — `jack` = 3 (`top-left`, `top-right`, `bottom-left`), `queen` = 1 (`bottom-right`), `king` = 4 (all corners). Each pip carries `data-corner`, `data-rotation`, and `transform="rotate(angle x y)"`.
+- **Outward rotation:** `facePipAngle(suit, corner)` returns `-45` / `45` / `135` / `-135` for hearts & clubs (distinguishing top half faces out) and the 180-degree opposite set (`135` / `-135` / `-45` / `45`) for spades & diamonds (bottom half faces out).
+
+### 3.5 REST & WebSocket Client (`api/`)
+- **`client.ts`:**
+  - `createGame(playerCount, playerNames, allowRedirect, chaosMode, playerTypes?)` → `POST /api/game/create`; `playerTypes` (`'human' | 'randomBot'` per seat) defaults to all `'human'`.
+  - `checkServerHealth()` → `GET /api/health`, resolving `true` for a 2xx response and `false` for any error, so the lobby can poll backend readiness.
+  - `getGameView()` and `sendAction()` validate every payload with `parsePlayerGameView`.
+- **`websocket.ts` (`GameWebSocket`):**
+  - Validates each frame through `parsePlayerGameView` and ignores control/malformed frames (`{"type":"pong"}`, bare pings, empty payloads) without touching UI state.
+  - Sends `{"type":"ping"}` every `20_000ms` while `OPEN` (keeping clear of the server's 60-second idle timeout); the timer is cleared on close and `disconnect()`.
+  - `sendPresence(isPresent)` emits `{"type":"presence", isPresent}`, queues the latest value until `onopen`, and re-sends it after an automatic reconnect.
+  - Reconnects with 1s/2s/4s exponential backoff, at most three retries.
+- **`types.ts` presence fields:** `PlayerType = 'human' | 'randomBot'`; `PublicPlayerSummary.isPresent` and `PlayerGameView.presentPlayers` are optional, validated by the parser when present.

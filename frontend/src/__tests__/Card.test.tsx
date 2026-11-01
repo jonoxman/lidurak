@@ -103,7 +103,7 @@ describe('Card', () => {
     expect(pips[0].getAttribute('x')).toBe('35');
   });
 
-  it('renders J, Q and K as centered letters flanked by decorative pips', () => {
+  it('centers the J, Q and K letters on the card', () => {
     const faces = [
       ['jack', 'J'],
       ['queen', 'Q'],
@@ -115,10 +115,62 @@ describe('Card', () => {
       const face = container.querySelector('[data-pip="face"]')!;
       expect(face.textContent).toBe(letter);
       expect(face.getAttribute('x')).toBe('35');
+      expect(face.getAttribute('y')).toBe('50');
       expect(face.getAttribute('text-anchor')).toBe('middle');
-      expect(container.querySelectorAll('[data-pip="decor"]')).toHaveLength(4);
+      expect(face.getAttribute('dominant-baseline')).toBe('central');
       unmount();
     });
+  });
+
+  it('places face-card pips at the ends of the center letter', () => {
+    const layouts = [
+      ['jack', ['top-left', 'top-right', 'bottom-left']],
+      ['queen', ['bottom-right']],
+      ['king', ['top-left', 'top-right', 'bottom-left', 'bottom-right']],
+    ] as const;
+
+    layouts.forEach(([rank, corners]) => {
+      const { container, unmount } = render(<Card suit="spades" rank={rank} />);
+      const pips = Array.from(container.querySelectorAll('.face-pip'));
+      expect(pips.map((pip) => pip.getAttribute('data-corner')), rank).toEqual([...corners]);
+      expect(container.querySelectorAll('[data-pip="decor"]')).toHaveLength(corners.length);
+      unmount();
+    });
+  });
+
+  it('rotates each face pip so its distinguishing half faces outward', () => {
+    const corners = ['top-left', 'top-right', 'bottom-right', 'bottom-left'] as const;
+
+    const angleOf = (suit: string, corner: string): number => {
+      const { container, unmount } = render(<Card suit={suit} rank="king" />);
+      const pip = container.querySelector(`.face-pip[data-corner="${corner}"]`)!;
+      const angle = Number(pip.getAttribute('data-rotation'));
+      expect(pip.getAttribute('transform')).toBe(
+        `rotate(${angle} ${pip.getAttribute('x')} ${pip.getAttribute('y')})`,
+      );
+      expect(pip.getAttribute('dominant-baseline')).toBe('central');
+      unmount();
+      return angle;
+    };
+
+    const offset = (angle: number): number => ((((angle % 360) + 540) % 360) - 180);
+
+    corners.forEach((corner) => {
+      const hearts = angleOf('hearts', corner);
+      const clubs = angleOf('clubs', corner);
+      const spades = angleOf('spades', corner);
+      const diamonds = angleOf('diamonds', corner);
+
+      // Hearts and clubs share a rotation, as do spades and diamonds.
+      expect(clubs, corner).toBe(hearts);
+      expect(diamonds, corner).toBe(spades);
+      // Spades/diamonds expose their bottom half, exactly opposite the upper half.
+      expect(Math.abs(offset(spades - hearts)), corner).toBe(180);
+    });
+
+    // Top-left points up-left for hearts and down-right for spades.
+    expect(angleOf('hearts', 'top-left')).toBe(-45);
+    expect(angleOf('spades', 'top-left')).toBe(135);
   });
 
   it('centers the trump badge symbol exactly inside the golden circle', () => {

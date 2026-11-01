@@ -76,6 +76,11 @@ Press `Ctrl+C` to stop both servers cleanly.
     - **Bottom-Right:** Client-side **Hand Sorting Controls** and contextual action buttons.
 - **Right Sidebar:** Displays the large digital **15-Second Turn Clock (`00:XX`)** and match results (`Winners` list and final `Durak`).
 
+### Card Faces
+- Number cards (`6`–`10`, plus `2`–`5` in 4-player games) show one suit pip per rank; aces show a single large ornate pip.
+- Face cards (`J`, `Q`, `K`) place their suit pips at the ends of the center letter — `J` has 3 pips (top-left, top-right, bottom-left), `Q` has 1 pip (bottom-right tail), and `K` has 4 pips (all corners).
+- Every face pip is rotated diagonally outward, so the recognizable half of the suit symbol (the top half of a heart/club, the bottom half of a spade/diamond) points away from the letter.
+
 ### Playing Cards & Controls
 - **Drag-and-Drop with Magnetic Snapping:** Drag any card from your hand within `48px` of a valid drop zone (a target player outline, an uncovered attacking card to cover it, the throw-in slot, or the arrow reflection outline). The preview snaps into place; release the mouse to play the card.
 - **Fast Double-Click to Play:** Double-click any card in your hand to play it immediately whenever there is **only one unambiguous legal move** for that card (e.g., opening attack in standard mode, throwing in a matching rank, or covering when only one uncovered card can be beaten). If multiple targets are legal (such as in Chaos Mode or when a card can cover multiple uncovered cards), drag the card to your chosen target instead.

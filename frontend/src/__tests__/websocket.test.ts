@@ -30,6 +30,11 @@ class MockWebSocket {
     this.onclose?.();
   }
 
+  emitOpen(): void {
+    this.readyState = MockWebSocket.OPEN;
+    this.onopen?.();
+  }
+
   emitMessage(payload: unknown): void {
     this.onmessage?.({ data: JSON.stringify(payload) });
   }
@@ -120,6 +125,81 @@ describe('GameWebSocket', () => {
         defenseCard: { suit: 'spades', rank: 'six' },
       }),
     ]);
+  });
+
+  it('pings every 20 seconds while the socket is open', () => {
+    const socket = new GameWebSocket('game-1', 'p0', () => {});
+    socket.connect();
+    const ws = latest();
+    ws.emitOpen();
+
+    vi.advanceTimersByTime(19_999);
+    expect(ws.sent).toHaveLength(0);
+
+    vi.advanceTimersByTime(1);
+    expect(ws.sent).toEqual([JSON.stringify({ type: 'ping' })]);
+
+    vi.advanceTimersByTime(20_000);
+    expect(ws.sent).toHaveLength(2);
+
+    socket.disconnect();
+    vi.advanceTimersByTime(60_000);
+    expect(ws.sent).toHaveLength(2);
+  });
+
+  it('stops the keepalive when the connection drops', () => {
+    const socket = new GameWebSocket('game-1', 'p0', () => {});
+    socket.connect();
+    const ws = latest();
+    ws.emitOpen();
+
+    vi.advanceTimersByTime(20_000);
+    expect(ws.sent).toHaveLength(1);
+
+    ws.emitClose();
+    vi.advanceTimersByTime(60_000);
+
+    expect(ws.sent).toHaveLength(1);
+  });
+
+  it('ignores server control frames without emitting a state update', () => {
+    const updates: PlayerGameView[] = [];
+    const socket = new GameWebSocket('game-1', 'p0', (next) => updates.push(next));
+    socket.connect();
+
+    latest().emitMessage({ type: 'pong' });
+    latest().emitMessage({ type: 'ping' });
+    latest().emitRawMessage('');
+    latest().emitMessage({});
+
+    expect(updates).toHaveLength(0);
+  });
+
+  it('sends presence once connected and remembers it across reconnects', () => {
+    const socket = new GameWebSocket('game-1', 'p0', () => {});
+    socket.connect();
+    const ws = latest();
+    ws.readyState = MockWebSocket.CONNECTING;
+
+    socket.sendPresence(false);
+    expect(ws.sent).toHaveLength(0);
+
+    ws.emitOpen();
+    expect(ws.sent).toEqual([JSON.stringify({ type: 'presence', isPresent: false })]);
+
+    socket.sendPresence(true);
+    expect(ws.sent[1]).toBe(JSON.stringify({ type: 'presence', isPresent: true }));
+  });
+
+  it('does not send presence while the socket is closed', () => {
+    const socket = new GameWebSocket('game-1', 'p0', () => {});
+    socket.connect();
+    const ws = latest();
+    ws.readyState = MockWebSocket.CLOSED;
+
+    socket.sendPresence(true);
+
+    expect(ws.sent).toHaveLength(0);
   });
 
   it('does not send while the socket is closed', () => {
