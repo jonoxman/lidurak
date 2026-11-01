@@ -1,25 +1,61 @@
-import { describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/preact';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/preact';
+
+vi.mock('../api/client', () => ({
+  checkServerHealth: vi.fn(async () => true),
+  createGame: vi.fn(),
+  getGameView: vi.fn(),
+  sendAction: vi.fn(),
+}));
+
+import * as client from '../api/client';
 import { App, parseRoute } from '../app';
 
+const checkServerHealth = client.checkServerHealth as unknown as ReturnType<typeof vi.fn>;
+
 describe('App', () => {
-  it('renders the Lidurak heading', () => {
-    render(<App />);
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Lidurak');
+  beforeEach(() => {
+    checkServerHealth.mockResolvedValue(true);
   });
 
-  it('shows the local lobby by default', () => {
+  it('does not repeat the Lidurak title below the header bar', async () => {
     render(<App />);
-    expect(screen.getByRole('button', { name: 'Create Game' })).toBeTruthy();
+
+    await screen.findByRole('button', { name: 'Create Game' });
+
+    expect(document.querySelector('.app-title')).toBeNull();
+    expect(screen.queryByRole('heading', { level: 1 })).toBeNull();
   });
 
-  it('mounts the universal site header above the lobby', () => {
+  it('shows the local lobby by default', async () => {
+    render(<App />);
+    expect(await screen.findByRole('button', { name: 'Create Game' })).toBeTruthy();
+  });
+
+  it('mounts the universal site header above the lobby', async () => {
     render(<App />);
 
     const header = screen.getByRole('banner');
     expect(header.getAttribute('data-zone')).toBe('site-header');
     expect(screen.getByRole('link', { name: 'LIDURAK' }).getAttribute('href')).toBe('#/');
     expect(screen.getByRole('button', { name: 'Account menu' })).toBeTruthy();
+    await screen.findByRole('button', { name: 'Create Game' });
+  });
+
+  it('waits on the loading view instead of the lobby until the backend is ready', async () => {
+    checkServerHealth.mockResolvedValue(false);
+    render(<App />);
+
+    const loading = await screen.findByTestId('server-loading');
+    expect(loading.getAttribute('role')).toBe('status');
+    expect(loading.textContent).toContain('Starting game server, please wait');
+    expect(screen.queryByRole('button', { name: 'Create Game' })).toBeNull();
+
+    checkServerHealth.mockResolvedValue(true);
+    await waitFor(
+      () => expect(screen.getByRole('button', { name: 'Create Game' })).toBeTruthy(),
+      { timeout: 3000 },
+    );
   });
 });
 

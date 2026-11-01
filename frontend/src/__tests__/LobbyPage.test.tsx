@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/preact';
 
 vi.mock('../api/client', () => ({
+  checkServerHealth: vi.fn(),
   createGame: vi.fn(),
 }));
 
@@ -9,29 +10,36 @@ import * as client from '../api/client';
 import { LobbyPage } from '../pages/LobbyPage';
 
 const createGame = client.createGame as unknown as ReturnType<typeof vi.fn>;
+const checkServerHealth = client.checkServerHealth as unknown as ReturnType<typeof vi.fn>;
 
 const submitForm = () => {
-  const form = screen.getByRole('button', { name: /Create Game|Creating/ }).closest('form');
-  fireEvent.submit(form as HTMLFormElement);
+  const button = screen.getByRole('button', { name: /Create Game|Creating/ });
+  fireEvent.submit(button.closest('form') as HTMLFormElement);
 };
+
+const humanSeats = (count: number) => Array.from({ length: count }, () => 'human');
 
 describe('LobbyPage', () => {
   beforeEach(() => {
     createGame.mockReset();
+    checkServerHealth.mockReset();
+    checkServerHealth.mockResolvedValue(true);
   });
 
-  it('renders a two-player form by default', () => {
-    render(<LobbyPage />);
+  it('renders a two-player form with a seat-type dropdown per player', () => {
+    render(<LobbyPage initialServerReady />);
 
     expect(screen.getByLabelText('Players')).toBeTruthy();
     expect((screen.getByLabelText('Player 1') as HTMLInputElement).value).toBe('Alice');
     expect((screen.getByLabelText('Player 2') as HTMLInputElement).value).toBe('Bob');
     expect(screen.queryByLabelText('Player 3')).toBeNull();
     expect(screen.getByLabelText('Allow redirects')).toBeTruthy();
+    expect((screen.getByLabelText('Player 1 type') as HTMLSelectElement).value).toBe('human');
+    expect((screen.getByTestId('player-type-1') as HTMLSelectElement).value).toBe('human');
   });
 
   it('adds a name field per extra player when the count changes', async () => {
-    render(<LobbyPage />);
+    render(<LobbyPage initialServerReady />);
 
     fireEvent.change(screen.getByLabelText('Players'), { target: { value: '4' } });
 
@@ -39,9 +47,56 @@ describe('LobbyPage', () => {
     expect((screen.getByLabelText('Player 3') as HTMLInputElement).value).toBe('Carol');
   });
 
+  it('offers Human and RandomBot for every player row', async () => {
+    render(<LobbyPage initialServerReady />);
+
+    fireEvent.change(screen.getByLabelText('Players'), { target: { value: '4' } });
+
+    await waitFor(() => expect(screen.getByTestId('player-type-3')).toBeTruthy());
+    for (let index = 0; index < 4; index += 1) {
+      expect(screen.getByLabelText(`Player ${index + 1}`)).toBeTruthy();
+      const select = screen.getByTestId(`player-type-${index}`) as HTMLSelectElement;
+      expect(select.value).toBe('human');
+      expect(Array.from(select.options).map((option) => option.value)).toEqual([
+        'human',
+        'randomBot',
+      ]);
+      expect(Array.from(select.options).map((option) => option.textContent)).toEqual([
+        'Human',
+        'RandomBot',
+      ]);
+    }
+  });
+
+  it('passes the selected player types to createGame', async () => {
+    createGame.mockResolvedValue({ gameId: 'game-2', players: ['p0', 'p1'] });
+    render(<LobbyPage initialServerReady />);
+
+    fireEvent.change(screen.getByTestId('player-type-1'), { target: { value: 'randomBot' } });
+    submitForm();
+
+    await waitFor(() =>
+      expect(createGame).toHaveBeenCalledWith(2, ['Alice', 'Bob'], true, false, [
+        'human',
+        'randomBot',
+      ]),
+    );
+  });
+
+  it('keeps seat choices when the count grows and defaults new seats to human', async () => {
+    render(<LobbyPage initialServerReady />);
+
+    fireEvent.change(screen.getByTestId('player-type-0'), { target: { value: 'randomBot' } });
+    fireEvent.change(screen.getByLabelText('Players'), { target: { value: '3' } });
+
+    await waitFor(() => expect(screen.getByTestId('player-type-2')).toBeTruthy());
+    expect((screen.getByTestId('player-type-0') as HTMLSelectElement).value).toBe('randomBot');
+    expect((screen.getByTestId('player-type-2') as HTMLSelectElement).value).toBe('human');
+  });
+
   it('creates a game with the chosen names and links every player view', async () => {
     createGame.mockResolvedValue({ gameId: 'game-1', players: ['p0', 'p1', 'p2'] });
-    render(<LobbyPage />);
+    render(<LobbyPage initialServerReady />);
 
     fireEvent.change(screen.getByLabelText('Players'), { target: { value: '3' } });
     fireEvent.input(screen.getByLabelText('Player 1'), { target: { value: 'Zoe' } });
@@ -49,7 +104,13 @@ describe('LobbyPage', () => {
     submitForm();
 
     await waitFor(() =>
-      expect(createGame).toHaveBeenCalledWith(3, ['Zoe', 'Bob', 'Carol'], false, false),
+      expect(createGame).toHaveBeenCalledWith(
+        3,
+        ['Zoe', 'Bob', 'Carol'],
+        false,
+        false,
+        humanSeats(3),
+      ),
     );
 
     const alice = await screen.findByRole('link', { name: 'Zoe (p0)' });
@@ -64,7 +125,7 @@ describe('LobbyPage', () => {
 
   it('offers chaos mode only for three or more players and sends it on create', async () => {
     createGame.mockResolvedValue({ gameId: 'game-1', players: ['p0', 'p1', 'p2'] });
-    render(<LobbyPage />);
+    render(<LobbyPage initialServerReady />);
 
     expect(screen.queryByLabelText('Chaos mode (attack any player)')).toBeNull();
 
@@ -76,13 +137,19 @@ describe('LobbyPage', () => {
     submitForm();
 
     await waitFor(() =>
-      expect(createGame).toHaveBeenCalledWith(3, ['Alice', 'Bob', 'Carol'], true, true),
+      expect(createGame).toHaveBeenCalledWith(
+        3,
+        ['Alice', 'Bob', 'Carol'],
+        true,
+        true,
+        humanSeats(3),
+      ),
     );
   });
 
   it('drops chaos mode when the player count returns to two', async () => {
     createGame.mockResolvedValue({ gameId: 'game-1', players: ['p0', 'p1'] });
-    render(<LobbyPage />);
+    render(<LobbyPage initialServerReady />);
 
     fireEvent.change(screen.getByLabelText('Players'), { target: { value: '4' } });
     fireEvent.click(await screen.findByLabelText('Chaos mode (attack any player)'));
@@ -92,17 +159,78 @@ describe('LobbyPage', () => {
     submitForm();
 
     await waitFor(() =>
-      expect(createGame).toHaveBeenCalledWith(2, ['Alice', 'Bob'], true, false),
+      expect(createGame).toHaveBeenCalledWith(2, ['Alice', 'Bob'], true, false, humanSeats(2)),
     );
   });
 
-  it('shows an error banner when game creation fails', async () => {
-    createGame.mockRejectedValue(new Error('backend down'));
+  it('shows a themed loading page until the backend answers its health check', async () => {
+    checkServerHealth.mockResolvedValue(false);
+    render(<LobbyPage initialServerReady={false} />);
+
+    const loading = await screen.findByTestId('server-loading');
+    expect(loading.getAttribute('role')).toBe('status');
+    expect(loading.className).toContain('server-loading-page');
+    expect(loading.textContent).toContain('Starting game server, please wait');
+    expect(screen.queryByRole('button', { name: 'Create Game' })).toBeNull();
+    expect(screen.queryByLabelText('Players')).toBeNull();
+
+    // The server finishes booting and the next poll unlocks the form.
+    checkServerHealth.mockResolvedValue(true);
+    await waitFor(
+      () => expect(screen.getByRole('button', { name: 'Create Game' })).toBeTruthy(),
+      { timeout: 3000 },
+    );
+    expect(screen.queryByTestId('server-loading')).toBeNull();
+  });
+
+  it('keeps the create form hidden while the health check keeps failing', async () => {
+    checkServerHealth.mockResolvedValue(false);
     render(<LobbyPage />);
+
+    await screen.findByTestId('server-loading');
+
+    expect(checkServerHealth).toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Create Game' })).toBeNull();
+  });
+
+  it('falls back to the loading page when creating hits a warming-up server', async () => {
+    createGame.mockRejectedValue(new Error('Could not create game (HTTP 500)'));
+    render(<LobbyPage initialServerReady />);
+    checkServerHealth.mockResolvedValue(false);
+
+    submitForm();
+
+    const loading = await screen.findByTestId('server-loading');
+    expect(loading.getAttribute('role')).toBe('status');
+    // No raw "Could not create game (HTTP 500)" banner while the server boots.
+    expect(screen.queryByRole('alert')).toBeNull();
+
+    checkServerHealth.mockResolvedValue(true);
+    await waitFor(
+      () => expect(screen.getByRole('button', { name: 'Create Game' })).toBeTruthy(),
+      { timeout: 3000 },
+    );
+  });
+
+  it('treats a network failure on create as the server still starting up', async () => {
+    createGame.mockRejectedValue(new TypeError('Failed to fetch'));
+    render(<LobbyPage initialServerReady />);
+    checkServerHealth.mockResolvedValue(false);
+
+    submitForm();
+
+    expect(await screen.findByTestId('server-loading')).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('shows an error banner when game creation fails for a real reason', async () => {
+    createGame.mockRejectedValue(new Error('backend down'));
+    render(<LobbyPage initialServerReady />);
 
     submitForm();
 
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('backend down');
+    expect(screen.queryByTestId('server-loading')).toBeNull();
   });
 });
