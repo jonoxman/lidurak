@@ -21,16 +21,28 @@ function errorMessage(body: unknown, fallback: string): string {
   return fallback;
 }
 
+/** Resolves true only when the backend answers `GET /api/health` with 2xx. */
+export async function checkServerHealth(): Promise<boolean> {
+  try {
+    const response = await fetch('/api/health');
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 export async function createGame(
   playerCount: number,
   playerNames: string[],
   allowRedirect = true,
   chaosMode = false,
+  playerTypes?: string[],
 ): Promise<CreatedGame> {
+  const seats = playerTypes ?? Array.from({ length: playerCount }, () => 'human');
   const response = await fetch('/api/game/create', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ playerCount, playerNames, allowRedirect, chaosMode }),
+    body: JSON.stringify({ playerCount, playerNames, allowRedirect, chaosMode, playerTypes: seats }),
   });
   const body = await readJson(response);
 
