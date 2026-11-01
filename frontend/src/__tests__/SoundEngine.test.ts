@@ -516,8 +516,7 @@ describe('SoundEngine sound packs, volume and clock', () => {
     }
   });
 
-  it('survives storage failures while reading and writing preferences', () => {
-    const storage = {
+  it('survives storage failures while reading and writing preferences', () => {    const storage = {
       getItem: () => {
         throw new Error('blocked');
       },
@@ -535,5 +534,57 @@ describe('SoundEngine sound packs, volume and clock', () => {
     }).not.toThrow();
     expect(resilient.getVolume()).toBeCloseTo(0.5);
     expect(resilient.getSoundPack()).toBe('arcade-8bit');
+  });
+
+  it('previews a random sample from a pack without switching the active pack', () => {
+    engine.setSoundPack('classic-felt');
+
+    engine.playSampleSound('arcade-8bit', 0.3);
+
+    expect(context.oscillators.length + context.sources.length).toBeGreaterThan(0);
+    expect(context.oscillators.every((oscillator) => oscillator.type === 'square')).toBe(true);
+    expect(engine.getSoundPack()).toBe('classic-felt');
+    expect(engine.getVolume()).toBeCloseTo(0.7);
+
+    // The preview is routed through its own gain at the requested volume.
+    const previewGain = context.gains.find((gain) => Math.abs(gain.gain.value - 0.3) < 1e-9);
+    expect(previewGain).toBeTruthy();
+    expect(previewGain!.connect).toHaveBeenCalledWith(context.destination);
+  });
+
+  it('samples the active pack when no pack argument is given', () => {
+    engine.setSoundPack('arcade-8bit');
+
+    engine.playSampleSound();
+
+    expect(context.oscillators.length + context.sources.length).toBeGreaterThan(0);
+    expect(context.oscillators.every((oscillator) => oscillator.type === 'square')).toBe(true);
+  });
+
+  it('chooses the sample at random from the preview repertoire', () => {
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0);
+
+    engine.playSampleSound('classic-felt');
+
+    // The first entry in SAMPLE_EVENTS is the attack thud of the pack.
+    expect(requestedFrequencies(context)[0]).toBe(140);
+    random.mockRestore();
+  });
+
+  it('falls back to the active pack for an unknown preview id', () => {
+    expect(() => engine.playSampleSound('kazoo')).not.toThrow();
+    expect(context.oscillators.length + context.sources.length).toBeGreaterThan(0);
+  });
+
+  it('stays silent when previewing at zero volume or while muted', () => {
+    engine.playSampleSound('classic-felt', 0);
+    expect(context.oscillators).toHaveLength(0);
+    expect(context.sources).toHaveLength(0);
+
+    engine.setMuted(true);
+    engine.playSampleSound('classic-felt', 0.8);
+    expect(context.oscillators).toHaveLength(0);
+    expect(context.sources).toHaveLength(0);
+    engine.setEnabled(true);
   });
 });

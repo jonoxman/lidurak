@@ -1,7 +1,7 @@
-import { useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { SoundEngine, soundEngine } from '../audio/SoundEngine';
-import { CARD_BACK_PATTERNS, CardBack } from './CardBack';
-import { TABLE_TEXTURES } from '../styles/tableTextures';
+import { ALL_CARD_BACK_PATTERNS, CARD_BACK_LABELS, CardBack } from './CardBack';
+import { TABLE_TEXTURES, getTableFilterCss } from '../styles/tableTextures';
 import {
   ROUNDNESS_MAX,
   ROUNDNESS_MIN,
@@ -80,6 +80,19 @@ export type ProfileIconName =
   | 'cardback';
 
 export type SubmenuId = 'sound' | 'theme' | 'table' | 'cardback';
+
+/** Title shown in the in-place submenu header. */
+export const SUBMENU_LABELS: Record<SubmenuId, string> = {
+  sound: 'Sound',
+  theme: 'Theme',
+  table: 'Table',
+  cardback: 'Card Back',
+};
+
+/** Lag-switch range: an instant connection up to a deliberately awful one. */
+export const LAG_MIN_MS = 0;
+export const LAG_MAX_MS = 500;
+export const LAG_STEP_MS = 10;
 
 interface ProfileItem {
   id: string;
@@ -182,14 +195,31 @@ function MenuIcon({ name }: { name: ProfileIconName }) {
   }
 }
 
+/** Right-facing chevron marking profile rows that open a submenu. */
 function Chevron() {
   return (
-    <svg class="menu-chevron" viewBox="0 0 12 12" aria-hidden="true">
+    <svg class="menu-chevron" viewBox="0 0 14 14" aria-hidden="true">
       <path
-        d="M4.5 2.5 8 6l-3.5 3.5"
+        d="M5 2.5 9.5 7 5 11.5"
         fill="none"
         stroke="currentColor"
-        stroke-width="1.8"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </svg>
+  );
+}
+
+/** Left-facing chevron in the submenu header that returns to the main menu. */
+function BackChevron() {
+  return (
+    <svg class="submenu-chevron" viewBox="0 0 14 14" aria-hidden="true">
+      <path
+        d="M9 2.5 4.5 7 9 11.5"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
         stroke-linecap="round"
         stroke-linejoin="round"
       />
@@ -217,6 +247,8 @@ function SoundSubmenu() {
             const next = Number((event.target as HTMLInputElement).value);
             setVolume(next);
             soundEngine.setVolume(next);
+            // Audible feedback: a random effect at the new volume.
+            soundEngine.playSampleSound(undefined, next);
           }}
         />
         <output class="setting-value">{Math.round(volume * 100)}%</output>
@@ -230,8 +262,10 @@ function SoundSubmenu() {
             class={`pack-option${pack === option.id ? ' active' : ''}`}
             aria-pressed={pack === option.id}
             onClick={() => {
-              setPack(option.id);
               soundEngine.setSoundPack(option.id);
+              setPack(option.id);
+              // Audition the pack right away with one of its own effects.
+              soundEngine.playSampleSound(option.id, soundEngine.getVolume());
             }}
           >
             {option.name}
@@ -288,6 +322,8 @@ function ThemeSubmenu() {
 function TableSubmenu() {
   const settings = useSettings();
   const { brightness, contrast, hue } = settings.tableFilters;
+  // Every swatch previews the live filter, so slider drags repaint them in place.
+  const filterCss = getTableFilterCss({ brightness, contrast, hue });
 
   return (
     <div class="settings-submenu" data-testid="submenu-table">
@@ -301,7 +337,16 @@ function TableSubmenu() {
             aria-pressed={settings.tableTexture === texture.id}
             onClick={() => setSettings({ tableTexture: texture.id })}
           >
-            <span class="texture-swatch" style={{ background: texture.base }} aria-hidden="true" />
+            <span
+              class="texture-swatch"
+              data-testid={`texture-swatch-${texture.id}`}
+              style={{
+                backgroundColor: texture.base,
+                backgroundImage: texture.overlay,
+                filter: filterCss,
+              }}
+              aria-hidden="true"
+            />
             <span class="texture-name">{texture.name}</span>
           </button>
         ))}
@@ -364,18 +409,20 @@ function CardBackSubmenu() {
   return (
     <div class="settings-submenu" data-testid="submenu-cardback">
       <div class="cardback-grid" role="group" aria-label="Card backs">
-        {CARD_BACK_PATTERNS.map((pattern) => (
+        {ALL_CARD_BACK_PATTERNS.map((pattern) => (
           <button
             type="button"
             key={pattern}
             class={`cardback-option${settings.cardBack === pattern ? ' active' : ''}`}
-            aria-label={pattern}
+            aria-label={CARD_BACK_LABELS[pattern]}
+            title={CARD_BACK_LABELS[pattern]}
             aria-pressed={settings.cardBack === pattern}
             onClick={() => setSettings({ cardBack: pattern })}
           >
             <span class="cardback-preview" aria-hidden="true">
               <CardBack pattern={pattern} />
             </span>
+            <span class="cardback-name">{CARD_BACK_LABELS[pattern]}</span>
           </button>
         ))}
       </div>
@@ -405,13 +452,62 @@ export function HeaderBar({ pingMs = 24, serverDelayMs = 12 }: HeaderBarProps) {
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [submenu, setSubmenu] = useState<SubmenuId | null>(null);
+  const [lagPing, setLagPing] = useState<number | null>(null);
+  const [barsUpdating, setBarsUpdating] = useState(false);
+  const previousLevel = useRef<number | null>(null);
 
-  const level = connectionLevel(pingMs);
+  // The lag-switch overrides the reported round-trip time until it is cleared.
+  const activePing = lagPing ?? pingMs;
+  const level = connectionLevel(activePing);
+
+  // Bars animate once per quality-tier change; a steady connection stays still.
+  useEffect(() => {
+    if (previousLevel.current === null) {
+      previousLevel.current = level;
+      return;
+    }
+    if (previousLevel.current === level) return;
+    previousLevel.current = level;
+    setBarsUpdating(true);
+    const timer = window.setTimeout(() => setBarsUpdating(false), 360);
+    return () => window.clearTimeout(timer);
+  }, [level]);
 
   return (
     <header class="site-header" data-zone="site-header">
-      <a class="header-logo" href="#/" onClick={() => setOpenMenu(null)}>
-        LIDURAK
+      <a class="header-brand" href="#/" onClick={() => setOpenMenu(null)}>
+        <svg
+          class="header-logo"
+          data-testid="header-logo"
+          viewBox="0 0 32 32"
+          aria-hidden="true"
+        >
+          {/* Two fanned playing cards with a trump diamond. */}
+          <rect
+            x="4"
+            y="8"
+            width="15"
+            height="20"
+            rx="2.5"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            opacity="0.55"
+            transform="rotate(-10 11.5 18)"
+          />
+          <rect
+            x="12"
+            y="4"
+            width="16"
+            height="23"
+            rx="2.5"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          />
+          <path d="M20 9 24.5 15 20 21 15.5 15z" fill="currentColor" />
+        </svg>
+        <span class="header-brand-text">LIDURAK</span>
       </a>
 
       <nav class="header-nav" aria-label="Main">
@@ -477,44 +573,75 @@ export function HeaderBar({ pingMs = 24, serverDelayMs = 12 }: HeaderBarProps) {
 
         {profileOpen ? (
           <div class="profile-dropdown" role="menu" aria-label="Profile menu">
-            <div class="profile-menu-main">
-              {PROFILE_ITEMS.map((item) => (
+            {submenu ? (
+              // The submenu replaces the main list in place: its header carries a
+              // back chevron and the title, and returns to the main menu.
+              <div class="profile-submenu-panel" role="none">
                 <button
                   type="button"
-                  role="menuitem"
-                  key={item.id}
-                  class={`profile-item${item.submenu && submenu === item.submenu ? ' active' : ''}`}
-                  aria-haspopup={item.submenu ? 'menu' : undefined}
-                  onClick={() =>
-                    setSubmenu((open) => {
-                      if (!item.submenu) return null;
-                      return open === item.submenu ? null : item.submenu;
-                    })
-                  }
+                  class="submenu-header"
+                  data-testid="submenu-back"
+                  data-submenu={submenu}
+                  aria-label="Back to profile menu"
+                  onClick={() => setSubmenu(null)}
                 >
-                  <MenuIcon name={item.icon} />
-                  <span class="profile-item-label">{item.label}</span>
-                  {item.submenu ? <Chevron /> : null}
+                  <BackChevron />
+                  <span class="submenu-title">{SUBMENU_LABELS[submenu]}</span>
                 </button>
-              ))}
-            </div>
-
-            {submenu ? (
-              <div class="profile-submenu-panel" role="menu" aria-label={`${submenu} settings`}>
-                <Submenu id={submenu} />
+                <div
+                  class="settings-panel"
+                  role="menu"
+                  aria-label={`${SUBMENU_LABELS[submenu]} settings`}
+                >
+                  <Submenu id={submenu} />
+                </div>
               </div>
-            ) : null}
+            ) : (
+              <div class="profile-menu-main" role="none">
+                {PROFILE_ITEMS.map((item) => (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    key={item.id}
+                    class="profile-item"
+                    aria-haspopup={item.submenu ? 'menu' : undefined}
+                    onClick={() => {
+                      if (item.submenu) setSubmenu(item.submenu);
+                    }}
+                  >
+                    <MenuIcon name={item.icon} />
+                    <span class="profile-item-label">{item.label}</span>
+                    {item.submenu ? <Chevron /> : null}
+                  </button>
+                ))}
+              </div>
+            )}
 
             <div class="connection-tracker" aria-label="Connection">
               <div class="connection-metrics">
-                <span class="connection-ping">Ping: {pingMs} ms</span>
-                <span class="connection-delay">Server Delay: {serverDelayMs} ms</span>
+                <span class="connection-ping">
+                  <span class="connection-label" data-testid="ping-label">
+                    PING
+                  </span>
+                  <span class="connection-value" data-testid="ping-value">
+                    {activePing} ms
+                  </span>
+                </span>
+                <span class="connection-delay">
+                  <span class="connection-label" data-testid="server-delay-label">
+                    SERVER DELAY
+                  </span>
+                  <span class="connection-value" data-testid="server-delay-value">
+                    {serverDelayMs} ms
+                  </span>
+                </span>
               </div>
               <div
-                class="signal-bars"
+                class={`signal-bars${barsUpdating ? ' connection-bars-updating' : ''}`}
                 role="img"
                 aria-label={`Connection strength: ${level} of 4`}
                 data-level={level}
+                data-updating={barsUpdating ? 'true' : 'false'}
               >
                 {[1, 2, 3, 4].map((bar) => (
                   <span
@@ -525,6 +652,23 @@ export function HeaderBar({ pingMs = 24, serverDelayMs = 12 }: HeaderBarProps) {
                   />
                 ))}
               </div>
+              <label class="lag-switch">
+                <span class="connection-label">LAG-SWITCH</span>
+                <input
+                  type="range"
+                  min={LAG_MIN_MS}
+                  max={LAG_MAX_MS}
+                  step={LAG_STEP_MS}
+                  value={activePing}
+                  data-testid="lag-switch"
+                  aria-label="Lag switch"
+                  onInput={(event) => {
+                    const next = Number((event.target as HTMLInputElement).value);
+                    setLagPing(Number.isFinite(next) ? next : null);
+                  }}
+                />
+                <output class="setting-value">{activePing} ms</output>
+              </label>
             </div>
           </div>
         ) : null}

@@ -3,6 +3,8 @@ import {
   DEFAULT_TABLE_FILTERS,
   DEFAULT_TABLE_TEXTURE_ID,
   TABLE_TEXTURES,
+  getTableFilterCss,
+  getTableTextureStyle,
   isTableTextureId,
   tableTexture,
   tableTextureStyle,
@@ -86,5 +88,34 @@ describe('table textures', () => {
     expect(style['--table-contrast']).toBe(String(DEFAULT_TABLE_FILTERS.contrast));
     expect(style['--table-hue']).toBe(`${DEFAULT_TABLE_FILTERS.hue}deg`);
     expect(style['--table-filter']).toBe('brightness(1) contrast(1) hue-rotate(0deg)');
+  });
+
+  it('exposes the same filter string through getTableFilterCss', () => {
+    expect(getTableFilterCss()).toBe('brightness(1) contrast(1) hue-rotate(0deg)');
+    expect(getTableFilterCss({ brightness: 1.2, contrast: 0.9, hue: -15 })).toBe(
+      'brightness(1.2) contrast(0.9) hue-rotate(-15deg)',
+    );
+    expect(getTableFilterCss({ brightness: 1.2, contrast: 0.9, hue: -15 })).toBe(
+      textureFilter({ brightness: 1.2, contrast: 0.9, hue: -15 }),
+    );
+    expect(getTableFilterCss({ brightness: 5 })).toBe(
+      'brightness(2) contrast(1) hue-rotate(0deg)',
+    );
+  });
+
+  it('builds a felt style straight from a settings snapshot', () => {
+    const defaults = getTableTextureStyle();
+    expect(defaults.backgroundColor).toBe('#123f2b');
+    expect(defaults['--table-filter']).toBe('brightness(1) contrast(1) hue-rotate(0deg)');
+
+    const custom = getTableTextureStyle({
+      tableTexture: 'vintage-oak',
+      tableFilters: { brightness: 1.4, contrast: 1.1, hue: 40 },
+    });
+    expect(custom.backgroundColor).toBe('#3a2b1c');
+    expect(custom['--table-brightness']).toBe('1.4');
+    expect(custom['--table-filter']).toBe('brightness(1.4) contrast(1.1) hue-rotate(40deg)');
+
+    expect(getTableTextureStyle({ tableTexture: 'lava-lamp' }).backgroundColor).toBe('#123f2b');
   });
 });

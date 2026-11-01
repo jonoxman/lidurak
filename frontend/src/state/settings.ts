@@ -2,8 +2,8 @@ import { useEffect, useState } from 'preact/hooks';
 import {
   DEFAULT_TABLE_FILTERS,
   DEFAULT_TABLE_TEXTURE_ID,
+  getTableFilterCss,
   tableTexture,
-  textureFilter,
   type TableFilterSettings,
   type TableTextureId,
 } from '../styles/tableTextures';
@@ -126,10 +126,12 @@ export function applySettings(settings: AppSettings, root?: HTMLElement | null):
   target.style.setProperty('--app-roundness', `${clampRoundness(settings.roundness)}px`);
   target.style.setProperty('--table-felt', preset.base);
   target.style.setProperty('--table-felt-overlay', preset.overlay);
+  target.style.setProperty('--table-texture-bg', preset.base);
+  target.style.setProperty('--table-texture-overlay', preset.overlay);
   target.style.setProperty('--table-brightness', String(filters.brightness));
   target.style.setProperty('--table-contrast', String(filters.contrast));
   target.style.setProperty('--table-hue', `${filters.hue}deg`);
-  target.style.setProperty('--table-filter', textureFilter(filters));
+  target.style.setProperty('--table-filter', getTableFilterCss(filters));
 }
 
 /**

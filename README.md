@@ -36,6 +36,20 @@ Press `Ctrl+C` to stop both servers cleanly.
 
 ## 2. User Interface & Gameplay Guide
 
+### Site Header & Appearance Menu (Profile Dropdown)
+- **Brand Link:** The `LIDURAK` wordmark is preceded by an SVG logo inside the same home link; hovering highlights the logo and the text together in the accent colour. Everything left of the profile menu shifts right to make room, while the outer header margins stay unchanged.
+- **Navigation Menus:** `PLAY`, `PUZZLES`, `LEARN` and `WATCH` open on hover.
+- **Profile Dropdown:** Click the avatar (`Guest`) to open it. Rows are `Profile`, `Inbox`, `Preferences`, `Sign out`, `Language`, `Sound`, `Theme`, `Table` and `Card Back`.
+  - Rows with a chevron (`Sound`, `Theme`, `Table`, `Card Back`) open their settings **in place of** the main list — no side flyout. A submenu header at the top shows a left-facing chevron plus the submenu name; clicking it returns to the main menu.
+- **Connection Tracker:** Shows `PING` and `SERVER DELAY` in capitals with a lowercase `ms` unit, e.g. `24 ms`, next to a four-bar signal indicator. The bars change instantly with the latency tier (4 bars ≤ 60 ms, 3 ≤ 150 ms, 2 ≤ 300 ms, 1 above) and play one short pop animation only when the tier actually changes — there is no constant pulsing.
+- **Lag-Switch (development):** The slider under the connection metrics sets a manual ping from `0 ms` to `500 ms`. Moving it across a tier boundary immediately updates the `PING` readout, the number of active bars, and the one-shot bar animation.
+
+### Appearance & Audio Submenus
+- **Theme:** `Device theme` (follows the OS), `Light`, or `Dark`, plus a global `Roundness` slider (`0–16 px`) that reshapes panels, buttons and inputs on every page.
+- **Table:** Six felt textures — `Emerald Felt` (default), `Midnight Navy`, `Burgundy Velvet`, `Charcoal Slate`, `Forest Moss`, `Vintage Oak`. `Brightness`, `Contrast` and `Hue` sliders retune the felt live: every texture preview swatch shows the same filter as the table, so you can compare presets before selecting one.
+- **Card Back:** Thirteen designs split into the original monochrome set (`Classic Hatch` default, `Royal Diamond`, `Celtic Weave`, `Hex Mesh`, `Chevron`, `Starburst`) and vibrant gradient backs (`Classic Crimson`, `Royal Sapphire`, `Emerald Gold`, `Sunset Prism`, `Amethyst Nebula`, `Cyber Neon`, `Coral Wave`). The choice applies to every face-down card in the app.
+- **Sound:** `Master volume` slider plus five sound packs (`Classic Felt`, `Arcade 8-Bit`, `Sci-Fi Synth`, `Acoustic Pluck`, `Modern Minimal`). Choosing a pack plays a random sample from that pack immediately, and dragging the volume slider auditions a sample at the new level.
+
 ### Creating a Match (Lobby Page)
 1. Open [http://localhost:5173](http://localhost:5173) in your browser.
 2. Select the **Number of Players** (`2`, `3`, or `4` players).

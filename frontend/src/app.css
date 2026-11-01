@@ -9,6 +9,8 @@
   --app-accent: #629924;
   --app-accent-soft: rgba(98, 153, 36, 0.18);
   --app-profile-hover: #6cb2e8;
+  --app-input-bg: #161512;
+  --app-shadow: 0 18px 36px rgba(0, 0, 0, 0.42);
   --app-roundness: 8px;
 }
 
@@ -24,6 +26,8 @@ html[data-theme='light'] {
   --app-accent: #4f7d1c;
   --app-accent-soft: rgba(98, 153, 36, 0.14);
   --app-profile-hover: #1f6fa8;
+  --app-input-bg: #ffffff;
+  --app-shadow: 0 18px 36px rgba(31, 41, 55, 0.12);
   /* Consumed by table.css via the --durak-* variables. */
   --durak-bg: #f4f1ea;
   --durak-panel: #ffffff;
@@ -33,6 +37,24 @@ html[data-theme='light'] {
   --durak-accent: #4f7d1c;
   --durak-danger: #b3261e;
   --durak-amber: #a9761b;
+}
+
+/* Before JavaScript applies data-theme, follow a light OS preference. */
+@media (prefers-color-scheme: light) {
+  html:not([data-theme]) {
+    --app-bg: #f4f1ea;
+    --app-bg-soft: #ece7dc;
+    --app-header: #fffdf7;
+    --app-panel: #ffffff;
+    --app-text: #3a3833;
+    --app-text-strong: #1d1c19;
+    --app-border: #d7d2c6;
+    --app-accent: #4f7d1c;
+    --app-accent-soft: rgba(98, 153, 36, 0.14);
+    --app-profile-hover: #1f6fa8;
+    --app-input-bg: #ffffff;
+    --app-shadow: 0 18px 36px rgba(31, 41, 55, 0.12);
+  }
 }
 
 body {
@@ -54,7 +76,7 @@ body {
   font-size: 20px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #f5f1e6;
+  color: var(--app-text-strong);
 }
 
 .page {
@@ -67,7 +89,7 @@ body {
 .lobby-page h2 {
   margin: 0 0 14px;
   font-size: 18px;
-  color: #f5f1e6;
+  color: var(--app-text-strong);
 }
 
 .lobby-form {
@@ -76,8 +98,10 @@ body {
   gap: 14px;
   max-width: 420px;
   padding: 16px;
-  background: #262421;
-  border-radius: 10px;
+  background: var(--app-panel);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-roundness);
+  box-sizing: border-box;
 }
 
 .field {
@@ -90,11 +114,22 @@ body {
 .field select,
 .field input {
   padding: 8px 10px;
-  border-radius: 6px;
-  border: 1px solid #3a3733;
-  background: #161512;
-  color: #bababa;
+  border-radius: calc(var(--app-roundness) * 0.75);
+  border: 1px solid var(--app-border);
+  background: var(--app-input-bg);
+  color: var(--app-text);
   font-size: 14px;
+}
+
+.field select:focus-visible,
+.field input:focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: 1px;
+}
+
+.field select option {
+  background: var(--app-input-bg);
+  color: var(--app-text);
 }
 
 .name-fields {
@@ -108,6 +143,11 @@ body {
   align-items: center;
   gap: 8px;
   font-size: 14px;
+  color: var(--app-text);
+}
+
+.checkbox-field input {
+  accent-color: var(--app-accent);
 }
 
 .error-banner {
@@ -119,15 +159,24 @@ body {
   color: #f0b3b3;
 }
 
-.created-game {
-  margin-top: 18px;
-  padding: 14px 16px;
-  background: #262421;
-  border-radius: 10px;
+html[data-theme='light'] .error-banner {
+  background: rgba(204, 51, 51, 0.1);
+  color: #8f1d1d;
 }
 
-.created-game code {
-  color: #f5f1e6;
+.created-game,
+.created-room {
+  margin-top: 18px;
+  padding: 14px 16px;
+  background: var(--app-panel);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-roundness);
+  box-sizing: border-box;
+}
+
+.created-game code,
+.created-room code {
+  color: var(--app-text-strong);
 }
 
 .player-tabs {
@@ -138,16 +187,16 @@ body {
 
 .player-tabs a {
   padding: 8px 12px;
-  background: #161512;
-  border: 1px solid #3a3733;
-  border-radius: 8px;
-  color: #bababa;
+  background: var(--app-input-bg);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-roundness);
+  color: var(--app-text);
   text-decoration: none;
 }
 
 .player-tabs a:hover {
-  border-color: #629924;
-  color: #f5f1e6;
+  border-color: var(--app-accent);
+  color: var(--app-text-strong);
 }
 
 .game-page {
@@ -190,9 +239,9 @@ body {
   gap: 10px;
   min-width: 0;
   padding: 12px;
-  background: #262421;
-  border: 1px solid #3a3733;
-  border-radius: 8px;
+  background: var(--app-panel);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-roundness);
   box-sizing: border-box;
 }
 
@@ -201,7 +250,7 @@ body {
   font-size: 12px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #bababa;
+  color: var(--app-text);
   opacity: 0.8;
 }
 
@@ -219,24 +268,24 @@ body {
   gap: 8px;
   min-width: 0;
   padding: 8px 10px;
-  background: #161512;
-  border: 1px solid #3a3733;
-  border-radius: 6px;
-  color: #bababa;
+  background: var(--app-input-bg);
+  border: 1px solid var(--app-border);
+  border-radius: calc(var(--app-roundness) * 0.75);
+  color: var(--app-text);
   font-size: 13px;
   text-align: left;
   cursor: pointer;
 }
 
 .hotseat-tab:hover {
-  border-color: #629924;
-  color: #f5f1e6;
+  border-color: var(--app-accent);
+  color: var(--app-text-strong);
 }
 
 .hotseat-tab.active {
-  border-color: #629924;
-  background: rgba(98, 153, 36, 0.16);
-  color: #f5f1e6;
+  border-color: var(--app-accent);
+  background: var(--app-accent-soft);
+  color: var(--app-text-strong);
 }
 
 .hotseat-name {
@@ -269,7 +318,7 @@ body {
   font-size: 2.25rem;
   font-family: monospace;
   line-height: 1.1;
-  color: #f5f1e6;
+  color: var(--app-text-strong);
 }
 
 .status-badges {
@@ -288,21 +337,21 @@ body {
   gap: 8px;
   min-width: 0;
   padding: 6px 8px;
-  background: #161512;
-  border: 1px solid #3a3733;
-  border-radius: 6px;
+  background: var(--app-input-bg);
+  border: 1px solid var(--app-border);
+  border-radius: calc(var(--app-roundness) * 0.75);
   font-size: 13px;
 }
 
 .status-badge.mine {
-  border-color: #629924;
+  border-color: var(--app-accent);
 }
 
 .status-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #f5f1e6;
+  color: var(--app-text-strong);
 }
 
 .status-count {
@@ -327,13 +376,13 @@ body {
 }
 
 .game-id {
-  color: #f5f1e6;
+  color: var(--app-text-strong);
 }
 
 .connection {
   padding: 2px 8px;
   border-radius: 999px;
-  border: 1px solid #3a3733;
+  border: 1px solid var(--app-border);
   font-size: 11px;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -353,18 +402,31 @@ body {
 
 .game-player-switch select {
   padding: 6px 8px;
-  border-radius: 6px;
-  border: 1px solid #3a3733;
-  background: #262421;
-  color: #bababa;
+  border-radius: calc(var(--app-roundness) * 0.75);
+  border: 1px solid var(--app-border);
+  background: var(--app-input-bg);
+  color: var(--app-text);
 }
 
 .game-player-switch a {
-  color: #bababa;
+  color: var(--app-text);
 }
 
 .loading {
   padding: 24px 16px;
+}
+
+.server-loading-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 220px;
+  padding: 24px 16px;
+  background: var(--app-panel);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-roundness);
+  color: var(--app-text);
 }
 
 .game-buttons {
@@ -387,7 +449,7 @@ body {
   font-size: 16px;
   letter-spacing: normal;
   text-transform: none;
-  color: #f5f1e6;
+  color: var(--app-text-strong);
   opacity: 1;
 }
 
@@ -430,20 +492,40 @@ body {
   border-bottom: 1px solid var(--app-border);
 }
 
-.header-logo {
+/* Brand link: the SVG mark sits immediately left of the LIDURAK wordmark. */
+.header-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   flex: 0 0 auto;
+  min-width: 0;
   margin-left: 6px;
-  padding: 6px 4px;
+  padding: 4px;
   color: var(--app-text-strong);
-  font-size: 17px;
-  font-weight: 800;
-  letter-spacing: 0.18em;
   text-decoration: none;
   border-radius: calc(var(--app-roundness) * 0.5);
   transition: color 120ms ease;
 }
 
-.header-logo:hover {
+.header-brand-text {
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  white-space: nowrap;
+}
+
+.header-logo {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  color: inherit;
+  transition: color 120ms ease;
+}
+
+/* The mark paints with currentColor, so both highlight in the accent. */
+.header-brand:hover,
+.header-brand:focus-visible,
+.header-brand:hover .header-logo {
   color: var(--app-accent);
 }
 
@@ -558,16 +640,16 @@ body {
   top: calc(100% + 6px);
   right: 0;
   z-index: 30;
-  display: grid;
-  grid-template-columns: minmax(210px, auto) auto;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
-  min-width: 240px;
-  max-width: min(560px, 92vw);
+  min-width: 260px;
+  max-width: min(360px, 92vw);
   padding: 10px;
   background: var(--app-panel);
   border: 1px solid var(--app-border);
   border-radius: var(--app-roundness);
-  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.42);
+  box-shadow: var(--app-shadow);
 }
 
 .profile-menu-main {
@@ -611,18 +693,58 @@ body {
   flex: 0 0 auto;
 }
 
-/* Right-facing chevron marks rows that open a secondary submenu. */
-.menu-chevron {
-  width: 12px;
-  height: 12px;
+/* Chevrons are deliberately chunky so the menu read is obvious. */
+.menu-chevron,
+.submenu-chevron {
+  width: 18px;
+  height: 18px;
   flex: 0 0 auto;
   color: var(--app-accent);
 }
 
 .profile-submenu-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   min-width: 0;
-  padding-left: 10px;
-  border-left: 1px solid var(--app-border);
+}
+
+/* Submenu header: back chevron on the left, then the submenu name. */
+.submenu-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 8px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--app-border);
+  border-radius: calc(var(--app-roundness) * 0.75);
+  color: var(--app-text-strong);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.submenu-header:hover,
+.submenu-header:focus-visible {
+  color: var(--app-text-strong);
+  background: var(--app-accent-soft);
+}
+
+.submenu-title {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-panel {
+  display: block;
+  min-width: 0;
 }
 
 .settings-submenu {
@@ -720,10 +842,12 @@ body {
 
 .texture-swatch {
   display: block;
-  height: 18px;
+  height: 24px;
   margin-bottom: 5px;
   border-radius: calc(var(--app-roundness) * 0.4);
   border: 1px solid rgba(0, 0, 0, 0.25);
+  /* Inline style supplies the felt colours and the live brightness/contrast/hue. */
+  transition: filter 80ms linear;
 }
 
 .texture-name {
@@ -736,7 +860,17 @@ body {
 .cardback-option {
   display: grid;
   justify-items: center;
+  gap: 4px;
   padding: 6px;
+}
+
+.cardback-name {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 10px;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .cardback-preview {
@@ -751,11 +885,10 @@ body {
 }
 
 .connection-tracker {
-  grid-column: 1 / -1;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 8px 12px;
   padding-top: 8px;
   border-top: 1px solid var(--app-border);
   font-size: 12px;
@@ -764,9 +897,46 @@ body {
 .connection-metrics {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
   min-width: 0;
   color: var(--app-text);
+}
+
+.connection-ping,
+.connection-delay {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.connection-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--app-text);
+  opacity: 0.75;
+}
+
+.connection-value {
+  font-variant-numeric: tabular-nums;
+  color: var(--app-text-strong);
+}
+
+/* Development lag-switch: drive the reported ping by hand. */
+.lag-switch {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: auto minmax(90px, 1fr) 52px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.lag-switch input[type='range'] {
+  width: 100%;
+  accent-color: var(--app-accent);
 }
 
 .signal-bars {
@@ -800,16 +970,27 @@ body {
 
 .signal-bar[data-active='true'] {
   background: var(--app-accent);
-  animation: signalPulse 1.6s ease-in-out infinite;
+  transition: opacity 160ms ease, transform 160ms ease;
 }
 
-@keyframes signalPulse {
-  0%,
+/* One short pop, only when the tier changes: no idle pulsing. */
+.connection-bars-updating .signal-bar[data-active='true'] {
+  transform-origin: bottom center;
+  animation: signalBarUpdate 360ms ease-out 1;
+}
+
+@keyframes signalBarUpdate {
+  0% {
+    opacity: 0.35;
+    transform: scaleY(0.6);
+  }
+  60% {
+    opacity: 1;
+    transform: scaleY(1.12);
+  }
   100% {
     opacity: 1;
-  }
-  50% {
-    opacity: 0.5;
+    transform: scaleY(1);
   }
 }
 
@@ -842,9 +1023,18 @@ html [data-zone='table-arena']::before {
     padding: 8px 10px;
   }
 
-  .header-logo {
+  .header-brand {
     margin-left: 0;
+    gap: 6px;
+  }
+
+  .header-brand-text {
     font-size: 15px;
+  }
+
+  .header-logo {
+    width: 22px;
+    height: 22px;
   }
 
   .header-menu-trigger {
@@ -857,15 +1047,7 @@ html [data-zone='table-arena']::before {
   }
 
   .profile-dropdown {
-    grid-template-columns: minmax(0, 1fr);
     max-width: 92vw;
-  }
-
-  .profile-submenu-panel {
-    padding-left: 0;
-    padding-top: 8px;
-    border-left: none;
-    border-top: 1px solid var(--app-border);
   }
 }
 
