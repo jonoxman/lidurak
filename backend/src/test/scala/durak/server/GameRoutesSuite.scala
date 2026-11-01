@@ -190,3 +190,91 @@ class GameRoutesSuite extends munit.FunSuite:
 
     assertEquals(status, Status.NotFound)
   }
+
+  // --- Readiness, player types & presence ---
+
+  test("GET /api/health reports the server as ready") {
+    val (status, json) = get(newManager, "/api/health")
+
+    assertEquals(status, Status.Ok)
+    assertEquals(json.hcursor.get[String]("status").toOption, Some("ok"))
+  }
+
+  test("POST /api/games creates a game and seats a RandomBot from playerTypes") {
+    val manager = newManager
+
+    val (status, json) = post(
+      manager,
+      "/api/games",
+      Json.obj(
+        "playerCount" -> 2.asJson,
+        "playerNames" -> List("Bot", "Alice").asJson,
+        "playerTypes" -> List("randomBot", "human").asJson
+      )
+    )
+
+    assertEquals(status, Status.Ok)
+    val gameId = json.hcursor
+      .get[String]("gameId")
+      .getOrElse(fail(s"missing gameId in ${json.noSpaces}"))
+    assertEquals(
+      json.hcursor.downField("playerTypes").as[List[String]].toOption,
+      Some(List("randomBot", "human"))
+    )
+
+    val (viewStatus, viewJson) = get(manager, s"/api/games/$gameId/view?player=p1")
+    assertEquals(viewStatus, Status.Ok)
+    val view = viewJson.as[PlayerGameView].getOrElse(fail(s"invalid view body: ${viewJson.noSpaces}"))
+    // A bot seat is always present, so the human sees it as connected.
+    assert(view.presentPlayers.contains("p0"), view.presentPlayers.toString)
+    assert(view.opponents.exists(seat => seat.id == "p0" && seat.isPresent), view.opponents.toString)
+  }
+
+  test("POST /api/games/:gameId/presence toggles presence for every viewer") {
+    val manager = newManager
+    val gameId = createGame(manager, 2)
+
+    val (status, json) = post(
+      manager,
+      s"/api/games/$gameId/presence",
+      Json.obj("playerId" -> "p1".asJson, "isPresent" -> true.asJson)
+    )
+    assertEquals(status, Status.Ok)
+    val joined = json.as[PlayerGameView].getOrElse(fail(s"invalid presence view: ${json.noSpaces}"))
+    assert(joined.presentPlayers.contains("p1"), joined.presentPlayers.toString)
+
+    val (_, otherJson) = get(manager, s"/api/game/$gameId/view/p0")
+    val otherView = otherJson.as[PlayerGameView].getOrElse(fail("invalid view body"))
+    assert(
+      otherView.opponents.exists(seat => seat.id == "p1" && seat.isPresent),
+      otherView.opponents.toString
+    )
+
+    val (leftStatus, leftJson) = post(
+      manager,
+      s"/api/games/$gameId/presence",
+      Json.obj("playerId" -> "p1".asJson, "isPresent" -> false.asJson)
+    )
+    assertEquals(leftStatus, Status.Ok)
+    val left = leftJson.as[PlayerGameView].getOrElse(fail("invalid presence view"))
+    assert(!left.presentPlayers.contains("p1"), left.presentPlayers.toString)
+  }
+
+  test("presence for an unknown player or game returns 404") {
+    val manager = newManager
+    val gameId = createGame(manager, 2)
+
+    val (unknownPlayer, _) = post(
+      manager,
+      s"/api/games/$gameId/presence",
+      Json.obj("playerId" -> "ghost".asJson, "isPresent" -> true.asJson)
+    )
+    val (unknownGame, _) = post(
+      manager,
+      "/api/games/missing/presence",
+      Json.obj("playerId" -> "p0".asJson, "isPresent" -> true.asJson)
+    )
+
+    assertEquals(unknownPlayer, Status.NotFound)
+    assertEquals(unknownGame, Status.NotFound)
+  }

@@ -8,9 +8,10 @@ import org.slf4j.LoggerFactory
 import scala.concurrent.duration.*
 
 /**
- * A live game: its authoritative state, its broadcast topic, its seats and its
- * turn clock. The clock wakes up for whichever player the game is waiting on,
- * and either they act first or the server plays a legal move for them.
+ * A live game: its authoritative state, its broadcast topic, its seats, its
+ * turn clock and its bot driver. The clock wakes up for whichever player the
+ * game is waiting on and plays a legal move if they do not; the bot driver does
+ * the same, sooner and after a human-like pause, for computer-controlled seats.
  */
 case class GameRoom(
   gameId: String,
@@ -18,7 +19,9 @@ case class GameRoom(
   topic: Topic[IO, GameState],
   playerIds: Vector[String],
   turnSeconds: Int,
-  clockStop: Deferred[IO, Unit]
+  clockStop: Deferred[IO, Unit],
+  botDelayMin: FiniteDuration = GameActor.DefaultBotDelayMin,
+  botDelayMax: FiniteDuration = GameActor.DefaultBotDelayMax
 )
 
 object GameActor:
@@ -29,10 +32,21 @@ object GameActor:
   /** Grace period a defender with no legal defense gets before auto-surrender. */
   val DefenselessGraceSeconds: Int = 3
 
+  /** Shortest pause a bot takes before it plays, so moves stay readable. */
+  val DefaultBotDelayMin: FiniteDuration = 500.millis
+
+  /** Longest pause a bot takes before it plays. */
+  val DefaultBotDelayMax: FiniteDuration = 2000.millis
+
   /** How often the clock re-reads the room state while a turn is running. */
   private val ClockPollMillis: Long = 250L
 
+  /** How often the bot driver checks whether the state moved on. */
+  private val BotPollMillis: Long = 50L
+
   private val logger = LoggerFactory.getLogger("durak.server.GameActor")
+
+  private val botRandom = new scala.util.Random()
 
   /**
    * Records a rejected client action as a warning. The line goes to SLF4J and
@@ -49,12 +63,14 @@ object GameActor:
 
   /**
    * Creates a room holding the engine's initial state for `config`, with a fresh
-   * 8-character game id, and starts its turn clock.
+   * 8-character game id, and starts its turn clock and bot driver.
    */
   def create(
       config: GameConfig,
       playerNames: Vector[String],
-      turnSeconds: Int = DefaultTurnSeconds
+      turnSeconds: Int = DefaultTurnSeconds,
+      botDelayMin: FiniteDuration = DefaultBotDelayMin,
+      botDelayMax: FiniteDuration = DefaultBotDelayMax
   ): IO[GameRoom] =
     IO.delay(GameEngine.createGame(config, playerNames)).flatMap { initialState =>
       nowMs.flatMap { now =>
@@ -70,9 +86,12 @@ object GameActor:
             topic = topic,
             playerIds = initialState.players.map(_.id),
             turnSeconds = turnSeconds,
-            clockStop = clockStop
+            clockStop = clockStop,
+            botDelayMin = botDelayMin,
+            botDelayMax = botDelayMax
           )
           _ <- startClock(room)
+          _ <- startBots(room)
         yield room
       }
     }
@@ -112,6 +131,32 @@ object GameActor:
       case GameAction.ThrowInCards(playerId, _)   => playerId
       case GameAction.DeclareSurrender(playerId)  => playerId
       case GameAction.PassTurn(playerId)          => playerId
+
+  // --- Presence ---
+
+  /**
+   * Records whether a human seat is connected, publishing a fresh projection so
+   * every subscriber's presence dots update. Bot seats are always present, and
+   * presence for an unknown seat or an unchanged value is a no-op.
+   */
+  def setPresence(room: GameRoom, playerId: String, isPresent: Boolean): IO[Unit] =
+    room.stateRef
+      .modify { current =>
+        val known = current.players.exists(_.id == playerId)
+        val changed = current.presentPlayers.contains(playerId) != isPresent
+        if !known || !changed then (current, None)
+        else
+          val updated = current.copy(
+            presentPlayers =
+              if isPresent then current.presentPlayers + playerId
+              else current.presentPlayers - playerId
+          )
+          (updated, Some(updated))
+      }
+      .flatMap {
+        case Some(updated) => room.topic.publish1(updated).void
+        case None          => IO.unit
+      }
 
   // --- Turn clock ---
 
@@ -196,5 +241,94 @@ object GameActor:
         .filter(action => GameEngine.applyAction(state, action).isRight)
 
     surrender.orElse(GameEngine.randomLegalAction(state, playerId, new scala.util.Random()))
+
+  // --- Bots ---
+
+  /** Starts the room's bot driver in the background when any seat is a bot. */
+  def startBots(room: GameRoom): IO[Unit] =
+    room.stateRef.get.flatMap { state =>
+      if state.players.indices.exists(state.config.isBotSeat) then botLoop(room).start.void
+      else IO.unit
+    }
+
+  /**
+   * The seat the game is waiting on, when that seat is a bot with something to
+   * play: the attacker during an opening attack, the defender while attacks are
+   * uncovered, and otherwise any thrower who has not passed yet.
+   */
+  def promptedBotId(state: GameState): Option[String] =
+    if state.isGameOver then None
+    else
+      val candidates = state.boutPhase match
+        case BoutPhase.InitialAttack  => Vector(state.attackerIdx)
+        case BoutPhase.Defense        =>
+          if state.tablePairs.exists(_.defense.isEmpty) then Vector(state.defenderIdx)
+          else throwerSeats(state)
+        case BoutPhase.SurrenderThrowIn => throwerSeats(state)
+        case BoutPhase.BoutOver | BoutPhase.GameOver => Vector.empty
+
+      candidates.flatMap(seat => botIdAt(state, seat)).headOption
+
+  /** Non-defending active seats that still have to pass or throw in. */
+  private def throwerSeats(state: GameState): Vector[Int] =
+    state.players.indices
+      .filter { idx =>
+        val seat = state.players(idx)
+        idx != state.defenderIdx && seat.isActive && seat.hasCards && !seat.hasPassed
+      }
+      .toVector
+
+  /** The bot id at `seatIdx` when that seat is a bot with a legal move. */
+  private def botIdAt(state: GameState, seatIdx: Int): Option[String] =
+    Option
+      .when(state.config.isBotSeat(seatIdx))(state.players.lift(seatIdx).map(_.id))
+      .flatten
+      .filter(playerId => RandomBot.legalActionsFor(state, playerId).nonEmpty)
+
+  /**
+   * Drives every bot seat for the whole game. A single fiber owns all bot moves,
+   * so a pending move can never race another one: each iteration re-reads the
+   * state, and a state transition during the pause ends the pending move before
+   * it can play for a position that no longer exists.
+   */
+  private def botLoop(room: GameRoom): IO[Unit] =
+    room.stateRef.get.flatMap { state =>
+      if state.isGameOver then IO.unit
+      else
+        promptedBotId(state) match
+          case None => awaitStateChange(room, state) *> botLoop(room)
+          case Some(botId) =>
+            IO.sleep(randomBotDelay(room)).race(awaitStateChange(room, state)).flatMap {
+              case Right(_) => botLoop(room) // the table moved on: reconsider
+              case Left(_) =>
+                room.stateRef.get.flatMap { current =>
+                  if current != state then botLoop(room)
+                  else
+                    RandomBot.chooseAction(current, botId) match
+                      case None => awaitStateChange(room, current) *> botLoop(room)
+                      case Some(action) => playBotAction(room, action) *> botLoop(room)
+                }
+            }
+    }
+
+  /** Waits until the room's state differs from `previous`. */
+  private def awaitStateChange(room: GameRoom, previous: GameState): IO[Unit] =
+    IO.sleep(BotPollMillis.millis) *> room.stateRef.get.flatMap { current =>
+      if current == previous then awaitStateChange(room, previous) else IO.unit
+    }
+
+  /** A random pause in the room's configured bot delay window. */
+  private def randomBotDelay(room: GameRoom): FiniteDuration =
+    val minMs = Math.max(0L, room.botDelayMin.toMillis)
+    val maxMs = Math.max(minMs, room.botDelayMax.toMillis)
+    (minMs + Math.floorMod(botRandom.nextLong(), maxMs - minMs + 1)).millis
+
+  /** Submits a bot's move through the same pipeline as a client action. */
+  private def playBotAction(room: GameRoom, action: GameAction): IO[Unit] =
+    IO.delay(
+      logger.info(
+        s"RandomBot plays ${actionType(action)} as ${actorId(action)} in game ${room.gameId}"
+      )
+    ).void *> applyAction(room, action).void
 
   private def nowMs: IO[Long] = IO.realTime.map(_.toMillis)

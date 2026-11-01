@@ -14,7 +14,8 @@ case class GameState(
   defenderInitialHandSize: Int,
   finishOrder: Vector[String],   // Player IDs in order of finishing
   isDraw: Boolean = false,
-  turnDeadlineMs: Long = 0L      // Epoch ms when the acting player's clock expires (0 = idle)
+  turnDeadlineMs: Long = 0L,     // Epoch ms when the acting player's clock expires (0 = idle)
+  presentPlayers: Set[String] = Set.empty // Human seats that reported an open connection
 ):
 
   /** Players still in the game (have not finished). */
@@ -72,6 +73,24 @@ case class GameState(
   /** True while the player may still be handed the attack or the defense. */
   private def isInRotation(player: PlayerState): Boolean =
     player.isActive && (talon.nonEmpty || player.hasCards)
+
+  // --- Presence ---
+
+  /**
+   * True when the seat is currently present: bots always are, humans are once
+   * they report an open connection and until they report otherwise.
+   */
+  def isPresentSeat(seatIdx: Int): Boolean =
+    config.isBotSeat(seatIdx) ||
+      players.lift(seatIdx).exists(player => presentPlayers.contains(player.id))
+
+  /** True when `playerId` is a present seat; unknown ids are never present. */
+  def isPlayerPresent(playerId: String): Boolean =
+    isPresentSeat(players.indexWhere(_.id == playerId))
+
+  /** Ids of every present seat, in seat order. */
+  def presentPlayerIds: Vector[String] =
+    players.indices.collect { case idx if isPresentSeat(idx) => players(idx).id }.toVector
 
   // --- Turn clock ---
 
