@@ -1,20 +1,34 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd ~/agent-project
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$PROJECT_ROOT"
 
 NUM_WORKERS="${1:-3}"
 IMAGE_NAME="lidurak-sandbox:latest"
-SHARED_AUTH_DIR="$(pwd)/agent-orchestration/.freebuff-home"
-ENV_FILE="$(pwd)/agent-orchestration/.env"
+ENV_FILE="$PROJECT_ROOT/agent-orchestration/.env"
+RUNTIME_HOME="$PROJECT_ROOT/agent-orchestration/.runtime/freebuff-home"
+CONTAINER_ENV_FILE="$PROJECT_ROOT/agent-orchestration/.runtime/container.env"
 
-mkdir -p "$SHARED_AUTH_DIR/.config" "$SHARED_AUTH_DIR/.local"
-touch "$ENV_FILE"
-
-if [ -f agent-orchestration/Dockerfile.sandbox ] && [ ! -f Dockerfile.sandbox ]; then
-  cp agent-orchestration/Dockerfile.sandbox Dockerfile.sandbox
+mkdir -p "$RUNTIME_HOME/.config/manicode" "$RUNTIME_HOME/.local"
+if [ ! -f "$ENV_FILE" ] && [ -f "$PROJECT_ROOT/agent-orchestration/.env.example" ]; then
+  cp "$PROJECT_ROOT/agent-orchestration/.env.example" "$ENV_FILE"
 fi
+touch "$ENV_FILE"
+chmod 600 "$ENV_FILE"
+
+# Extract FREEBUFF_AUTH_B64 without exporting it into the process environment
+AUTH_B64=$(grep '^FREEBUFF_AUTH_B64=' "$ENV_FILE" 2>/dev/null | head -n 1 | cut -d= -f2- | tr -d '"' || true)
+if [ -n "$AUTH_B64" ]; then
+  printf '%s' "$AUTH_B64" | base64 -d | tar -xzf - -C "$RUNTIME_HOME" 2>/dev/null || true
+fi
+unset AUTH_B64
+
+# Create a clean container env file excluding FREEBUFF_AUTH_B64
+grep -v '^FREEBUFF_AUTH_B64=' "$ENV_FILE" > "$CONTAINER_ENV_FILE" 2>/dev/null || true
+chmod 600 "$CONTAINER_ENV_FILE"
 
 if ! docker info >/dev/null 2>&1; then
+  echo "🔧 Starting Docker daemon..."
   sudo service docker start >/dev/null 2>&1 </dev/null || sudo dockerd >/dev/null 2>&1 </dev/null &
   for _ in {1..15}; do
     if docker info >/dev/null 2>&1; then break; fi
@@ -23,20 +37,27 @@ if ! docker info >/dev/null 2>&1; then
 fi
 
 if ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
+  echo "🐳 Building $IMAGE_NAME from agent-orchestration/Dockerfile.sandbox..."
   docker build -t "$IMAGE_NAME" -f agent-orchestration/Dockerfile.sandbox .
 fi
 
-# Base container for play-local.sh (:8080 and :5173)
+# Ensure RUNTIME_HOME is owned by UID 1000 (node:node)
+docker run --rm --user root -v "${RUNTIME_HOME}:/mnt/fbhome" "$IMAGE_NAME" \
+  chown -R 1000:1000 /mnt/fbhome 2>/dev/null || true
+
+# Boot base container for ./play-local.sh (:8080 and :5173)
 if [ "$(docker inspect -f '{{.State.Running}}' freebuff_worker 2>/dev/null || true)" != "true" ]; then
   docker rm -f freebuff_worker 2>/dev/null || true
   docker run -d --name freebuff_worker \
     --cap-drop=ALL --cap-add=CHOWN --cap-add=SETUID --cap-add=SETGID --cap-add=DAC_OVERRIDE \
     --security-opt no-new-privileges:true \
-    --env-file "$ENV_FILE" \
+    --env-file "$CONTAINER_ENV_FILE" \
+    -e HOME=/home/node \
     -e NODE_OPTIONS="--dns-result-order=ipv4first" \
     -p 8080:8080 -p 5173:5173 \
-    -v "$(pwd):/workspace" \
-    -v "${SHARED_AUTH_DIR}:/freebuff-home" \
+    -v "${PROJECT_ROOT}:/workspace" \
+    -v "${RUNTIME_HOME}/.config:/home/node/.config" \
+    -v "${RUNTIME_HOME}/.local:/home/node/.local" \
     --mount type=tmpfs,destination=/workspace/agent-orchestration,ro \
     -w /workspace "$IMAGE_NAME" tail -f /dev/null >/dev/null
 fi
@@ -45,7 +66,7 @@ mkdir -p .worktrees
 git worktree prune 2>/dev/null || true
 
 for w in $(seq 1 "$NUM_WORKERS"); do
-  WT_DIR="$(pwd)/.worktrees/worker-${w}"
+  WT_DIR="${PROJECT_ROOT}/.worktrees/worker-${w}"
   C_NAME="freebuff_worker_${w}"
   SBT_VOL="sbt_cache_worker_${w}"
 
@@ -58,24 +79,23 @@ for w in $(seq 1 "$NUM_WORKERS"); do
   docker volume create "$SBT_VOL" >/dev/null 2>&1 || true
 
   if ! docker inspect "$C_NAME" >/dev/null 2>&1; then
-    echo "🐳 Creating $C_NAME (mounted to shared repo vault: agent-orchestration/.freebuff-home)..."
+    docker run --rm --user root -v "${SBT_VOL}:/mnt/sbt" "$IMAGE_NAME" chown -R 1000:1000 /mnt/sbt 2>/dev/null || true
+    echo "🐳 Creating $C_NAME (mounted to shared /home/node/.config auth)..."
     docker run -d --name "$C_NAME" \
       --cap-drop=ALL --cap-add=CHOWN --cap-add=SETUID --cap-add=SETGID --cap-add=DAC_OVERRIDE \
       --security-opt no-new-privileges:true \
-      --env-file "$ENV_FILE" \
+      --env-file "$CONTAINER_ENV_FILE" \
+      -e HOME=/home/node \
       -e NODE_OPTIONS="--dns-result-order=ipv4first" \
       -v "${WT_DIR}:/workspace" \
-      -v "${SHARED_AUTH_DIR}:/freebuff-home" \
-      -v "${SBT_VOL}:/root/.cache" \
+      -v "${RUNTIME_HOME}/.config:/home/node/.config" \
+      -v "${RUNTIME_HOME}/.local:/home/node/.local" \
+      -v "${SBT_VOL}:/home/node/.cache" \
       --mount type=tmpfs,destination=/workspace/agent-orchestration,ro \
       -w /workspace "$IMAGE_NAME" tail -f /dev/null >/dev/null
   elif [ "$(docker inspect -f '{{.State.Running}}' "$C_NAME" 2>/dev/null || true)" != "true" ]; then
     docker start "$C_NAME" >/dev/null
   fi
-
-  docker exec "$C_NAME" bash -c '
-    grep -q "precedence ::ffff:0:0/96  100" /etc/gai.conf 2>/dev/null || echo "precedence ::ffff:0:0/96  100" >> /etc/gai.conf
-  ' 2>/dev/null || true
 done
 
-echo "✅ Workspace ready (${NUM_WORKERS} worker containers sharing repo-backed /freebuff-home)."
+echo "✅ Workspace ready (${NUM_WORKERS} worker containers mounted to shared /home/node/.config)."

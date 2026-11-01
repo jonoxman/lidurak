@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd ~/agent-project
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$PROJECT_ROOT"
 
 if [ $# -lt 1 ]; then
   CURRENT=$(cat .reviews/target_workers 2>/dev/null || echo "3")
@@ -12,6 +13,7 @@ fi
 NEW_COUNT="$1"
 MODE="${2:-graceful}"
 OLD_COUNT=$(cat .reviews/target_workers 2>/dev/null || echo "3")
+mkdir -p .reviews
 echo "$NEW_COUNT" > .reviews/target_workers
 
 if [ "$NEW_COUNT" -gt "$OLD_COUNT" ]; then

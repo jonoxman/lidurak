@@ -19,3 +19,7 @@
      - Row 3: Col 1 = Talon Deck & Trump Card (`data-zone="table-deck"`), Col 2 = Active Player's Hand (`data-zone="player-hand"`), Col 3 = `SortBar` + contextual `Surrender` / `Pass` button.
    - `[data-zone="sidebar-right"]`: Large digital `00:XX` turn clock (`00:15` default) & game winner/durak results.
 3. **Zero Table Text Clutter:** Never render text banners like "Waiting for first attack...", "Your turn to defend", or invalid-move error strings on the table or below the hand.
+
+## Local Server Launcher Maintenance (`./play-local.sh`)
+- `./play-local.sh` in the repository root is an official project file used to launch the backend and frontend locally.
+- Whenever a ticket modifies server ports, environment variables, build targets, or startup commands in `backend/` or `frontend/`, you MUST update `./play-local.sh` accordingly so `./play-local.sh` always starts the full application cleanly.

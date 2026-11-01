@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-cd ~/agent-project
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$PROJECT_ROOT"
 watch -n 2 -t -c '
   TARGET_W=$(cat .reviews/target_workers 2>/dev/null || echo "3")
-  printf "\033[1;32m⚡ PARALLEL WORKER POOL (Target Workers: %s | Scale: ./agent-orchestration/scale-workers.sh <N>)\033[0m\n" "$TARGET_W"
+  printf "\033[1;32m⚡ LIDURAK WORKER POOL (Target Workers: %s | Scale: ./agent-orchestration/scale-workers.sh <N>)\033[0m\n" "$TARGET_W"
   echo "=================================================================="
   for f in $(ls -1v .reviews/worker_*.status 2>/dev/null); do
     [ -e "$f" ] && echo "  $(basename "$f" .status): $(cat "$f")"

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-cd ~/agent-project
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$PROJECT_ROOT"
 NUM_WORKERS=$(cat .reviews/target_workers 2>/dev/null || echo "${1:-3}")
 
 while ! docker inspect freebuff_worker_1 >/dev/null 2>&1; do
@@ -9,7 +10,6 @@ done
 
 tmux kill-session -t worker_viewer 2>/dev/null || true
 
-# Launch Worker-1 directly in the initial window, then move index 0 -> index 1
 CMD1="echo '⏳ Waiting for FreeBuff task on freebuff_worker_1...'; while true; do if docker exec freebuff_worker_1 tmux has-session -t buff 2>/dev/null; then docker exec -it freebuff_worker_1 tmux attach -t buff || true; fi; sleep 2; done"
 tmux new-session -d -s worker_viewer -n "Worker-1" "$CMD1"
 

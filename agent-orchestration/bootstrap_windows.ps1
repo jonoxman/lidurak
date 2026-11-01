@@ -15,7 +15,6 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "=== 2. Hardening WSL Sandbox (/etc/wsl.conf) ===" -ForegroundColor Cyan
-# Quarantines WSL from Windows drives (C:\) and Windows PATH
 $wslConf = @'
 [automount]
 enabled = false
@@ -34,29 +33,31 @@ wsl.exe --shutdown
 Start-Sleep -Seconds 3
 
 Write-Host "=== 3. Creating Multi-Worker Mission Control Launcher ===" -ForegroundColor Cyan
-@'
+$LauncherContent = @'
 param(
     [int]$Workers = 3
 )
 
 Write-Host "🚀 Launching Lidurak Parallel Mission Control ($Workers Workers)..." -ForegroundColor Cyan
 
-# Window 1: Parallel Orchestrator (Boots Docker workers & manages GitHub PR pipeline)
-Start-Process wsl.exe -ArgumentList "-e bash -ic `"cd ~/agent-project && ./agent-orchestration/orchestrate.sh --workers $Workers; exec bash`""
+# Window 1: Main Orchestrator
+Start-Process wsl.exe -ArgumentList "--cd ~/lidurak-agent-project -e bash -lc `"./agent-orchestration/orchestrate.sh --workers $Workers; exec bash`""
+Start-Sleep -Seconds 2
+
+# Window 2: Multi-Worker FreeBuff Tabbed Viewer (Ctrl+A then 1..N to switch workers)
+Start-Process wsl.exe -ArgumentList "--cd ~/lidurak-agent-project -e bash -lc `"./agent-orchestration/watch-workers.sh $Workers; exec bash`""
 Start-Sleep -Seconds 1
 
-# Window 2: Multi-Worker FreeBuff Viewer (Switch between workers 1..N with Ctrl+A then 1/2/3 or n/p)
-Start-Process wsl.exe -ArgumentList "-e bash -ic `"cd ~/agent-project && ./agent-orchestration/watch-workers.sh $Workers; exec bash`""
+# Window 3: Live Worker Pool, Test Gate & PR Review Monitor
+Start-Process wsl.exe -ArgumentList "--cd ~/lidurak-agent-project -e bash -lc `"./agent-orchestration/watch-reviews.sh; exec bash`""
 Start-Sleep -Seconds 1
 
-# Window 3: Live PR, Test Gate & Review Monitor
-Start-Process wsl.exe -ArgumentList "-e bash -ic `"cd ~/agent-project && ./agent-orchestration/watch-reviews.sh; exec bash`""
-Start-Sleep -Seconds 1
+# Window 4: Interactive Command Line
+Start-Process wsl.exe -ArgumentList "--cd ~/lidurak-agent-project"
 
-# Window 4: Interactive Command Line (For play-local.sh, gh pr list, git sync)
-Start-Process wsl.exe -ArgumentList "-e bash -ic `"cd ~/agent-project && clear && echo === Interactive Shell: ~/agent-project === && exec bash`""
+Write-Host "✅ All 4 windows launched!" -ForegroundColor Green
+'@
+$LauncherContent | Set-Content -Path "$HOME\mission_control.ps1" -Encoding UTF8
+$LauncherContent | Set-Content -Path "$HOME\mission-control.ps1" -Encoding UTF8
 
-Write-Host "✅ All 4 Mission Control windows launched!" -ForegroundColor Green
-'@ | Set-Content -Path "$HOME\mission-control.ps1" -Encoding UTF8
-
-Write-Host "✅ Windows host setup complete! Next, open Ubuntu WSL and run install-wsl-deps.sh." -ForegroundColor Green
+Write-Host "✅ Windows host setup complete! Next, open Ubuntu WSL and run ~/lidurak-agent-project/agent-orchestration/install-wsl-deps.sh." -ForegroundColor Green
