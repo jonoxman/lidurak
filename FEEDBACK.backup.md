@@ -1,57 +1,73 @@
-First, examine the git repo and merge in any necessary branches so we have one working branch. Then, implement the following feedback:
+<!-- Write your plain-English UI/UX feedback, bugs, or usability requests below this line. -->
+<!-- Note: Your previous feedback is always backed up in FEEDBACK.backup.md and .reviews/feedback_archive/ -->  
+We have the following output in the server log after trying to create a game a few times, which may be related to the following issues in the document:
+🎮 Starting Lidurak Local Server...
+   -> Backend API / WS : http://localhost:8080
+   -> Frontend UI      : http://localhost:5173
+Press Ctrl+C to stop both servers.
 
-0. We get the following output when running the server:
-  "VITE v5.4.21  ready in 726 ms
+> lidurak-frontend@0.1.0 dev
+> vite --host 0.0.0.0 --port 5173 --host 0.0.0.0 --port 5173
+
+
+  VITE v5.4.21  ready in 673 ms
 
   ➜  Local:   http://localhost:5173/
-  ➜  Network: http://172.19.0.3:5173/
+  ➜  Network: http://172.17.0.2:5173/
+[info] [launcher] getting org.scala-sbt sbt 1.9.8  (this may take some time)...
+[info] [launcher] getting Scala 2.12.18 (for sbt)...
 [info] welcome to sbt 1.9.8 (Debian Java 17.0.21)
+5:55:51 PM [vite] http proxy error: /api/game/create
+Error: connect ECONNREFUSED 127.0.0.1:8080
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1638:16)
 [info] loading project definition from /workspace/backend/project
+[warn] jline-2.14.6.jar no longer exists at /home/node/.cache/coursier/v1/https/repo1.maven.org/maven2/jline/jline/2.14.6/jline-2.14.6.jar
 [info] loading settings for project root from build.sbt ...
 [info] set current project to durak-backend (in build file:/workspace/backend/)
-[info] compiling 8 Scala sources to /workspace/backend/target/scala-3.3.3/classes ...
-[warn] -- [E121] Pattern Match Warning: /workspace/backend/src/main/scala/durak/engine/GameEngine.scala:78:11
-[warn] 78 |      case other =>
-[warn]    |           ^^^^^
-[warn]    |Unreachable case except for null (if this is intentional, consider writing case null => instead).
-[warn] there was 1 deprecation warning; re-run with -deprecation for details
-[warn] two warnings found
-[info] done compiling
-[info] compiling 5 Scala sources to /workspace/backend/target/scala-3.3.3/classes ...
-[warn] there was 1 deprecation warning; re-run with -deprecation for details
-[warn] three warnings found
-[info] done compiling
+[warn] scala3-library_3-3.3.3.jar no longer exists at /home/node/.cache/coursier/v1/https/repo1.maven.org/maven2/org/scala-lang/scala3-library_3/3.3.3/scala3-library_3-3.3.3.jar
+5:55:56 PM [vite] http proxy error: /api/game/create
+Error: connect ECONNREFUSED 127.0.0.1:8080
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1638:16) (x2)
+5:55:59 PM [vite] http proxy error: /api/game/create
+Error: connect ECONNREFUSED 127.0.0.1:8080
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1638:16) (x3)
 [info] running (fork) durak.Main
-[error] SLF4J: Failed to load class "org.slf4j.impl.StaticLoggerBinder".
-[error] SLF4J: Defaulting to no-operation (NOP) logger implementation
-[error] SLF4J: See http://www.slf4j.org/codes.html#StaticLoggerBinder for further details.
-[info] Durak server running on 0.0.0.0:8080"
+[error] [io-compute-7] INFO org.http4s.ember.server.EmberServerBuilderCompanionPlatform - Ember-Server service bound to address: [::]:8080
+[info] Durak server running on 0.0.0.0:8080
 
-Refine the implementation to fix these problems so that the code is as clean as possible (genuinely fix the cause if possible; do not simply suppress warnings). Especially the logging bug is high priority since it potentially means we cannot see any logs from the server.
-1. Display the deck of cards and the revealed trump suit in an overlapping T-shape instead of adjacent to one another.
-2. Make the black suites (spades and clubs) much darker on the cards. Instead of the current grey, the pips and symbols should be a sharply contrasting black.
-3. Customize card sprites: instead of just one pip of the suit, display the number of pips equal to the rank (for cards 2-10). Aces should have only one pip, but larger and ornate, with a total width of about half of the card's width. J, Q, and K cards should display the letters J, Q, and K respectively, with decorative suit pips placed around the letter. Keep the color design matching the current cards.
-4. The trump indicator on the cards is not drawn correctly. The symbol for the trump suit should be centred within the yellow circle.
-5. If the size of the window allows, the overall size of the cards should be larger. Make any card-size based designs (for example the outlines on which players are to drag the cards) match the card size.
-6. Add to the top of every page a header bar. The specs are as follows: 
-a) On the left end of the header bar should be the current LIDURAK "logo" - this should be a link that changes color interactively when moused over, and it should link back to the home page of the site. Place to the left of the logo some empty margin space (in the header bar only) so that it floats a little away from the left side of the window.
-b) Next to the logo, there should be as many a series of dropdown menus that open when moused over. To start out, let's make 4 menu which are titled "PLAY", "PUZZLES", "LEARN", and "WATCH" For now, put a few placeholder links into each dropdown menu. 
-c) On the right end, with some floating margin on the right in the same way as on the left, place the user's account name. This should light up in a different color than the logo link. Since for the moment we have no user accounts, use a placeholder user name, along with a typical SVG user profile icon (person inside a circle). When clicked, this element should make a dropdown with a list of options, including Profile, Inbox, Preferences, Sign out, Language, Sound, Theme, Table, and Card Back. At the bottom of the dropdown should be displayed a connection tracker which tells the user their current ping and server delay (one row each for these metrics, appearing on the left of the dropdown - on the right side should be an animated 4-bar indicator for the ping, which changes based on the strength of the connection. In each other dropdown element, place on the left side an icon representing the dropdown element's functionality. IMPORTANT: There is no need to implement any elements aside from what is explicitly mentioned in this spec - unimplemented elements will serve as placeholders. Design this section to be very extensible in later development.
-d) The header bar should be a very slightly different shade compared to the rest of the page. The whole header bar should be this different shade. Make a gradient effect in the shading of the rest of the page so that the shade seamlessly transitions between the colors of the header bar and the rest of the page.
-7. Implement the Sound functionality in the dropdown bar. For this, create 5 different sound packs (each pack should have a different style of sounds for every action in the game - make the sound styles match closely within each pack, i.e. don't use a complex musical tone for one action and a dull single-beat thud for another action within the same soundpack). Name each sound pack. Allow the user to choose between the sound packs by clicking the Sound section of the user profile dropdown, which should open a secondary dropdown with an interactive volume slider (which applies only for the current user, not for other players in a game) as well as clickable options to select each sound pack - the selected sound pack determines which sounds play for the user. The options should highlight in a pale version of the main green color we are using throughout the site when hovered over. Place also a right-facing green chevron on the right of the Sound button in the profile dropdown menu, to indicate it has a submenu.
-8. Implement the Theme functionality in the dropdown bar. Visually, the spec is identical to the Sound spec, except instead of choosing sounds the user chooses between three options: Device theme, Light, and Dark. No volume slider on the side here - instead, there should be a Roundness slider below the Device theme, Light, and Dark options which defaults to 8px and scales from 0px to 16px - 0px makes all webpage elements completely square with sharp corners, while 16px makes them more rounded. Add also the green chevron to the Theme button in the profile dropdown. Clicking Device theme, Light, and Dark changes the theme of the website as one might expect - choose appropriate colors for Light theme (what we currently have will be the Dark theme) matching the aesthetic we are trying to deliver.
-9. Implement the Table functionality in the profile dropdown bar. Visually, the spec is similar to the previous two features. This dropdown should have a grid of textures the user can select to choose how the table looks (this is the play area where the cards are placed). Generate (or use a library for) a selection of textures (at least 6) and store these in a project file - later on, we will implement a feature allowing the user to upload their own textures, and possibly create our own custom textures to be saved in this location. Display small previews of these textures in the grid mentioned above. Also include three sliders - Brightness, Contrast, and Hue, allowing the user to customize their game table texture in real time as they like. Add to the Table element in the dropdown a green chevron as in the previous elements. Keep the textures generated for this feature in line with the overall aesthetic of the site.
-10. Implement the Card Back functionality in the profile dropdown bar. This should simply be a grid view of options for the patterns on the back of the cards. As with the table textures, generate at least 6 choices for card back textures, keeping with the overall aesthetic of the site. 
-11. Instead of three buttons "Suit" "Pairs" and "Rank" next to the user's hand in the current implementation, make one clean dropdown to select these options in the same location to take less screen space.
-12. In the user's hand, automatically shift the cards that are currently legal to play upwards slightly to give a visual indication of which moves are legal to play.
-13. In the Hotseat menu, don't reorder the players to put the active player at the top. Instead, keep the players' positions fixed in the menu. The same should apply to the Players section on the right of the page.
-14. Currently, the activity clock doesn't seem to ever tick down. In case this feature request was missed: Whenever a player is being waited on to make an action, their clock starts ticking. When the clock runs out, the player automatically makes a random legal move (which can include passing, throwing in, defending, attacking, or surrendering). Each player clock resets whenever a player takes an action. Display each player's clock in a small format above each player's player box (where their card deck is held). A ticking sound should play for only the user whose clock is ticking when the clock goes below 5 seconds.
-15. Make the sizes of every player's box other than the user's equal.
-16. Reduce the length of the game ID in the link and all internal tracking; games should have an ID of at most 8 characters, which should only be letters and numbers. 
-17. The Back to lobby link at the top right of the game page should be a button element and match the rest of the aesthetic of the site.
-18. If a player is being attacked and has no legal way to defend, they should automatically surrender after 3 seconds (or they can press the button before then).
-19. Clicking and dragging a card turns the mouse cursor into a no symbol (circle with slash through it). Instead, the cursor should remain the "clickable element" pointer finger symbol throughout dragging the mouse.
-20. It should not be possible under any circumstance to highlight text that appears in the game elements. This includes anything in the play area, as well as all buttons and timers. The only exceptions are the game ID, HOW TO PLAY section, and the players' names.
-21. Currently, the same color is being used to highlight the player who is about to attack and the player who is about to be attacked. Modify this to be two different colors. The color for the attacking player should match the highlight of their hand.
-22. Make the highlight box for the hand of the attacking player (from their point of view only) tightly fit around the cards instead of leaving space as it is now.
+Based on this log, the following should be corrected:
+1. When the server first starts, the frontend page is possible to open before the server completely loads, making it impossible to create a game - creating a game gives a "Could not create game (HTTP 500)" error message. Make the UI display a loading page, rather than letting the user try to create a game before the server is ready.
+2. The elements for the create a game page do not match the light theme. All elements in all pages should always adapt to the theme chosen by the user.
+3. In all of the submenus in the profile menu dropdown, the following issue happens: the submenu pops out of the right side of the profile menu, which extends the page length. Instead, the submenu should replace the profile menu completely. At the top of each submenu should be an element with the name of the submenu and (on the left side) a left-facing chevron which when clicked closes the submenu.
+4. Make the chevrons in this menu slightly larger.
+5. The Ping and Server Delay section should be in all caps (except for the ms unit, which should be lowercase). Don't make the connection bar icon pulse constantly - instead, it should only animate when the connection worsens or improves, to update the number of bars visually with no other special visual effect.
+6. Implement a "lag-switch" temporary development feature to manually set the ping and test the connection bar animation.
+7. The card deck and displayed trump, along with the TRUMP suit indicator element, are incorrectly positioned. The card deck should be placed vertically, with the revealed trump being placed horizontally, sticking out on the right side of the deck (the left side of the horizontal trump card should be aligned with the left side of the vertically positioned deck, and centred vertically). The TRUMP suit indicator should be placed clearly below both of these elements with no overlap. Additionally, place all three of these elements on the right side of the screen, underneath the clock and PLAYERS list element.
+8. Only players currently being waited on to play should see their clock timer element ticking down. For inactive players, it should remain frozen at 15 seconds.
+9. Currently, if a player has too many cards in hand, their hand forms a second row within the bounding box. Instead, if there are too many cards to fit in the bounding box with the default pixel overlap, the cards should overlap more. In other words, the existing 8 pixel overlap should be the default (cards should never be farther apart than that) but if the player has more cards, the pixel overlap can increase to a maximum of the width of the cards' top-left pip count symbol (so the suit and rank of the card should always be readable). If the number of cards would exceed the maximum overlap, place all cards on one end of the hand behind the last card that can overlap within spec (they are overlapped 100%). However, in this case, the player must still be able to see all of their hand. To achieve this, dynamically move the cards from one end of the hand to the other depending on the position of the player's cursor as they hover over they hand - as the cursor moves from left to right, cards should move from the hidden stack on the right side to the hidden stack on the left, and vice versa. Apply this logic to the cards not being held by the user as well - in other players' hands, the player's box should be a fixed size, with cards overlapping more or less depending on their quantity, and a minimum degree of overlap (this should not respond to mouse movement, however)
+10. After running a game for some time, we get the following errors in the server log:
+[error] [io-compute-1] ERROR org.http4s.ember.server.EmberServerBuilderCompanionPlatform - WebSocket connection terminated with exception
+[error] java.util.concurrent.TimeoutException: 60 seconds
+[error]         at timeout @ org.http4s.ember.core.Util$.timeoutMaybe(Util.scala:106)
+[error]         at main$ @ durak.Main$.main(Main.scala:8)
+[error]         at timeout @ org.http4s.ember.core.Util$.timeoutMaybe(Util.scala:106)
+[error]         at timeout @ org.http4s.ember.core.Util$.timeoutMaybe(Util.scala:106)
+[error] [io-compute-7] INFO durak.server.GameActor - Turn clock expired in game 3M8Hlnun: auto-playing InitialAttack for p0
+[error] [io-compute-0] INFO durak.server.GameActor - Turn clock expired in game 3M8Hlnun: auto-playing CoverCard for p1
+[error] [io-compute-8] ERROR org.http4s.ember.server.EmberServerBuilderCompanionPlatform - WebSocket connection terminated with exception
+[error] java.util.concurrent.TimeoutException: 60 seconds
+[error]         at timeout @ org.http4s.ember.core.Util$.timeoutMaybe(Util.scala:106)
+[error]         at main$ @ durak.Main$.main(Main.scala:8)
+[error]         at timeout @ org.http4s.ember.core.Util$.timeoutMaybe(Util.scala:106)
+[error]         at timeout @ org.http4s.ember.core.Util$.timeoutMaybe(Util.scala:106)
+I'm not sure if these are related to letting the clock time out for a given player. Make sure these errors do not happen - fix the necessary problems, rather than suppressing them.
+11. Use the textures in the Table subsection of the profile submenu to color the game table element (Emerald Felt by default). Make the brightnes, contrast, and hue sliders apply to the previews of the textures in real time, as well as to the game table area itself.
+12. Add some more colorful options to the card backs in the Card Back section of the profile submenu.
+13. When the user clicks to select a sound pack from the Sound menu, play a random sample sound from the pack being clicked. Do the same when the volume slider is adjusted (at the new volume).
+14. Remove the LIDURAK that appears below the header bar - it is now redundant.
+15. Create an SVG logo for the site and place it to the left of the LIDURAK link in the header bar. Keep the left and right margins as they are - all elements except the profile menu in the header bar will move to the right to acommodate the logo. The logo should also highlight in the same color as the LIDURAK text when moused over, and be part of the same link.
+16. Implement a bot player agent. For now, only one level of bot should be made - RandomBot, which simply makes a random legal move whenever it is prompted. The bot should make its moves (or pass, surrender, and so on) on a random delay between 0.5 seconds and 2 seconds delay when it is prompted, to simulate a human player.
+17. When creating a game, when inputting the player names, put a second dropdown for each player from which the user can select who will be playing - a human, or bot (each level of bot will appear in this dropdown, for now only one level of RandomBot).
+18. Update the design for face cards (J, K, Q) - instead of arranging the extra pips for these cards in a simple diamond pattern, instead place the pips on the ends of the letter (J will have 3 pips, at the top-left, top-right, and bottom-left at the point of the J - Q will have one pip at the bottom-right point of the Q, and K will have 4 pips, one at each of the top-left, top-right, bottom-left, and bottom-right). For these cards, rotate the pips so that their distinguishing parts (these are the top half of the heart and club, and the bottom half of the spade and diamond are facing outwards from the letter. 
+19. Place a dot next to each active player's name in the player list. This dot should be green when the player is present and playing (i.e the window is in focus and the mouse has moved in the last 30 seconds) and grey otherwise.
 
