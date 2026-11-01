@@ -19,15 +19,34 @@
   min-width: 0;
   min-height: 620px;
   padding: 20px;
-  background-color: var(--table-felt, #1e2923);
   border-radius: 8px;
   box-sizing: border-box;
+  position: relative;
+  isolation: isolate;
 }
 
 [data-zone='table-arena'] *,
 [data-zone='table-arena'] *::before,
 [data-zone='table-arena'] *::after {
   box-sizing: border-box;
+}
+
+/* Feedback #11: the felt texture fills a dedicated grid-spanning layer so the
+   brightness/contrast/hue filter tints the surface, never the cards. */
+[data-zone='table-arena']::before {
+  content: '';
+  grid-column: 1 / -1;
+  grid-row: 1 / -1;
+  z-index: 0;
+  border-radius: 8px;
+  background-color: var(--table-felt, #1e2923);
+  background-image: var(--table-felt-overlay, none);
+  filter: var(--table-filter);
+  pointer-events: none;
+}
+
+[data-zone='table-arena'] > * {
+  z-index: 1;
 }
 
 /* --- Row 1: opponent seats --- */
@@ -142,20 +161,27 @@
   white-space: nowrap;
 }
 
+/* Feedback #9: a fixed-size opponent row whose cards overlap more as the hand
+   grows, without ever responding to the cursor. */
 .opponent-cards {
   display: flex;
+  flex-wrap: nowrap;
   align-items: center;
+  width: 100%;
+  max-width: 208px;
   min-height: 32px;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
-.opponent .playing-card {
+.opponent-card {
+  display: flex;
+  flex: 0 0 auto;
+}
+
+.opponent-cards .playing-card {
   width: 22px;
   height: 32px;
-  margin-left: -10px;
-}
-
-.opponent-cards .playing-card:first-child {
-  margin-left: 0;
 }
 
 .seat-meta {
@@ -319,30 +345,37 @@
 
 /* --- Row 3, column 1: talon deck & trump card --- */
 
+/* Feedback #7: the talon, revealed trump and TRUMP badge live in the right
+   sidebar, directly under the turn clock and the PLAYERS list. */
 [data-zone='table-deck'] {
-  grid-column: 1;
-  grid-row: 3;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  justify-content: flex-end;
-  gap: 10px;
+  gap: 16px;
   min-width: 0;
+  padding: 12px;
+  background: var(--app-panel, var(--durak-panel));
+  border: 1px solid var(--app-border, var(--durak-border));
+  border-radius: var(--app-roundness, 8px);
+  box-sizing: border-box;
 }
 
-/* Item 1: the talon and the perpendicular trump share one grid cell, so the
-   T-shape overlap needs no absolute positioning. */
-.deck-stack {
+/* One grid cell holds the vertical deck and the horizontal trump: both left
+   edges line up, the trump is centred on the deck's height, and it sticks out
+   to the right of the deck with no absolute positioning. */
+.talon-deck {
   display: grid;
-  grid-template-columns: 80px;
+  grid-template-columns: 114px;
   grid-template-rows: 114px;
-  align-items: start;
+  align-items: center;
   min-width: 0;
 }
 
 .talon-stack {
   grid-area: 1 / 1;
   z-index: 2;
+  justify-self: start;
+  align-self: start;
   display: grid;
   grid-template-columns: 80px;
   grid-template-rows: 114px;
@@ -375,10 +408,10 @@
   color: #f5f1e6;
 }
 
-/* The bottom trump card lies face up, perpendicular to the talon. */
-.bottom-trump {
+/* The bottom trump lies face up, perpendicular to the talon and centred on it. */
+.table-trump {
   grid-area: 1 / 1;
-  align-self: end;
+  align-self: center;
   justify-self: start;
   z-index: 1;
   display: grid;
@@ -386,15 +419,14 @@
   flex: 0 0 auto;
   width: 114px;
   height: 80px;
-  /* Tucked under the deck's bottom edge, forming the crossbar of the T. */
-  margin: 0 0 -10px 30px;
 }
 
-.bottom-trump-card {
+.table-trump-card {
   transform: rotate(90deg);
 }
 
 .trump-badge {
+  align-self: flex-start;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -479,16 +511,29 @@
 /* Item 22: the highlight hugs the cards instead of the whole grid column. */
 .hand-cards {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: flex-end;
-  justify-content: center;
+  justify-content: flex-start;
   width: max-content;
   max-width: 100%;
   min-width: 0;
-  gap: 6px;
+  gap: 0;
   padding: 4px 6px;
   border-radius: 8px;
   box-sizing: border-box;
+}
+
+/* Feedback #9: the overlap is computed per card, so each slot carries its own
+   negative margin. Hidden slots stack at 100% and sit behind the visible row. */
+.hand-slot {
+  display: flex;
+  flex: 0 0 auto;
+  z-index: 1;
+}
+
+.hand-slot[data-hidden='true'] {
+  z-index: 0;
+  pointer-events: none;
 }
 
 .hand-cards.attacker-turn {
@@ -497,10 +542,6 @@
 
 .hand-cards.defender-turn {
   animation: defenderPulse 2.4s infinite ease-in-out;
-}
-
-[data-zone='player-hand'] .card-slot + .card-slot {
-  margin-left: -10px;
 }
 
 /* Item 17/22: the pulse lives on the tight card container, not the column. */
@@ -721,11 +762,6 @@
     padding: 10px;
   }
 
-  [data-zone='table-deck'] {
-    grid-column: 1;
-    grid-row: 3;
-  }
-
   [data-zone='player-hand'] {
     grid-column: 1;
     grid-row: 4;
@@ -766,13 +802,18 @@
     height: 68px;
   }
 
-  .bottom-trump {
+  .talon-deck {
+    grid-template-columns: 68px;
+    grid-template-rows: 68px;
+  }
+
+  .table-trump {
     width: 68px;
     height: 48px;
   }
 
-  .bottom-trump-card,
-  .bottom-trump-card .card-slot {
+  .table-trump-card,
+  .table-trump-card .card-slot {
     width: 48px;
     height: 68px;
   }
@@ -802,10 +843,6 @@
     margin: 10px 0 0 14px;
   }
 
-  [data-zone='player-hand'] .card-slot + .card-slot {
-    margin-left: -8px;
-  }
-
   .action-button {
     padding: 8px 16px;
     font-size: 14px;
@@ -824,7 +861,6 @@
   --table-hue: 0deg;
   --table-filter: brightness(var(--table-brightness)) contrast(var(--table-contrast))
     hue-rotate(var(--table-hue));
-  background-image: var(--table-felt-overlay);
 }
 
 [data-zone='table-arena'][data-texture='emerald-felt'] {
@@ -940,4 +976,44 @@
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   vertical-align: middle;
+}
+
+/* Feedback #19: a green dot beside a present, playing player; grey when idle. */
+.status-player {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.presence-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #7a766f;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+  transition: background 160ms ease, box-shadow 160ms ease;
+}
+
+.presence-dot.present {
+  background: var(--durak-accent);
+  box-shadow: 0 0 6px rgba(98, 153, 36, 0.65);
+}
+
+[data-theme='light'] .presence-dot {
+  background: #b4afa6;
+}
+
+[data-theme='light'] .presence-dot.present {
+  background: #4f7f16;
+}
+
+/* The clock brightens only while this viewer is the player being waited on. */
+.turn-clock.active {
+  color: var(--durak-amber);
+}
+
+.turn-clock[data-active='false'] {
+  opacity: 0.75;
 }

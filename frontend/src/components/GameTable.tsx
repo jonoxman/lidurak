@@ -1,9 +1,11 @@
-import { useRef, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { Card, isRedSuit, suitSymbol, type CardData } from './Card';
 import { CardBack } from './CardBack';
 import { SortBar, type SortMode } from './SortBar';
 import { TablePair } from './TablePair';
+import { useSettings } from '../state/settings';
+import { getTableFilterCss } from '../styles/tableTextures';
 import '../styles/table.css';
 
 export interface OpponentSummary {
@@ -38,8 +40,6 @@ export interface GameTableProps {
   myHand: CardData[];
   opponents: OpponentSummary[];
   tablePairs: TablePairData[];
-  talonCount: number;
-  bottomTrumpCard?: CardData | null;
   trumpSuit: string;
   attackerId?: string;
   defenderId?: string;
@@ -117,6 +117,151 @@ export const SNAP_DISTANCE_PX = 48;
 
 /** Every opponent box is exactly this size, so no seat looks bigger. */
 export const SEAT_BOX = { width: 240, height: 140 } as const;
+
+/** --- Hand overlap geometry --- */
+
+/** Width of one hand card at desktop scale. */
+export const HAND_CARD_WIDTH = 80;
+/** Neighbouring hand cards never sit farther apart than this overlap. */
+export const HAND_MIN_OVERLAP = 8;
+/** Used until the hand has been measured (jsdom reports zero widths). */
+export const HAND_FALLBACK_WIDTH = 720;
+/** Width of one opponent card back inside a seat box. */
+export const OPPONENT_CARD_WIDTH = 22;
+/** Usable width of the fixed opponent card row. */
+export const OPPONENT_CARDS_WIDTH = 208;
+/** Opponent card backs always overlap at least this much. */
+export const OPPONENT_MIN_OVERLAP = 4;
+
+/** Left strip kept visible so the top-left rank/suit index stays readable. */
+const readableEdge = (cardWidth: number): number =>
+  Math.max(12, Math.round(cardWidth * 0.28));
+
+export interface HandLayout {
+  overlap: number;
+  visibleCount: number;
+  hiddenLeft: number;
+  hiddenRight: number;
+}
+
+/**
+ * Single-row hand layout. Cards start at an 8px overlap and tighten up to the
+ * readable limit; beyond that the surplus cards are stacked at 100% overlap on
+ * the ends, and `cursorFraction` (0 = left edge, 1 = right edge) slides them
+ * between the two hidden stacks.
+ */
+export function handLayout(
+  count: number,
+  availableWidth: number,
+  cursorFraction = 0.5,
+  cardWidth = HAND_CARD_WIDTH,
+): HandLayout {
+  if (count <= 0) return { overlap: 0, visibleCount: 0, hiddenLeft: 0, hiddenRight: 0 };
+
+  const maxOverlap = Math.max(HAND_MIN_OVERLAP, cardWidth - readableEdge(cardWidth));
+  const step = cardWidth - maxOverlap;
+  const capacity = Math.max(
+    1,
+    Math.floor(Math.max(0, availableWidth - cardWidth) / step) + 1,
+  );
+
+  if (count <= capacity) {
+    const needed = count === 1 ? 0 : cardWidth - (availableWidth - cardWidth) / (count - 1);
+    const overlap = Math.min(maxOverlap, Math.max(HAND_MIN_OVERLAP, needed));
+    return { overlap, visibleCount: count, hiddenLeft: 0, hiddenRight: 0 };
+  }
+
+  const hidden = count - capacity;
+  const fraction = Math.min(1, Math.max(0, cursorFraction));
+  const hiddenLeft = Math.round(hidden * fraction);
+  return {
+    overlap: maxOverlap,
+    visibleCount: capacity,
+    hiddenLeft,
+    hiddenRight: hidden - hiddenLeft,
+  };
+}
+
+/** Left offset of every hand card inside the single row. */
+export function handOffsets(
+  layout: HandLayout,
+  count: number,
+  cardWidth = HAND_CARD_WIDTH,
+): number[] {
+  const step = cardWidth - layout.overlap;
+  const lastVisible = Math.max(0, layout.visibleCount - 1);
+  return Array.from({ length: count }, (_, index) => {
+    const visibleIndex = index - layout.hiddenLeft;
+    if (visibleIndex < 0) return 0;
+    if (visibleIndex >= layout.visibleCount) return lastVisible * step;
+    return visibleIndex * step;
+  });
+}
+
+/** Negative left margin per card, so 100% overlap needs no positioning. */
+export function handMargins(
+  layout: HandLayout,
+  count: number,
+  cardWidth = HAND_CARD_WIDTH,
+): number[] {
+  const offsets = handOffsets(layout, count, cardWidth);
+  return offsets.map((offset, index) =>
+    index === 0 ? 0 : offset - offsets[index - 1] - cardWidth,
+  );
+}
+
+/** Overlap for a fixed-width opponent card row; never reacts to the cursor. */
+export function opponentOverlap(
+  count: number,
+  availableWidth = OPPONENT_CARDS_WIDTH,
+  cardWidth = OPPONENT_CARD_WIDTH,
+): number {
+  if (count <= 1) return 0;
+  const needed = cardWidth - (availableWidth - cardWidth) / (count - 1);
+  const maxOverlap = Math.max(
+    OPPONENT_MIN_OVERLAP,
+    cardWidth - Math.max(6, Math.round(cardWidth * 0.28)),
+  );
+  return Math.min(maxOverlap, Math.max(OPPONENT_MIN_OVERLAP, needed));
+}
+
+/** Talon deck, revealed trump and TRUMP badge for the right sidebar. */
+export interface TableDeckProps {
+  talonCount: number;
+  bottomTrumpCard?: CardData | null;
+  trumpSuit: string;
+}
+
+export function TableDeck({ talonCount, bottomTrumpCard, trumpSuit }: TableDeckProps) {
+  return (
+    <div class="table-deck" data-zone="table-deck" aria-label="Talon">
+      <div class="talon-deck" data-testid="talon-deck" data-layout="horizontal-trump">
+        <div class="talon-stack">
+          <CardBack class="talon-back talon-back-second" />
+          <CardBack class="talon-back" />
+          <span class="talon-count" data-testid="talon-count">
+            {talonCount}
+          </span>
+        </div>
+        {talonCount > 0 && bottomTrumpCard ? (
+          <div class="table-trump" aria-label="Bottom trump card">
+            <div class="table-trump-card" data-rotated="true">
+              <Card suit={bottomTrumpCard.suit} rank={bottomTrumpCard.rank} trump />
+            </div>
+          </div>
+        ) : null}
+      </div>
+      <div
+        class={`trump-badge ${isRedSuit(trumpSuit) ? 'red' : 'black'}`}
+        data-testid="trump-indicator"
+        data-suit={trumpSuit.toLowerCase()}
+      >
+        <span>Trump</span>
+        <span class="trump-symbol">{suitSymbol(trumpSuit)}</span>
+      </div>
+    </div>
+  );
+}
 
 /** Small `00:XX` label used by the per-player clocks. */
 export function formatSeatClock(seconds: number): string {
@@ -299,8 +444,6 @@ export function GameTable({
   myHand,
   opponents,
   tablePairs,
-  talonCount,
-  bottomTrumpCard,
   trumpSuit,
   attackerId,
   defenderId,
@@ -325,10 +468,48 @@ export function GameTable({
   const [sortMode, setSortMode] = useState<SortMode>('suit');
   const [dragCard, setDragCard] = useState<CardData | null>(null);
   const [snapZone, setSnapZone] = useState<string | null>(null);
+  const [handWidth, setHandWidth] = useState(0);
+  const [cardWidth, setCardWidth] = useState(HAND_CARD_WIDTH);
+  const [cursorFraction, setCursorFraction] = useState(0.5);
   const arenaRef = useRef<HTMLDivElement>(null);
+  const handRef = useRef<HTMLDivElement>(null);
+  const settings = useSettings();
 
   const hand = sortHand(myHand, sortMode, trumpSuit);
   const seats = assignSeats(opponents);
+
+  // Measure the hand column so the overlap follows the real available space.
+  useEffect(() => {
+    const measure = () => {
+      const node = handRef.current;
+      if (!node) return;
+      const available = node.parentElement?.clientWidth ?? node.clientWidth;
+      setHandWidth(available);
+      const card = node.querySelector('.card-slot') as HTMLElement | null;
+      const measured = card?.offsetWidth ?? 0;
+      if (measured > 0) setCardWidth(measured);
+    };
+    measure();
+    if (typeof ResizeObserver !== 'undefined' && handRef.current?.parentElement) {
+      const observer = new ResizeObserver(measure);
+      observer.observe(handRef.current.parentElement);
+      return () => observer.disconnect();
+    }
+    if (typeof window !== 'undefined') {
+      window.addEventListener('resize', measure);
+      return () => window.removeEventListener('resize', measure);
+    }
+    return undefined;
+  }, []);
+
+  const handLayoutState = handLayout(
+    hand.length,
+    handWidth > 0 ? handWidth : HAND_FALLBACK_WIDTH,
+    cursorFraction,
+    cardWidth,
+  );
+  const handMarginList = handMargins(handLayoutState, hand.length, cardWidth);
+  const hiddenCards = handLayoutState.hiddenLeft + handLayoutState.hiddenRight;
 
   // Rhythm nudges go only to the client that has to act: uncovered attacks for
   // the defender, the whole hand for the attacker who owes a play. The pulse
@@ -445,6 +626,8 @@ export function GameTable({
       data-my-id={myId}
       data-chaos={chaosMode ? 'true' : 'false'}
       data-dragging={dragCard ? 'true' : 'false'}
+      data-texture={settings.tableTexture}
+      style={{ '--table-filter': getTableFilterCss(settings.tableFilters) }}
       ref={arenaRef}
       onDragOver={draggable ? magnetize : undefined}
       onDragEnd={draggable ? clearSnap : undefined}
@@ -483,7 +666,16 @@ export function GameTable({
               </div>
               <div class="opponent-cards" aria-label={`${opponent.name}'s cards`}>
                 {Array.from({ length: opponent.cardCount }, (_, index) => (
-                  <CardBack key={index} />
+                  <span
+                    key={index}
+                    class="opponent-card"
+                    style={{
+                      marginLeft:
+                        index === 0 ? '0px' : `-${opponentOverlap(opponent.cardCount)}px`,
+                    }}
+                  >
+                    <CardBack />
+                  </span>
                 ))}
               </div>
               <div class="seat-meta">
@@ -583,32 +775,6 @@ export function GameTable({
         ) : null}
       </section>
 
-      <aside class="table-deck" data-zone="table-deck" aria-label="Talon">
-        <div class="deck-stack" data-testid="deck-t-shape" data-layout="t-shape">
-          <div class="talon-stack">
-            <CardBack class="talon-back talon-back-second" />
-            <CardBack class="talon-back" />
-            <span class="talon-count" data-testid="talon-count">
-              {talonCount}
-            </span>
-          </div>
-          {talonCount > 0 && bottomTrumpCard ? (
-            <div class="bottom-trump" aria-label="Bottom trump card">
-              <div class="bottom-trump-card" data-rotated="true">
-                <Card suit={bottomTrumpCard.suit} rank={bottomTrumpCard.rank} trump />
-              </div>
-            </div>
-          ) : null}
-        </div>
-        <div
-          class={`trump-badge ${isRedSuit(trumpSuit) ? 'red' : 'black'}`}
-          data-suit={trumpSuit.toLowerCase()}
-        >
-          <span>Trump</span>
-          <span class="trump-symbol">{suitSymbol(trumpSuit)}</span>
-        </div>
-      </aside>
-
       <section class={handClasses.join(' ')} data-zone="player-hand" aria-label="Your hand">
         <span
           class={`hand-clock${viewerOnClock ? ' active' : ''}`}
@@ -617,32 +783,62 @@ export function GameTable({
         >
           {formatSeatClock(viewerOnClock ? activeSeconds : 15)}
         </span>
-        <div class={handCardClasses.join(' ')}>
-        {hand.map((card, index) => (
-          <Card
-            key={`${cardKey(card)}-${index}`}
-            suit={card.suit}
-            rank={card.rank}
-            trump={isTrumpCard(card, trumpSuit)}
-            selected={selectedKeys.includes(cardKey(card))}
-            playable={playableKeys.includes(cardKey(card))}
-            onClick={onCardClick ? () => onCardClick(card) : undefined}
-            onDoubleClick={onCardDoubleClick ? () => onCardDoubleClick(card) : undefined}
-            draggable={draggable}
-            onDragStart={(event) => {
-              setDragCard(card);
-              if (event.dataTransfer) {
-                // A move drag keeps the pointer cursor instead of the copy arrow.
-                event.dataTransfer.effectAllowed = 'move';
-                event.dataTransfer.setData('text/plain', cardKey(card));
-              }
-            }}
-            onDragEnd={() => {
-              setDragCard(null);
-              setSnapZone(null);
-            }}
-          />
-        ))}
+        <div
+          class={handCardClasses.join(' ')}
+          data-overlap={handLayoutState.overlap}
+          data-hidden-left={handLayoutState.hiddenLeft}
+          data-hidden-right={handLayoutState.hiddenRight}
+          ref={handRef}
+          onMouseMove={
+            hiddenCards > 0
+              ? (event) => {
+                  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+                  if (rect.width <= 0) return;
+                  const fraction = (event.clientX - rect.left) / rect.width;
+                  setCursorFraction(Math.min(1, Math.max(0, fraction)));
+                }
+              : undefined
+          }
+          onMouseLeave={hiddenCards > 0 ? () => setCursorFraction(0.5) : undefined}
+        >
+        {hand.map((card, index) => {
+          const hidden =
+            index < handLayoutState.hiddenLeft ||
+            index >= handLayoutState.hiddenLeft + handLayoutState.visibleCount;
+          return (
+            <div
+              key={`${cardKey(card)}-${index}`}
+              class="hand-slot"
+              data-hidden={hidden ? 'true' : 'false'}
+              data-index={index}
+              aria-hidden={hidden ? 'true' : undefined}
+              style={{ marginLeft: `${handMarginList[index]}px` }}
+            >
+              <Card
+                suit={card.suit}
+                rank={card.rank}
+                trump={isTrumpCard(card, trumpSuit)}
+                selected={selectedKeys.includes(cardKey(card))}
+                playable={playableKeys.includes(cardKey(card))}
+                onClick={onCardClick ? () => onCardClick(card) : undefined}
+                onDoubleClick={onCardDoubleClick ? () => onCardDoubleClick(card) : undefined}
+                draggable={draggable}
+                onDragStart={(event) => {
+                  setDragCard(card);
+                  if (event.dataTransfer) {
+                    // A move drag keeps the pointer cursor instead of the copy arrow.
+                    event.dataTransfer.effectAllowed = 'move';
+                    event.dataTransfer.setData('text/plain', cardKey(card));
+                  }
+                }}
+                onDragEnd={() => {
+                  setDragCard(null);
+                  setSnapZone(null);
+                }}
+              />
+            </div>
+          );
+        })}
         </div>
       </section>
 

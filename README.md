@@ -54,7 +54,7 @@ Press `Ctrl+C` to stop both servers cleanly.
 
 ### Appearance & Audio Submenus
 - **Theme:** `Device theme` (follows the OS), `Light`, or `Dark`, plus a global `Roundness` slider (`0–16 px`) that reshapes panels, buttons and inputs on every page.
-- **Table:** Six felt textures — `Emerald Felt` (default), `Midnight Navy`, `Burgundy Velvet`, `Charcoal Slate`, `Forest Moss`, `Vintage Oak`. `Brightness`, `Contrast` and `Hue` sliders retune the felt live: every texture preview swatch shows the same filter as the table, so you can compare presets before selecting one.
+- **Table:** Six felt textures — `Emerald Felt` (default), `Midnight Navy`, `Burgundy Velvet`, `Charcoal Slate`, `Forest Moss`, `Vintage Oak`. `Brightness`, `Contrast` and `Hue` sliders retune the felt live: every texture preview swatch and the live game table itself pick up the selected texture and filters instantly, and only the felt is filtered — cards keep their true colours.
 - **Card Back:** Thirteen designs split into the original monochrome set (`Classic Hatch` default, `Royal Diamond`, `Celtic Weave`, `Hex Mesh`, `Chevron`, `Starburst`) and vibrant gradient backs (`Classic Crimson`, `Royal Sapphire`, `Emerald Gold`, `Sunset Prism`, `Amethyst Nebula`, `Cyber Neon`, `Coral Wave`). The choice applies to every face-down card in the app.
 - **Sound:** `Master volume` slider plus five sound packs (`Classic Felt`, `Arcade 8-Bit`, `Sci-Fi Synth`, `Acoustic Pluck`, `Modern Minimal`). Choosing a pack plays a random sample from that pack immediately, and dragging the volume slider auditions a sample at the new level.
 
@@ -81,10 +81,10 @@ Press `Ctrl+C` to stop both servers cleanly.
     - All cards in play (`tablePairs`) and drop outlines are anchored in front of the currently defending player's seat (or directly above your hand at the bottom when you are defending).
     - When reflection (`Perevod`) is legal, a card-sized **Reflection Outline** with a directional arrow pointing toward the next receiver appears immediately to the right of the attacking cards.
   - **Bottom Row:**
-    - **Bottom-Left:** The **Talon Deck** (remaining draw count) and perpendicular face-up **Trump Card**.
     - **Bottom-Center:** Your active **Hand** (trump cards feature a subtle golden border glow and corner badge). A gentle pulsing glow around your hand (when attacking) or around uncovered attacking cards (when defending) indicates that the game is waiting on your move.
     - **Bottom-Right:** Client-side **Hand Sorting Controls** and contextual action buttons.
-- **Right Sidebar:** Displays the large digital **15-Second Turn Clock (`00:XX`)** and match results (`Winners` list and final `Durak`).
+- **Right Sidebar:** From top to bottom: the large digital **15-Second Turn Clock (`00:XX`)**, the **PLAYERS** list with presence dots, the **Talon Deck** stack, and the match results (`Winners` list and final `Durak`).
+  - The deck is drawn vertically with the revealed **Trump Card** lying horizontally and sticking out to its right (their left edges line up); the suit-specific `TRUMP` badge sits clearly below both, with no overlap.
 
 ### Card Faces
 - Number cards (`6`–`10`, plus `2`–`5` in 4-player games) show one suit pip per rank; aces show a single large ornate pip.
@@ -101,7 +101,10 @@ Press `Ctrl+C` to stop both servers cleanly.
 - **Contextual Action Buttons (`Surrender` / `Pass`):**
   - **Surrender:** Appears next to your hand only when you are the defender facing uncovered attacking cards. Clicking it picks up all table cards after any final throw-ins.
   - **Pass:** Appears next to your hand only when you are an attacker and all current table cards are covered (or the defender has surrendered) to end your throw-in turn early.
+- **Single-Row Hand Overlap:** Your hand never wraps onto a second row. Neighbouring cards overlap by `8px` by default and tighten only as far as the top-left rank/suit index stays readable. If even that cannot fit, the surplus cards stack at 100% overlap behind the readable row, and moving the cursor left-to-right slides them from the hidden right stack to the hidden left stack (and back). Opponent hands sit in a fixed-size box and overlap more as they hold more cards, without following the cursor.
+- **Presence Dots:** Each name in the `PLAYERS` list carries a dot that is green while that player is present — their window is focused and the mouse or keyboard moved within the last 30 seconds — and grey otherwise.
 - **15-Second Turn Clock & Auto-Actions:**
+  - Only the player being waited on sees the clock count down; every other seat — including your right-sidebar clock when it is someone else's turn — stays frozen at `00:15`.
   - Resets to `00:15` on every move and plays a subtle per-second tick during the final 5 seconds (`00:05`–`00:01`).
   - If `00:00` is reached, the server automatically executes the default action (random opening attack, `Surrender` for a defender, or `Pass` for a thrower).
   - Automatic state transitions (such as forced auto-surrender) include a 3-second visual delay so table updates remain easy to follow.
