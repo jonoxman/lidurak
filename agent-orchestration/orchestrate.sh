@@ -19,6 +19,9 @@ done
 mkdir -p .tickets .reviews .reviews/feedback_archive
 echo "$INITIAL_WORKERS" > .reviews/target_workers
 
+# Re-arm the single-email notification latch on fresh orchestrator startup
+rm -f .reviews/alert_sent.latch
+
 if [ -f "$PROJECT_ROOT/agent-orchestration/.env" ]; then
   set -a
   # shellcheck disable=SC1090
@@ -43,6 +46,18 @@ agent_gh() {
   else
     gh "$@"
   fi
+}
+
+send_alert() {
+  local SUBJECT=$1
+  local BODY=$2
+  if [ -x "$PROJECT_ROOT/agent-orchestration/notify.sh" ]; then
+    "$PROJECT_ROOT/agent-orchestration/notify.sh" "$SUBJECT" "$BODY" || true
+  fi
+}
+
+reset_alert_latch() {
+  rm -f "$PROJECT_ROOT/.reviews/alert_sent.latch"
 }
 
 retry_git_push() {
@@ -173,6 +188,12 @@ try_agy_call() {
   if [ -s "$OUT_FILE" ] && grep -qE "$EXPECT_PATTERN" "$OUT_FILE"; then
     return 0
   fi
+
+  # Check if Antigravity CLI explicitly reported an authentication / login failure
+  if grep -qiE "not logged in|unauthenticated|auth login|Please login|invalid_grant|401 Unauthorized" "$ERR_LOG" "$OUT_FILE" 2>/dev/null; then
+    send_alert "Antigravity Login Required" "Antigravity CLI (agy) reported an authentication error while calling ${MODEL}. Please run 'agy auth login' in WSL."
+  fi
+
   return 1
 }
 
@@ -203,7 +224,8 @@ run_agy_pool() {
       fi
       echo "🔀 [${ROLE}] Model ${MODEL} unavailable or rate-limited; advancing to next pool model..."
     done
-    echo "💤 All 3 model pools exhausted or offline. Sleeping 5 minutes before retrying..."
+    echo "💤 All 3 model pools exhausted or offline. Sending single notification (if not already sent) and sleeping 5 minutes..."
+    send_alert "Antigravity Quota Exhausted or Offline (${ROLE})" "All models across all 3 Antigravity pools (${CHAIN[*]}) failed or hit quota limits during role ${ROLE}. The orchestrator is sleeping and retrying every 5 minutes. Please check 'agy' login or quota status."
     sleep 300
   done
 }
@@ -227,6 +249,8 @@ admit_and_send_prompt() {
 
     local READY_CHECKS=0
     local LOGGED_IN_NOW=0
+    local AUTO_RESTORE_ATTEMPTED=0
+
     while true; do
       if ! docker exec "$CONTAINER" tmux has-session -t buff 2>/dev/null; then
         docker exec "$CONTAINER" tmux new-session -d -s buff "NODE_OPTIONS='--dns-result-order=ipv4first' freebuff"
@@ -254,9 +278,26 @@ admit_and_send_prompt() {
 
       if echo "$SCREEN" | grep -qiE "Log in|Sign in|visit https://|Press Enter to login|Waiting for login|authenticate|Open this link|not authenticated"; then
         READY_CHECKS=0
+        # First attempt: try restoring credentials from .env and restarting TUI once before bothering the human
+        if [ "$AUTO_RESTORE_ATTEMPTED" -eq 0 ]; then
+          AUTO_RESTORE_ATTEMPTED=1
+          echo "[Worker ${WORKER_ID}] 🔄 Login screen detected; attempting automatic credential restore from .env first..."
+          AUTH_B64=$(grep '^FREEBUFF_AUTH_B64=' "$PROJECT_ROOT/agent-orchestration/.env" 2>/dev/null | head -n 1 | cut -d= -f2- | tr -d '"' || true)
+          if [ -n "$AUTH_B64" ]; then
+            printf '%s' "$AUTH_B64" | base64 -d | tar -xzf - -C "$PROJECT_ROOT/agent-orchestration/.runtime/freebuff-home" 2>/dev/null || true
+            docker exec "$CONTAINER" tmux kill-session -t buff 2>/dev/null || true
+            sleep 3
+            docker exec "$CONTAINER" tmux new-session -d -s buff "NODE_OPTIONS='--dns-result-order=ipv4first' freebuff"
+            sleep 6
+            continue
+          fi
+        fi
+
+        # If auto-restore didn't clear the login screen, notify human once (latch-protected)
         LOGGED_IN_NOW=1
         echo "🔐 Log in once in Worker-${WORKER_ID} (Tab ${WORKER_ID}) — auto-saves to .env for all workers!" > "$STATUS_FILE"
         echo "[Worker ${WORKER_ID}] 🔐 Waiting for one-time login in Tab ${WORKER_ID}..."
+        send_alert "FreeBuff Login Required (Worker ${WORKER_ID})" "FreeBuff's authentication token has expired and requires a manual login in Window 2 (Worker-${WORKER_ID}, Tab ${WORKER_ID}). Once you log in once, the new token will be saved to .env for all workers automatically."
         sleep 4
         continue
       fi
@@ -275,8 +316,10 @@ admit_and_send_prompt() {
       sleep 2
     done
 
+    # If the user completed a manual login, persist the new token and re-arm the notification latch!
     if [ "$LOGGED_IN_NOW" -eq 1 ]; then
       ./agent-orchestration/save-auth.sh >/dev/null 2>&1 || true
+      reset_alert_latch
     fi
 
     echo "$PREV_STATUS" > "$STATUS_FILE"
@@ -357,6 +400,8 @@ run_worker_test_gate() {
   local RAW_LOG="${WT_DIR}/.reviews/local_test_raw.log"
   local CLEAN_LOG="${WT_DIR}/.reviews/local_test_clean.log"
   local REPORT_FILE="${WT_DIR}/.reviews/test_failure_report.md"
+  local CODE_FENCE
+  CODE_FENCE=$(printf '\x60\x60\x60')
 
   echo "[Worker ${WORKER_ID}] 🧪 Running deterministic local test gate..."
   rm -f "$RAW_LOG" "$CLEAN_LOG" "$REPORT_FILE"
@@ -370,14 +415,14 @@ run_worker_test_gate() {
 - **Failed Stage:** Backend Scala Test Suite (\`cd /workspace/backend && sbt -batch test\`)
 
 ## Extracted Failing Tests & Compiler Errors
-~~~text
+${CODE_FENCE}text
 $(grep -E '(\[error\]|==> X|FAILED|Exception|Error:)' "$CLEAN_LOG" | tail -n 60 || echo "See tail output below.")
-~~~
+${CODE_FENCE}
 
 ## Last 90 Lines of Output
-~~~text
+${CODE_FENCE}text
 $(tail -n 90 "$CLEAN_LOG")
-~~~
+${CODE_FENCE}
 REPORT_EOF
       echo "[Worker ${WORKER_ID}] ❌ Backend 'sbt test' FAILED!"
       return 1
@@ -393,14 +438,14 @@ REPORT_EOF
 - **Failed Stage:** Frontend Test Suite (\`cd /workspace/frontend && npm test -- --run\`)
 
 ## Extracted Failing Suites & Assertions
-~~~text
+${CODE_FENCE}text
 $(grep -E '(FAIL|AssertionError|Error:|TS[0-9]+:|✕|×)' "$CLEAN_LOG" | tail -n 60 || echo "See tail output below.")
-~~~
+${CODE_FENCE}
 
 ## Last 90 Lines of Output
-~~~text
+${CODE_FENCE}text
 $(tail -n 90 "$CLEAN_LOG")
-~~~
+${CODE_FENCE}
 REPORT_EOF
       echo "[Worker ${WORKER_ID}] ❌ Frontend 'npm test' FAILED!"
       return 1
@@ -422,7 +467,7 @@ process_ticket_on_worker() {
   local STATUS_FILE=".reviews/worker_${WORKER_ID}.status"
 
   echo "🔨 Implementing ${TICKET_NAME}" > "$STATUS_FILE"
-  echo "[Worker ${WORKER_ID}] 🎬 Starting ${TICKET_NAME} on branch${BRANCH_NAME}..."
+  echo "[Worker ${WORKER_ID}] 🎬 Starting ${TICKET_NAME} on branch ${BRANCH_NAME}..."
 
   (
     cd "$WT_DIR"
@@ -451,6 +496,7 @@ process_ticket_on_worker() {
       TEST_RETRIES=$(expr "$TEST_RETRIES" + 1)
       if [ "$TEST_RETRIES" -gt "$MAX_REVIEW_ROUNDS" ]; then
         echo "❌ Failed test gate on ${TICKET_NAME}" > "$STATUS_FILE"
+        send_alert "Worker ${WORKER_ID} Halted — Test Gate Failed on ${TICKET_NAME}" "Ticket ${TICKET_NAME} failed the automated local unit test gate ${TEST_RETRIES} consecutive times on Worker ${WORKER_ID}. Please inspect ${WT_DIR}/.reviews/test_failure_report.md."
         return 1
       fi
       local FIX_TESTS_PROMPT="🚨 AUTOMATED TEST GATE REJECTION: You marked @.tickets/${TICKET_NAME}.md as DONE, but the test suite FAILED. Read @.reviews/test_failure_report.md, fix the broken code/tests, update .reviews/agent_notes.md, and run: echo DONE > .tickets/STATUS"
@@ -464,7 +510,7 @@ process_ticket_on_worker() {
       git add -A
       git reset -- .reviews/ .tickets/ 2>/dev/null || true
       if ! git diff --cached --quiet; then
-        agent_git commit -m "feat(${TICKET_NAME}): round${ROUND} implementation" >/dev/null
+        agent_git commit -m "feat(${TICKET_NAME}): round ${ROUND} implementation" >/dev/null
       fi
     )
 
@@ -485,7 +531,6 @@ process_ticket_on_worker() {
           --body "## Ticket Specification
 $(cat "$TICKET_FILE")
 
----
 ## Implementer Notes (Worker ${WORKER_ID})
 ${NOTES_BODY}" >/dev/null 2>&1 || true
         PR_NUMBER=$(agent_gh pr list --head "$BRANCH_NAME" --json number --jq '.[0].number // empty' 2>/dev/null || true)
@@ -549,7 +594,7 @@ PROMPT_EOF
     cp "$REVIEW_FILE" "${WT_DIR}/.reviews/${TICKET_NAME}-review-${ROUND}.md"
 
     if [ "$USE_GITHUB_PRS" -eq 1 ] && [ -n "$PR_NUMBER" ]; then
-      agent_gh pr comment "$PR_NUMBER" --body "### 🤖 Automated Code Review (Round ${ROUND} by \`${ACTIVE_MODEL_USED}\`)
+      agent_gh pr comment "$PR_NUMBER" --body "### 🤖 Automated Code Review (Round ${ROUND} by ${ACTIVE_MODEL_USED})
 
 $(cat "$REVIEW_FILE")" >/dev/null 2>&1 || true
     fi
@@ -561,6 +606,7 @@ $(cat "$REVIEW_FILE")" >/dev/null 2>&1 || true
 
     if [ "$ROUND" -ge "$MAX_REVIEW_ROUNDS" ]; then
       echo "🛑 Max review rounds exceeded on ${TICKET_NAME}" > "$STATUS_FILE"
+      send_alert "Worker ${WORKER_ID} Halted — Max Review Rounds Exceeded on ${TICKET_NAME}" "Ticket ${TICKET_NAME} was not approved after ${MAX_REVIEW_ROUNDS} code review rounds on Worker ${WORKER_ID}. Please inspect .reviews/${TICKET_NAME}-review-${ROUND}.md."
       return 1
     fi
 
@@ -910,6 +956,9 @@ while true; do
 
   rm -f FEEDBACK.in_progress.md
 
+  ACTIVE_M=$(grep -oE "CURRENT ACTIVE MILESTONE: M[0-9]+" SPEC.md 2>/dev/null | head -n 1 | awk '{print $NF}' || echo "M1")
+  send_alert "Ready for Human Review (${ACTIVE_M})" "All current waves and pull requests for ${ACTIVE_M} have passed tests, passed AI code review, and merged into main. Test the build with ./play-local.sh, add notes to FEEDBACK.md, or type 'accept' in Window 1 to advance to the next milestone."
+
   echo "=================================================================="
   echo "🏆 ALL CURRENT WAVES COMPLETED, PRs MERGED, AND SYNCED TO GITHUB!"
   echo "=================================================================="
@@ -921,6 +970,9 @@ while true; do
   echo "   5. To sign off on this milestone and auto-start the next milestone, type 'accept'"
   echo "------------------------------------------------------------------"
   read -r -p "Press [ENTER] after saving FEEDBACK.md, or type 'accept' to advance to the next milestone: " USER_CHOICE
+
+  # Human responded! Re-arm the single-email notification latch for the next run
+  reset_alert_latch
 
   if [ "$USER_CHOICE" = "accept" ] || [ "$USER_CHOICE" = "approve" ]; then
     if ! advance_to_next_milestone; then
