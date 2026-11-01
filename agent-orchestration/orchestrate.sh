@@ -2,7 +2,7 @@
 set -u
 cd ~/agent-project
 
-INITIAL_WORKERS=1
+INITIAL_WORKERS=3
 while [ $# -gt 0 ]; do
   case "$1" in
     --workers|-w)
@@ -22,11 +22,10 @@ cleanup_on_interrupt() {
   echo ""
   echo "🛑 Interrupted by user (Ctrl+C). Terminating active worker jobs safely..."
   pkill -9 -P $$ 2>/dev/null || true
-  rm -f .reviews/worker_*.pid .reviews/worker_*.ticket
+  rm -f .reviews/worker_*.pid .reviews/worker_*.ticket .reviews/admission.lock
   if [ -f FEEDBACK.in_progress.md ]; then
     cp FEEDBACK.in_progress.md FEEDBACK.md
     rm -f FEEDBACK.in_progress.md
-    echo "♻️  Restored in-progress feedback back to FEEDBACK.md."
   fi
   exit 130
 }
@@ -52,7 +51,7 @@ else
 fi
 
 echo "=================================================================="
-echo "⚙️  Dynamic Workers    : ${INITIAL_WORKERS} (Scale live: ./agent-orchestration/scale-workers.sh <N>)"
+echo "⚙️  Dynamic Workers    : ${INITIAL_WORKERS} (Shared Session Vault: agent-orchestration/.freebuff-home)"
 echo "⚙️  Architect Routing  : ${PRIMARY_ARCHITECT_MODEL} -> Fallback: ${FALLBACK_MODEL}"
 echo "⚙️  Reviewer Routing   : ${PRIMARY_REVIEWER_MODEL} -> Fallback: ${FALLBACK_MODEL}"
 echo "=================================================================="
@@ -62,70 +61,144 @@ if [ "$USE_GITHUB_PRS" -eq 1 ]; then
   git fetch origin main 2>/dev/null || true
 fi
 
-wait_until_worker_tui_ready() {
+FREEBUFF_LAUNCH_CMD="HOME=/freebuff-home XDG_CONFIG_HOME=/freebuff-home/.config XDG_DATA_HOME=/freebuff-home/.local/share XDG_STATE_HOME=/freebuff-home/.local/state NODE_OPTIONS='--dns-result-order=ipv4first' freebuff"
+
+# Serialized session admission: ensures workers join the shared session one at a time without 409 collisions
+admit_and_send_prompt() {
   local WORKER_ID=$1
+  local PROMPT=$2
   local CONTAINER="freebuff_worker_${WORKER_ID}"
   local STATUS_FILE=".reviews/worker_${WORKER_ID}.status"
   local PREV_STATUS
   PREV_STATUS=$(cat "$STATUS_FILE" 2>/dev/null || echo "🔨 Working...")
 
-  if ! docker exec "$CONTAINER" tmux has-session -t buff 2>/dev/null; then
-    echo "[Worker ${WORKER_ID}] 🚀 Starting FreeBuff TUI inside ${CONTAINER} (IPv4-first)..."
-    docker exec "$CONTAINER" tmux new-session -d -s buff "NODE_OPTIONS='--dns-result-order=ipv4first' freebuff"
-    sleep 6
-  fi
+  (
+    flock -x 201
 
-  local STABLE_READY_CHECKS=0
+    if ! docker exec "$CONTAINER" tmux has-session -t buff 2>/dev/null; then
+      echo "[Worker ${WORKER_ID}] 🚀 Launching FreeBuff TUI with shared repo credentials..."
+      docker exec "$CONTAINER" tmux new-session -d -s buff "$FREEBUFF_LAUNCH_CMD"
+      sleep 6
+    fi
+
+    # 1. Wait until TUI is past splash/login/waiting-room screens
+    local READY_CHECKS=0
+    while true; do
+      if ! docker exec "$CONTAINER" tmux has-session -t buff 2>/dev/null; then
+        docker exec "$CONTAINER" tmux new-session -d -s buff "$FREEBUFF_LAUNCH_CMD"
+        sleep 6
+        continue
+      fi
+
+      local SCREEN
+      SCREEN=$(docker exec "$CONTAINER" tmux capture-pane -t buff -p 2>/dev/null || true)
+      if [ -z "$(echo "$SCREEN" | tr -d '[:space:]')" ]; then
+        READY_CHECKS=0
+        sleep 2
+        continue
+      fi
+
+      if echo "$SCREEN" | grep -qiE "admission_attempt_closed|session POST failed|This session start was cancelled|operation timed out"; then
+        READY_CHECKS=0
+        echo "[Worker ${WORKER_ID}] 🔄 Resetting closed admission attempt..."
+        docker exec "$CONTAINER" tmux kill-session -t buff 2>/dev/null || true
+        sleep 4
+        docker exec "$CONTAINER" tmux new-session -d -s buff "$FREEBUFF_LAUNCH_CMD"
+        sleep 6
+        continue
+      fi
+
+      if echo "$SCREEN" | grep -qiE "Log in|Sign in|visit https://|Press Enter to login|Waiting for login|authenticate|Open this link|not authenticated"; then
+        READY_CHECKS=0
+        echo "🔐 Log in once in Worker-${WORKER_ID} (Tab ${WORKER_ID}) — auto-saves to repo for all workers!" > "$STATUS_FILE"
+        echo "[Worker ${WORKER_ID}] 🔐 Waiting for one-time login in Tab ${WORKER_ID} (all other workers will inherit it)..."
+        sleep 4
+        continue
+      fi
+
+      if echo "$SCREEN" | grep -qiE "waiting room|queued|position in queue|Starting your model session|Connecting to|Initializing"; then
+        READY_CHECKS=0
+        echo "⏳ Admitting shared FreeBuff session (Worker-${WORKER_ID})..." > "$STATUS_FILE"
+        sleep 4
+        continue
+      fi
+
+      READY_CHECKS=$((READY_CHECKS + 1))
+      if [ $READY_CHECKS -ge 2 ]; then
+        break
+      fi
+      sleep 2
+    done
+
+    # 2. Send prompt with a single Enter while still holding admission lock
+    echo "$PREV_STATUS" > "$STATUS_FILE"
+    echo "[Worker ${WORKER_ID}] 📨 Submitting prompt to shared FreeBuff session..."
+    docker exec "$CONTAINER" tmux send-keys -t buff -l -- "${PROMPT}"
+    sleep 1
+    docker exec "$CONTAINER" tmux send-keys -t buff Enter
+
+    # 3. Hold admission lock briefly while "Starting your model session" completes so next worker doesn't 409
+    local ADMIT_WAIT=0
+    while [ $ADMIT_WAIT -lt 45 ]; do
+      sleep 3
+      ADMIT_WAIT=$((ADMIT_WAIT + 3))
+      local S_AFTER
+      S_AFTER=$(docker exec "$CONTAINER" tmux capture-pane -t buff -p 2>/dev/null || true)
+      if echo "$S_AFTER" | grep -qiE "Starting your model session"; then
+        continue
+      fi
+      break
+    done
+  ) 201>.reviews/admission.lock
+}
+
+run_worker_freebuff() {
+  local WORKER_ID=$1
+  local PROMPT=$2
+  local WT_DIR=".worktrees/worker-${WORKER_ID}"
+  local CONTAINER="freebuff_worker_${WORKER_ID}"
+
+  rm -f "${WT_DIR}/.tickets/STATUS"
 
   while true; do
-    if ! docker exec "$CONTAINER" tmux has-session -t buff 2>/dev/null; then
-      docker exec "$CONTAINER" tmux new-session -d -s buff "NODE_OPTIONS='--dns-result-order=ipv4first' freebuff"
-      sleep 6
-      continue
-    fi
+    admit_and_send_prompt "$WORKER_ID" "$PROMPT"
 
-    local SCREEN
-    SCREEN=$(docker exec "$CONTAINER" tmux capture-pane -t buff -p 2>/dev/null || true)
-    local NON_WS
-    NON_WS=$(echo "$SCREEN" | tr -d '[:space:]')
+    local ELAPSED=0
+    while [ $ELAPSED -lt $SESSION_TIMEOUT_SEC ]; do
+      sleep $POLL_INTERVAL_SEC
+      ELAPSED=$((ELAPSED + POLL_INTERVAL_SEC))
 
-    if [ -z "$NON_WS" ]; then
-      STABLE_READY_CHECKS=0
-      sleep 2
-      continue
-    fi
+      if [ -f "${WT_DIR}/.tickets/STATUS" ] && grep -q "DONE" "${WT_DIR}/.tickets/STATUS" 2>/dev/null; then
+        echo "[Worker ${WORKER_ID}] ✅ FreeBuff signaled DONE after ${ELAPSED}s!"
+        return 0
+      fi
 
-    if echo "$SCREEN" | grep -qiE "admission_attempt_closed|session POST failed|This session start was cancelled|operation timed out"; then
-      STABLE_READY_CHECKS=0
-      echo "[Worker ${WORKER_ID}] 🔄 Admission attempt closed/timed out during startup; restarting fresh FreeBuff session..."
+      if ! docker exec "$CONTAINER" tmux has-session -t buff 2>/dev/null; then
+        echo "[Worker ${WORKER_ID}] ⚠️  FreeBuff tmux exited early. Respawning in 6s..."
+        sleep 6
+        break
+      fi
+
+      SCREEN=$(docker exec "$CONTAINER" tmux capture-pane -t buff -p 2>/dev/null || true)
+
+      if echo "$SCREEN" | grep -qiE "Starting your model session"; then
+        continue
+      fi
+
+      if echo "$SCREEN" | grep -qiE "admission_attempt_closed|session POST failed|This session start was cancelled|operation timed out|not authenticated|Failed to start agent run|AI_APICallError|Message not sent|Session ended|superseded|Log in to continue"; then
+        echo "[Worker ${WORKER_ID}] 🔄 Session interrupted or timed out. Re-admitting cleanly in 6s..."
+        docker exec "$CONTAINER" tmux kill-session -t buff 2>/dev/null || true
+        sleep 6
+        break
+      fi
+    done
+
+    if [ $ELAPSED -ge $SESSION_TIMEOUT_SEC ]; then
+      echo "[Worker ${WORKER_ID}] 🔄 1-Hour limit reached. Restarting session with continuation prompt..."
       docker exec "$CONTAINER" tmux kill-session -t buff 2>/dev/null || true
-      sleep 5
-      docker exec "$CONTAINER" tmux new-session -d -s buff "NODE_OPTIONS='--dns-result-order=ipv4first' freebuff"
+      PROMPT="Your previous 1-hour session timed out. Run 'git status' and 'git diff' to inspect existing progress, finish remaining work, verify all tests pass, write .reviews/agent_notes.md, and run: echo DONE > .tickets/STATUS"
       sleep 6
-      continue
     fi
-
-    if echo "$SCREEN" | grep -qiE "Log in|Sign in|visit https://|Press Enter to login|Waiting for login|authenticate|Open this link|not authenticated"; then
-      STABLE_READY_CHECKS=0
-      echo "🔐 Log in inside Worker-${WORKER_ID} (Tab ${WORKER_ID}: Ctrl+A then ${WORKER_ID})" > "$STATUS_FILE"
-      echo "[Worker ${WORKER_ID}] 🔐 Waiting for login in Worker-${WORKER_ID} tab..."
-      sleep 4
-      continue
-    fi
-
-    if echo "$SCREEN" | grep -qiE "waiting room|queued|position in queue|Starting your model session|Connecting to|Initializing"; then
-      STABLE_READY_CHECKS=0
-      echo "⏳ Admitting FreeBuff model session (Worker-${WORKER_ID})..." > "$STATUS_FILE"
-      sleep 4
-      continue
-    fi
-
-    STABLE_READY_CHECKS=$((STABLE_READY_CHECKS + 1))
-    if [ $STABLE_READY_CHECKS -ge 2 ]; then
-      echo "$PREV_STATUS" > "$STATUS_FILE"
-      return 0
-    fi
-    sleep 3
   done
 }
 
@@ -169,7 +242,6 @@ try_agy_call() {
     if [ "$BYTES" -gt 500 ] && [ "$BYTES" -eq "$LAST_BYTES" ]; then
       STAGNANT_SEC=$((STAGNANT_SEC + 5))
       if [ $STAGNANT_SEC -ge 25 ] && grep -qE "$EXPECT_PATTERN" "$OUT_FILE" 2>/dev/null; then
-        echo "✅ ${MODEL} stream idle for 25s with valid output (${BYTES} bytes). Force-closing CLI..."
         kill_agy_tree "$AGY_PID"
         return 0
       fi
@@ -178,14 +250,9 @@ try_agy_call() {
     fi
     LAST_BYTES=$BYTES
 
-    if [ $((ELAPSED % 15)) -eq 0 ]; then
-      echo "   ⏳ ${MODEL} streaming... (${ELAPSED}s / ${AGY_TIMEOUT_SEC}s | ${BYTES} bytes)"
-    fi
-
     if [ $ELAPSED -ge $AGY_TIMEOUT_SEC ]; then
       kill_agy_tree "$AGY_PID"
       if [ -s "$OUT_FILE" ] && grep -qE "$EXPECT_PATTERN" "$OUT_FILE"; then
-        echo "♻️  Salvaged valid output written before timeout!"
         return 0
       fi
       return 1
@@ -193,7 +260,6 @@ try_agy_call() {
   done
 
   if [ -s "$OUT_FILE" ] && grep -qE "$EXPECT_PATTERN" "$OUT_FILE"; then
-    echo "✅ ${MODEL} succeeded in ${ELAPSED}s."
     return 0
   fi
   return 1
@@ -283,64 +349,6 @@ REPORT_EOF
   return 0
 }
 
-run_worker_freebuff() {
-  local WORKER_ID=$1
-  local PROMPT=$2
-  local WT_DIR=".worktrees/worker-${WORKER_ID}"
-  local CONTAINER="freebuff_worker_${WORKER_ID}"
-
-  rm -f "${WT_DIR}/.tickets/STATUS"
-
-  while true; do
-    wait_until_worker_tui_ready "$WORKER_ID"
-
-    echo "[Worker ${WORKER_ID}] 📨 Sending ticket prompt to FreeBuff TUI..."
-    docker exec "$CONTAINER" tmux send-keys -t buff -l -- "${PROMPT}"
-    sleep 1
-    docker exec "$CONTAINER" tmux send-keys -t buff Enter
-
-    local ELAPSED=0
-    while [ $ELAPSED -lt $SESSION_TIMEOUT_SEC ]; do
-      sleep $POLL_INTERVAL_SEC
-      ELAPSED=$((ELAPSED + POLL_INTERVAL_SEC))
-
-      if [ -f "${WT_DIR}/.tickets/STATUS" ] && grep -q "DONE" "${WT_DIR}/.tickets/STATUS" 2>/dev/null; then
-        echo "[Worker ${WORKER_ID}] ✅ FreeBuff signaled DONE after ${ELAPSED}s!"
-        return 0
-      fi
-
-      if ! docker exec "$CONTAINER" tmux has-session -t buff 2>/dev/null; then
-        echo "[Worker ${WORKER_ID}] ⚠️  FreeBuff tmux exited early. Respawning in 6s..."
-        sleep 6
-        break
-      fi
-
-      SCREEN=$(docker exec "$CONTAINER" tmux capture-pane -t buff -p 2>/dev/null || true)
-
-      if echo "$SCREEN" | grep -qiE "Starting your model session"; then
-        if [ $((ELAPSED % 30)) -eq 0 ]; then
-          echo "[Worker ${WORKER_ID}] ⏳ FreeBuff is starting model session (message is saved and queued)..."
-        fi
-        continue
-      fi
-
-      if echo "$SCREEN" | grep -qiE "admission_attempt_closed|session POST failed|This session start was cancelled|operation timed out|not authenticated|Failed to start agent run|AI_APICallError|Message not sent|Session ended|superseded|Log in to continue"; then
-        echo "[Worker ${WORKER_ID}] 🔄 FreeBuff session admission closed or timed out. Restarting clean FreeBuff session in 6s..."
-        docker exec "$CONTAINER" tmux kill-session -t buff 2>/dev/null || true
-        sleep 6
-        break
-      fi
-    done
-
-    if [ $ELAPSED -ge $SESSION_TIMEOUT_SEC ]; then
-      echo "[Worker ${WORKER_ID}] 🔄 1-Hour limit reached. Restarting session with continuation prompt..."
-      docker exec "$CONTAINER" tmux kill-session -t buff 2>/dev/null || true
-      PROMPT="Your previous 1-hour session timed out. Run 'git status' and 'git diff' to inspect existing progress, finish remaining work, verify all tests pass, write .reviews/agent_notes.md, and run: echo DONE > .tickets/STATUS"
-      sleep 6
-    fi
-  done
-}
-
 process_ticket_on_worker() {
   local WORKER_ID=$1
   local TICKET_FILE=$2
@@ -416,7 +424,6 @@ $(cat "$TICKET_FILE")
 ## Implementer Notes (Worker ${WORKER_ID})
 ${NOTES_BODY}" >/dev/null 2>&1 || true
         PR_NUMBER=$(gh pr list --head "$BRANCH_NAME" --json number --jq '.[0].number // empty' 2>/dev/null || true)
-        echo "[Worker ${WORKER_ID}] 📬 Opened GitHub Pull Request #${PR_NUMBER} for ${TICKET_NAME}!"
       fi
     fi
 
@@ -499,7 +506,6 @@ $(cat "$REVIEW_FILE")" >/dev/null 2>&1 || true
     ROUND=$((ROUND + 1))
   done
 
-  # === STAGE 3: BULLETPROOF SERIALIZED MERGE INTO MAIN & REMOTE BRANCH CLEANUP ===
   echo "🔒 Acquiring merge lock for ${TICKET_NAME}..." > "$STATUS_FILE"
   (
     flock -x 200
@@ -530,19 +536,16 @@ $(cat "$REVIEW_FILE")" >/dev/null 2>&1 || true
       cd "$WT_DIR"
     fi
 
-    # Detach worktree HEAD so the branch is unlocked and can be cleanly merged & deleted
     git checkout --detach HEAD >/dev/null 2>&1
 
     cd ~/agent-project
     git checkout main >/dev/null 2>&1
-    # Merge the verified feature branch directly into main
     git merge --no-ff "$BRANCH_NAME" -m "Merge ${TICKET_NAME} (PR #${PR_NUMBER:-local})" >/dev/null 2>&1
     touch "$DONE_MARKER"
-    git add "$DONE_MARKER" "$TICKET_FILE" 2>/dev/null || true
+    git add "$DONE_MARKER" "$TICKET_FILE" "agent-orchestration/.freebuff-home" 2>/dev/null || true
     git commit -m "chore(tickets): mark ${TICKET_NAME} completed" >/dev/null 2>&1 || true
 
     if [ "$USE_GITHUB_PRS" -eq 1 ]; then
-      # Push updated branch first so GitHub marks PR as Merged when main is pushed, then delete remote branch
       git push origin "$BRANCH_NAME" >/dev/null 2>&1 || true
       git push origin main >/dev/null 2>&1
       git push origin --delete "$BRANCH_NAME" >/dev/null 2>&1 || true
@@ -646,7 +649,7 @@ PROMPT_EOF
 RESET_EOF
 
   git checkout main 2>/dev/null || true
-  git add .tickets/ FEEDBACK.md FEEDBACK.backup.md 2>/dev/null || true
+  git add .tickets/ FEEDBACK.md FEEDBACK.backup.md "agent-orchestration/.freebuff-home" 2>/dev/null || true
   git commit -m "chore(tickets): add feedback wave tickets ${TIMESTAMP}" >/dev/null 2>&1 || true
   [ "$USE_GITHUB_PRS" -eq 1 ] && (git push origin main >/dev/null 2>&1 || true)
 }
@@ -671,8 +674,7 @@ while true; do
 
     for WAVE_NUM in "${UNIQUE_WAVES[@]}"; do
       echo "=================================================================="
-      echo "🌊 EXECUTING WAVE ${WAVE_NUM} (Dynamic Worker Pool Active)"
-      echo "   Tip: Run './agent-orchestration/scale-workers.sh <N>' in Window 4 to add/remove workers live!"
+      echo "🌊 EXECUTING WAVE ${WAVE_NUM} (Shared Repo Vault + Serialized Admission)"
       echo "=================================================================="
 
       rm -f .reviews/worker_*.pid .reviews/worker_*.ticket
@@ -731,7 +733,7 @@ while true; do
               echo "$!" > ".reviews/worker_${w_id}.pid"
               ACTIVE_COUNT=$((ACTIVE_COUNT + 1))
               DISPATCHED=1
-              sleep 5
+              sleep 3
               break
             fi
           done
