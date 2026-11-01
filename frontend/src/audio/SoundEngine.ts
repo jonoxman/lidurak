@@ -100,7 +100,7 @@ interface EventSpec {
   stagger?: number;
 }
 
-interface SoundPack extends SoundPackSummary {
+export interface SoundPack extends SoundPackSummary {
   events: Record<SoundEvent, EventSpec>;
 }
 
@@ -601,6 +601,20 @@ export const SOUND_PACKS: readonly SoundPack[] = [
 
 export const DEFAULT_SOUND_PACK_ID: SoundPackId = 'classic-felt';
 
+/**
+ * Effects used for the pack/volume previews in the profile menu. The sample is
+ * picked at random from this repertoire so repeated clicks stay interesting.
+ */
+export const SAMPLE_EVENTS: readonly SoundEvent[] = [
+  'cardPlay',
+  'cardDefend',
+  'cardRedirect',
+  'pass',
+  'boutWon',
+  'clockTick',
+  'talonDraw',
+];
+
 function findPack(id: string): SoundPack | undefined {
   return SOUND_PACKS.find((pack) => pack.id === id);
 }
@@ -615,6 +629,8 @@ export class SoundEngine {
   private readonly storage: Storage | null;
   private readonly injectedContext: AudioContext | null;
   private unlockTarget: EventTarget | null = null;
+  /** One-off output bus used while previewing a sound at another volume. */
+  private playDestination: AudioNode | null = null;
   private readonly unlockHandler = () => this.unlock();
 
   constructor(options: SoundEngineOptions = {}) {
@@ -830,6 +846,46 @@ export class SoundEngine {
     this.playRepeated(this.pack.events.clockTick, 1);
   }
 
+  /**
+   * Plays one randomly chosen effect as a preview, e.g. when selecting a sound
+   * pack or dragging the volume slider. `pack` may be a pack object or an id;
+   * when omitted the active pack is used. A `volume` argument previews the
+   * effect at that master volume without changing the persisted volume.
+   */
+  playSampleSound(pack?: SoundPack | SoundPackId | string, volume?: number): void {
+    const resolved = (typeof pack === 'string' ? findPack(pack) : pack) ?? this.pack;
+    const event = SAMPLE_EVENTS[Math.floor(Math.random() * SAMPLE_EVENTS.length)] ?? 'cardPlay';
+    const spec = resolved.events[event];
+    if (!spec) return;
+
+    const previewVolume =
+      volume === undefined || !Number.isFinite(volume) ? null : clampVolume(volume);
+    const context = this.acquire(previewVolume ?? this.volume);
+    if (!context) return;
+
+    const previousDestination = this.playDestination;
+    if (previewVolume !== null) {
+      this.playDestination = this.previewBus(context, previewVolume);
+    }
+    try {
+      this.render(context, this.now(context), spec);
+    } finally {
+      this.playDestination = previousDestination;
+    }
+  }
+
+  /** Gain node that applies a one-off preview volume straight to the output. */
+  private previewBus(context: AudioContext, volume: number): AudioNode | null {
+    try {
+      const gain = context.createGain();
+      gain.gain.value = volume;
+      gain.connect(context.destination);
+      return gain;
+    } catch {
+      return null;
+    }
+  }
+
   // --- Legacy method names ---------------------------------------------
 
   /** @deprecated Use [[playCardPlay]]. */
@@ -892,8 +948,8 @@ export class SoundEngine {
   }
 
   /** Returns a usable context, creating/resuming it and honoring mute/volume. */
-  private acquire(): AudioContext | null {
-    if (!this.enabled || this.volume <= 0) return null;
+  private acquire(effectiveVolume: number = this.volume): AudioContext | null {
+    if (!this.enabled || effectiveVolume <= 0) return null;
     const context = this.ensureContext();
     if (!context) return null;
     if (context.state === 'suspended') {
@@ -932,8 +988,9 @@ export class SoundEngine {
     }
   }
 
+  /** Where effect nodes connect: an open preview bus, else the master gain. */
   private destination(context: AudioContext): AudioNode {
-    return this.master ?? context.destination;
+    return this.playDestination ?? this.master ?? context.destination;
   }
 
   private now(context: AudioContext): number {

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/preact';
 import { HeaderBar, NAV_MENUS, PROFILE_ITEMS, connectionLevel } from '../components/HeaderBar';
-import { CardBack } from '../components/CardBack';
+import { ALL_CARD_BACK_PATTERNS, CardBack } from '../components/CardBack';
 import { soundEngine } from '../audio/SoundEngine';
 import {
   clampRoundness,
@@ -32,13 +32,22 @@ describe('HeaderBar', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders the LIDURAK home logo and the four navigation menus', () => {
+  it('renders the LIDURAK brand with the SVG logo left of the wordmark', () => {
     render(<HeaderBar />);
 
-    const logo = screen.getByRole('link', { name: 'LIDURAK' });
-    expect(logo.getAttribute('href')).toBe('#/');
-    expect(NAV_MENUS.map((menu) => menu.label)).toEqual(['PLAY', 'PUZZLES', 'LEARN', 'WATCH']);
+    const brand = screen.getByRole('link', { name: 'LIDURAK' });
+    expect(brand.getAttribute('href')).toBe('#/');
+    expect(brand.classList.contains('header-brand')).toBe(true);
 
+    const logo = screen.getByTestId('header-logo');
+    expect(logo.tagName.toLowerCase()).toBe('svg');
+    expect(logo.classList.contains('header-logo')).toBe(true);
+    expect(brand.contains(logo)).toBe(true);
+
+    // The mark sits immediately before the wordmark inside the same link.
+    expect(logo.nextElementSibling?.textContent).toBe('LIDURAK');
+
+    expect(NAV_MENUS.map((menu) => menu.label)).toEqual(['PLAY', 'PUZZLES', 'LEARN', 'WATCH']);
     for (const menu of NAV_MENUS) {
       const trigger = screen.getByRole('button', { name: menu.label });
       expect(trigger.getAttribute('aria-haspopup')).toBe('true');
@@ -95,15 +104,44 @@ describe('HeaderBar', () => {
     expect(screen.queryByRole('menu', { name: 'Profile menu' })).toBeNull();
   });
 
-  it('shows ping, server delay and a four-bar connection indicator', () => {
+  it('replaces the profile list in place with a submenu that has a back header', () => {
+    render(<HeaderBar />);
+    openSubmenu('Sound');
+
+    // The main rows are gone; the submenu body occupies the same panel.
+    const menu = screen.getByRole('menu', { name: 'Profile menu' });
+    expect(within(menu).queryByRole('menuitem', { name: 'Profile' })).toBeNull();
+    expect(screen.getByTestId('submenu-sound')).toBeTruthy();
+
+    const back = screen.getByTestId('submenu-back');
+    expect(back.classList.contains('submenu-header')).toBe(true);
+    expect(back.querySelector('svg.submenu-chevron')).not.toBeNull();
+    expect(back.textContent).toContain('Sound');
+
+    fireEvent.click(back);
+
+    expect(screen.queryByTestId('submenu-sound')).toBeNull();
+    expect(
+      within(screen.getByRole('menu', { name: 'Profile menu' })).getByRole('menuitem', {
+        name: 'Profile',
+      }),
+    ).toBeTruthy();
+  });
+
+  it('shows uppercase PING and SERVER DELAY labels with a lowercase ms unit', () => {
     render(<HeaderBar pingMs={42} serverDelayMs={9} />);
     openProfile();
 
-    expect(screen.getByText('Ping: 42 ms')).toBeTruthy();
-    expect(screen.getByText('Server Delay: 9 ms')).toBeTruthy();
+    expect(screen.getByTestId('ping-label').textContent).toBe('PING');
+    expect(screen.getByTestId('server-delay-label').textContent).toBe('SERVER DELAY');
+    expect(screen.getByTestId('ping-value').textContent).toBe('42 ms');
+    expect(screen.getByTestId('server-delay-value').textContent).toBe('9 ms');
+
     const bars = screen.getByRole('img', { name: 'Connection strength: 4 of 4' });
     expect(bars.querySelectorAll('.signal-bar')).toHaveLength(4);
     expect(bars.querySelectorAll('.signal-bar[data-active="true"]')).toHaveLength(4);
+    // Nothing is animating until the tier changes.
+    expect(bars.classList.contains('connection-bars-updating')).toBe(false);
   });
 
   it('drops signal bars as latency worsens', () => {
@@ -120,7 +158,35 @@ describe('HeaderBar', () => {
     expect(bars.querySelectorAll('.signal-bar[data-active="true"]')).toHaveLength(1);
   });
 
-  it('controls volume and the five sound packs from the Sound submenu', () => {
+  it('lets the lag-switch override the ping and animate the bars on tier change', () => {
+    render(<HeaderBar pingMs={24} />);
+    openProfile();
+
+    const lag = screen.getByTestId('lag-switch') as HTMLInputElement;
+    expect(lag.min).toBe('0');
+    expect(lag.max).toBe('500');
+    expect(lag.value).toBe('24');
+
+    fireEvent.input(lag, { target: { value: '420' } });
+
+    expect(screen.getByTestId('ping-value').textContent).toBe('420 ms');
+    const bars = screen.getByRole('img', { name: 'Connection strength: 1 of 4' });
+    expect(bars.querySelectorAll('.signal-bar[data-active="true"]')).toHaveLength(1);
+    expect(bars.classList.contains('connection-bars-updating')).toBe(true);
+    expect(bars.getAttribute('data-updating')).toBe('true');
+
+    // Worsening from 1 to 1 bar keeps the tier: the counter is not re-pulsed.
+    fireEvent.input(lag, { target: { value: '0' } });
+    expect(screen.getByTestId('ping-value').textContent).toBe('0 ms');
+    expect(
+      screen.getByRole('img', { name: 'Connection strength: 4 of 4' }).classList.contains(
+        'connection-bars-updating',
+      ),
+    ).toBe(true);
+  });
+
+  it('previews a random sample when picking a pack and when dragging the volume', () => {
+    const sample = vi.spyOn(soundEngine, 'playSampleSound');
     render(<HeaderBar />);
     openSubmenu('Sound');
 
@@ -128,8 +194,19 @@ describe('HeaderBar', () => {
     const slider = within(panel).getByLabelText('Master volume') as HTMLInputElement;
     expect(Number(slider.value)).toBeCloseTo(0.7);
 
-    fireEvent.input(slider, { target: { value: '0.25' } });
-    expect(soundEngine.getVolume()).toBeCloseTo(0.25);
+    fireEvent.click(within(panel).getByRole('button', { name: 'Sci-Fi Synth' }));
+
+    expect(soundEngine.getSoundPack()).toBe('sci-fi-synth');
+    expect(sample).toHaveBeenCalledWith('sci-fi-synth', expect.any(Number));
+    expect(
+      within(panel).getByRole('button', { name: 'Sci-Fi Synth' }).getAttribute('aria-pressed'),
+    ).toBe('true');
+
+    sample.mockClear();
+    fireEvent.input(slider, { target: { value: '0.35' } });
+
+    expect(soundEngine.getVolume()).toBeCloseTo(0.35);
+    expect(sample).toHaveBeenCalledWith(undefined, 0.35);
 
     expect(within(panel).getAllByRole('button').map((button) => button.textContent)).toEqual([
       'Classic Felt',
@@ -138,13 +215,6 @@ describe('HeaderBar', () => {
       'Acoustic Pluck',
       'Modern Minimal',
     ]);
-
-    fireEvent.click(within(panel).getByRole('button', { name: 'Arcade 8-Bit' }));
-
-    expect(soundEngine.getSoundPack()).toBe('arcade-8bit');
-    expect(
-      within(panel).getByRole('button', { name: 'Arcade 8-Bit' }).getAttribute('aria-pressed'),
-    ).toBe('true');
   });
 
   it('switches themes and applies the roundness slider to the document', () => {
@@ -175,7 +245,7 @@ describe('HeaderBar', () => {
     expect(resolveTheme('device', false)).toBe('light');
   });
 
-  it('selects a table texture and adjusts the felt filters live', () => {
+  it('selects a table texture and previews the felt filters on every swatch', () => {
     render(<HeaderBar />);
     openSubmenu('Table');
 
@@ -190,6 +260,11 @@ describe('HeaderBar', () => {
       within(panel).getByRole('button', { name: 'Midnight Navy' }).getAttribute('aria-pressed'),
     ).toBe('true');
 
+    const swatch = panel.querySelector(
+      '[data-testid="texture-swatch-midnight-navy"]',
+    ) as HTMLElement;
+    expect(swatch.getAttribute('style')).toContain('brightness(1) contrast(1) hue-rotate(0deg)');
+
     fireEvent.input(within(panel).getByLabelText('Brightness'), { target: { value: '1.2' } });
     fireEvent.input(within(panel).getByLabelText('Contrast'), { target: { value: '0.8' } });
     fireEvent.input(within(panel).getByLabelText('Hue'), { target: { value: '25' } });
@@ -198,24 +273,36 @@ describe('HeaderBar', () => {
     expect(document.documentElement.style.getPropertyValue('--table-filter')).toBe(
       'brightness(1.2) contrast(0.8) hue-rotate(25deg)',
     );
+    expect(document.documentElement.style.getPropertyValue('--table-texture-bg')).toBe('#16203a');
+    // The preview swatches follow the sliders in real time.
+    expect(swatch.getAttribute('style')).toContain(
+      'brightness(1.2) contrast(0.8) hue-rotate(25deg)',
+    );
   });
 
-  it('selects one of the six card back patterns', () => {
+  it('selects one of the colourful card back designs', () => {
     render(<HeaderBar />);
     openSubmenu('Card Back');
 
     const panel = screen.getByTestId('submenu-cardback');
     const options = within(panel).getAllByRole('button');
-    expect(options).toHaveLength(6);
-    expect(options[0].getAttribute('aria-pressed')).toBe('true');
-    expect(panel.querySelectorAll('svg.card-back')).toHaveLength(6);
-
-    fireEvent.click(within(panel).getByRole('button', { name: 'royal-diamond' }));
-
-    expect(getSettings().cardBack).toBe('royal-diamond');
-    expect(document.documentElement.getAttribute('data-card-back')).toBe('royal-diamond');
+    expect(options).toHaveLength(ALL_CARD_BACK_PATTERNS.length);
+    expect(panel.querySelectorAll('svg.card-back')).toHaveLength(ALL_CARD_BACK_PATTERNS.length);
     expect(
-      within(panel).getByRole('button', { name: 'royal-diamond' }).getAttribute('aria-pressed'),
+      within(panel).getByRole('button', { name: 'Classic Hatch' }).getAttribute('aria-pressed'),
+    ).toBe('true');
+
+    fireEvent.click(within(panel).getByRole('button', { name: 'Royal Sapphire' }));
+
+    expect(getSettings().cardBack).toBe('royal-sapphire');
+    expect(document.documentElement.getAttribute('data-card-back')).toBe('royal-sapphire');
+    expect(
+      within(panel).getByRole('button', { name: 'Royal Sapphire' }).getAttribute('aria-pressed'),
+    ).toBe('true');
+    expect(
+      panel.querySelector('svg.card-back[data-pattern="royal-sapphire"]')!.getAttribute(
+        'data-colorful',
+      ),
     ).toBe('true');
   });
 

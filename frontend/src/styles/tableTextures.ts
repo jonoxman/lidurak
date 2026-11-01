@@ -108,6 +108,32 @@ export function textureFilter(filters: Partial<TableFilterSettings> = {}): strin
   return `brightness(${brightness}) contrast(${contrast}) hue-rotate(${hue}deg)`;
 }
 
+/**
+ * CSS `filter` for the felt, as consumed by both the arena and the header
+ * preview swatches. Alias of [[textureFilter]] kept as the settings-facing name.
+ */
+export function getTableFilterCss(filters: Partial<TableFilterSettings> = {}): string {
+  return textureFilter(filters);
+}
+
+export interface TableAppearanceSettings {
+  tableTexture?: string;
+  tableFilters?: Partial<TableFilterSettings>;
+}
+
+/**
+ * Inline style for the felt (or a texture preview swatch) built straight from a
+ * settings snapshot, so previews and the live table can never drift apart.
+ */
+export function getTableTextureStyle(
+  settings: TableAppearanceSettings = {},
+): Record<string, string> {
+  return tableTextureStyle(
+    settings.tableTexture ?? DEFAULT_TABLE_TEXTURE_ID,
+    settings.tableFilters ?? {},
+  );
+}
+
 export function isTableTextureId(id: string): id is TableTextureId {
   return TABLE_TEXTURES.some((preset) => preset.id === id);
 }

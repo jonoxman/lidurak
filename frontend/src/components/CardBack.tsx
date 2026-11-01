@@ -6,9 +6,16 @@ export type CardBackPattern =
   | 'celtic-weave'
   | 'hex-mesh'
   | 'chevron'
-  | 'starburst';
+  | 'starburst'
+  | 'classic-crimson'
+  | 'royal-sapphire'
+  | 'emerald-gold'
+  | 'sunset-prism'
+  | 'amethyst-nebula'
+  | 'cyber-neon'
+  | 'coral-wave';
 
-/** Every selectable card back, in picker order. */
+/** The original monochrome patterns, in picker order. */
 export const CARD_BACK_PATTERNS: readonly CardBackPattern[] = [
   'classic-hatch',
   'royal-diamond',
@@ -17,18 +24,182 @@ export const CARD_BACK_PATTERNS: readonly CardBackPattern[] = [
   'chevron',
   'starburst'];
 
+/** Vibrant multi-colour backs, in picker order. */
+export const COLORFUL_CARD_BACK_PATTERNS: readonly CardBackPattern[] = [
+  'classic-crimson',
+  'royal-sapphire',
+  'emerald-gold',
+  'sunset-prism',
+  'amethyst-nebula',
+  'cyber-neon',
+  'coral-wave'];
+
+/** Every selectable card back: the monochrome set, then the colourful set. */
+export const ALL_CARD_BACK_PATTERNS: readonly CardBackPattern[] = [
+  ...CARD_BACK_PATTERNS,
+  ...COLORFUL_CARD_BACK_PATTERNS,
+];
+
+/** Human-readable name shown in the Card Back submenu. */
+export const CARD_BACK_LABELS: Record<CardBackPattern, string> = {
+  'classic-hatch': 'Classic Hatch',
+  'royal-diamond': 'Royal Diamond',
+  'celtic-weave': 'Celtic Weave',
+  'hex-mesh': 'Hex Mesh',
+  chevron: 'Chevron',
+  starburst: 'Starburst',
+  'classic-crimson': 'Classic Crimson',
+  'royal-sapphire': 'Royal Sapphire',
+  'emerald-gold': 'Emerald Gold',
+  'sunset-prism': 'Sunset Prism',
+  'amethyst-nebula': 'Amethyst Nebula',
+  'cyber-neon': 'Cyber Neon',
+  'coral-wave': 'Coral Wave',
+};
+
 export const DEFAULT_CARD_BACK_PATTERN: CardBackPattern = 'classic-hatch';
 
 export interface CardBackProps {
   class?: string;
-  /** Which SVG pattern fills the back; defaults to the classic cross-hatch. */
+  /** Which design fills the back; defaults to the user's saved preference. */
   pattern?: CardBackPattern;
 }
 
 const BACK_BASE = '#262421';
 const BACK_INK = '#3a3733';
 
-/** The pattern tile for one card back design (all share the 70x100 card tiles). */
+type ColorfulMotif = 'stripes' | 'diamonds' | 'rings' | 'rays' | 'sparkle' | 'grid' | 'waves';
+
+interface ColorfulDesign {
+  /** Outer frame colour. */
+  frame: string;
+  /** Three gradient stops for the inner face. */
+  stops: readonly [string, string, string];
+  /** Border, motif and hover-able accent colour. */
+  accent: string;
+  motif: ColorfulMotif;
+}
+
+const COLORFUL_DESIGNS: Partial<Record<CardBackPattern, ColorfulDesign>> = {
+  'classic-crimson': {
+    frame: '#2a0b12',
+    stops: ['#7a1026', '#c2213f', '#f0684b'],
+    accent: '#ffd9a0',
+    motif: 'stripes',
+  },
+  'royal-sapphire': {
+    frame: '#0b1430',
+    stops: ['#123a8c', '#2a6fd6', '#67c8ff'],
+    accent: '#d8ecff',
+    motif: 'diamonds',
+  },
+  'emerald-gold': {
+    frame: '#07251b',
+    stops: ['#0b5a3a', '#1f9e63', '#8fe07a'],
+    accent: '#ffd24a',
+    motif: 'rings',
+  },
+  'sunset-prism': {
+    frame: '#2b1030',
+    stops: ['#ff6f61', '#ff9a3c', '#ffd166'],
+    accent: '#ffe9b0',
+    motif: 'rays',
+  },
+  'amethyst-nebula': {
+    frame: '#180a2e',
+    stops: ['#4b1d8c', '#8a4de0', '#e879f9'],
+    accent: '#f5d0ff',
+    motif: 'sparkle',
+  },
+  'cyber-neon': {
+    frame: '#05080f',
+    stops: ['#0b1b2b', '#00d9c0', '#ff00a8'],
+    accent: '#39ff14',
+    motif: 'grid',
+  },
+  'coral-wave': {
+    frame: '#2b1116',
+    stops: ['#ff5f6d', '#ff8ba7', '#7dd3fc'],
+    accent: '#ffe6ea',
+    motif: 'waves',
+  },
+};
+
+const MOTIF_INK = 'rgba(255, 255, 255, 0.34)';
+
+/** The motif tile laid over a colourful gradient face. */
+function MotifTile({ id, motif }: { id: string; motif: ColorfulMotif }) {
+  const tile = { id, width: 16, height: 16, patternUnits: 'userSpaceOnUse' } as const;
+
+  switch (motif) {
+    case 'diamonds':
+      return (
+        <pattern {...tile}>
+          <path d="M8 1.5 L14.5 8 L8 14.5 L1.5 8 Z" fill="none" stroke={MOTIF_INK} stroke-width="1.1" />
+        </pattern>
+      );
+
+    case 'rings':
+      return (
+        <pattern {...tile}>
+          <circle cx="8" cy="8" r="6.5" fill="none" stroke={MOTIF_INK} stroke-width="1.1" />
+          <circle cx="8" cy="8" r="3" fill="none" stroke={MOTIF_INK} stroke-width="1" />
+        </pattern>
+      );
+
+    case 'rays':
+      return (
+        <pattern {...tile}>
+          <g stroke={MOTIF_INK} stroke-width="1.2" stroke-linecap="round">
+            <line x1="8" y1="8" x2="8" y2="0" />
+            <line x1="8" y1="8" x2="16" y2="8" />
+            <line x1="8" y1="8" x2="8" y2="16" />
+            <line x1="8" y1="8" x2="0" y2="8" />
+          </g>
+        </pattern>
+      );
+
+    case 'sparkle':
+      return (
+        <pattern {...tile}>
+          <circle cx="4" cy="4" r="1.1" fill="rgba(255, 255, 255, 0.55)" />
+          <circle cx="12" cy="11" r="0.9" fill="rgba(255, 255, 255, 0.42)" />
+          <path d="M11 3.5 L12 5.5 L14 6.5 L12 7.5 L11 9.5 L10 7.5 L8 6.5 L10 5.5 Z" fill={MOTIF_INK} />
+        </pattern>
+      );
+
+    case 'grid':
+      return (
+        <pattern {...tile}>
+          <path d="M0 0 H16 V16 H0 Z" fill="none" stroke={MOTIF_INK} stroke-width="1" />
+          <path d="M8 0 V16 M0 8 H16" stroke={MOTIF_INK} stroke-width="0.6" />
+        </pattern>
+      );
+
+    case 'waves':
+      return (
+        <pattern {...tile}>
+          <path
+            d="M0 5 Q4 1 8 5 T16 5 M0 12 Q4 8 8 12 T16 12"
+            fill="none"
+            stroke={MOTIF_INK}
+            stroke-width="1.3"
+            stroke-linecap="round"
+          />
+        </pattern>
+      );
+
+    case 'stripes':
+    default:
+      return (
+        <pattern {...tile} patternTransform="rotate(35)">
+          <line x1="0" y1="0" x2="0" y2="16" stroke={MOTIF_INK} stroke-width="3" />
+        </pattern>
+      );
+  }
+}
+
+/** The pattern tile for one monochrome card back design. */
 function PatternTile({ pattern }: { pattern: CardBackPattern }) {
   const id = `card-back-${pattern}`;
 
@@ -118,19 +289,23 @@ function PatternTile({ pattern }: { pattern: CardBackPattern }) {
           patternTransform="rotate(45)"
         >
           <rect width="8" height="8" fill={BACK_BASE} />
-          <line x1="0" y1="0" x2="0" y2="8" stroke={BACK_INK} stroke-width={3} />
+          <line x1="0" y1="0" x2="0" y2="8" stroke={BACK_INK} stroke-width="3" />
         </pattern>
       );
   }
 }
 
-/** The dark patterned back of a playing card, sized like a [[Card]]. */
+/** The back of a playing card, sized like a [[Card]]. */
 export function CardBack({ class: className, pattern }: CardBackProps) {
   // Without an explicit pattern, follow the user's Card Back preference, so the
   // header setting reaches every face-down card in the app.
   const settings = useSettings();
   const activePattern = pattern ?? settings.cardBack;
   const id = `card-back-${activePattern}`;
+  const gradientId = `${id}-gradient`;
+  const design = COLORFUL_DESIGNS[activePattern];
+  const frame = design ? design.frame : BACK_BASE;
+  const ink = design ? design.accent : BACK_INK;
 
   return (
     <svg
@@ -139,9 +314,21 @@ export function CardBack({ class: className, pattern }: CardBackProps) {
       role="img"
       aria-label="Card back"
       data-pattern={activePattern}
+      data-colorful={design ? 'true' : 'false'}
     >
       <defs>
-        <PatternTile pattern={activePattern} />
+        {design ? (
+          <>
+            <linearGradient id={gradientId} x1="0" y1="0" x2="0.65" y2="1">
+              <stop offset="0%" stop-color={design.stops[0]} />
+              <stop offset="55%" stop-color={design.stops[1]} />
+              <stop offset="100%" stop-color={design.stops[2]} />
+            </linearGradient>
+            <MotifTile id={id} motif={design.motif} />
+          </>
+        ) : (
+          <PatternTile pattern={activePattern} />
+        )}
       </defs>
       <rect
         x="1"
@@ -150,8 +337,8 @@ export function CardBack({ class: className, pattern }: CardBackProps) {
         height="98"
         rx="6"
         ry="6"
-        fill={BACK_BASE}
-        stroke={BACK_INK}
+        fill={frame}
+        stroke={ink}
         stroke-width={2}
       />
       <rect
@@ -162,10 +349,23 @@ export function CardBack({ class: className, pattern }: CardBackProps) {
         height="88"
         rx="4"
         ry="4"
-        fill={`url(#${id})`}
-        stroke={BACK_INK}
+        fill={design ? `url(#${gradientId})` : `url(#${id})`}
+        stroke={ink}
         stroke-width={1}
       />
+      {design ? (
+        <rect
+          data-pattern-motif={activePattern}
+          x="6"
+          y="6"
+          width="58"
+          height="88"
+          rx="4"
+          ry="4"
+          fill={`url(#${id})`}
+          opacity="0.6"
+        />
+      ) : null}
     </svg>
   );
 }
