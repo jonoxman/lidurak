@@ -403,3 +403,31 @@ class PlayerViewSuite extends munit.FunSuite:
     assertEquals(view.opponents.map(_.isPresent), List(true))
     assertEquals(gs.isPlayerPresent("p1"), false)
   }
+
+  // --- Viewer name ---
+
+  test("the viewer's own name is projected and encoded for the POV menu") {
+    val gs = state(
+      Vector(player("p0", List(card(Rank.Six))), player("p1", List(card(Rank.Seven))))
+    )
+
+    val view = PlayerGameView.forViewer(gs, "p0")
+
+    assertEquals(view.myName, "P0")
+    assert(view.asJson.noSpaces.contains("\"myName\":\"P0\""), view.asJson.noSpaces)
+  }
+
+  test("legacy view JSON without myName still decodes to an empty name") {
+    val gs = state(
+      Vector(player("p0", List(card(Rank.Six))), player("p1", List(card(Rank.Seven))))
+    )
+    val json = PlayerGameView.forViewer(gs, "p0").asJson
+    val legacy = io.circe.Json.fromJsonObject(
+      json.asObject.map(_.remove("myName")).getOrElse(io.circe.JsonObject.empty)
+    )
+
+    val decoded = io.circe.parser.decode[PlayerGameView](legacy.noSpaces)
+
+    assertEquals(decoded.map(_.myName), Right(""))
+    assertEquals(decoded.map(_.myId), Right("p0"))
+  }

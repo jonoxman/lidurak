@@ -20,6 +20,9 @@ case class PublicPlayerSummary(
  */
 case class PlayerGameView(
   myId: String,
+  // The viewer's own display name, so the UI can label every seat (POV menu)
+  // without falling back to a raw seat id. Defaults to "" for older payloads.
+  myName: String = "",
   myHand: List[Card],
   opponents: List[PublicPlayerSummary],
   tablePairs: Vector[TablePair],
@@ -79,6 +82,7 @@ object PlayerGameView:
 
     PlayerGameView(
       myId = viewer.id,
+      myName = viewer.name,
       myHand = viewer.hand.toList,
       opponents = state.players.zipWithIndex.collect {
         case (other, idx) if idx != viewerIdx =>

@@ -23,6 +23,8 @@ export interface PublicPlayerSummary {
 
 export interface PlayerGameView {
   myId: string;
+  /** The viewed player's display name (empty for older backend payloads). */
+  myName?: string;
   myHand: Card[];
   opponents: PublicPlayerSummary[];
   tablePairs: TablePair[];
@@ -169,6 +171,10 @@ export function parsePlayerGameView(value: unknown): PlayerGameView {
   if (turnPlayerId !== undefined && typeof turnPlayerId !== 'string') {
     fail('turnPlayerId must be a string');
   }
+  const myName = raw.myName;
+  if (myName !== undefined && typeof myName !== 'string') {
+    fail('myName must be a string');
+  }
   const presentPlayers = raw.presentPlayers;
   if (presentPlayers !== undefined) parseStringArray(presentPlayers, 'presentPlayers');
   const discardCount = raw.discardCount;
@@ -211,6 +217,7 @@ export function parsePlayerGameView(value: unknown): PlayerGameView {
 
   return {
     myId,
+    ...(typeof myName === 'string' && myName.length > 0 ? { myName } : {}),
     myHand: (raw.myHand as unknown[]).map(parseCard),
     opponents: (raw.opponents as unknown[]).map(parsePublicPlayerSummary),
     tablePairs: (raw.tablePairs as unknown[]).map(parseTablePair),

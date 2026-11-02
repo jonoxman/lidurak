@@ -66,6 +66,7 @@ object JsonCodecs:
   given Encoder[PlayerGameView] = Encoder.instance { view =>
     Json.obj(
       "myId" -> view.myId.asJson,
+      "myName" -> view.myName.asJson,
       "myHand" -> view.myHand.asJson,
       "opponents" -> view.opponents.asJson,
       "tablePairs" -> view.tablePairs.asJson,
@@ -100,6 +101,8 @@ object JsonCodecs:
     def field[A: Decoder](name: String): Decoder.Result[A] = cursor.downField(name).as[A]
     for
       myId <- field[String]("myId")
+      // Older fixtures omit "myName"; a missing field decodes to an empty name.
+      myName <- cursor.downField("myName").as[Option[String]].map(_.getOrElse(""))
       myHand <- field[List[Card]]("myHand")
       opponents <- field[List[PublicPlayerSummary]]("opponents")
       tablePairs <- field[Vector[TablePair]]("tablePairs")
@@ -129,6 +132,7 @@ object JsonCodecs:
       promptedPlayerIds <- field[Vector[String]]("promptedPlayerIds")
     yield PlayerGameView(
       myId = myId,
+      myName = myName,
       myHand = myHand,
       opponents = opponents,
       tablePairs = tablePairs,

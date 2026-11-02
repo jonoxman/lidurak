@@ -273,3 +273,18 @@ describe('GameAction builders', () => {
     });
   });
 });
+
+describe('viewer name parsing', () => {
+  it('keeps a non-empty myName', () => {
+    expect(parsePlayerGameView({ ...sampleView, myName: 'Alice' }).myName).toBe('Alice');
+  });
+
+  it('omits missing and empty names so older payloads stay clean', () => {
+    expect(parsePlayerGameView({ ...sampleView }).myName).toBeUndefined();
+    expect(parsePlayerGameView({ ...sampleView, myName: '' }).myName).toBeUndefined();
+  });
+
+  it('rejects a non-string myName', () => {
+    expect(() => parsePlayerGameView({ ...sampleView, myName: 7 })).toThrow(/myName/);
+  });
+});
