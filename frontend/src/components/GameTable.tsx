@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { Card, isRedSuit, suitSymbol, type CardData } from './Card';
 import { CardBack } from './CardBack';
-import { SortBar, type SortMode } from './SortBar';
+import type { SortMode } from './SortBar';
 import { TablePair } from './TablePair';
 import { useSettings } from '../state/settings';
 import { getTableFilterCss } from '../styles/tableTextures';
@@ -57,6 +57,8 @@ export interface GameTableProps {
   turnPlayerId?: string;
   /** Seconds left on the active turn clock (0..15). */
   turnSecondsRemaining?: number;
+  /** Display order of the viewer's own hand; the dropdown lives in the sidebar. */
+  sortMode?: SortMode;
   selectedKeys?: string[];
   /** Keys of hand cards that are legal to play right now; they lift off the hand. */
   playableKeys?: string[];
@@ -235,29 +237,39 @@ export interface TableDeckProps {
 export function TableDeck({ talonCount, bottomTrumpCard, trumpSuit }: TableDeckProps) {
   return (
     <div class="table-deck" data-zone="table-deck" aria-label="Talon">
-      <div class="talon-deck" data-testid="talon-deck" data-layout="horizontal-trump">
-        <div class="talon-stack">
-          <CardBack class="talon-back talon-back-second" />
-          <CardBack class="talon-back" />
-          <span class="talon-count" data-testid="talon-count">
-            {talonCount}
-          </span>
-        </div>
-        {talonCount > 0 && bottomTrumpCard ? (
-          <div class="table-trump" aria-label="Bottom trump card">
-            <div class="table-trump-card" data-rotated="true">
-              <Card suit={bottomTrumpCard.suit} rank={bottomTrumpCard.rank} trump />
-            </div>
+      <h2 class="deck-title">Deck</h2>
+      {/* The whole assembly is centred as one block, so the deck, the trump
+          sticking out to its right and the badge underneath keep their
+          relative positions. */}
+      <div class="deck-assembly" data-testid="deck-assembly" data-align="center">
+        <div class="talon-deck" data-testid="talon-deck" data-layout="horizontal-trump">
+          <div class="talon-stack">
+            <CardBack class="talon-back talon-back-second" />
+            <CardBack class="talon-back" />
+            <span
+              class="talon-count deck-count-badge"
+              data-testid="talon-count"
+              data-position="top-left"
+            >
+              {talonCount}
+            </span>
           </div>
-        ) : null}
-      </div>
-      <div
-        class={`trump-badge ${isRedSuit(trumpSuit) ? 'red' : 'black'}`}
-        data-testid="trump-indicator"
-        data-suit={trumpSuit.toLowerCase()}
-      >
-        <span>Trump</span>
-        <span class="trump-symbol">{suitSymbol(trumpSuit)}</span>
+          {talonCount > 0 && bottomTrumpCard ? (
+            <div class="table-trump" aria-label="Bottom trump card">
+              <div class="table-trump-card" data-rotated="true">
+                <Card suit={bottomTrumpCard.suit} rank={bottomTrumpCard.rank} trump />
+              </div>
+            </div>
+          ) : null}
+        </div>
+        <div
+          class={`trump-badge ${isRedSuit(trumpSuit) ? 'red' : 'black'}`}
+          data-testid="trump-indicator"
+          data-suit={trumpSuit.toLowerCase()}
+        >
+          <span>Trump</span>
+          <span class="trump-symbol">{suitSymbol(trumpSuit)}</span>
+        </div>
       </div>
     </div>
   );
@@ -454,6 +466,7 @@ export function GameTable({
   canThrowIn = false,
   turnPlayerId,
   turnSecondsRemaining = 15,
+  sortMode = 'suit',
   selectedKeys = [],
   playableKeys = [],
   onCardClick,
@@ -465,7 +478,6 @@ export function GameTable({
   onRedirectDrop,
   children,
 }: GameTableProps) {
-  const [sortMode, setSortMode] = useState<SortMode>('suit');
   const [dragCard, setDragCard] = useState<CardData | null>(null);
   const [snapZone, setSnapZone] = useState<string | null>(null);
   const [handWidth, setHandWidth] = useState(0);
@@ -664,29 +676,41 @@ export function GameTable({
                 </span>
                 <span class="opponent-name">{opponent.name}</span>
               </div>
-              <div class="opponent-cards" aria-label={`${opponent.name}'s cards`}>
-                {Array.from({ length: opponent.cardCount }, (_, index) => (
-                  <span
-                    key={index}
-                    class="opponent-card"
-                    style={{
-                      marginLeft:
-                        index === 0 ? '0px' : `-${opponentOverlap(opponent.cardCount)}px`,
-                    }}
-                  >
-                    <CardBack />
-                  </span>
-                ))}
+              {/* The counter oval sits on the top-left corner of the hand and
+                  the whole hand is centred inside the player box. */}
+              <div class="opponent-hand">
+                <span
+                  class="opponent-card-count deck-count-badge"
+                  data-testid={`opponent-card-count-${opponent.id}`}
+                  data-position="top-left"
+                >
+                  {opponent.cardCount}
+                </span>
+                <div class="opponent-cards" aria-label={`${opponent.name}'s cards`}>
+                  {Array.from({ length: opponent.cardCount }, (_, index) => (
+                    <span
+                      key={index}
+                      class="opponent-card"
+                      style={{
+                        marginLeft:
+                          index === 0 ? '0px' : `-${opponentOverlap(opponent.cardCount)}px`,
+                      }}
+                    >
+                      <CardBack />
+                    </span>
+                  ))}
+                </div>
               </div>
-              <div class="seat-meta">
-                <span class="opponent-count">{opponent.cardCount} cards</span>
-                {opponent.finishRank != null ? (
-                  <span class="opponent-rank">
-                    {opponent.finishRank === 1 ? 'WINNER' : 'OUT'}
-                  </span>
-                ) : null}
-                {opponent.hasPassed ? <span class="opponent-passed">Passed</span> : null}
-              </div>
+              {opponent.finishRank != null || opponent.hasPassed ? (
+                <div class="seat-meta">
+                  {opponent.finishRank != null ? (
+                    <span class="opponent-rank">
+                      {opponent.finishRank === 1 ? 'WINNER' : 'OUT'}
+                    </span>
+                  ) : null}
+                  {opponent.hasPassed ? <span class="opponent-passed">Passed</span> : null}
+                </div>
+              ) : null}
             </div>
           </div>
         );
@@ -842,8 +866,9 @@ export function GameTable({
         </div>
       </section>
 
+      {/* Row 3, column 3 holds only the contextual action buttons; the hand
+          sorting dropdown lives in its own sidebar box under the deck. */}
       <div class="player-controls" data-zone="player-controls" aria-label="Actions">
-        <SortBar mode={sortMode} onModeChange={setSortMode} />
         {children}
       </div>
     </div>

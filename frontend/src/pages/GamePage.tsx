@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { ActionBar } from '../components/ActionBar';
 import { GameTable, TableDeck, cardKey } from '../components/GameTable';
+import { SortBar, type SortMode } from '../components/SortBar';
 import { getGameView, sendAction as sendActionRest } from '../api/client';
 import { GameWebSocket } from '../api/websocket';
 import { soundEngine } from '../audio/SoundEngine';
@@ -172,6 +173,9 @@ export function GamePage({
   const dispatchRef = useRef<(action: GameAction) => void>(() => {});
   const [autoSurrenderRemaining, setAutoSurrenderRemaining] = useState<number | null>(null);
   const [selfPresent, setSelfPresent] = useState(true);
+  // Hand order is display-only state shared between the sidebar dropdown and
+  // the table's hand.
+  const [sortMode, setSortMode] = useState<SortMode>('suit');
   const lastActivityRef = useRef(Date.now());
 
   useEffect(() => {
@@ -662,6 +666,7 @@ export function GamePage({
           canThrowIn={hasLegalAction(view.legalActions, 'throwIn')}
           turnPlayerId={timedPlayerId}
           turnSecondsRemaining={seconds}
+          sortMode={sortMode}
           selectedKeys={selectedKeys}
           playableKeys={playableKeys}
           onCardClick={toggleCard}
@@ -759,6 +764,16 @@ export function GamePage({
             bottomTrumpCard={view.bottomTrumpCard}
             trumpSuit={view.trumpSuit}
           />
+
+          <section
+            class="panel sidebar-box sidebar-sort-box"
+            data-zone="hand-sort-box"
+            data-testid="hand-sort-box"
+            aria-label="Hand sorting"
+          >
+            <h2>Sort</h2>
+            <SortBar mode={sortMode} onModeChange={setSortMode} />
+          </section>
 
           {gameOver ? (
             <section class="panel game-result" aria-label="Game over">
