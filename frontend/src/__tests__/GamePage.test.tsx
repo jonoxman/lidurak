@@ -49,6 +49,17 @@ vi.mock('../api/websocket', () => ({
 
 import * as client from '../api/client';
 import { GamePage } from '../pages/GamePage';
+import appCss from '../app.css?raw';
+
+/** The light-theme Back to lobby rules, from their selector up to the OS query. */
+const backToLobbyLightCss = (() => {
+  const marker = "html[data-theme='light'] .game-page .back-to-lobby";
+  const start = appCss.indexOf(marker);
+  if (start === -1) return '';
+  const rest = appCss.slice(start);
+  const end = rest.indexOf('@media');
+  return end === -1 ? rest : rest.slice(0, end);
+})();
 
 const view: PlayerGameView = {
   myId: 'p0',
@@ -574,6 +585,48 @@ describe('GamePage', () => {
     expect(backToLobby.className).toContain('action-button');
     expect(backToLobby.className).toContain('back-to-lobby');
     expect(screen.queryByRole('link', { name: 'Back to lobby' })).toBeNull();
+  });
+
+  it('keeps the dark-theme Back to lobby styling untouched', () => {
+    const normalised = appCss.replace(/\s+/g, ' ');
+
+    expect(normalised).toContain(
+      '.game-page .back-to-lobby { padding: 8px 16px; font-size: 14px; }',
+    );
+    // No dark-theme background/border/text overrides were introduced.
+    expect(normalised).not.toContain('[data-theme=\'dark\'] .game-page .back-to-lobby');
+  });
+
+  it('gives Back to lobby high-contrast slate styling in the light theme', () => {
+    expect(backToLobbyLightCss).not.toBe('');
+    expect(backToLobbyLightCss).toContain('background: #e2e8f0');
+    expect(backToLobbyLightCss).toContain('border: 1px solid #64748b');
+    expect(backToLobbyLightCss).toContain('color: #0f172a');
+    expect(backToLobbyLightCss).toContain('font-weight: 600');
+    // Hover stays distinct from the resting surface and border.
+    expect(backToLobbyLightCss).toContain('background: #cbd5e1');
+    expect(backToLobbyLightCss).toContain('border-color: #334155');
+  });
+
+  it('applies the same contrast for an OS light preference before the theme is set', () => {
+    expect(appCss).toContain("html:not([data-theme]) .game-page .back-to-lobby");
+  });
+
+  it('renders the light-theme button with the same back-to-lobby hooks', async () => {
+    getGameView.mockResolvedValue(view);
+    document.documentElement.setAttribute('data-theme', 'light');
+
+    try {
+      render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+      await waitFor(() => expect(screen.getByText('Pass')).toBeTruthy());
+      const backToLobby = screen.getByRole('button', { name: 'Back to lobby' });
+
+      expect(backToLobby.className).toContain('action-button');
+      expect(backToLobby.className).toContain('back-to-lobby');
+    } finally {
+      document.documentElement.removeAttribute('data-theme');
+    }
   });
 
   it('keeps hotseat tabs and the players list in fixed seat order', async () => {

@@ -1100,3 +1100,34 @@ html [data-zone='table-arena']::before {
   padding: 8px 16px;
   font-size: 14px;
 }
+
+/* Feedback #7.6: the dark theme keeps the plain action-button look, while the
+   light theme gives Back to lobby a high-contrast slate surface, border and
+   text so it never washes out against the pale game header. */
+html[data-theme='light'] .game-page .back-to-lobby {
+  background: #e2e8f0;
+  border: 1px solid #64748b;
+  color: #0f172a;
+  font-weight: 600;
+}
+
+html[data-theme='light'] .game-page .back-to-lobby:hover {
+  background: #cbd5e1;
+  border-color: #334155;
+}
+
+/* Before JavaScript applies data-theme, a light OS preference gets the same
+   high-contrast treatment. */
+@media (prefers-color-scheme: light) {
+  html:not([data-theme]) .game-page .back-to-lobby {
+    background: #e2e8f0;
+    border: 1px solid #64748b;
+    color: #0f172a;
+    font-weight: 600;
+  }
+
+  html:not([data-theme]) .game-page .back-to-lobby:hover {
+    background: #cbd5e1;
+    border-color: #334155;
+  }
+}
