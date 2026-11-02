@@ -65,13 +65,22 @@ Press `Ctrl+C` to stop both servers cleanly.
 2. If the backend is still starting, the lobby shows a **loading panel** (`Starting game server, please wait…`) and re-checks `GET /api/health` every second. The Create Game form appears automatically once the server answers, so a click can never land on a proxy `HTTP 500`.
 3. Select the **Number of Players** (`2`, `3`, or `4` players).
 4. Enter custom player names (defaults to `Alice`, `Bob`, `Carol`, `Dave`).
-5. Pick who plays each seat from the **Type** dropdown next to every name — `Human` or `RandomBot`. Bots play legal moves on their own after a short random pause; seat choices survive changing the player count, and new seats default to `Human`.
+5. Pick who plays each seat from the **Type** dropdown next to every name — `Human`, `RandomBot` or `BasicBot` (listed in that order). Bots play legal moves on their own after a short random pause; seat choices survive changing the player count, and new seats default to `Human`.
 6. Configure match variants:
    - **Allow redirects (`Perevod`):** Enables reflecting an unopened attack to the next player using a card of matching rank.
    - **Chaos Mode** *(available for 3 or 4 players)*: Allows the initial attacker to target *any* active player who still holds cards (instead of strictly attacking clockwise), and sends reflections (`Perevod`) to a randomly chosen eligible player.
 7. Click **Create Game** and select any player link (or use the left-sidebar player switcher tabs during local hotseat inspection) to view the table from that player's seat.
 
+### Computer Opponents (`RandomBot` & `BasicBot`)
+- **`RandomBot`** plays one uniformly random legal move each turn.
+- **`BasicBot`** follows a simple heuristic and always obeys the rules:
+  - It opens with its **lowest-ranked non-trump** card; only when the hand holds nothing but trumps does it open with a random trump.
+  - As defender it always **covers or reflects** when a legal `CoverCard` / `RedirectAttack` exists, and surrenders only when it genuinely cannot answer.
+  - During throw-ins — including after another player surrenders — it throws in **non-trump** cards that match a rank on the table (lowest rank first) and passes once only trumps or nothing legal remain.
+- **Legal-move guarantees (both bots):** every move a bot submits is one the engine accepts. A redirect is only legal while the next clockwise player still holds at least `attacking cards + 1` cards, nobody can redirect an attack to themselves or cover their own attack, and once a defender surrenders that seat has no further actions for the rest of the bout.
+
 ### Table Layout (Lichess 3-Column Shell)
+- **Game Header:** `Game {id}`, the connection state and a **`Back to lobby`** button. The button keeps its charcoal dark-theme styling; in the light theme it switches to a high-contrast slate surface (`#e2e8f0`, hover `#cbd5e1`), a visible border (`#64748b`, hover `#334155`) and bold near-black text (`#0f172a`) so it stays readable against the pale header.
 - **Left Sidebar:** Displays the **How to Play** quick-reference guide and the **Player Switcher** tabs (`p0`, `p1`, etc.) for testing multi-seat perspectives locally.
 - **Center Felt Table (3x3 Grid):**    - **Top Row (Opponent Seats):** Opponents are seated consistently in clockwise order relative to your bottom seat. Each opponent's face-down cards are centred inside their player box, with that player's card count shown as a small oval on the **top-left** corner of the hand (no `N cards` text underneath).
     - *2 Players:* Opponent sits directly across (`Top-Center`).
@@ -81,8 +90,10 @@ Press `Ctrl+C` to stop both servers cleanly.
     - Before the opening card of a bout is played, dashed green **Target Outlines** appear directly in front of every player who is a legal attack target.
     - All cards in play (`tablePairs`) and drop outlines are anchored in front of the currently defending player's seat (or directly above your hand at the bottom when you are defending).
     - When reflection (`Perevod`) is legal, a card-sized **Reflection Outline** with a directional arrow pointing toward the next receiver appears immediately to the right of the attacking cards.
+    - The tinted battle box has a **fixed size tied to the table** (it spans the whole middle row at `88%` width), so it never grows or shrinks with the number of cards in play — only the cards inside move.
+    - When a player **surrenders**, every card in play slides toward that player's box (left/right for the corner seats, up for the centre seat, down toward your own hand) while the tinted box keeps its size.
   - **Bottom Row:**
-    - **Bottom-Center:** Your active **Hand** (trump cards feature a subtle golden border glow and corner badge). A gentle pulsing glow around your hand (when attacking) or around uncovered attacking cards (when defending) indicates that the game is waiting on your move.
+    - **Bottom-Center:** Your active **Hand** (trump cards feature a subtle golden border glow and corner badge). A gentle pulsing glow around your hand (when attacking) or around uncovered attacking cards (when defending) indicates that the game is waiting on your move. The turn-highlight box wraps only the rendered cards — never the empty column — so it tightly encloses your hand.
     - **Bottom-Right:** Contextual action buttons only (`Surrender` / `Pass`). The hand sorting control now lives in the right sidebar.
 - **Right Sidebar:** From top to bottom: the large digital **15-Second Turn Clock (`00:XX`)**, the **PLAYERS** list with presence dots, the **`DECK`** box, the **`SORT`** box, and the match results (`Winners` list and final `Durak`).
   - The `DECK` box is titled like the `PLAYERS` box. Its assembly — the vertical talon stack, the horizontal trump card and the `TRUMP` badge — is centred as one block in the box: the revealed **Trump Card** lies horizontally and sticks out to the right of the deck (their left edges line up), and the suit-specific `TRUMP` badge sits clearly below both, with no overlap. The remaining-deck count is an oval on the **top-left** corner of the deck.
