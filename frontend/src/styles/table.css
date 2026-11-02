@@ -502,6 +502,75 @@
   color: #f5f1e6;
 }
 
+/* Req 7: the discard pile shares the DECK box with the talon. Earlier discards
+   stay face-down under a top-left counter oval; only the last bout is revealed. */
+.table-discard {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  align-self: stretch;
+  min-width: 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--app-border, var(--durak-border));
+  box-sizing: border-box;
+}
+
+.discard-title {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--app-text, var(--durak-text));
+  opacity: 0.7;
+}
+
+.discard-stack {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* The face-down stack and the revealed cards sit side by side in normal flow,
+   so nothing is absolutely positioned and no card can overlap the counter. */
+.discard-face-down {
+  display: grid;
+  grid-template-columns: 40px;
+  grid-template-rows: 57px;
+  flex: 0 0 auto;
+}
+
+.discard-back,
+.discard-card .card-slot {
+  width: 40px;
+  height: 57px;
+}
+
+.discard-count {
+  grid-column: 1;
+  grid-row: 1;
+  justify-self: start;
+  align-self: start;
+  margin: -8px 0 0 -8px;
+  padding: 0 7px;
+}
+
+.discard-last {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+}
+
+.discard-card {
+  display: flex;
+  flex: 0 0 auto;
+}
+
+.discard-empty {
+  font-size: 11px;
+  opacity: 0.6;
+}
+
 /* Opponent counter ovals tuck onto the hand's top-left corner. */
 .opponent-card-count {
   justify-self: start;

@@ -961,4 +961,168 @@ describe('GamePage', () => {
     );
     expect(screen.getByTestId('presence-dot-p1').classList.contains('present')).toBe(true);
   });
+
+  it('renders the discard pile inside the DECK box, face-down with the last bout revealed', async () => {
+    getGameView.mockResolvedValue({
+      ...view,
+      discardCount: 5,
+      lastDiscardCards: [
+        { suit: 'spades', rank: 'six' },
+        { suit: 'hearts', rank: 'seven' },
+      ],
+    });
+
+    const { container } = render(
+      <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('discard-pile')).toBeTruthy());
+
+    const deckBox = container.querySelector('[data-zone="table-deck"]') as HTMLElement;
+    expect(deckBox.contains(screen.getByTestId('discard-pile'))).toBe(true);
+    expect(screen.getByTestId('discard-count').textContent).toBe('5');
+    expect(screen.getByTestId('discard-count').getAttribute('data-position')).toBe('top-left');
+
+    // The general pile is face-down; only the last discard is face-up.
+    expect(screen.getByTestId('discard-face-down').querySelector('svg')).not.toBeNull();
+    const revealed = screen.getByTestId('discard-last');
+    expect(revealed.querySelectorAll('.card-slot')).toHaveLength(2);
+    expect(revealed.textContent).not.toMatch(/\d+ cards?/i);
+  });
+
+  it('shows an empty discard pile before the first bout resolves', async () => {
+    getGameView.mockResolvedValue(view);
+
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    await waitFor(() => expect(screen.getByTestId('discard-pile')).toBeTruthy());
+    expect(screen.getByTestId('discard-empty').textContent).toBe('Empty');
+    expect(screen.queryByTestId('discard-count')).toBeNull();
+    expect(screen.queryByTestId('discard-last')).toBeNull();
+  });
+
+  it('shows the overall game clock separately from the turn clock', async () => {
+    getGameView.mockResolvedValue({
+      ...view,
+      gameStartedAtMs: Date.now() - 65_000,
+      gameEndedAtMs: null,
+      turnDeadlineMs: 0,
+    });
+
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    await waitFor(() => expect(screen.getByTestId('game-clock')).toBeTruthy());
+    expect(screen.getByTestId('game-clock').textContent).toMatch(/^01:0[5-9]$/);
+    expect(screen.getByTestId('game-clock').getAttribute('data-active')).toBe('true');
+    // The 15-second turn clock is a separate panel: the viewer is the waited-on
+    // defender, so it reads its rested value while the game clock counts up.
+    expect(screen.getByTestId('turn-clock').textContent?.trim()).toBe('00:15');
+    expect(screen.getByTestId('turn-clock').getAttribute('data-active')).toBe('true');
+  });
+
+  it('freezes the game clock at the recorded end time after game over', async () => {
+    const startedAtMs = Date.now() - 300_000;
+    getGameView.mockResolvedValue({
+      ...view,
+      myHand: [],
+      tablePairs: [],
+      boutPhase: 'GameOver',
+      legalActions: [],
+      finishOrder: ['p1', 'p0'],
+      isDraw: false,
+      gameStartedAtMs: startedAtMs,
+      gameEndedAtMs: startedAtMs + 95_000,
+    });
+
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    await waitFor(() => expect(screen.getByTestId('game-clock')).toBeTruthy());
+    expect(screen.getByTestId('game-clock').textContent).toBe('01:35');
+    expect(screen.getByTestId('game-clock').getAttribute('data-active')).toBe('false');
+  });
+
+  it('switches the point of view from the header POV menu', async () => {
+    getGameView.mockResolvedValue({
+      ...view,
+      opponents: [
+        { id: 'p1', name: 'Bob', cardCount: 6, hasPassed: false, finishRank: null },
+        { id: 'p2', name: 'Carol', cardCount: 4, hasPassed: false, finishRank: null },
+      ],
+    });
+    const onSwitchPlayer = vi.fn();
+
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={onSwitchPlayer} />);
+
+    await waitFor(() => expect(screen.getByTestId('pov-menu')).toBeTruthy());
+    const select = screen.getByTestId('pov-menu') as HTMLSelectElement;
+    expect(select.value).toBe('p0');
+    // Opponents keep their real names; the viewer's own name is not in the
+    // projection, so its seat id is used instead of a "You" placeholder.
+    expect(Array.from(select.options).map((option) => option.textContent)).toEqual([
+      'p0',
+      'Bob',
+      'Carol',
+    ]);
+
+    fireEvent.change(select, { target: { value: 'p2' } });
+    expect(onSwitchPlayer).toHaveBeenCalledWith('p2');
+  });
+
+  it('announces the result in a game-over banner and locks the table in review mode', async () => {
+    getGameView.mockResolvedValue({
+      ...view,
+      myHand: [],
+      tablePairs: [],
+      boutPhase: 'GameOver',
+      legalActions: [],
+      finishOrder: ['p1', 'p0'],
+      isDraw: false,
+    });
+
+    const { container } = render(
+      <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('game-over-banner')).toBeTruthy());
+    const banner = screen.getByTestId('game-over-banner');
+    expect(banner.textContent).toContain('Game over — Bob wins');
+    expect(banner.textContent).toContain('Durak: you');
+    // The banner sits above the three-column shell, never over the felt.
+    expect(banner.nextElementSibling?.classList.contains('game-shell')).toBe(true);
+
+    // Review mode: no commands, no drop surfaces, no turn glow, no drags.
+    expect(container.querySelector('[data-zone="player-controls"]')).toBeNull();
+    expect(screen.queryByText('Pass')).toBeNull();
+    expect(screen.queryByText('Surrender')).toBeNull();
+    expect(screen.queryByText('Throw In')).toBeNull();
+    expect(container.querySelector('[data-drop-zone]')).toBeNull();
+    expect(
+      container.querySelector('[data-zone="table-arena"]')!.getAttribute('data-review-mode'),
+    ).toBe('true');
+    expect(screen.getByTestId('hand-turn-highlight').getAttribute('data-active')).toBe('false');
+  });
+
+  it('shows the countdown on the Pass button while the throw-in clock runs', async () => {
+    getGameView.mockResolvedValue({
+      ...view,
+      tablePairs: [
+        { attack: { suit: 'spades', rank: 'six' }, defense: { suit: 'spades', rank: 'seven' } },
+      ],
+      attackerIdx: 0,
+      defenderIdx: 1,
+      boutPhase: 'defense',
+      legalActions: ['pass'],
+      turnDeadlineMs: Date.now() + 12_000,
+      turnSecondsRemaining: 12,
+      turnPlayerId: 'p0',
+    });
+
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    await waitFor(() => expect(screen.getByTestId('pass-countdown')).toBeTruthy());
+    const countdown = screen.getByTestId('pass-countdown');
+    expect(countdown.textContent).toMatch(/^(11|12)$/);
+    expect(countdown.className).toBe('surrender-countdown');
+    expect(countdown.closest('button')?.textContent).toContain('Pass');
+  });
 });

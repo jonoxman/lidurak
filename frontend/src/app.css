@@ -481,6 +481,79 @@ html[data-theme='light'] .error-banner {
   font-size: 13px;
 }
 
+/* Wave 3: header POV menu, overall game clock and the game-over banner. */
+.game-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.pov-menu {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--app-text);
+  opacity: 0.9;
+}
+
+.pov-select {
+  padding: 4px 8px;
+  font-size: 12px;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--app-text-strong);
+  background: var(--app-input-bg);
+  border: 1px solid var(--app-border);
+  border-radius: calc(var(--app-roundness) * 0.6);
+}
+
+.game-clock-panel {
+  align-items: center;
+}
+
+.game-clock {
+  font-size: 1.5rem;
+  font-family: monospace;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+  color: var(--app-text-strong);
+  opacity: 0.8;
+}
+
+.game-clock[data-active='true'] {
+  color: var(--app-accent);
+  opacity: 1;
+}
+
+.game-over-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: center;
+  gap: 10px;
+  margin: 8px 16px 0;
+  padding: 10px 16px;
+  background: var(--app-panel);
+  border: 1px solid var(--app-accent);
+  border-radius: var(--app-roundness);
+  box-sizing: border-box;
+}
+
+.game-over-title {
+  font-size: 16px;
+  color: var(--app-text-strong);
+}
+
+.game-over-durak {
+  font-size: 13px;
+  color: var(--app-text);
+}
+
 /* Below the desktop shell width the three columns stack. */
 @media (max-width: 1100px) {
   .game-shell {
