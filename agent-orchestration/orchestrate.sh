@@ -189,7 +189,6 @@ try_agy_call() {
     return 0
   fi
 
-  # Check if Antigravity CLI explicitly reported an authentication / login failure
   if grep -qiE "not logged in|unauthenticated|auth login|Please login|invalid_grant|401 Unauthorized" "$ERR_LOG" "$OUT_FILE" 2>/dev/null; then
     send_alert "Antigravity Login Required" "Antigravity CLI (agy) reported an authentication error while calling ${MODEL}. Please run 'agy auth login' in WSL."
   fi
@@ -230,6 +229,7 @@ run_agy_pool() {
   done
 }
 
+# Serialized FreeBuff admission & prompt submission (handles "This session was released" / "Enter: retry" automatically)
 admit_and_send_prompt() {
   local WORKER_ID=$1
   local PROMPT=$2
@@ -241,102 +241,139 @@ admit_and_send_prompt() {
   (
     flock -x 201
 
-    if ! docker exec "$CONTAINER" tmux has-session -t buff 2>/dev/null; then
-      echo "[Worker ${WORKER_ID}] 🚀 Launching FreeBuff TUI inside ${CONTAINER}..."
-      docker exec "$CONTAINER" tmux new-session -d -s buff "NODE_OPTIONS='--dns-result-order=ipv4first' freebuff"
-      sleep 6
-    fi
-
-    local READY_CHECKS=0
-    local LOGGED_IN_NOW=0
-    local AUTO_RESTORE_ATTEMPTED=0
-
     while true; do
       if ! docker exec "$CONTAINER" tmux has-session -t buff 2>/dev/null; then
+        echo "[Worker ${WORKER_ID}] 🚀 Launching FreeBuff TUI inside ${CONTAINER}..."
         docker exec "$CONTAINER" tmux new-session -d -s buff "NODE_OPTIONS='--dns-result-order=ipv4first' freebuff"
         sleep 6
-        continue
       fi
 
-      local SCREEN
-      SCREEN=$(docker exec "$CONTAINER" tmux capture-pane -t buff -p 2>/dev/null || true)
-      if [ -z "$(echo "$SCREEN" | tr -d '[:space:]')" ]; then
-        READY_CHECKS=0
+      local READY_CHECKS=0
+      local LOGGED_IN_NOW=0
+      local AUTO_RESTORE_ATTEMPTED=0
+
+      while true; do
+        if ! docker exec "$CONTAINER" tmux has-session -t buff 2>/dev/null; then
+          docker exec "$CONTAINER" tmux new-session -d -s buff "NODE_OPTIONS='--dns-result-order=ipv4first' freebuff"
+          sleep 6
+          continue
+        fi
+
+        local SCREEN
+        SCREEN=$(docker exec "$CONTAINER" tmux capture-pane -t buff -p 2>/dev/null || true)
+        if [ -z "$(echo "$SCREEN" | tr -d '[:space:]')" ]; then
+          READY_CHECKS=0
+          sleep 2
+          continue
+        fi
+
+        # If a leftover TUI is sitting on "This session was released" or "admission_attempt_closed" BEFORE we type the prompt, restart it fresh
+        if echo "$SCREEN" | grep -qiE "session was released|Choose a model to start a new session|Enter: retry|admission_attempt_closed|session POST failed|This session start was cancelled|operation timed out"; then
+          READY_CHECKS=0
+          echo "[Worker ${WORKER_ID}] 🔄 Resetting released/expired FreeBuff session before prompt submission..."
+          docker exec "$CONTAINER" tmux kill-session -t buff 2>/dev/null || true
+          sleep 3
+          docker exec "$CONTAINER" tmux new-session -d -s buff "NODE_OPTIONS='--dns-result-order=ipv4first' freebuff"
+          sleep 6
+          continue
+        fi
+
+        if echo "$SCREEN" | grep -qiE "Log in|Sign in|visit https://|Press Enter to login|Waiting for login|authenticate|Open this link|not authenticated"; then
+          READY_CHECKS=0
+          if [ "$AUTO_RESTORE_ATTEMPTED" -eq 0 ]; then
+            AUTO_RESTORE_ATTEMPTED=1
+            echo "[Worker ${WORKER_ID}] 🔄 Login screen detected; attempting automatic credential restore from .env first..."
+            AUTH_B64=$(grep '^FREEBUFF_AUTH_B64=' "$PROJECT_ROOT/agent-orchestration/.env" 2>/dev/null | head -n 1 | cut -d= -f2- | tr -d '"' || true)
+            if [ -n "$AUTH_B64" ]; then
+              printf '%s' "$AUTH_B64" | base64 -d | tar -xzf - -C "$PROJECT_ROOT/agent-orchestration/.runtime/freebuff-home" 2>/dev/null || true
+              docker exec "$CONTAINER" tmux kill-session -t buff 2>/dev/null || true
+              sleep 3
+              docker exec "$CONTAINER" tmux new-session -d -s buff "NODE_OPTIONS='--dns-result-order=ipv4first' freebuff"
+              sleep 6
+              continue
+            fi
+          fi
+
+          LOGGED_IN_NOW=1
+          echo "🔐 Log in once in Worker-${WORKER_ID} (Tab ${WORKER_ID}) — auto-saves to .env for all workers!" > "$STATUS_FILE"
+          echo "[Worker ${WORKER_ID}] 🔐 Waiting for one-time login in Tab ${WORKER_ID}..."
+          send_alert "FreeBuff Login Required (Worker ${WORKER_ID})" "FreeBuff's authentication token has expired and requires a manual login in Window 2 (Worker-${WORKER_ID}, Tab ${WORKER_ID}). Once you log in once, the new token will be saved to .env for all workers automatically."
+          sleep 4
+          continue
+        fi
+
+        if echo "$SCREEN" | grep -qiE "waiting room|queued|position in queue|Starting your model session|Connecting to|Initializing"; then
+          READY_CHECKS=0
+          echo "⏳ Admitting FreeBuff session (Worker-${WORKER_ID})..." > "$STATUS_FILE"
+          sleep 4
+          continue
+        fi
+
+        READY_CHECKS=$(expr "$READY_CHECKS" + 1)
+        if [ "$READY_CHECKS" -ge 2 ]; then
+          break
+        fi
         sleep 2
-        continue
+      done
+
+      if [ "$LOGGED_IN_NOW" -eq 1 ]; then
+        ./agent-orchestration/save-auth.sh >/dev/null 2>&1 || true
+        reset_alert_latch
       fi
 
-      if echo "$SCREEN" | grep -qiE "admission_attempt_closed|session POST failed|This session start was cancelled|operation timed out"; then
-        READY_CHECKS=0
-        echo "[Worker ${WORKER_ID}] 🔄 Resetting closed admission attempt..."
-        docker exec "$CONTAINER" tmux kill-session -t buff 2>/dev/null || true
-        sleep 4
-        docker exec "$CONTAINER" tmux new-session -d -s buff "NODE_OPTIONS='--dns-result-order=ipv4first' freebuff"
-        sleep 6
-        continue
-      fi
+      echo "$PREV_STATUS" > "$STATUS_FILE"
+      echo "[Worker ${WORKER_ID}] 📨 Submitting prompt to FreeBuff..."
+      docker exec "$CONTAINER" tmux send-keys -t buff -l -- "${PROMPT}"
+      sleep 1
+      docker exec "$CONTAINER" tmux send-keys -t buff Enter
 
-      if echo "$SCREEN" | grep -qiE "Log in|Sign in|visit https://|Press Enter to login|Waiting for login|authenticate|Open this link|not authenticated"; then
-        READY_CHECKS=0
-        # First attempt: try restoring credentials from .env and restarting TUI once before bothering the human
-        if [ "$AUTO_RESTORE_ATTEMPTED" -eq 0 ]; then
-          AUTO_RESTORE_ATTEMPTED=1
-          echo "[Worker ${WORKER_ID}] 🔄 Login screen detected; attempting automatic credential restore from .env first..."
-          AUTH_B64=$(grep '^FREEBUFF_AUTH_B64=' "$PROJECT_ROOT/agent-orchestration/.env" 2>/dev/null | head -n 1 | cut -d= -f2- | tr -d '"' || true)
-          if [ -n "$AUTH_B64" ]; then
-            printf '%s' "$AUTH_B64" | base64 -d | tar -xzf - -C "$PROJECT_ROOT/agent-orchestration/.runtime/freebuff-home" 2>/dev/null || true
+      # Monitor post-submission admission & handle "This session was released. Choose a model to start a new session. Enter: retry"
+      local ADMIT_WAIT=0
+      local RELEASE_RETRIES=0
+      local NEED_FULL_RESTART=0
+
+      while [ "$ADMIT_WAIT" -lt 60 ]; do
+        sleep 3
+        ADMIT_WAIT=$(expr "$ADMIT_WAIT" + 3)
+        local S_AFTER
+        S_AFTER=$(docker exec "$CONTAINER" tmux capture-pane -t buff -p 2>/dev/null || true)
+
+        # If submitting the prompt revealed that the session was released, press Enter to retry and allocate a new session!
+        if echo "$S_AFTER" | grep -qiE "session was released|Choose a model to start a new session|Enter: retry"; then
+          RELEASE_RETRIES=$(expr "$RELEASE_RETRIES" + 1)
+          if [ "$RELEASE_RETRIES" -le 3 ]; then
+            echo "[Worker ${WORKER_ID}] 🔄 Session was released upon submit; sending Enter (attempt ${RELEASE_RETRIES}/3) to start a new session..."
+            docker exec "$CONTAINER" tmux send-keys -t buff Enter
+            sleep 3
+            continue
+          else
+            echo "[Worker ${WORKER_ID}] 🔄 Session release banner persisted after 3 retries; restarting clean FreeBuff TUI..."
             docker exec "$CONTAINER" tmux kill-session -t buff 2>/dev/null || true
             sleep 3
-            docker exec "$CONTAINER" tmux new-session -d -s buff "NODE_OPTIONS='--dns-result-order=ipv4first' freebuff"
-            sleep 6
-            continue
+            NEED_FULL_RESTART=1
+            break
           fi
         fi
 
-        # If auto-restore didn't clear the login screen, notify human once (latch-protected)
-        LOGGED_IN_NOW=1
-        echo "🔐 Log in once in Worker-${WORKER_ID} (Tab ${WORKER_ID}) — auto-saves to .env for all workers!" > "$STATUS_FILE"
-        echo "[Worker ${WORKER_ID}] 🔐 Waiting for one-time login in Tab ${WORKER_ID}..."
-        send_alert "FreeBuff Login Required (Worker ${WORKER_ID})" "FreeBuff's authentication token has expired and requires a manual login in Window 2 (Worker-${WORKER_ID}, Tab ${WORKER_ID}). Once you log in once, the new token will be saved to .env for all workers automatically."
-        sleep 4
-        continue
-      fi
+        if echo "$S_AFTER" | grep -qiE "admission_attempt_closed|session POST failed|This session start was cancelled|operation timed out"; then
+          echo "[Worker ${WORKER_ID}] 🔄 Admission error detected after submit; restarting clean FreeBuff TUI..."
+          docker exec "$CONTAINER" tmux kill-session -t buff 2>/dev/null || true
+          sleep 3
+          NEED_FULL_RESTART=1
+          break
+        fi
 
-      if echo "$SCREEN" | grep -qiE "waiting room|queued|position in queue|Starting your model session|Connecting to|Initializing"; then
-        READY_CHECKS=0
-        echo "⏳ Admitting FreeBuff session (Worker-${WORKER_ID})..." > "$STATUS_FILE"
-        sleep 4
-        continue
-      fi
+        if echo "$S_AFTER" | grep -qiE "Starting your model session|waiting room|queued|position in queue|Connecting to"; then
+          continue
+        fi
 
-      READY_CHECKS=$(expr "$READY_CHECKS" + 1)
-      if [ "$READY_CHECKS" -ge 2 ]; then
         break
-      fi
-      sleep 2
-    done
+      done
 
-    # If the user completed a manual login, persist the new token and re-arm the notification latch!
-    if [ "$LOGGED_IN_NOW" -eq 1 ]; then
-      ./agent-orchestration/save-auth.sh >/dev/null 2>&1 || true
-      reset_alert_latch
-    fi
-
-    echo "$PREV_STATUS" > "$STATUS_FILE"
-    echo "[Worker ${WORKER_ID}] 📨 Submitting prompt to FreeBuff..."
-    docker exec "$CONTAINER" tmux send-keys -t buff -l -- "${PROMPT}"
-    sleep 1
-    docker exec "$CONTAINER" tmux send-keys -t buff Enter
-
-    local ADMIT_WAIT=0
-    while [ "$ADMIT_WAIT" -lt 45 ]; do
-      sleep 3
-      ADMIT_WAIT=$(expr "$ADMIT_WAIT" + 3)
-      local S_AFTER
-      S_AFTER=$(docker exec "$CONTAINER" tmux capture-pane -t buff -p 2>/dev/null || true)
-      if echo "$S_AFTER" | grep -qiE "Starting your model session"; then
+      if [ "$NEED_FULL_RESTART" -eq 1 ]; then
         continue
       fi
+
       break
     done
   ) 201>.reviews/admission.lock
@@ -354,6 +391,8 @@ run_worker_freebuff() {
     admit_and_send_prompt "$WORKER_ID" "$PROMPT"
 
     local ELAPSED=0
+    local MID_RUN_RELEASE_RETRIES=0
+
     while [ "$ELAPSED" -lt "$SESSION_TIMEOUT_SEC" ]; do
       sleep "$POLL_INTERVAL_SEC"
       ELAPSED=$(expr "$ELAPSED" + "$POLL_INTERVAL_SEC")
@@ -365,19 +404,57 @@ run_worker_freebuff() {
 
       if ! docker exec "$CONTAINER" tmux has-session -t buff 2>/dev/null; then
         echo "[Worker ${WORKER_ID}] ⚠️  FreeBuff tmux exited early. Respawning in 6s..."
+        PROMPT="Your previous FreeBuff session exited before signaling DONE. Run 'git status' and 'git diff' to inspect existing progress, finish remaining work, verify all tests pass, write .reviews/agent_notes.md, and run: echo DONE > .tickets/STATUS"
         sleep 6
         break
       fi
 
       SCREEN=$(docker exec "$CONTAINER" tmux capture-pane -t buff -p 2>/dev/null || true)
 
-      if echo "$SCREEN" | grep -qiE "Starting your model session"; then
+      if echo "$SCREEN" | grep -qiE "Starting your model session|waiting room|queued|position in queue"; then
         continue
+      fi
+
+      # Handle "This session was released. Choose a model to start a new session. Enter: retry" mid-task
+      if echo "$SCREEN" | grep -qiE "session was released|Choose a model to start a new session|Enter: retry"; then
+        MID_RUN_RELEASE_RETRIES=$(expr "$MID_RUN_RELEASE_RETRIES" + 1)
+        if [ "$MID_RUN_RELEASE_RETRIES" -le 2 ]; then
+          echo "[Worker ${WORKER_ID}] 🔄 Session was released mid-task; acquiring admission lock and sending Enter: retry (${MID_RUN_RELEASE_RETRIES}/2)..."
+          (
+            flock -x 201
+            docker exec "$CONTAINER" tmux send-keys -t buff Enter
+            sleep 4
+            local S_RETRY
+            S_RETRY=$(docker exec "$CONTAINER" tmux capture-pane -t buff -p 2>/dev/null || true)
+            if echo "$S_RETRY" | grep -qiE "Choose a model|Enter: retry"; then
+              docker exec "$CONTAINER" tmux send-keys -t buff Enter
+              sleep 4
+            fi
+            local W_RETRY=0
+            while [ "$W_RETRY" -lt 45 ]; do
+              S_RETRY=$(docker exec "$CONTAINER" tmux capture-pane -t buff -p 2>/dev/null || true)
+              if echo "$S_RETRY" | grep -qiE "Starting your model session|waiting room|queued"; then
+                sleep 3
+                W_RETRY=$(expr "$W_RETRY" + 3)
+                continue
+              fi
+              break
+            done
+          ) 201>.reviews/admission.lock
+          continue
+        else
+          echo "[Worker ${WORKER_ID}] 🔄 Session release banner persisted after in-place retries; restarting fresh FreeBuff session with continuation prompt..."
+          docker exec "$CONTAINER" tmux kill-session -t buff 2>/dev/null || true
+          PROMPT="Your previous FreeBuff session was released mid-task. Run 'git status' and 'git diff' to inspect existing progress, finish remaining work, verify all tests pass, write .reviews/agent_notes.md, and run: echo DONE > .tickets/STATUS"
+          sleep 6
+          break
+        fi
       fi
 
       if echo "$SCREEN" | grep -qiE "admission_attempt_closed|session POST failed|This session start was cancelled|operation timed out|not authenticated|Failed to start agent run|AI_APICallError|Message not sent|Session ended|superseded|Log in to continue"; then
         echo "[Worker ${WORKER_ID}] 🔄 Session interrupted or timed out. Re-admitting cleanly in 6s..."
         docker exec "$CONTAINER" tmux kill-session -t buff 2>/dev/null || true
+        PROMPT="Your previous FreeBuff session was interrupted. Run 'git status' and 'git diff' to inspect existing progress, finish remaining work, verify all tests pass, write .reviews/agent_notes.md, and run: echo DONE > .tickets/STATUS"
         sleep 6
         break
       fi
@@ -465,9 +542,13 @@ process_ticket_on_worker() {
   local WT_DIR=".worktrees/worker-${WORKER_ID}"
   local BRANCH_NAME="feat/${TICKET_NAME}"
   local STATUS_FILE=".reviews/worker_${WORKER_ID}.status"
+  local CONTAINER="freebuff_worker_${WORKER_ID}"
 
   echo "🔨 Implementing ${TICKET_NAME}" > "$STATUS_FILE"
   echo "[Worker ${WORKER_ID}] 🎬 Starting ${TICKET_NAME} on branch ${BRANCH_NAME}..."
+
+  # Close any idle leftover FreeBuff tmux session from earlier tickets so we never inherit an expired session lease
+  docker exec "$CONTAINER" tmux kill-session -t buff 2>/dev/null || true
 
   (
     cd "$WT_DIR"
@@ -664,6 +745,9 @@ $(cat "$REVIEW_FILE")" >/dev/null 2>&1 || true
     git branch -D "$BRANCH_NAME" >/dev/null 2>&1 || true
     echo "[Worker ${WORKER_ID}] ✅ ${TICKET_NAME} merged into main and feature branch deleted!"
   ) 200>.reviews/merge.lock
+
+  # Close the FreeBuff tmux session when ticket finishes so it doesn't expire while idle
+  docker exec "$CONTAINER" tmux kill-session -t buff 2>/dev/null || true
 
   echo "💤 Idle (Last completed: ${TICKET_NAME})" > "$STATUS_FILE"
   return 0
