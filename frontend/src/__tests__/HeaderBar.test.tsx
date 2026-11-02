@@ -158,6 +158,39 @@ describe('HeaderBar', () => {
     expect(bars.querySelectorAll('.signal-bar[data-active="true"]')).toHaveLength(1);
   });
 
+  it('colours the active bars green for 4/3, yellow for 2 and red for 1', () => {
+    const cases: Array<{ ping: number; level: number; color: string }> = [
+      { ping: 20, level: 4, color: 'green' },
+      { ping: 60, level: 4, color: 'green' },
+      { ping: 150, level: 3, color: 'green' },
+      { ping: 300, level: 2, color: 'yellow' },
+      { ping: 301, level: 1, color: 'red' },
+    ];
+
+    for (const { ping, level, color } of cases) {
+      const { unmount } = render(<HeaderBar pingMs={ping} />);
+      openProfile();
+
+      const bars = screen.getByRole('img', { name: `Connection strength: ${level} of 4` });
+      expect(bars.getAttribute('data-level')).toBe(String(level));
+      expect(bars.getAttribute('data-bar-color')).toBe(color);
+
+      const active = Array.from(bars.querySelectorAll('.signal-bar[data-active="true"]'));
+      expect(active, `active bars at ${ping} ms`).toHaveLength(level);
+      for (const bar of active) {
+        expect(bar.classList.contains('active')).toBe(true);
+        expect(bar.getAttribute('data-bar-color')).toBe(color);
+      }
+
+      // Inactive bars stay neutral and carry no tier colour.
+      const inactive = Array.from(bars.querySelectorAll('.signal-bar[data-active="false"]'));
+      expect(inactive).toHaveLength(4 - level);
+      for (const bar of inactive) expect(bar.hasAttribute('data-bar-color')).toBe(false);
+
+      unmount();
+    }
+  });
+
   it('lets the lag-switch override the ping and animate the bars on tier change', () => {
     render(<HeaderBar pingMs={24} />);
     openProfile();
@@ -172,6 +205,7 @@ describe('HeaderBar', () => {
     expect(screen.getByTestId('ping-value').textContent).toBe('420 ms');
     const bars = screen.getByRole('img', { name: 'Connection strength: 1 of 4' });
     expect(bars.querySelectorAll('.signal-bar[data-active="true"]')).toHaveLength(1);
+    expect(bars.getAttribute('data-bar-color')).toBe('red');
     expect(bars.classList.contains('connection-bars-updating')).toBe(true);
     expect(bars.getAttribute('data-updating')).toBe('true');
 
@@ -185,7 +219,7 @@ describe('HeaderBar', () => {
     ).toBe(true);
   });
 
-  it('previews a random sample when picking a pack and when dragging the volume', () => {
+  it('previews a pack sample and plays the volume sample only on slider release', () => {
     const sample = vi.spyOn(soundEngine, 'playSampleSound');
     render(<HeaderBar />);
     openSubmenu('Sound');
@@ -203,9 +237,20 @@ describe('HeaderBar', () => {
     ).toBe('true');
 
     sample.mockClear();
+    // Dragging the slider is silent but updates the stored volume and readout.
+    fireEvent.input(slider, { target: { value: '0.9' } });
     fireEvent.input(slider, { target: { value: '0.35' } });
 
     expect(soundEngine.getVolume()).toBeCloseTo(0.35);
+    expect(within(panel).getByText('35%')).toBeTruthy();
+    expect(sample).toHaveBeenCalledTimes(0);
+
+    // The burst of release events from one gesture auditions exactly one sample.
+    fireEvent.pointerUp(slider);
+    fireEvent.mouseUp(slider);
+    fireEvent.touchEnd(slider);
+
+    expect(sample).toHaveBeenCalledTimes(1);
     expect(sample).toHaveBeenCalledWith(undefined, 0.35);
 
     expect(within(panel).getAllByRole('button').map((button) => button.textContent)).toEqual([

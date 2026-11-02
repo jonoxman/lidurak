@@ -114,6 +114,9 @@ export const PROFILE_ITEMS: readonly ProfileItem[] = [
   { id: 'cardback', label: 'Card Back', icon: 'cardback', submenu: 'cardback' },
 ];
 
+/** Colour of the active signal bars for the current latency tier. */
+export type BarColor = 'green' | 'yellow' | 'red';
+
 /** Four-bar signal strength: 4 is excellent, 1 is poor. */
 export function connectionLevel(pingMs: number): number {
   if (!Number.isFinite(pingMs) || pingMs < 0) return 1;
@@ -230,7 +233,23 @@ function BackChevron() {
 function SoundSubmenu() {
   const [volume, setVolume] = useState(() => soundEngine.getVolume());
   const [pack, setPack] = useState(() => soundEngine.getSoundPack());
+  // The latest volume is mirrored in a ref so a release can audition it even
+  // before the re-render that follows the final `input` event.
+  const volumeRef = useRef(volume);
+  // A single release fires pointerup, mouseup and touchend in the same turn;
+  // the flag keeps that burst down to exactly one audible sample.
+  const releasedRef = useRef(false);
   const packs = SoundEngine.soundPacks();
+
+  const playReleasedSample = () => {
+    if (releasedRef.current) return;
+    releasedRef.current = true;
+    window.setTimeout(() => {
+      releasedRef.current = false;
+    }, 0);
+    // Audible feedback: one random effect from the pack at the chosen volume.
+    soundEngine.playSampleSound(undefined, volumeRef.current);
+  };
 
   return (
     <div class="settings-submenu" data-testid="submenu-sound">
@@ -245,11 +264,15 @@ function SoundSubmenu() {
           aria-label="Master volume"
           onInput={(event) => {
             const next = Number((event.target as HTMLInputElement).value);
+            // Dragging is silent: the level is stored immediately, but the
+            // sample only plays once the selector is released.
+            volumeRef.current = next;
             setVolume(next);
             soundEngine.setVolume(next);
-            // Audible feedback: a random effect at the new volume.
-            soundEngine.playSampleSound(undefined, next);
           }}
+          onPointerUp={playReleasedSample}
+          onMouseUp={playReleasedSample}
+          onTouchEnd={playReleasedSample}
         />
         <output class="setting-value">{Math.round(volume * 100)}%</output>
       </label>
@@ -459,6 +482,9 @@ export function HeaderBar({ pingMs = 24, serverDelayMs = 12 }: HeaderBarProps) {
   // The lag-switch overrides the reported round-trip time until it is cleared.
   const activePing = lagPing ?? pingMs;
   const level = connectionLevel(activePing);
+  // Tier colour: green only for a good connection, yellow for two bars and red
+  // for the last remaining bar, so the tracker reads at a glance.
+  const barColor: BarColor = level >= 3 ? 'green' : level === 2 ? 'yellow' : 'red';
 
   // Bars animate once per quality-tier change; a steady connection stays still.
   useEffect(() => {
@@ -641,16 +667,21 @@ export function HeaderBar({ pingMs = 24, serverDelayMs = 12 }: HeaderBarProps) {
                 role="img"
                 aria-label={`Connection strength: ${level} of 4`}
                 data-level={level}
+                data-bar-color={barColor}
                 data-updating={barsUpdating ? 'true' : 'false'}
               >
-                {[1, 2, 3, 4].map((bar) => (
-                  <span
-                    key={bar}
-                    class="signal-bar"
-                    data-bar={bar}
-                    data-active={bar <= level ? 'true' : 'false'}
-                  />
-                ))}
+                {[1, 2, 3, 4].map((bar) => {
+                  const active = bar <= level;
+                  return (
+                    <span
+                      key={bar}
+                      class={`signal-bar${active ? ' active' : ''}`}
+                      data-bar={bar}
+                      data-active={active ? 'true' : 'false'}
+                      data-bar-color={active ? barColor : undefined}
+                    />
+                  );
+                })}
               </div>
               <label class="lag-switch">
                 <span class="connection-label">LAG-SWITCH</span>
