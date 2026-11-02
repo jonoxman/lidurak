@@ -4,6 +4,7 @@ import type { PlayerGameView } from '../types';
 
 vi.mock('../api/client', () => ({
   getGameView: vi.fn(),
+  getGameReplay: vi.fn(),
   sendAction: vi.fn(),
 }));
 
@@ -89,11 +90,13 @@ const sortableView: PlayerGameView = {
 };
 
 const getGameView = client.getGameView as unknown as ReturnType<typeof vi.fn>;
+const getGameReplay = client.getGameReplay as unknown as ReturnType<typeof vi.fn>;
 const sendAction = client.sendAction as unknown as ReturnType<typeof vi.fn>;
 
 describe('GamePage', () => {
   beforeEach(() => {
     getGameView.mockReset();
+    getGameReplay.mockReset();
     sendAction.mockReset();
     wsState.onUpdate = null;
     wsState.presence = [];
@@ -1044,6 +1047,7 @@ describe('GamePage', () => {
   it('switches the point of view from the header POV menu', async () => {
     getGameView.mockResolvedValue({
       ...view,
+      myName: 'Alice',
       opponents: [
         { id: 'p1', name: 'Bob', cardCount: 6, hasPassed: false, finishRank: null },
         { id: 'p2', name: 'Carol', cardCount: 4, hasPassed: false, finishRank: null },
@@ -1056,13 +1060,24 @@ describe('GamePage', () => {
     await waitFor(() => expect(screen.getByTestId('pov-menu')).toBeTruthy());
     const select = screen.getByTestId('pov-menu') as HTMLSelectElement;
     expect(select.value).toBe('p0');
-    // Opponents keep their real names; the viewer's own name is not in the
-    // projection, so its seat id is used instead of a "You" placeholder.
+    // Item 13: every seat, including the viewer's own, is labelled with its
+    // real name instead of a "You" placeholder or a raw seat id.
     expect(Array.from(select.options).map((option) => option.textContent)).toEqual([
-      'p0',
+      'Alice',
       'Bob',
       'Carol',
     ]);
+    expect(select.textContent).not.toContain('You');
+    // The left-sidebar POV switcher uses the same real names.
+    const tabs = screen.getAllByRole('tab');
+    expect(tabs.map((tab) => tab.querySelector('.hotseat-name')?.textContent)).toEqual([
+      'Alice',
+      'Bob',
+      'Carol',
+    ]);
+    expect(screen.getByRole('tablist').getAttribute('aria-label')).toBe('POV player switcher');
+    // The header label and the left-sidebar heading both read POV.
+    expect(screen.getAllByText('POV')).toHaveLength(2);
 
     fireEvent.change(select, { target: { value: 'p2' } });
     expect(onSwitchPlayer).toHaveBeenCalledWith('p2');
@@ -1124,5 +1139,237 @@ describe('GamePage', () => {
     expect(countdown.textContent).toMatch(/^(11|12)$/);
     expect(countdown.className).toBe('surrender-countdown');
     expect(countdown.closest('button')?.textContent).toContain('Pass');
+  });
+
+  it('puts a return-to-lobby button inside the game-over banner', async () => {
+    getGameView.mockResolvedValue({
+      ...view,
+      myName: 'Alice',
+      myHand: [],
+      tablePairs: [],
+      boutPhase: 'GameOver',
+      legalActions: [],
+      finishOrder: ['p1', 'p0'],
+      isDraw: false,
+    });
+    const onLeaveGame = vi.fn();
+
+    render(
+      <GamePage
+        gameId="game-1"
+        playerId="p0"
+        onSwitchPlayer={() => {}}
+        onLeaveGame={onLeaveGame}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('game-over-banner')).toBeTruthy());
+    const banner = screen.getByTestId('game-over-banner');
+    const button = screen.getByTestId('banner-lobby-button');
+
+    expect(banner.contains(button)).toBe(true);
+    expect(button.tagName).toBe('BUTTON');
+    expect(button.textContent).toContain('Return to lobby');
+
+    fireEvent.click(button);
+    expect(onLeaveGame).toHaveBeenCalledTimes(1);
+
+    // The header button shares the same handler.
+    fireEvent.click(screen.getByRole('button', { name: 'Back to lobby' }));
+    expect(onLeaveGame).toHaveBeenCalledTimes(2);
+  });
+
+  it('splits one clock panel into game and turn halves and idles the game clock before the first move', async () => {
+    getGameView.mockResolvedValue({ ...view, gameStartedAtMs: null, gameEndedAtMs: null });
+
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    await waitFor(() => expect(screen.getByTestId('clock-panel')).toBeTruthy());
+    const panel = screen.getByTestId('clock-panel');
+    expect(panel.classList.contains('clock-split-panel')).toBe(true);
+    expect(panel.getAttribute('aria-label')).toBe('Game and turn clocks');
+
+    const gameHalf = panel.querySelector('.clock-half.game-clock-half') as HTMLElement;
+    const turnHalf = panel.querySelector('.clock-half.turn-clock-half') as HTMLElement;
+    expect(gameHalf).not.toBeNull();
+    expect(turnHalf).not.toBeNull();
+    expect(gameHalf.contains(screen.getByTestId('game-clock'))).toBe(true);
+    expect(turnHalf.contains(screen.getByTestId('turn-clock'))).toBe(true);
+    // The two halves are siblings inside the single panel, so CSS can divide
+    // them with one horizontal divider.
+    expect(gameHalf.nextElementSibling).toBe(turnHalf);
+    expect(document.querySelectorAll('[data-testid="clock-panel"]')).toHaveLength(1);
+
+    // Before the first move the overall clock is frozen at 00:00 and inactive.
+    expect(screen.getByTestId('game-clock').textContent).toBe('00:00');
+    expect(screen.getByTestId('game-clock').getAttribute('data-active')).toBe('false');
+  });
+
+  it('loads the replay after game over and steps through frames while freezing the game clock', async () => {
+    const finishedView: PlayerGameView = {
+      ...view,
+      myHand: [],
+      tablePairs: [],
+      boutPhase: 'GameOver',
+      legalActions: [],
+      finishOrder: ['p1', 'p0'],
+      isDraw: false,
+      gameStartedAtMs: 1_000,
+      gameEndedAtMs: 65_000,
+    };
+    const frameView = (
+      myId: string,
+      myHand: PlayerGameView['myHand'],
+      tablePairs: PlayerGameView['tablePairs'],
+      elapsedMs: number,
+      finishOrder: string[] = ['p1', 'p0'],
+    ): PlayerGameView => ({
+      ...finishedView,
+      myId,
+      myName: myId === 'p0' ? 'Alice' : 'Bob',
+      myHand,
+      tablePairs,
+      finishOrder,
+      opponents: [
+        myId === 'p0'
+          ? { id: 'p1', name: 'Bob', cardCount: 2, hasPassed: false, finishRank: null }
+          : { id: 'p0', name: 'Alice', cardCount: 1, hasPassed: false, finishRank: null },
+      ],
+      gameStartedAtMs: 0,
+      gameEndedAtMs: elapsedMs,
+    });
+    const openingPairs = [{ attack: { suit: 'spades', rank: 'seven' }, defense: null }];
+    const finalPairs = [
+      { attack: { suit: 'spades', rank: 'king' }, defense: { suit: 'hearts', rank: 'ace' } },
+    ];
+    const frames = [
+      {
+        moveIndex: 1,
+        playerId: 'p0',
+        action: { type: 'initialAttack', playerId: 'p0' },
+        elapsedMs: 0,
+        views: {
+          p0: frameView(
+            'p0',
+            [
+              { suit: 'clubs', rank: 'two' },
+              { suit: 'hearts', rank: 'three' },
+            ],
+            openingPairs,
+            0,
+            [],
+          ),
+          p1: frameView('p1', [], openingPairs, 0, []),
+        },
+      },
+      {
+        moveIndex: 2,
+        playerId: 'p0',
+        action: { type: 'initialAttack', playerId: 'p0' },
+        elapsedMs: 65_000,
+        views: {
+          p0: frameView('p0', [{ suit: 'clubs', rank: 'two' }], finalPairs, 65_000),
+          p1: frameView('p1', [], finalPairs, 65_000),
+        },
+      },
+    ];
+
+    getGameView.mockResolvedValue(finishedView);
+    getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames });
+
+    const { container } = render(
+      <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
+    );
+
+    await waitFor(() => expect(getGameReplay).toHaveBeenCalledWith('game-1'));
+    await waitFor(() => expect(screen.getByTestId('review-nav')).toBeTruthy());
+
+    // The navigation controls sit at the bottom of the left sidebar, directly
+    // under the How to Play panel.
+    const left = container.querySelector('[data-zone="sidebar-left"]') as HTMLElement;
+    const nav = within(left).getByTestId('review-nav');
+    expect(nav.previousElementSibling?.textContent).toContain('How to Play');
+    expect(within(nav).getByTestId('review-prev-button')).toBeTruthy();
+    expect(within(nav).getByTestId('review-next-button')).toBeTruthy();
+
+    const arena = container.querySelector('[data-zone="table-arena"]') as HTMLElement;
+    const ranks = (): (string | null)[] =>
+      Array.from(arena.querySelectorAll('.card-slot')).map((node) =>
+        node.getAttribute('data-rank'),
+      );
+
+    // Review opens on the final move of the game.
+    expect(screen.getByTestId('review-move-indicator').textContent).toBe('Move 2 / 2');
+    expect(screen.getByTestId('game-clock').textContent).toBe('01:05');
+    expect(screen.getByTestId('game-clock').getAttribute('data-active')).toBe('false');
+    expect(ranks()).toContain('king');
+    expect(ranks()).not.toContain('seven');
+    expect((screen.getByTestId('review-next-button') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId('review-prev-button') as HTMLButtonElement).disabled).toBe(false);
+
+    // The POV menu still lists real names while reviewing.
+    const pov = screen.getByTestId('pov-menu') as HTMLSelectElement;
+    expect(Array.from(pov.options).map((option) => option.textContent)).toEqual([
+      'Alice',
+      'Bob',
+    ]);
+
+    // Step one move back: the board, the counter and the clock all follow.
+    fireEvent.click(screen.getByTestId('review-prev-button'));
+    await waitFor(() =>
+      expect(screen.getByTestId('review-move-indicator').textContent).toBe('Move 1 / 2'),
+    );
+    expect(screen.getByTestId('game-clock').textContent).toBe('00:00');
+    expect(screen.getByTestId('game-clock').getAttribute('data-active')).toBe('false');
+    expect(ranks()).toContain('seven');
+    expect(ranks()).not.toContain('king');
+    expect((screen.getByTestId('review-prev-button') as HTMLButtonElement).disabled).toBe(true);
+
+    // The outcome banner and result summary stay bound to the finished match,
+    // even though this intermediate frame's finishOrder is still empty.
+    expect(screen.getByTestId('game-over-banner').textContent).toContain(
+      'Game over — Bob wins',
+    );
+    expect(screen.getByTestId('game-over-banner').textContent).toContain('Durak: you');
+    expect(screen.getByText('Bob wins')).toBeTruthy();
+    expect(container.querySelectorAll('.finish-order li')).toHaveLength(2);
+
+    // And forward again to the final position.
+    fireEvent.click(screen.getByTestId('review-next-button'));
+    await waitFor(() =>
+      expect(screen.getByTestId('review-move-indicator').textContent).toBe('Move 2 / 2'),
+    );
+    expect(screen.getByTestId('game-clock').textContent).toBe('01:05');
+    expect(ranks()).toContain('king');
+
+    // Sorting stays available while stepping through the replay.
+    expect(screen.getByLabelText('Sort hand')).toBeTruthy();
+  });
+
+  it('falls back to the live view in review mode when the replay request fails', async () => {
+    getGameView.mockResolvedValue({
+      ...view,
+      myHand: [],
+      tablePairs: [],
+      boutPhase: 'GameOver',
+      legalActions: [],
+      finishOrder: ['p1', 'p0'],
+      isDraw: false,
+      gameStartedAtMs: 1_000,
+      gameEndedAtMs: 35_000,
+    });
+    getGameReplay.mockRejectedValue(new Error('replay unavailable'));
+
+    const { container } = render(
+      <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('review-nav')).toBeTruthy());
+    // No frames loaded, so navigation is disabled and the recorded clock shows.
+    expect(screen.getByTestId('review-move-indicator').textContent).toBe('Move 0 / 0');
+    expect((screen.getByTestId('review-prev-button') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId('review-next-button') as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId('game-clock').textContent).toBe('00:34');
+    expect(container.querySelector('[data-zone="table-arena"]')).not.toBeNull();
   });
 });

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { ActionBar } from '../components/ActionBar';
 import { GameTable, TableDeck, cardKey, defenderDoubleClickAction } from '../components/GameTable';
 import { SortBar, type SortMode } from '../components/SortBar';
-import { getGameView, sendAction as sendActionRest } from '../api/client';
+import { getGameReplay, getGameView, sendAction as sendActionRest } from '../api/client';
 import { GameWebSocket } from '../api/websocket';
 import { soundEngine } from '../audio/SoundEngine';
 import {
@@ -18,6 +18,7 @@ import {
   normalizeToken,
   type Card as GameCard,
   type GameAction,
+  type GameReplay,
   type PlayerGameView,
 } from '../types';
 
@@ -162,6 +163,8 @@ export interface GamePageProps {
   gameId: string;
   playerId: string;
   onSwitchPlayer: (playerId: string) => void;
+  /** Leaves the table; defaults to the root URL when the router owns it. */
+  onLeaveGame?: () => void;
   /** Grace period before a defenceless defender surrenders automatically. */
   autoSurrenderMs?: number;
 }
@@ -170,6 +173,7 @@ export function GamePage({
   gameId,
   playerId,
   onSwitchPlayer,
+  onLeaveGame,
   autoSurrenderMs = AUTO_SURRENDER_MS,
 }: GamePageProps) {
   const [view, setView] = useState<PlayerGameView | null>(null);
@@ -192,6 +196,11 @@ export function GamePage({
   // Hand order is display-only state shared between the sidebar dropdown and
   // the table's hand.
   const [sortMode, setSortMode] = useState<SortMode>('suit');
+  // Item 12: the recorded match and the frame the review controls are showing.
+  const [replay, setReplay] = useState<GameReplay | null>(null);
+  const [replayFrameIdx, setReplayFrameIdx] = useState(0);
+  // Item 13: names remembered from every live view and replay frame.
+  const knownNamesRef = useRef<Record<string, string>>({});
   const lastActivityRef = useRef(Date.now());
 
   useEffect(() => {
@@ -311,6 +320,59 @@ export function GamePage({
     }
   }, [view]);
 
+  const gameOverPhase = view != null && isGameOverPhase(view.boutPhase);
+
+  // Item 12: a finished match loads its recorded replay so the review controls
+  // can step through it. A missing or failing endpoint leaves the live view in
+  // place instead of breaking the page.
+  useEffect(() => {
+    if (!gameOverPhase) {
+      setReplay(null);
+      setReplayFrameIdx(0);
+      return;
+    }
+    let active = true;
+    try {
+      if (typeof getGameReplay !== 'function') return;
+      const request = getGameReplay(gameId);
+      if (request == null || typeof request.then !== 'function') return;
+      request
+        .then((loaded) => {
+          if (!active) return;
+          setReplay(loaded);
+          setReplayFrameIdx(Math.max(0, loaded.frames.length - 1));
+        })
+        .catch((reason: unknown) => {
+          if (active) console.warn('Could not load the game replay', reason);
+        });
+    } catch (reason: unknown) {
+      console.warn('Could not load the game replay', reason);
+    }
+    return () => {
+      active = false;
+    };
+  }, [gameId, gameOverPhase]);
+
+  // Item 13: remember every real name seen in a live view or a replay frame so
+  // the POV menu can label each seat even when the current frame omits it.
+  useEffect(() => {
+    const remember = (name: string | undefined, id: string) => {
+      if (typeof name === 'string' && name.length > 0) knownNamesRef.current[id] = name;
+    };
+    if (view) {
+      remember(view.myName, view.myId);
+      view.opponents.forEach((opponent) => remember(opponent.name, opponent.id));
+    }
+    if (replay) {
+      replay.frames.forEach((frame) => {
+        Object.values(frame.views).forEach((frameView) => {
+          remember(frameView.myName, frameView.myId);
+          frameView.opponents.forEach((opponent) => remember(opponent.name, opponent.id));
+        });
+      });
+    }
+  }, [view, replay]);
+
   const deadlineMs = view?.turnDeadlineMs ?? 0;
   const gameStartedAtMs = view?.gameStartedAtMs ?? null;
   const gameEndedAtMs = view?.gameEndedAtMs ?? null;
@@ -340,7 +402,6 @@ export function GamePage({
   // Feedback #8: only the player being waited on sees the clock tick; every
   // other seat keeps a frozen 00:15 display.
   const viewerOnClock = view != null && timedPlayerId === view.myId;
-  const displayedSeconds = viewerOnClock ? seconds : 15;
 
   // A subtle tick on each of the final five seconds, only for the player whose
   // own clock is the one running.
@@ -389,9 +450,7 @@ export function GamePage({
           <button
             type="button"
             class="action-button back-to-lobby"
-            onClick={() => {
-              window.location.hash = '/';
-            }}
+            onClick={() => (onLeaveGame ? onLeaveGame() : window.location.assign('/'))}
           >
             Back to lobby
           </button>
@@ -404,11 +463,6 @@ export function GamePage({
   const selected = selection?.view === view ? selection.indices : EMPTY_SELECTION;
   const selectIndices = (indices: Set<number>) => setSelection({ view, indices });
   const clearSelection = () => setSelection(null);
-
-  const nameFor = (id: string): string => {
-    if (id === view.myId) return 'You';
-    return view.opponents.find((opponent) => opponent.id === id)?.name ?? id;
-  };
 
   const selectedCards: GameCard[] = [...selected]
     .sort((left, right) => left - right)
@@ -424,10 +478,6 @@ export function GamePage({
 
   const viewerIndex = viewerSeatIndex(view);
   const isDefender = view.defenderIdx === viewerIndex;
-
-  // Opponents arrive in seat order without the viewer, so a seat index maps
-  // onto its player id by skipping the viewer's own seat.
-  const playerIdForSeat = (seatIdx: number): string | undefined => seatIdFor(view, seatIdx);
 
   const isAttackerTurn =
     isInitialAttackPhase(view.boutPhase) && hasLegalAction(view.legalActions, 'attack');
@@ -619,32 +669,93 @@ export function GamePage({
     dispatch(buildRedirectAttack(playerId, [card]));
   };
 
-  // Fixed seat order: the hotseat switcher never reorders the active player.
-  const playerOptions = seatOrderedPlayerIds(view);
+  // Item 12: a finished game is reviewed read-only against the selected replay
+  // frame; a live match always renders the authoritative view.
+  const gameOver = isGameOverPhase(view.boutPhase);
+  const reviewMode = gameOver;
+  const replayFrames = replay?.frames ?? [];
+  const activeFrame =
+    replayFrames.length > 0
+      ? replayFrames[Math.min(Math.max(replayFrameIdx, 0), replayFrames.length - 1)]
+      : null;
+  const displayedView =
+    reviewMode && activeFrame
+      ? activeFrame.views[playerId] ??
+        activeFrame.views[Object.keys(activeFrame.views)[0]] ??
+        view
+      : view;
+
+  // Item 13: every seat resolves to a real name (opponent summary, the
+  // viewer's own `myName`, the displayed replay frame, a name remembered from
+  // a live/replay view, or a synchronous scan of the loaded replay frames),
+  // never a "You" placeholder or a raw seat id when a name is known. The
+  // replay scan matters on the first render after the replay resolves, before
+  // the name-cache effect has run.
+  const nameFor = (id: string): string => {
+    const opponent =
+      view.opponents.find((candidate) => candidate.id === id) ??
+      displayedView.opponents.find((candidate) => candidate.id === id);
+    if (opponent) return opponent.name;
+    if (view.myId === id && view.myName) return view.myName;
+    if (displayedView.myId === id && displayedView.myName) return displayedView.myName;
+    const remembered = knownNamesRef.current[id];
+    if (remembered) return remembered;
+    for (const frame of replay?.frames ?? []) {
+      for (const frameView of Object.values(frame.views)) {
+        if (frameView.myId === id && frameView.myName) return frameView.myName;
+        const frameOpponent = frameView.opponents.find((candidate) => candidate.id === id);
+        if (frameOpponent) return frameOpponent.name;
+      }
+    }
+    return id;
+  };
+
+  // Fixed seat order: neither the POV switcher nor the players list reorders
+  // the active player.
+  const playerOptions = seatOrderedPlayerIds(displayedView);
   const playersInSeatOrder = playerOptions.map((id) => {
-    const opponent = view.opponents.find((candidate) => candidate.id === id);
-    const mine = id === view.myId;
+    const opponent = displayedView.opponents.find((candidate) => candidate.id === id);
+    const mine = id === displayedView.myId;
     return {
       id,
-      name: mine ? nameFor(id) : opponent?.name ?? id,
-      cardCount: mine ? view.myHand.length : opponent?.cardCount ?? 0,
+      name: nameFor(id),
+      cardCount: mine ? displayedView.myHand.length : opponent?.cardCount ?? 0,
       finishRank: opponent?.finishRank ?? null,
       mine,
     };
   });
 
+  // Item 12: the match outcome always comes from the finished game, never an
+  // intermediate replay frame. Early frames have an empty or one-entry
+  // `finishOrder`, so binding these to `displayedView` would erase the winner
+  // or label the only finished player as both winner and Durak.
   const winnerId = view.finishOrder[0];
   const durakId = view.finishOrder[view.finishOrder.length - 1];
-  const gameOver = isGameOverPhase(view.boutPhase);
+  const gameIsDraw = view.isDraw;
 
-  // Req 12: a finished game is reviewed read-only. GameTable drops the command
-  // controls, drop outlines, drags and double-click calls, while sorting stays.
-  const reviewMode = gameOver;
-  const gameClock = formatGameClock(view.gameStartedAtMs, view.gameEndedAtMs, now);
-  // The table view never carries the viewer's own name, so the POV menu falls
-  // back to the seat id instead of inventing a "You" entry.
-  const povLabel = (id: string): string =>
-    view.opponents.find((opponent) => opponent.id === id)?.name ?? id;
+  // The replay clock is frozen at the frame's elapsed time (`00:00` on the
+  // opening move); live play uses the recorded start/end timestamps.
+  const gameClock =
+    reviewMode && activeFrame
+      ? formatGameClock(0, activeFrame.elapsedMs, 0)
+      : formatGameClock(displayedView.gameStartedAtMs, displayedView.gameEndedAtMs, now);
+  const gameClockActive =
+    !reviewMode &&
+    displayedView.gameStartedAtMs != null &&
+    displayedView.gameEndedAtMs == null;
+
+  // During review the turn clock rests at 00:15 instead of a live countdown.
+  const displayViewerOnClock = !reviewMode && viewerOnClock;
+  const displaySeconds = displayViewerOnClock ? seconds : 15;
+  const clockClasses = ['turn-clock', displayViewerOnClock ? ' active' : ''];
+
+  const leaveGame = () => {
+    if (onLeaveGame) {
+      onLeaveGame();
+      return;
+    }
+    window.location.assign('/');
+  };
   // Req 14: the Pass button counts down while the viewer's throw-in clock runs.
   const passCountdownSeconds =
     viewerOnClock && hasLegalAction(view.legalActions, 'pass') ? Math.max(1, seconds) : null;
@@ -672,46 +783,49 @@ export function GamePage({
             >
               {playersInSeatOrder.map((player) => (
                 <option key={player.id} value={player.id}>
-                  {povLabel(player.id)}
+                  {player.name}
                 </option>
               ))}
             </select>
           </label>
         </div>
-        <button
-          type="button"
-          class="action-button back-to-lobby"
-          onClick={() => {
-            window.location.hash = '/';
-          }}
-        >
-          Back to lobby
-        </button>
-      </header>
+        <button type="button" class="action-button back-to-lobby" onClick={leaveGame}>
+            Back to lobby
+          </button>
+        </header>
 
       {/* Req 12: the finished match announces its result above the shell. */}
       {gameOver ? (
         <div class="game-over-banner" data-testid="game-over-banner" role="status">
           <strong class="game-over-title">
-            {view.isDraw
+            {gameIsDraw
               ? 'Game over — Draw'
               : winnerId
                 ? `Game over — ${nameFor(winnerId)} wins`
                 : 'Game over'}
           </strong>
-          {!view.isDraw && durakId ? (
+          {!gameIsDraw && durakId ? (
             <span class="game-over-durak">
               {durakId === view.myId ? 'Durak: you' : `Durak: ${nameFor(durakId)}`}
             </span>
           ) : null}
+          {/* Item 9: the banner itself offers the way back to the lobby. */}
+          <button
+            type="button"
+            class="action-button banner-lobby-button"
+            data-testid="banner-lobby-button"
+            onClick={leaveGame}
+          >
+            Return to lobby
+          </button>
         </div>
       ) : null}
 
       <div class="game-shell">
         <aside class="game-sidebar sidebar-left" data-zone="sidebar-left">
           <section class="panel">
-            <h2>Hotseat</h2>
-            <div class="hotseat-tabs" role="tablist" aria-label="Hotseat player switcher">
+            <h2>POV</h2>
+            <div class="hotseat-tabs" role="tablist" aria-label="POV player switcher">
               {playerOptions.map((id) => (
                 <button
                   key={id}
@@ -736,34 +850,86 @@ export function GamePage({
               ))}
             </ul>
           </section>
+
+          {/* Item 12: move navigation sits at the bottom of the left sidebar. */}
+          {reviewMode ? (
+            <section
+              class="panel review-nav-panel"
+              data-testid="review-nav"
+              aria-label="Replay navigation"
+            >
+              <h2>Replay</h2>
+              <div class="review-nav-controls">
+                <button
+                  type="button"
+                  class="review-nav-button"
+                  data-testid="review-prev-button"
+                  aria-label="Previous move"
+                  disabled={!activeFrame || replayFrameIdx <= 0}
+                  onClick={() => setReplayFrameIdx((index) => Math.max(0, index - 1))}
+                >
+                  ‹
+                </button>
+                <span class="review-move-indicator" data-testid="review-move-indicator">
+                  {replayFrames.length > 0
+                    ? `Move ${
+                        Math.min(replayFrameIdx, replayFrames.length - 1) + 1
+                      } / ${replayFrames.length}`
+                    : 'Move 0 / 0'}
+                </span>
+                <button
+                  type="button"
+                  class="review-nav-button"
+                  data-testid="review-next-button"
+                  aria-label="Next move"
+                  disabled={!activeFrame || replayFrameIdx >= replayFrames.length - 1}
+                  onClick={() =>
+                    setReplayFrameIdx((index) => Math.min(replayFrames.length - 1, index + 1))
+                  }
+                >
+                  ›
+                </button>
+              </div>
+            </section>
+          ) : null}
         </aside>
 
         <GameTable
-          myId={view.myId}
-          myHand={view.myHand}
-          opponents={view.opponents}
-          tablePairs={view.tablePairs}
-          trumpSuit={view.trumpSuit}
-          attackerId={playerIdForSeat(view.attackerIdx)}
-          defenderId={playerIdForSeat(view.defenderIdx)}
-          chaosMode={view.chaosMode ?? false}
-          awaitingAttack={isAttackerTurn}
-          defending={isDefender && view.tablePairs.some((pair) => !pair.defense)}
-          canRedirect={hasLegalAction(view.legalActions, 'redirect')}
-          canThrowIn={hasLegalAction(view.legalActions, 'throwIn')}
+          myId={displayedView.myId}
+          myHand={displayedView.myHand}
+          opponents={displayedView.opponents}
+          tablePairs={displayedView.tablePairs}
+          trumpSuit={displayedView.trumpSuit}
+          attackerId={seatIdFor(displayedView, displayedView.attackerIdx)}
+          defenderId={seatIdFor(displayedView, displayedView.defenderIdx)}
+          chaosMode={displayedView.chaosMode ?? false}
+          awaitingAttack={
+            !reviewMode &&
+            isInitialAttackPhase(displayedView.boutPhase) &&
+            hasLegalAction(displayedView.legalActions, 'attack')
+          }
+          defending={
+            !reviewMode &&
+            displayedView.defenderIdx === viewerSeatIndex(displayedView) &&
+            displayedView.tablePairs.some((pair) => !pair.defense)
+          }
+          canRedirect={!reviewMode && hasLegalAction(displayedView.legalActions, 'redirect')}
+          canThrowIn={!reviewMode && hasLegalAction(displayedView.legalActions, 'throwIn')}
           isReviewMode={reviewMode}
-          turnPlayerId={timedPlayerId}
-          turnSecondsRemaining={seconds}
+          turnPlayerId={turnPlayerIdFor(displayedView)}
+          turnSecondsRemaining={clockSeconds(displayedView, now)}
           sortMode={sortMode}
-          selectedKeys={selectedKeys}
-          playableKeys={playableKeys}
-          onCardClick={toggleCard}
-          onCardDoubleClick={playCard}
-          onTableCardClick={hasLegalAction(view.legalActions, 'cover') ? coverAttack : undefined}
-          onAttackDrop={playAttackDrop}
-          onCoverDrop={playCoverDrop}
-          onThrowInDrop={playThrowInDrop}
-          onRedirectDrop={playRedirectDrop}
+          selectedKeys={reviewMode ? [] : selectedKeys}
+          playableKeys={reviewMode ? [] : playableKeys}
+          onCardClick={reviewMode ? undefined : toggleCard}
+          onCardDoubleClick={reviewMode ? undefined : playCard}
+          onTableCardClick={
+            !reviewMode && hasLegalAction(view.legalActions, 'cover') ? coverAttack : undefined
+          }
+          onAttackDrop={reviewMode ? undefined : playAttackDrop}
+          onCoverDrop={reviewMode ? undefined : playCoverDrop}
+          onThrowInDrop={reviewMode ? undefined : playThrowInDrop}
+          onRedirectDrop={reviewMode ? undefined : playRedirectDrop}
         >
           {gameOver ? null : (
             <div class="game-buttons">
@@ -798,28 +964,32 @@ export function GamePage({
         </GameTable>
 
         <aside class="game-sidebar sidebar-right" data-zone="sidebar-right">
-          {/* Req 7: the overall game clock is separate from the 15-second turn
-              clock, and freezes at the recorded end time. */}
-          <section class="panel game-clock-panel" aria-label="Game clock">
-            <h2>Game</h2>
-            <span
-              class="game-clock"
-              data-testid="game-clock"
-              data-active={gameEndedAtMs == null ? 'true' : 'false'}
-            >
-              {gameClock}
-            </span>
-          </section>
-
-          <section class="panel turn-clock-panel" aria-label="Turn clock">
-            <h2>Turn</h2>
-            <span
-              class={`turn-clock${viewerOnClock ? ' active' : ''}`}
-              data-testid="turn-clock"
-              data-active={viewerOnClock ? 'true' : 'false'}
-            >
-              {formatClock(displayedSeconds)}
-            </span>
+          {/* Item 10: one clock panel split into a Game half and a Turn half. */}
+          <section
+            class="panel clock-split-panel"
+            data-testid="clock-panel"
+            aria-label="Game and turn clocks"
+          >
+            <div class="clock-half game-clock-half">
+              <h2>Game</h2>
+              <span
+                class="game-clock"
+                data-testid="game-clock"
+                data-active={gameClockActive ? 'true' : 'false'}
+              >
+                {gameClock}
+              </span>
+            </div>
+            <div class="clock-half turn-clock-half">
+              <h2>Turn</h2>
+              <span
+                class={clockClasses.join(' ')}
+                data-testid="turn-clock"
+                data-active={displayViewerOnClock ? 'true' : 'false'}
+              >
+                {formatClock(displaySeconds)}
+              </span>
+            </div>
           </section>
 
           <section class="panel" aria-label="Player status">
@@ -827,12 +997,12 @@ export function GamePage({
             <ul class="status-badges">
               {playersInSeatOrder.map((player) => {
                 const present =
-                  player.id === view.myId
+                  player.id === displayedView.myId
                     ? selfPresent
-                    : view.presentPlayers
-                      ? view.presentPlayers.includes(player.id)
-                      : (view.opponents.find((opponent) => opponent.id === player.id)?.isPresent ??
-                        false);
+                    : displayedView.presentPlayers
+                      ? displayedView.presentPlayers.includes(player.id)
+                      : (displayedView.opponents.find((opponent) => opponent.id === player.id)
+                          ?.isPresent ?? false);
                 return (
                 <li
                   key={player.id}
@@ -862,11 +1032,11 @@ export function GamePage({
           </section>
 
           <TableDeck
-            talonCount={view.talonCount}
-            bottomTrumpCard={view.bottomTrumpCard}
-            trumpSuit={view.trumpSuit}
-            discardCount={view.discardCount ?? 0}
-            lastDiscardCards={view.lastDiscardCards ?? []}
+            talonCount={displayedView.talonCount}
+            bottomTrumpCard={displayedView.bottomTrumpCard}
+            trumpSuit={displayedView.trumpSuit}
+            discardCount={displayedView.discardCount ?? 0}
+            lastDiscardCards={displayedView.lastDiscardCards ?? []}
           />
 
           <section
@@ -882,13 +1052,13 @@ export function GamePage({
           {gameOver ? (
             <section class="panel game-result" aria-label="Game over">
               <h2>
-                {view.isDraw
+                {gameIsDraw
                   ? 'Draw'
                   : winnerId
                     ? `${nameFor(winnerId)} wins`
                     : 'Game over'}
               </h2>
-              {!view.isDraw && durakId ? (
+              {!gameIsDraw && durakId ? (
                 <p class="durak-line">
                   {durakId === view.myId
                     ? 'You are the Durak.'

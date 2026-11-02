@@ -310,8 +310,30 @@ html[data-theme='light'] .error-banner {
   line-height: 1.4;
 }
 
-.turn-clock-panel {
+/* Item 10: one clock panel split vertically into a Game half and a Turn half. */
+.clock-split-panel {
+  display: grid;
+  grid-template-rows: 1fr 1fr;
+  gap: 0;
+  padding: 0;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.clock-half {
+  display: flex;
+  flex-direction: column;
   align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 12px;
+  box-sizing: border-box;
+}
+
+/* The divider between the two vertical halves of the single clock panel. */
+.clock-half.turn-clock-half {
+  border-top: 1px solid var(--app-border);
 }
 
 .turn-clock {
@@ -512,10 +534,6 @@ html[data-theme='light'] .error-banner {
   border-radius: calc(var(--app-roundness) * 0.6);
 }
 
-.game-clock-panel {
-  align-items: center;
-}
-
 .game-clock {
   font-size: 1.5rem;
   font-family: monospace;
@@ -552,6 +570,56 @@ html[data-theme='light'] .error-banner {
 .game-over-durak {
   font-size: 13px;
   color: var(--app-text);
+}
+
+.game-over-banner .banner-lobby-button {
+  flex: 0 0 auto;
+  padding: 6px 14px;
+  font-size: 13px;
+}
+
+/* Item 12: replay move navigation at the bottom of the left sidebar. */
+.review-nav-panel {
+  gap: 8px;
+}
+
+.review-nav-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.review-nav-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  padding: 4px 10px;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--app-text-strong);
+  background: var(--app-input-bg);
+  border: 1px solid var(--app-border);
+  border-radius: calc(var(--app-roundness) * 0.6);
+  cursor: pointer;
+}
+
+.review-nav-button:hover:not(:disabled) {
+  border-color: var(--app-accent);
+}
+
+.review-nav-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.review-move-indicator {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--app-text-strong);
+  white-space: nowrap;
 }
 
 /* Below the desktop shell width the three columns stack. */

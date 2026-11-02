@@ -66,6 +66,7 @@ export function App() {
           gameId={route.gameId}
           playerId={route.playerId}
           onSwitchPlayer={(playerId) => navigate(`/g/${route.gameId}?player=${playerId}`)}
+          onLeaveGame={() => navigate('/')}
         />
       ) : (
         <LobbyPage />
