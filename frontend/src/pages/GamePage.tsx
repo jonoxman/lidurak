@@ -77,6 +77,22 @@ export function formatClock(seconds: number): string {
   return `00:${String(seconds).padStart(2, '0')}`;
 }
 
+/**
+ * Overall game clock: `mm:ss` since the first move, frozen at the recorded end
+ * time once the game is over, and `00:00` before the first move.
+ */
+export function formatGameClock(
+  startedAtMs: number | null | undefined,
+  endedAtMs: number | null | undefined,
+  nowMs: number,
+): string {
+  if (startedAtMs == null) return '00:00';
+  const elapsedSeconds = Math.max(0, Math.round(((endedAtMs ?? nowMs) - startedAtMs) / 1000));
+  const minutes = Math.floor(elapsedSeconds / 60);
+  const seconds = elapsedSeconds % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
 /** Numeric part of a `p<seat>` id, used to keep every list in fixed seat order. */
 export function seatNumber(id: string): number {
   const match = /^p(\d+)$/.exec(id);
@@ -296,6 +312,8 @@ export function GamePage({
   }, [view]);
 
   const deadlineMs = view?.turnDeadlineMs ?? 0;
+  const gameStartedAtMs = view?.gameStartedAtMs ?? null;
+  const gameEndedAtMs = view?.gameEndedAtMs ?? null;
 
   useEffect(() => {
     if (deadlineMs <= 0) return;
@@ -303,6 +321,15 @@ export function GamePage({
     const timer = setInterval(() => setNow(Date.now()), 250);
     return () => clearInterval(timer);
   }, [deadlineMs]);
+
+  // The overall game clock keeps ticking while a match is running, even between
+  // bouts where no turn deadline is set. It stops once the end time is recorded.
+  useEffect(() => {
+    if (gameStartedAtMs == null || gameEndedAtMs != null) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [gameStartedAtMs, gameEndedAtMs]);
 
   useEffect(() => {
     tickedSecondRef.current = 0;
@@ -610,6 +637,18 @@ export function GamePage({
   const durakId = view.finishOrder[view.finishOrder.length - 1];
   const gameOver = isGameOverPhase(view.boutPhase);
 
+  // Req 12: a finished game is reviewed read-only. GameTable drops the command
+  // controls, drop outlines, drags and double-click calls, while sorting stays.
+  const reviewMode = gameOver;
+  const gameClock = formatGameClock(view.gameStartedAtMs, view.gameEndedAtMs, now);
+  // The table view never carries the viewer's own name, so the POV menu falls
+  // back to the seat id instead of inventing a "You" entry.
+  const povLabel = (id: string): string =>
+    view.opponents.find((opponent) => opponent.id === id)?.name ?? id;
+  // Req 14: the Pass button counts down while the viewer's throw-in clock runs.
+  const passCountdownSeconds =
+    viewerOnClock && hasLegalAction(view.legalActions, 'pass') ? Math.max(1, seconds) : null;
+
   return (
     <div class="page game-page">
       <header class="game-header">
@@ -618,6 +657,26 @@ export function GamePage({
           <span class={`connection ${live ? 'live' : 'pending'}`}>
             {live ? 'Connected' : 'Connecting…'}
           </span>
+          {/* Req 13: the header POV menu switches the inspected seat by name. */}
+          <label class="pov-menu">
+            <span class="pov-label">POV</span>
+            <select
+              class="pov-select"
+              data-testid="pov-menu"
+              aria-label="View as player"
+              value={playerId}
+              onChange={(event) => {
+                const next = (event.currentTarget as HTMLSelectElement).value;
+                if (next !== playerId) onSwitchPlayer(next);
+              }}
+            >
+              {playersInSeatOrder.map((player) => (
+                <option key={player.id} value={player.id}>
+                  {povLabel(player.id)}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
         <button
           type="button"
@@ -629,6 +688,24 @@ export function GamePage({
           Back to lobby
         </button>
       </header>
+
+      {/* Req 12: the finished match announces its result above the shell. */}
+      {gameOver ? (
+        <div class="game-over-banner" data-testid="game-over-banner" role="status">
+          <strong class="game-over-title">
+            {view.isDraw
+              ? 'Game over — Draw'
+              : winnerId
+                ? `Game over — ${nameFor(winnerId)} wins`
+                : 'Game over'}
+          </strong>
+          {!view.isDraw && durakId ? (
+            <span class="game-over-durak">
+              {durakId === view.myId ? 'Durak: you' : `Durak: ${nameFor(durakId)}`}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
 
       <div class="game-shell">
         <aside class="game-sidebar sidebar-left" data-zone="sidebar-left">
@@ -674,6 +751,7 @@ export function GamePage({
           defending={isDefender && view.tablePairs.some((pair) => !pair.defense)}
           canRedirect={hasLegalAction(view.legalActions, 'redirect')}
           canThrowIn={hasLegalAction(view.legalActions, 'throwIn')}
+          isReviewMode={reviewMode}
           turnPlayerId={timedPlayerId}
           turnSecondsRemaining={seconds}
           sortMode={sortMode}
@@ -713,12 +791,26 @@ export function GamePage({
                 legalActions={view.legalActions}
                 onAction={handleActionBar}
                 surrenderSeconds={autoSurrenderRemaining}
+                passCountdownSeconds={passCountdownSeconds}
               />
             </div>
           )}
         </GameTable>
 
         <aside class="game-sidebar sidebar-right" data-zone="sidebar-right">
+          {/* Req 7: the overall game clock is separate from the 15-second turn
+              clock, and freezes at the recorded end time. */}
+          <section class="panel game-clock-panel" aria-label="Game clock">
+            <h2>Game</h2>
+            <span
+              class="game-clock"
+              data-testid="game-clock"
+              data-active={gameEndedAtMs == null ? 'true' : 'false'}
+            >
+              {gameClock}
+            </span>
+          </section>
+
           <section class="panel turn-clock-panel" aria-label="Turn clock">
             <h2>Turn</h2>
             <span
@@ -773,6 +865,8 @@ export function GamePage({
             talonCount={view.talonCount}
             bottomTrumpCard={view.bottomTrumpCard}
             trumpSuit={view.trumpSuit}
+            discardCount={view.discardCount ?? 0}
+            lastDiscardCards={view.lastDiscardCards ?? []}
           />
 
           <section

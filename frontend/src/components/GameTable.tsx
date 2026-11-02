@@ -240,9 +240,19 @@ export interface TableDeckProps {
   talonCount: number;
   bottomTrumpCard?: CardData | null;
   trumpSuit: string;
+  /** Cards already in the discard pile, shown as a face-down stack. */
+  discardCount?: number;
+  /** Most recent discard, revealed face-up on top of the pile. */
+  lastDiscardCards?: CardData[];
 }
 
-export function TableDeck({ talonCount, bottomTrumpCard, trumpSuit }: TableDeckProps) {
+export function TableDeck({
+  talonCount,
+  bottomTrumpCard,
+  trumpSuit,
+  discardCount = 0,
+  lastDiscardCards = [],
+}: TableDeckProps) {
   return (
     <div class="table-deck" data-zone="table-deck" aria-label="Talon">
       <h2 class="deck-title">Deck</h2>
@@ -277,6 +287,43 @@ export function TableDeck({ talonCount, bottomTrumpCard, trumpSuit }: TableDeckP
         >
           <span>Trump</span>
           <span class="trump-symbol">{suitSymbol(trumpSuit)}</span>
+        </div>
+      </div>
+
+      {/* Req 7: the discard pile shares the DECK box. Every earlier discard is
+          face-down; only the last finished bout is revealed on top. */}
+      <div class="table-discard" data-testid="discard-pile" aria-label="Discard pile">
+        <span class="discard-title">Discard</span>
+        <div class="discard-stack">
+          {discardCount > 0 ? (
+            <div class="discard-face-down" data-testid="discard-face-down">
+              <CardBack class="discard-back" />
+              <span
+                class="discard-count deck-count-badge"
+                data-testid="discard-count"
+                data-position="top-left"
+              >
+                {discardCount}
+              </span>
+            </div>
+          ) : (
+            <span class="discard-empty" data-testid="discard-empty">
+              Empty
+            </span>
+          )}
+          {lastDiscardCards.length > 0 ? (
+            <div class="discard-last" data-testid="discard-last">
+              {lastDiscardCards.map((card, index) => (
+                <span key={`${card.suit}-${card.rank}-${index}`} class="discard-card">
+                  <Card
+                    suit={card.suit}
+                    rank={card.rank}
+                    trump={isTrumpCard(card, trumpSuit)}
+                  />
+                </span>
+              ))}
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
