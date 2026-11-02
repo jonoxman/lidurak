@@ -97,6 +97,7 @@ AGY_TIMEOUT_SEC=600
 SESSION_TIMEOUT_SEC=3300
 POLL_INTERVAL_SEC=10
 MAX_REVIEW_ROUNDS=4
+MAX_HOLISTIC_AUDIT_PASSES=2
 
 USE_GITHUB_PRS=0
 if git remote get-url origin >/dev/null 2>&1 && agent_gh auth status >/dev/null 2>&1; then
@@ -131,7 +132,7 @@ try_agy_call() {
   local PROMPT_FILE=$2
   local OUT_FILE=$3
   local EXPECT_PATTERN=$4
-  local END_SENTINEL=${5:-"VERDICT: (APPROVED|CHANGES_REQUESTED)|===END_OF_TICKETS===|===END_OF_FILES===|===NO_TICKETS_NEEDED==="}
+  local END_SENTINEL=${5:-"VERDICT: (APPROVED|CHANGES_REQUESTED)|===END_OF_TICKETS===|===END_OF_FILES===|===NO_TICKETS_NEEDED===|===AUDIT_PASSED==="}
   local ERR_LOG="${OUT_FILE}.err"
 
   rm -f "$OUT_FILE" "$ERR_LOG"
@@ -267,7 +268,6 @@ admit_and_send_prompt() {
           continue
         fi
 
-        # If a leftover TUI is sitting on "This session was released" or "admission_attempt_closed" BEFORE we type the prompt, restart it fresh
         if echo "$SCREEN" | grep -qiE "session was released|Choose a model to start a new session|Enter: retry|admission_attempt_closed|session POST failed|This session start was cancelled|operation timed out"; then
           READY_CHECKS=0
           echo "[Worker ${WORKER_ID}] 🔄 Resetting released/expired FreeBuff session before prompt submission..."
@@ -327,7 +327,6 @@ admit_and_send_prompt() {
       sleep 1
       docker exec "$CONTAINER" tmux send-keys -t buff Enter
 
-      # Monitor post-submission admission & handle "This session was released. Choose a model to start a new session. Enter: retry"
       local ADMIT_WAIT=0
       local RELEASE_RETRIES=0
       local NEED_FULL_RESTART=0
@@ -338,7 +337,6 @@ admit_and_send_prompt() {
         local S_AFTER
         S_AFTER=$(docker exec "$CONTAINER" tmux capture-pane -t buff -p 2>/dev/null || true)
 
-        # If submitting the prompt revealed that the session was released, press Enter to retry and allocate a new session!
         if echo "$S_AFTER" | grep -qiE "session was released|Choose a model to start a new session|Enter: retry"; then
           RELEASE_RETRIES=$(expr "$RELEASE_RETRIES" + 1)
           if [ "$RELEASE_RETRIES" -le 3 ]; then
@@ -415,7 +413,6 @@ run_worker_freebuff() {
         continue
       fi
 
-      # Handle "This session was released. Choose a model to start a new session. Enter: retry" mid-task
       if echo "$SCREEN" | grep -qiE "session was released|Choose a model to start a new session|Enter: retry"; then
         MID_RUN_RELEASE_RETRIES=$(expr "$MID_RUN_RELEASE_RETRIES" + 1)
         if [ "$MID_RUN_RELEASE_RETRIES" -le 2 ]; then
@@ -547,7 +544,6 @@ process_ticket_on_worker() {
   echo "🔨 Implementing ${TICKET_NAME}" > "$STATUS_FILE"
   echo "[Worker ${WORKER_ID}] 🎬 Starting ${TICKET_NAME} on branch ${BRANCH_NAME}..."
 
-  # Close any idle leftover FreeBuff tmux session from earlier tickets so we never inherit an expired session lease
   docker exec "$CONTAINER" tmux kill-session -t buff 2>/dev/null || true
 
   (
@@ -563,7 +559,7 @@ process_ticket_on_worker() {
     rm -f .tickets/STATUS .reviews/agent_notes.md
   )
 
-  local WORK_PROMPT="Implement @.tickets/${TICKET_NAME}.md following all rules in @AGENTS.md and @SPEC.md (including keeping ./README.md, ./ARCHITECTURE.md, and ./play-local.sh updated as specified). Write a concise summary of your implementation into .reviews/agent_notes.md, verify all unit tests pass, and then run: echo DONE > .tickets/STATUS"
+  local WORK_PROMPT="Implement EVERY single requirement and checklist item in @.tickets/${TICKET_NAME}.md following all rules in @AGENTS.md and @SPEC.md (including keeping ./README.md, ./ARCHITECTURE.md, and ./play-local.sh updated as specified). Do NOT skip or stub any bullet point. In .reviews/agent_notes.md, write a checklist confirming how each requirement in the ticket was implemented, verify all unit tests pass, and then run: echo DONE > .tickets/STATUS"
   run_worker_freebuff "$WORKER_ID" "$WORK_PROMPT"
 
   local PR_NUMBER=""
@@ -580,7 +576,7 @@ process_ticket_on_worker() {
         send_alert "Worker ${WORKER_ID} Halted — Test Gate Failed on ${TICKET_NAME}" "Ticket ${TICKET_NAME} failed the automated local unit test gate ${TEST_RETRIES} consecutive times on Worker ${WORKER_ID}. Please inspect ${WT_DIR}/.reviews/test_failure_report.md."
         return 1
       fi
-      local FIX_TESTS_PROMPT="🚨 AUTOMATED TEST GATE REJECTION: You marked @.tickets/${TICKET_NAME}.md as DONE, but the test suite FAILED. Read @.reviews/test_failure_report.md, fix the broken code/tests, update .reviews/agent_notes.md, and run: echo DONE > .tickets/STATUS"
+      local FIX_TESTS_PROMPT="🚨 AUTOMATED TEST GATE REJECTION: You marked @.tickets/${TICKET_NAME}.md as DONE, but the test suite FAILED. Read @.reviews/test_failure_report.md, fix the broken code/tests without removing any required ticket features, update .reviews/agent_notes.md, and run: echo DONE > .tickets/STATUS"
       run_worker_freebuff "$WORKER_ID" "$FIX_TESTS_PROMPT"
       continue
     fi
@@ -620,8 +616,19 @@ ${NOTES_BODY}" >/dev/null 2>&1 || true
 
     echo "🔍 Reviewing ${TICKET_NAME} (PR #${PR_NUMBER:-local}, Round ${ROUND})" > "$STATUS_FILE"
     local DIFF_FILE="${WT_DIR}/.reviews/current.diff"
+    local CHANGED_FILES_LIST="${WT_DIR}/.reviews/changed_files.txt"
     (
       cd "$WT_DIR"
+      git diff --name-status main...HEAD -- . \
+        ':(exclude)*package-lock.json' \
+        ':(exclude)*yarn.lock' \
+        ':(exclude)*pnpm-lock.yaml' \
+        ':(exclude)*/target/*' \
+        ':(exclude)*/node_modules/*' \
+        ':(exclude).reviews/*' \
+        ':(exclude).tickets/*' \
+        ':(exclude)agent-orchestration/*' \
+        ':(exclude)FEEDBACK*.md' > .reviews/changed_files.txt
       git diff main...HEAD -- . \
         ':(exclude)*package-lock.json' \
         ':(exclude)*yarn.lock' \
@@ -631,7 +638,7 @@ ${NOTES_BODY}" >/dev/null 2>&1 || true
         ':(exclude).reviews/*' \
         ':(exclude).tickets/*' \
         ':(exclude)agent-orchestration/*' \
-        ':(exclude)FEEDBACK*.md' | head -c 65000 > .reviews/current.diff
+        ':(exclude)FEEDBACK*.md' | head -c 120000 > .reviews/current.diff
     )
 
     local NOTES_CONTENT="No implementer notes provided."
@@ -640,8 +647,9 @@ ${NOTES_BODY}" >/dev/null 2>&1 || true
     local REVIEW_FILE=".reviews/${TICKET_NAME}-review-${ROUND}.md"
     local PROMPT_FILE="${WT_DIR}/.reviews/review_prompt.txt"
 
+    # Layer 2 Enforcement: Mandatory Item-by-Item Requirement Verification Table in Reviewer
     cat << PROMPT_EOF > "$PROMPT_FILE"
-You are a Principal Code Reviewer conducting PR Review Round ${ROUND} of ${MAX_REVIEW_ROUNDS} for ticket ${TICKET_NAME}.
+You are a Principal Code Reviewer conducting strict PR Review Round ${ROUND} of ${MAX_REVIEW_ROUNDS} for ticket ${TICKET_NAME}.
 CRITICAL INSTRUCTION: Do NOT use any tools, do NOT run bash commands, and do NOT read external files. The local unit test suite ('sbt test' / 'npm test') has ALREADY passed.
 
 <ticket_specification>
@@ -652,14 +660,21 @@ $(cat "$TICKET_FILE")
 ${NOTES_CONTENT}
 </implementer_notes_and_rebuttals>
 
+<changed_files_summary>
+$(cat "$CHANGED_FILES_LIST")
+</changed_files_summary>
+
 <git_diff>
 $(cat "$DIFF_FILE")
 </git_diff>
 
-REVIEW GUIDELINES:
-1. Carefully read <implementer_notes_and_rebuttals> to see how the implementer addressed previous feedback.
-2. Only request changes (VERDICT: CHANGES_REQUESTED) for genuine High/Medium severity logic bugs, security flaws, missing core requirements (including required updates to README.md or ARCHITECTURE.md if specified in the ticket), or UI layout violations.
-3. Do NOT block approval over Low-severity nitpicks or valid scope rebuttals.
+STRICT COMPLETENESS & REVIEW GUIDELINES:
+1. **Mandatory Item-by-Item Audit:** You MUST begin your review with a "## Requirement Verification Checklist" section that lists EVERY single requirement, acceptance criterion, UI detail, and sub-bullet from <ticket_specification>.
+2. For each requirement, explicitly mark it as:
+   - \`[IMPLEMENTED]\` — and cite the exact file and function/CSS selector in <git_diff> that implements it.
+   - \`[MISSING]\` or \`[PARTIAL]\` — if the requirement or sub-bullet is absent, stubbed, or incomplete in <git_diff>.
+3. **Do NOT Trust Implementer Claims Blindly:** Verify against <git_diff>, not <implementer_notes_and_rebuttals>. If ANY requirement or sub-bullet in <ticket_specification> is marked \`[MISSING]\` or \`[PARTIAL]\`, or if there is a bug/layout violation, you MUST output \`VERDICT: CHANGES_REQUESTED\`.
+4. Only output \`VERDICT: APPROVED\` when 100% of requirements in <ticket_specification> are verified \`[IMPLEMENTED]\` in <git_diff> without logic or layout bugs.
 
 End your response with EXACTLY one of:
 VERDICT: APPROVED
@@ -692,7 +707,7 @@ $(cat "$REVIEW_FILE")" >/dev/null 2>&1 || true
     fi
 
     echo "🔧 Fixing review feedback on ${TICKET_NAME} (Round ${ROUND})" > "$STATUS_FILE"
-    local FIX_PROMPT="🚨 PR CODE REVIEW FEEDBACK (Round ${ROUND}): Read the reviewer feedback in @.reviews/${TICKET_NAME}-review-${ROUND}.md and the ticket @.tickets/${TICKET_NAME}.md. Fix valid issues in your scope, or write a clear technical rebuttal in .reviews/agent_notes.md. Re-run tests until green, and run: echo DONE > .tickets/STATUS"
+    local FIX_PROMPT="🚨 PR CODE REVIEW REJECTION (Round ${ROUND}): Read the reviewer's Requirement Verification Checklist in @.reviews/${TICKET_NAME}-review-${ROUND}.md and the ticket @.tickets/${TICKET_NAME}.md. Implement every item marked [MISSING] or [PARTIAL] and fix all bugs identified. Update .reviews/agent_notes.md, re-run tests until green, and run: echo DONE > .tickets/STATUS"
     run_worker_freebuff "$WORKER_ID" "$FIX_PROMPT"
     ROUND=$(expr "$ROUND" + 1)
   done
@@ -713,7 +728,7 @@ $(cat "$REVIEW_FILE")" >/dev/null 2>&1 || true
     if ! agent_git merge --no-edit main >/dev/null 2>&1; then
       echo "[Worker ${WORKER_ID}] ⚠️  Merge conflict detected with main! Dispatching FreeBuff to resolve..."
       cd "$PROJECT_ROOT"
-      local CONFLICT_PROMPT="🚨 GIT MERGE CONFLICT WITH MAIN: Another parallel worker merged changes to 'main' that conflict with your branch. Run 'git status' and 'git diff' to find all <<<<<<< HEAD conflict markers, resolve them cleanly so both features work together, run the test suite ('sbt -batch test' and 'npm test -- --run') until 100% green, and run: echo DONE > .tickets/STATUS"
+      local CONFLICT_PROMPT="🚨 GIT MERGE CONFLICT WITH MAIN: Another parallel worker merged changes to 'main' that conflict with your branch. Run 'git status' and 'git diff' to find all <<<<<<< HEAD conflict markers, resolve them cleanly so BOTH branches' features are preserved (never delete another ticket's feature when resolving a conflict!), run the test suite ('sbt -batch test' and 'npm test -- --run') until 100% green, and run: echo DONE > .tickets/STATUS"
       run_worker_freebuff "$WORKER_ID" "$CONFLICT_PROMPT"
       run_worker_test_gate "$WORKER_ID" "$TICKET_FILE" || exit 1
       cd "$WT_DIR"
@@ -746,7 +761,6 @@ $(cat "$REVIEW_FILE")" >/dev/null 2>&1 || true
     echo "[Worker ${WORKER_ID}] ✅ ${TICKET_NAME} merged into main and feature branch deleted!"
   ) 200>.reviews/merge.lock
 
-  # Close the FreeBuff tmux session when ticket finishes so it doesn't expire while idle
   docker exec "$CONTAINER" tmux kill-session -t buff 2>/dev/null || true
 
   echo "💤 Idle (Last completed: ${TICKET_NAME})" > "$STATUS_FILE"
@@ -755,7 +769,7 @@ $(cat "$REVIEW_FILE")" >/dev/null 2>&1 || true
 
 extract_tickets_with_waves() {
   local RAW_FILE=$1
-  sed '/===END_OF_TICKETS===/d; /===NO_TICKETS_NEEDED===/d' "$RAW_FILE" | awk '
+  sed '/===END_OF_TICKETS===/d; /===NO_TICKETS_NEEDED===/d; /===AUDIT_PASSED===/d' "$RAW_FILE" | awk '
     /===TICKET:.*===/ {
       line=$0;
       gsub(/.*===TICKET:/, "", line);
@@ -785,16 +799,19 @@ ensure_milestone_tickets_exist() {
   local ACTIVE_M
   ACTIVE_M=$(grep -oE "CURRENT ACTIVE MILESTONE: M[0-9]+" SPEC.md 2>/dev/null | head -n 1 | awk '{print $NF}' || echo "M1")
   echo "=================================================================="
-  echo "🏗️  Phase 1: Decomposing SPEC.md (${ACTIVE_M}) into wave-scheduled tickets..."
+  echo "🏗️  Phase 1: Decomposing SPEC.md (${ACTIVE_M}) with Requirement Traceability..."
   echo "=================================================================="
 
   cat << PROMPT_EOF > .reviews/phase1_prompt.txt
 You are a Principal Systems Architect. DO NOT use any internal tools, DO NOT run bash commands, and DO NOT read external files.
 
 Break the CURRENT ACTIVE MILESTONE (${ACTIVE_M}) in <spec> down into atomic implementation tickets grouped into PARALLEL EXECUTION WAVES (WAVE:1, WAVE:2, etc.).
-- Put tickets that touch independent files/subsystems into the SAME wave so they run in parallel!
-- Put tickets that depend on earlier tickets or edit the exact same files into sequential waves.
-- REAL-TIME DOCUMENTATION REQUIREMENT: Ensure the final wave of this milestone includes updating ./README.md (installation, startup, and user interface instructions for all new features), ./ARCHITECTURE.md (technical structure, state machine, and protocol documentation), and ./play-local.sh (if startup commands or ports changed). To prevent Git merge conflicts between parallel workers, only ONE ticket in any given wave should modify README.md and ARCHITECTURE.md.
+
+CRITICAL COMPLETENESS & TRACEABILITY RULES:
+1. First, output a \`===TRACEABILITY_MATRIX===\` block listing EVERY single requirement and sub-feature of ${ACTIVE_M} as \`REQ-01\`, \`REQ-02\`, ... and mapping each \`REQ-XX\` to the exact ticket filename that will implement it. ZERO requirements may be omitted.
+2. Inside each ticket, include a \`## Mandatory Acceptance Criteria Checklist\` containing the exact, unabridged technical details for every \`REQ-XX\` assigned to that ticket. Never summarize away specific UI details, formulas, or edge cases.
+3. Put tickets that touch independent files/subsystems into the SAME wave so they run in parallel, and put tickets that edit the exact same files into sequential waves.
+4. Ensure the final wave includes updating ./README.md, ./ARCHITECTURE.md, and ./play-local.sh (in a single ticket so parallel workers never conflict on docs).
 
 <spec>
 $(cat SPEC.md)
@@ -804,12 +821,12 @@ $(cat SPEC.md)
 $(cat AGENTS.md)
 </agents>
 
-Output each ticket using this EXACT delimiter format on its own line (including |WAVE:N), and end your entire response with ===END_OF_TICKETS===:
+Output your traceability matrix first, followed by each ticket using this EXACT delimiter format on its own line (including |WAVE:N), and end your entire response with ===END_OF_TICKETS===:
+===TRACEABILITY_MATRIX===
+- REQ-01: [Description] -> T-01-example.md
 ===TICKET:T-01-example.md|WAVE:1===
-[Full Markdown content of ticket 1]
+[Full Markdown content of ticket 1 including ## Mandatory Acceptance Criteria Checklist]
 ===END_OF_TICKETS===
-
-Do NOT output any text before the first ===TICKET:...=== marker.
 PROMPT_EOF
 
   run_agy_pool "ARCHITECT" ".reviews/phase1_prompt.txt" ".reviews/raw_tickets.txt" "===TICKET:"
@@ -821,7 +838,7 @@ PROMPT_EOF
   [ "$USE_GITHUB_PRS" -eq 1 ] && (retry_git_push origin main >/dev/null 2>&1 || true)
 }
 
-# === PHASE 1.5: HUMAN FEEDBACK PRIORITY QUEUE ===
+# === PHASE 1.5: HUMAN FEEDBACK PRIORITY QUEUE (WITH REQUIREMENT TRACEABILITY) ===
 check_and_compile_human_feedback() {
   if [ ! -f FEEDBACK.md ]; then return 0; fi
   local ACTIVE_FEEDBACK
@@ -840,11 +857,13 @@ RESET_EOF
 
   local TIMESTAMP
   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+  git rev-parse HEAD > .reviews/feedback_base_commit
+  echo "0" > .reviews/feedback_audit_passes
   cp FEEDBACK.md FEEDBACK.backup.md
   cp FEEDBACK.md ".reviews/feedback_archive/FEEDBACK_${TIMESTAMP}.md"
   cp FEEDBACK.md FEEDBACK.in_progress.md
 
-  for old_fb in .tickets/T-9*-feedback-*.md; do
+  for old_fb in .tickets/T-9*-feedback-*.md .tickets/T-95-audit-gap-*.md; do
     [ -e "$old_fb" ] || continue
     local bname
     bname=$(basename "$old_fb" .md)
@@ -852,17 +871,22 @@ RESET_EOF
   done
 
   echo "=================================================================="
-  echo "🗣️  HUMAN FEEDBACK DETECTED IN FEEDBACK.md! Generating parallel waves..."
+  echo "🗣️  HUMAN FEEDBACK DETECTED IN FEEDBACK.md! Generating traceable waves..."
   echo "=================================================================="
 
+  # Layer 1 Enforcement: Mandatory Requirement Traceability Matrix (RTM) & Verbatim Checklists
   cat << PROMPT_EOF > .reviews/feedback_prompt.txt
 You are a Principal Systems Architect. DO NOT use any internal tools, DO NOT run bash commands, and DO NOT read external files.
 
 Decompose ALL requirements in <human_feedback> into atomic implementation tickets grouped into PARALLEL EXECUTION WAVES (WAVE:1, WAVE:2, WAVE:3).
-Tickets in the same wave run concurrently on parallel FreeBuff workers:
-- Assign independent subsystems to the SAME wave so they run simultaneously!
-- Assign tickets that modify the exact same files or build on earlier tickets to sequential wave numbers so they never cause Git merge conflicts.
-- REAL-TIME DOCUMENTATION REQUIREMENT: Ensure that the final wave of tickets updates ./README.md (installation, startup, and user interface instructions), ./ARCHITECTURE.md (technical structure and component/protocol reference), and ./play-local.sh (if server startup or ports change) to reflect all changes made in this feedback batch. Only ONE ticket in any given wave may edit README.md and ARCHITECTURE.md so parallel workers never conflict on documentation files.
+
+CRITICAL ANTI-OMISSION & TRACEABILITY RULES:
+1. **Step 1 — Requirement Traceability Matrix (\`===TRACEABILITY_MATRIX===\`):** Before outputting any ticket, you MUST list EVERY single discrete item, sub-point, sentence, bug report, and UI tweak from <human_feedback> as \`REQ-01\`, \`REQ-02\`, ..., \`REQ-N\`, and map each \`REQ-XX\` to the exact \`T-90-feedback-${TIMESTAMP}-...\` ticket filename that implements it. ZERO items or sub-sentences from <human_feedback> may be left out or ignored!
+2. **Step 2 — Verbatim Acceptance Checklists:** Inside every ticket, include a section titled \`## Mandatory Acceptance Criteria Checklist\` that copies the FULL, UNABRIDGED details of each \`REQ-XX\` assigned to that ticket (including exact numbers, colors, layout positions, and edge cases). Never paraphrase or summarize away details from <human_feedback>.
+3. **Wave Scheduling:**
+   - Assign independent subsystems to the SAME wave so they run simultaneously.
+   - Assign tickets that modify the exact same files to sequential wave numbers so they never cause Git merge conflicts.
+4. **Real-Time Documentation:** Ensure the final wave updates ./README.md, ./ARCHITECTURE.md, and ./play-local.sh (in a single ticket so parallel workers never conflict on documentation files).
 
 <agents_rules>
 $(cat AGENTS.md)
@@ -880,12 +904,12 @@ $(find backend/src frontend/src play-local.sh README.md ARCHITECTURE.md -type f 
 $(head -n 120 README.md ARCHITECTURE.md play-local.sh backend/src/main/scala/**/*.scala frontend/src/app.tsx frontend/src/pages/*.tsx frontend/src/components/*.tsx 2>/dev/null | head -c 28000)
 </current_code_context>
 
-Output each ticket using this EXACT delimiter format on its own line (including |WAVE:N), and end your entire response with ===END_OF_TICKETS===:
+Output your ===TRACEABILITY_MATRIX=== first, followed by each ticket using this EXACT delimiter format on its own line (including |WAVE:N), and end your entire response with ===END_OF_TICKETS===:
+===TRACEABILITY_MATRIX===
+- REQ-01: [Exact requirement from FEEDBACK.md] -> T-90-feedback-${TIMESTAMP}-1-backend.md
 ===TICKET:T-90-feedback-${TIMESTAMP}-1-backend.md|WAVE:1===
-[Full Markdown content of ticket 1]
+[Full Markdown content of ticket 1 including ## Mandatory Acceptance Criteria Checklist]
 ===END_OF_TICKETS===
-
-Do NOT output any text before the first ===TICKET:...=== marker.
 PROMPT_EOF
 
   run_agy_pool "ARCHITECT" ".reviews/feedback_prompt.txt" ".reviews/raw_feedback_tickets.txt" "===TICKET:|===NO_TICKETS_NEEDED==="
@@ -901,6 +925,88 @@ RESET_EOF
   git add .tickets/ FEEDBACK.md FEEDBACK.backup.md 2>/dev/null || true
   agent_git commit -m "chore(tickets): add feedback wave tickets ${TIMESTAMP}" >/dev/null 2>&1 || true
   [ "$USE_GITHUB_PRS" -eq 1 ] && (retry_git_push origin main >/dev/null 2>&1 || true)
+}
+
+# === LAYER 3: PRE-HUMAN HOLISTIC SPEC AUDIT GATE ===
+# Compares the raw original FEEDBACK.backup.md against the actual integrated codebase on 'main'.
+# If any item was dropped, partially implemented, or overwritten during merges, it auto-generates
+# T-95-audit-gap tickets and loops back to execute them before alerting the human!
+run_holistic_feedback_audit() {
+  if [ ! -f .reviews/feedback_base_commit ] || [ ! -f FEEDBACK.backup.md ]; then
+    return 0
+  fi
+
+  local PASS_COUNT
+  PASS_COUNT=$(cat .reviews/feedback_audit_passes 2>/dev/null || echo "0")
+  if [ "$PASS_COUNT" -ge "$MAX_HOLISTIC_AUDIT_PASSES" ]; then
+    echo "ℹ️  Reached max holistic audit passes (${MAX_HOLISTIC_AUDIT_PASSES}); proceeding to human review."
+    rm -f .reviews/feedback_base_commit .reviews/feedback_audit_passes
+    return 0
+  fi
+
+  PASS_COUNT=$(expr "$PASS_COUNT" + 1)
+  echo "$PASS_COUNT" > .reviews/feedback_audit_passes
+
+  local BASE_COMMIT
+  BASE_COMMIT=$(cat .reviews/feedback_base_commit 2>/dev/null || git rev-parse HEAD~1)
+  local TIMESTAMP
+  TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+
+  echo "=================================================================="
+  echo "🕵️  Holistic Spec Audit (Pass ${PASS_COUNT}/${MAX_HOLISTIC_AUDIT_PASSES}): Verifying 100% of FEEDBACK.backup.md against main..."
+  echo "=================================================================="
+
+  git diff "${BASE_COMMIT}...HEAD" -- . \
+    ':(exclude)*package-lock.json' \
+    ':(exclude)*/target/*' \
+    ':(exclude)*/node_modules/*' \
+    ':(exclude).reviews/*' \
+    ':(exclude).tickets/*' \
+    ':(exclude)agent-orchestration/*' \
+    ':(exclude)FEEDBACK*.md' | head -c 90000 > .reviews/holistic_cumulative.diff
+
+  cat << PROMPT_EOF > .reviews/holistic_audit_prompt.txt
+You are a Principal QA & Systems Auditor conducting a final pre-release audit on the integrated 'main' branch.
+CRITICAL: DO NOT use any tools, DO NOT run bash commands, and DO NOT read external files.
+
+Compare EVERY single item, sub-bullet, UI detail, and bug fix requested by the human in <original_human_feedback> against <cumulative_git_diff_on_main> and <current_main_source_files>.
+
+<original_human_feedback>
+$(cat FEEDBACK.backup.md)
+</original_human_feedback>
+
+<cumulative_git_diff_on_main>
+$(cat .reviews/holistic_cumulative.diff)
+</cumulative_git_diff_on_main>
+
+<current_main_source_files>
+$(head -n 160 backend/src/main/scala/durak/engine/*.scala backend/src/main/scala/durak/server/*.scala frontend/src/app.tsx frontend/src/pages/*.tsx frontend/src/components/*.tsx frontend/src/styles/*.css 2>/dev/null | head -c 35000)
+</current_main_source_files>
+
+AUDIT INSTRUCTIONS:
+1. First, output an \`===AUDIT_CHECKLIST===\` checking every discrete item and sub-point in <original_human_feedback> and marking it \`[VERIFIED ON MAIN]\` or \`[MISSING / INCOMPLETE]\`.
+2. If 100% of items in <original_human_feedback> are \`[VERIFIED ON MAIN]\`, end your response with \`===AUDIT_PASSED===\`.
+3. If ANY item or sub-point from <original_human_feedback> was ignored, partially implemented, or accidentally overwritten during branch merges, output 1 to 3 atomic remediation tickets using this EXACT format and end with \`===END_OF_TICKETS===\`:
+===TICKET:T-95-audit-gap-${TIMESTAMP}-1.md|WAVE:1===
+[Full Markdown ticket specifying the exact missing requirements to implement, files to touch, and unit tests to run]
+===END_OF_TICKETS===
+PROMPT_EOF
+
+  run_agy_pool "ARCHITECT" ".reviews/holistic_audit_prompt.txt" ".reviews/holistic_audit_out.txt" "===AUDIT_PASSED===|===TICKET:"
+
+  if grep -q "===TICKET:" .reviews/holistic_audit_out.txt 2>/dev/null; then
+    echo "⚠️  Holistic Audit detected unimplemented or incomplete items from FEEDBACK.md! Generating remediation wave..."
+    extract_tickets_with_waves ".reviews/holistic_audit_out.txt"
+    git checkout main 2>/dev/null || true
+    git add .tickets/ 2>/dev/null || true
+    agent_git commit -m "chore(audit): add remediation tickets for missing feedback items ${TIMESTAMP}" >/dev/null 2>&1 || true
+    [ "$USE_GITHUB_PRS" -eq 1 ] && (retry_git_push origin main >/dev/null 2>&1 || true)
+    return 1
+  fi
+
+  echo "✅ Holistic Spec Audit PASSED! 100% of FEEDBACK.md items verified on main."
+  rm -f .reviews/feedback_base_commit .reviews/feedback_audit_passes
+  return 0
 }
 
 advance_to_next_milestone() {
@@ -924,7 +1030,7 @@ advance_to_next_milestone() {
   mkdir -p "$ARCHIVE_DIR"
   mv .tickets/T-*.md "$ARCHIVE_DIR"/ 2>/dev/null || true
   mv .tickets/.completed_* "$ARCHIVE_DIR"/ 2>/dev/null || true
-  rm -f .reviews/raw_tickets.txt .tickets/STATUS
+  rm -f .reviews/raw_tickets.txt .tickets/STATUS .reviews/feedback_base_commit .reviews/feedback_audit_passes
 
   if grep -q "CURRENT ACTIVE MILESTONE:" SPEC.md 2>/dev/null; then
     sed -i "s/CURRENT ACTIVE MILESTONE: M[0-9]\+/CURRENT ACTIVE MILESTONE: ${NEXT_M}/g" SPEC.md
@@ -967,7 +1073,7 @@ while true; do
 
     for WAVE_NUM in "${UNIQUE_WAVES[@]}"; do
       echo "=================================================================="
-      echo "🌊 EXECUTING WAVE ${WAVE_NUM} (3-Pool Router + Shared Auth)"
+      echo "🌊 EXECUTING WAVE ${WAVE_NUM} (3-Pool Router + Strict Checklist Review)"
       echo "=================================================================="
 
       rm -f .reviews/worker_*.pid .reviews/worker_*.ticket
@@ -1038,13 +1144,18 @@ while true; do
     done
   fi
 
+  # Layer 3 Enforcement: Run Holistic Spec Audit against FEEDBACK.backup.md before pausing for human review!
+  if ! run_holistic_feedback_audit; then
+    continue
+  fi
+
   rm -f FEEDBACK.in_progress.md
 
   ACTIVE_M=$(grep -oE "CURRENT ACTIVE MILESTONE: M[0-9]+" SPEC.md 2>/dev/null | head -n 1 | awk '{print $NF}' || echo "M1")
-  send_alert "Ready for Human Review (${ACTIVE_M})" "All current waves and pull requests for ${ACTIVE_M} have passed tests, passed AI code review, and merged into main. Test the build with ./play-local.sh, add notes to FEEDBACK.md, or type 'accept' in Window 1 to advance to the next milestone."
+  send_alert "Ready for Human Review (${ACTIVE_M})" "All current waves, PR reviews, and the Holistic Spec Audit for ${ACTIVE_M} have passed and merged into main. Test the build with ./play-local.sh, add notes to FEEDBACK.md, or type 'accept' in Window 1 to advance to the next milestone."
 
   echo "=================================================================="
-  echo "🏆 ALL CURRENT WAVES COMPLETED, PRs MERGED, AND SYNCED TO GITHUB!"
+  echo "🏆 ALL WAVES & HOLISTIC SPEC AUDIT COMPLETED, MERGED & SYNCED!"
   echo "=================================================================="
   echo "👉 How to test & review your build right now:"
   echo "   1. Run './play-local.sh' in Window 4 and open http://localhost:5173"
