@@ -15,7 +15,13 @@ case class GameState(
   finishOrder: Vector[String],   // Player IDs in order of finishing
   isDraw: Boolean = false,
   turnDeadlineMs: Long = 0L,     // Epoch ms when the acting player's clock expires (0 = idle)
-  presentPlayers: Set[String] = Set.empty // Human seats that reported an open connection
+  presentPlayers: Set[String] = Set.empty, // Human seats that reported an open connection
+  // Cards of the most recent bout that ended in a successful defense. Kept as
+  // the tail slice of `discardPile`, so no card is ever counted twice.
+  lastDiscardCards: Vector[Card] = Vector.empty,
+  // Overall game clock: starts on the first move, stops once the game is over.
+  gameStartedAtMs: Option[Long] = None,
+  gameEndedAtMs: Option[Long] = None
 ):
 
   /** Players still in the game (have not finished). */
@@ -96,6 +102,54 @@ case class GameState(
 
   /** True while a turn clock is running (it is cleared once the game is over). */
   def hasTurnClock: Boolean = turnDeadlineMs > 0L
+
+  /**
+   * True while the table is open to throw-ins from every other active seat:
+   * either the defender has surrendered, or every attacking card is already
+   * covered and the bout is only waiting for the throwers to pass.
+   */
+  def isThrowInPhase: Boolean =
+    boutPhase == BoutPhase.SurrenderThrowIn ||
+      (boutPhase == BoutPhase.Defense &&
+        tablePairs.nonEmpty &&
+        tablePairs.forall(_.defense.isDefined))
+
+  /**
+   * Every seat the game is currently waiting on. Unlike [[turnPlayerIdx]] this
+   * can hold several seats at once: during a throw-in phase every active
+   * non-defender who may still throw in or pass is on the clock together, so
+   * each of them sees the full turn deadline and is auto-passed on expiry.
+   */
+  def promptedPlayerIds: Set[String] =
+    if isGameOver then Set.empty
+    else if isThrowInPhase then throwInPlayerIds
+    else
+      boutPhase match
+        case BoutPhase.InitialAttack => players.lift(attackerIdx).map(_.id).toSet
+        case BoutPhase.Defense =>
+          if tablePairs.isEmpty then players.lift(attackerIdx).map(_.id).toSet
+          else if tablePairs.exists(_.defense.isEmpty) then
+            players.lift(defenderIdx).map(_.id).toSet
+          else Set.empty
+        case BoutPhase.SurrenderThrowIn        => throwInPlayerIds
+        case BoutPhase.BoutOver | BoutPhase.GameOver => Set.empty
+
+  /** Seats currently on the clock, in seat order. */
+  def promptedPlayerSeats: Vector[Int] =
+    players.indices.filter(idx => promptedPlayerIds.contains(players(idx).id)).toVector
+
+  /**
+   * Active non-defenders with something left to do this bout: they still hold
+   * cards, have not passed, and the engine accepts a `PassTurn` for them.
+   */
+  private def throwInPlayerIds: Set[String] =
+    val defenderId = players.lift(defenderIdx).map(_.id)
+    players.iterator
+      .filter(player => player.isActive && player.hasCards && !player.hasPassed)
+      .filterNot(player => defenderId.contains(player.id))
+      .map(_.id)
+      .filter(id => GameEngine.legalActions(this, id).contains(GameAction.PassTurn(id)))
+      .toSet
 
   /**
    * The seat the clock is waiting on this turn: the attacker while an initial

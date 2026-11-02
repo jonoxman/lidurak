@@ -44,7 +44,15 @@ case class PlayerGameView(
   // True while the defender has no cover and no redirect, so only surrender is legal.
   defenderDefenseless: Boolean = false,
   // Ids of every seat currently present, for the green/grey presence dots.
-  presentPlayers: Vector[String] = Vector.empty
+  presentPlayers: Vector[String] = Vector.empty,
+  // Size of the discard pile plus the bout that ended in the last successful defense.
+  discardCount: Int = 0,
+  lastDiscardCards: Vector[Card] = Vector.empty,
+  // Overall game clock: started with the first move and frozen at game over.
+  gameStartedAtMs: Option[Long] = None,
+  gameEndedAtMs: Option[Long] = None,
+  // Every seat the game is waiting on right now (several during a throw-in).
+  promptedPlayerIds: Vector[String] = Vector.empty
 )
 
 object PlayerGameView:
@@ -67,7 +75,7 @@ object PlayerGameView:
     if viewerIdx == -1 then
       throw new IllegalArgumentException(s"Unknown player: $viewerId")
     val viewer = state.players(viewerIdx)
-    val turnIdx = state.turnPlayerIdx
+    val prompted = state.promptedPlayerIds
 
     PlayerGameView(
       myId = viewer.id,
@@ -81,7 +89,7 @@ object PlayerGameView:
             hasPassed = other.hasPassed,
             finishRank = other.finishRank,
             status = other.status,
-            isTurn = turnIdx.contains(idx),
+            isTurn = prompted.contains(other.id),
             isPresent = state.isPresentSeat(idx)
           )
       }.toList,
@@ -105,7 +113,12 @@ object PlayerGameView:
       turnDeadlineMs = state.turnDeadlineMs,
       turnSecondsRemaining = secondsRemaining(state, nowMs),
       defenderDefenseless = state.defenderIsDefenseless,
-      presentPlayers = state.presentPlayerIds
+      presentPlayers = state.presentPlayerIds,
+      discardCount = state.discardPile.size,
+      lastDiscardCards = state.lastDiscardCards,
+      gameStartedAtMs = state.gameStartedAtMs,
+      gameEndedAtMs = state.gameEndedAtMs,
+      promptedPlayerIds = state.promptedPlayerSeats.map(idx => state.players(idx).id)
     )
 
   /** Whole seconds left on the turn clock, rounded up and never negative. */

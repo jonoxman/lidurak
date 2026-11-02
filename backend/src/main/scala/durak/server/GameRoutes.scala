@@ -77,6 +77,12 @@ object GameRoutes:
     case GET -> Root / "api" / "games" / gameId / "view" :? PlayerQueryParam(playerId) =>
       viewOf(manager, gameId, playerId)
 
+    case GET -> Root / "api" / "games" / gameId / "replay" =>
+      replayOf(manager, gameId)
+
+    case GET -> Root / "api" / "game" / gameId / "replay" =>
+      replayOf(manager, gameId)
+
     case GET -> Root / "api" / "game" / gameId / "view" / playerId =>
       viewOf(manager, gameId, playerId)
 
@@ -137,8 +143,7 @@ object GameRoutes:
       }
     }
 
-  private def submitAction(
-      manager: GameManager,
+  private def submitAction(      manager: GameManager,
       gameId: String,
       req: Request[IO]
   ): IO[Response[IO]] =
@@ -186,6 +191,16 @@ object GameRoutes:
                     }
               }
       }
+    }
+
+  /**
+   * The full move-by-move history of a game: the deal, every recorded move with
+   * its elapsed time and resulting state, and one frozen projection per seat
+   * for every frame, so a replay viewer never needs the live room.
+   */
+  private def replayOf(manager: GameManager, gameId: String): IO[Response[IO]] =
+    withRoom(manager, gameId) { room =>
+      room.replay.get.flatMap(replay => Ok(replay.asJson))
     }
 
   // --- WebSocket ---

@@ -307,3 +307,56 @@ class GameRoutesSuite extends munit.FunSuite:
     assertEquals(unknownPlayer, Status.NotFound)
     assertEquals(unknownGame, Status.NotFound)
   }
+
+  // --- Replay API ---
+
+  test("GET /api/games/:gameId/replay returns every move with per-seat views") {
+    val manager = newManager
+    val gameId = createGame(manager, 2)
+
+    val (_, startJson) = get(manager, s"/api/game/$gameId/view/p0")
+    val start = startJson.as[PlayerGameView].getOrElse(fail("invalid start view"))
+    val attackerId = s"p${start.attackerIdx}"
+    val attackerJson =
+      if attackerId == "p0" then startJson else get(manager, s"/api/game/$gameId/view/p1")._2
+    val attackerView = attackerJson.as[PlayerGameView].getOrElse(fail("invalid attacker view"))
+    val card = attackerView.myHand.head
+
+    val (actionStatus, _) = post(
+      manager,
+      s"/api/game/$gameId/action",
+      Json.obj(
+        "type" -> "initialAttack".asJson,
+        "playerId" -> attackerId.asJson,
+        "cards" -> Json.arr(card.asJson)
+      )
+    )
+    assertEquals(actionStatus, Status.Ok)
+
+    val (status, json) = get(manager, s"/api/games/$gameId/replay")
+    assertEquals(status, Status.Ok)
+    val replay = json.as[SerializedGame].getOrElse(fail(s"invalid replay body: ${json.noSpaces}"))
+
+    assertEquals(replay.gameId, gameId)
+    assertEquals(replay.config.playerCount, 2)
+    assertEquals(replay.initialState.players.map(_.hand.size), Vector(6, 6))
+    assertEquals(replay.moves.size, 1)
+    assertEquals(replay.moves.head.moveIndex, 1)
+    assertEquals(replay.moves.head.playerId, attackerId)
+    assertEquals(replay.moves.head.elapsedMs, 0L)
+    assertEquals(replay.frames.map(_.moveIndex), Vector(0, 1))
+    assertEquals(replay.frames.head.action, None)
+    assertEquals(replay.frames.last.playerId, Some(attackerId))
+    assertEquals(replay.frames.last.views.keySet, Set("p0", "p1"))
+    assertEquals(GameReplay.verifyReplay(replay).map(_.size), Right(2))
+
+    // The documented singular alias serves the same history.
+    val (aliasStatus, aliasJson) = get(manager, s"/api/game/$gameId/replay")
+    assertEquals(aliasStatus, Status.Ok)
+    assertEquals(aliasJson.as[SerializedGame], Right(replay))
+  }
+
+  test("the replay endpoint returns 404 for an unknown game") {
+    val (status, _) = get(newManager, "/api/games/missing/replay")
+    assertEquals(status, Status.NotFound)
+  }
