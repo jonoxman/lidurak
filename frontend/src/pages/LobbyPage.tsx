@@ -216,20 +216,11 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
         </>
       ) : (
         <div class="server-loading-page" data-testid="server-loading" role="status">
-          <span class="server-loading-indicator" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="22" height="22">
-              <circle
-                cx="12"
-                cy="12"
-                r="9"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="3"
-                stroke-linecap="round"
-                stroke-dasharray="10 56"
-              />
-            </svg>
-          </span>
+          <span
+            class="lobby-loading-spinner"
+            data-testid="lobby-loading-spinner"
+            aria-hidden="true"
+          />
           <p class="server-loading-message">Starting game server, please wait…</p>
         </div>
       )}

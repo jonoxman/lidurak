@@ -49,8 +49,7 @@ Press `Ctrl+C` to stop both servers cleanly.
 - **Navigation Menus:** `PLAY`, `PUZZLES`, `LEARN` and `WATCH` open on hover.
 - **Profile Dropdown:** Click the avatar (`Guest`) to open it. Rows are `Profile`, `Inbox`, `Preferences`, `Sign out`, `Language`, `Sound`, `Theme`, `Table` and `Card Back`.
   - Rows with a chevron (`Sound`, `Theme`, `Table`, `Card Back`) open their settings **in place of** the main list — no side flyout. A submenu header at the top shows a left-facing chevron plus the submenu name; clicking it returns to the main menu.
-- **Connection Tracker:** Shows `PING` and `SERVER DELAY` in capitals with a lowercase `ms` unit, e.g. `24 ms`, next to a four-bar signal indicator. The bars change instantly with the latency tier (4 bars ≤ 60 ms, 3 ≤ 150 ms, 2 ≤ 300 ms, 1 above), and their colour follows the tier: **green** for 3–4 bars, **yellow** for 2 bars and **red** for the last remaining bar. They play one short pop animation only when the tier actually changes — there is no constant pulsing.
-- **Lag-Switch (development):** The slider under the connection metrics sets a manual ping from `0 ms` to `500 ms`. Moving it across a tier boundary immediately updates the `PING` readout, the number of active bars, and the one-shot bar animation.
+- **Connection Tracker:** Shows `PING` and `SERVER DELAY` in capitals with a lowercase `ms` unit, e.g. `24 ms`, next to a four-bar signal indicator. The values come from the live measured round-trip time. The bars change instantly with the latency tier (4 bars ≤ 60 ms, 3 ≤ 150 ms, 2 ≤ 300 ms, 1 above), and their colour follows the tier: **green** for 3–4 bars, **yellow** for 2 bars and **red** for the last remaining bar. They play one short pop animation only when the tier actually changes — there is no constant pulsing.
 
 ### Appearance & Audio Submenus
 - **Theme:** `Device theme` (follows the OS), `Light`, or `Dark`, plus a global `Roundness` slider (`0–16 px`) that reshapes panels, buttons and inputs on every page.
@@ -62,7 +61,7 @@ Press `Ctrl+C` to stop both servers cleanly.
 
 ### Creating a Match (Lobby Page)
 1. Open [http://localhost:5173](http://localhost:5173) in your browser.
-2. If the backend is still starting, the lobby shows a **loading panel** (`Starting game server, please wait…`) and re-checks `GET /api/health` every second. The Create Game form appears automatically once the server answers, so a click can never land on a proxy `HTTP 500`.
+2. If the backend is still starting, the lobby shows a **loading panel** with a continuously spinning ring (`Starting game server, please wait…`) and re-checks `GET /api/health` every second. The Create Game form appears automatically once the server answers, so a click can never land on a proxy `HTTP 500`.
 3. Select the **Number of Players** (`2`, `3`, or `4` players).
 4. Enter custom player names (defaults to `Alice`, `Bob`, `Carol`, `Dave`).
 5. Pick who plays each seat from the **Type** dropdown next to every name — `Human`, `RandomBot` or `BasicBot` (listed in that order). Bots play legal moves on their own after a short random pause; seat choices survive changing the player count, and new seats default to `Human`.
