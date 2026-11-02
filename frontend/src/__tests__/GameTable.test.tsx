@@ -97,15 +97,27 @@ describe('GameTable', () => {
     expect(battle.querySelectorAll('.table-pair-defense')).toHaveLength(1);
   });
 
-  it('renders an opponent seat per opponent with names and card counts', () => {
+  it('renders an opponent seat per opponent with a top-left counter oval', () => {
     renderTable();
 
     const areas = screen.getAllByTestId('opponent');
     expect(areas).toHaveLength(2);
     expect(within(areas[0]).getByText('Bob')).toBeTruthy();
-    expect(areas[0].querySelector('.opponent-count')!.textContent).toBe('2 cards');
     expect(within(areas[1]).getByText('Carol')).toBeTruthy();
-    expect(areas[1].querySelector('.opponent-count')!.textContent).toBe('4 cards');
+
+    // The count is an oval on the hand's top-left corner, not an `N cards` line.
+    const bobCount = screen.getByTestId('opponent-card-count-p1');
+    expect(bobCount.textContent).toBe('2');
+    expect(bobCount.getAttribute('data-position')).toBe('top-left');
+    expect(bobCount.classList.contains('deck-count-badge')).toBe(true);
+    expect(screen.getByTestId('opponent-card-count-p2').textContent).toBe('4');
+
+    for (const area of areas) {
+      expect(area.querySelector('.opponent-count')).toBeNull();
+      expect(area.textContent).not.toMatch(/\d+ cards?/i);
+      // The cards sit centred in the box.
+      expect(area.querySelector('.opponent-hand .opponent-cards')).not.toBeNull();
+    }
   });
 
   it('seats opponents at their clockwise data-seat position', () => {
@@ -142,8 +154,16 @@ describe('GameTable', () => {
       />,
     );
 
-    expect(container.querySelector('[data-zone="table-deck"]')).not.toBeNull();
-    expect(screen.getByTestId('talon-count').textContent).toBe('24');
+    const deckZone = container.querySelector('[data-zone="table-deck"]') as HTMLElement;
+    expect(deckZone).not.toBeNull();
+    expect(within(deckZone).getByText('Deck')).toBeTruthy();
+    expect(within(deckZone).getByTestId('deck-assembly').getAttribute('data-align')).toBe(
+      'center',
+    );
+
+    const count = screen.getByTestId('talon-count');
+    expect(count.textContent).toBe('24');
+    expect(count.getAttribute('data-position')).toBe('top-left');
     expect(container.querySelector('.table-trump')).not.toBeNull();
     expect(container.querySelector('.trump-badge .trump-symbol')!.textContent).toBe('♦');
     expect(container.querySelector('.trump-badge')!.classList.contains('red')).toBe(true);
@@ -230,29 +250,16 @@ describe('hand sorting', () => {
     ]);
   });
 
-  it('exposes every sort mode through one compact dropdown', () => {
+  it('keeps the sort dropdown out of the felt arena', () => {
     const { container } = renderSortableTable();
-    const sortBar = container.querySelector('[data-testid="sort-bar"]') as HTMLElement;
-    const select = within(sortBar).getByRole('combobox') as HTMLSelectElement;
 
-    expect(sortBar.querySelectorAll('button')).toHaveLength(0);
-    expect(Array.from(select.options).map((option) => option.value)).toEqual([
-      'suit',
-      'pairs',
-      'rank',
-    ]);
-    expect(Array.from(select.options).map((option) => option.textContent)).toEqual([
-      'Suit',
-      'Pairs',
-      'Rank',
-    ]);
-    expect(select.value).toBe('suit');
+    // Feedback #9: the dropdown moved into the right sidebar.
+    expect(container.querySelector('[data-testid="sort-bar"]')).toBeNull();
+    expect(screen.queryByLabelText('Sort hand')).toBeNull();
   });
 
-  it('switches to pairs mode so matching ranks sit together', () => {
-    renderSortableTable();
-
-    fireEvent.change(screen.getByLabelText('Sort hand'), { target: { value: 'pairs' } });
+  it('renders matching ranks together when the shared sort mode is `pairs`', () => {
+    renderSortableTable({ sortMode: 'pairs' });
 
     expect(handOrder()).toEqual([
       'hearts:six',
@@ -260,13 +267,10 @@ describe('hand sorting', () => {
       'hearts:king',
       'clubs:ace',
     ]);
-    expect((screen.getByLabelText('Sort hand') as HTMLSelectElement).value).toBe('pairs');
   });
 
-  it('switches to rank mode where all trumps rank above non-trumps', () => {
-    renderSortableTable();
-
-    fireEvent.change(screen.getByLabelText('Sort hand'), { target: { value: 'rank' } });
+  it('ranks every trump above non-trumps when the shared sort mode is `rank`', () => {
+    renderSortableTable({ sortMode: 'rank' });
 
     expect(handOrder()).toEqual([
       'hearts:six',
@@ -641,7 +645,7 @@ describe('drag-snap and double-click', () => {
 });
 
 describe('minimalist controls', () => {
-  it('renders the SortBar and contextual buttons in the third column', () => {
+  it('keeps only the contextual buttons in the third column', () => {
     const { container } = renderSortableTable({
       children: (
         <div class="action-bar">
@@ -653,8 +657,9 @@ describe('minimalist controls', () => {
     });
 
     const controls = container.querySelector('[data-zone="player-controls"]') as HTMLElement;
-    expect(controls.querySelector('[data-testid="sort-bar"]')).not.toBeNull();
-    expect(within(controls).getByRole('combobox', { name: 'Sort hand' })).toBeTruthy();
+    // The sort dropdown lives in the sidebar box, not beside the hand.
+    expect(controls.querySelector('[data-testid="sort-bar"]')).toBeNull();
+    expect(within(controls).queryByRole('combobox', { name: 'Sort hand' })).toBeNull();
     // The three separate sort buttons are gone.
     expect(within(controls).queryByRole('button', { name: 'Suit' })).toBeNull();
     expect(within(controls).queryByRole('button', { name: 'Pairs' })).toBeNull();
@@ -783,9 +788,16 @@ describe('seat boxes, clocks and the deck stack', () => {
     );
 
     const deckZone = container.querySelector('[data-zone="table-deck"]') as HTMLElement;
+    expect(deckZone.querySelector('.deck-title')!.textContent).toBe('Deck');
+    expect(within(deckZone).getByTestId('talon-count').getAttribute('data-position')).toBe(
+      'top-left',
+    );
+
     const stack = within(deckZone).getByTestId('talon-deck');
     expect(stack.getAttribute('data-layout')).toBe('horizontal-trump');
     expect(stack.querySelector('.talon-stack')).not.toBeNull();
+    // Deck, trump and badge share one centred assembly.
+    expect(within(deckZone).getByTestId('deck-assembly').contains(stack)).toBe(true);
 
     // The trump is rotated a quarter turn and shares the deck's grid cell.
     const trump = stack.querySelector('.table-trump') as HTMLElement;
