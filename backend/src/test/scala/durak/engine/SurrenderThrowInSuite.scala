@@ -461,3 +461,101 @@ class SurrenderThrowInSuite extends munit.FunSuite:
     assertEquals(next.players(0).hasPassed, true)
     assertEquals(next.players(2).hasPassed, true)
   }
+
+  // --- The surrendering defender has no legal actions ---
+
+  test("a surrendering defender cannot surrender, cover, redirect, throw in or pass") {
+    val six = card(Rank.Six, Suit.Spades)
+    val sixHearts = card(Rank.Six, Suit.Hearts)
+    val kingHearts = card(Rank.King, Suit.Hearts)
+    val gs = twoPlayer(
+      attackerHand = List(card(Rank.Ace, Suit.Clubs)),
+      defenderHand = List(sixHearts, kingHearts),
+      tablePairs = Vector(TablePair(six))
+    )
+
+    val surrendered = GameEngine
+      .applyAction(gs, GameAction.DeclareSurrender("p1"))
+      .getOrElse(fail("expected a valid surrender"))
+    assertEquals(surrendered.boutPhase, BoutPhase.SurrenderThrowIn)
+
+    val attempts = List(
+      GameAction.DeclareSurrender("p1"),
+      GameAction.CoverCard("p1", 0, kingHearts),
+      GameAction.RedirectAttack("p1", List(sixHearts)),
+      GameAction.PassTurn("p1"),
+      GameAction.ThrowInCards("p1", List(sixHearts))
+    )
+    attempts.foreach { action =>
+      assert(
+        GameEngine.applyAction(surrendered, action).isLeft,
+        s"the surrendering defender must not be able to play $action"
+      )
+    }
+    assertEquals(GameEngine.legalActions(surrendered, "p1"), Nil)
+    assertEquals(RandomBot.legalActionsFor(surrendered, "p1"), Vector.empty)
+    assertEquals(PlayerGameView.forViewer(surrendered, "p1").legalActions, List.empty)
+  }
+
+  test("a seat can never cover its own attack") {
+    val six = card(Rank.Six, Suit.Spades)
+    val seven = card(Rank.Seven, Suit.Spades)
+    val gs = twoPlayer(
+      attackerHand = List(card(Rank.Ace, Suit.Clubs)),
+      defenderHand = List(seven),
+      tablePairs = Vector(TablePair(six))
+    )
+
+    // The attacker never gets to cover, and only the defender may.
+    assert(GameEngine.applyAction(gs, GameAction.CoverCard("p0", 0, seven)).isLeft)
+    // A seat that is both attacker and defender must not answer its own attack.
+    val sameSeat = gs.copy(defenderIdx = gs.attackerIdx)
+    assert(
+      GameEngine.applyAction(sameSeat, GameAction.CoverCard("p0", 0, seven)).isLeft,
+      "a seat that is both attacker and defender must not cover its own attack"
+    )
+  }
+
+  test("a surrender auto-passes an opponent that attacked with its last card") {
+    val attack = card(Rank.Six, Suit.Spades)
+    val held = card(Rank.Seven, Suit.Hearts)
+    val gs = twoPlayer(
+      attackerHand = Nil,
+      defenderHand = List(held),
+      tablePairs = Vector(TablePair(attack)),
+      defenderInitialHandSize = 1
+    )
+
+    val surrendered = GameEngine
+      .applyAction(gs, GameAction.DeclareSurrender("p1"))
+      .getOrElse(fail("expected a valid surrender"))
+
+    assertEquals(surrendered.boutPhase, BoutPhase.SurrenderThrowIn)
+    assertEquals(surrendered.players(0).hasPassed, true)
+    assertEquals(surrendered.players(0).hand, Vector.empty)
+    // A cardless attacker has no throw-in, so only the settling pass is left.
+    assertEquals(
+      RandomBot.legalActionsFor(surrendered, "p0"),
+      Vector(GameAction.PassTurn("p0"))
+    )
+
+    val settled = pass(surrendered, "p0")
+
+    assertEquals(settled.tablePairs, Vector.empty)
+    assertEquals(settled.discardPile, Vector.empty)
+    assertEquals(settled.players(1).hand.toSet, Set(held, attack))
+  }
+
+  test("a defense-phase throw-in is rejected when the defender cannot cover it") {
+    val thrown = card(Rank.Six, Suit.Hearts)
+    val gs = twoPlayer(
+      attackerHand = List(thrown),
+      defenderHand = List(card(Rank.Seven, Suit.Spades)),
+      tablePairs = Vector(TablePair(card(Rank.Six, Suit.Spades)))
+    )
+
+    // The defender owns a single card and already faces one uncovered attack.
+    val result = GameEngine.applyAction(gs, GameAction.ThrowInCards("p0", List(thrown)))
+
+    assert(result.isLeft, result)
+  }

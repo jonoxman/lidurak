@@ -320,3 +320,70 @@ class GameActorSuite extends munit.FunSuite:
     assertEquals(absent.presentPlayerIds, Vector("p0"))
     assert(!PlayerGameView.forViewer(absent, "p0").opponents.head.isPresent)
   }
+
+  // --- Bot prompting ---
+
+  /** A fresh game whose defender seat is played by a bot. */
+  private def botDefenderGame(seed: Long = 5L): GameState =
+    val probe = GameEngine.createGame(GameConfig(playerCount = 2, seed = seed), Vector("Human", "Bot"))
+    val types = Vector.tabulate(probe.players.size) { idx =>
+      if idx == probe.defenderIdx then "randomBot" else "human"
+    }
+    val game = GameEngine.createGame(
+      GameConfig(playerCount = 2, seed = seed, playerTypes = types),
+      Vector("Human", "Bot")
+    )
+    assert(game.config.isBotSeat(game.defenderIdx), "the defender seat must be a bot")
+    game
+
+  test("the bot loop prompts the defender while an attack is uncovered") {
+    val gs = botDefenderGame()
+    val defenderId = gs.players(gs.defenderIdx).id
+    val attacked = gs.copy(
+      tablePairs = Vector(TablePair(gs.players(gs.attackerIdx).hand.head)),
+      boutPhase = BoutPhase.Defense
+    )
+
+    assertEquals(GameActor.promptedBotId(attacked), Some(defenderId))
+    val actions = RandomBot.legalActionsFor(attacked, defenderId)
+    assert(actions.nonEmpty, "the defender bot must have a move")
+    actions.foreach(action => assert(GameEngine.applyAction(attacked, defenderId, action).isRight))
+  }
+
+  test("a surrendered bot seat is never prompted again in the same bout") {
+    val gs = botDefenderGame()
+    val defenderId = gs.players(gs.defenderIdx).id
+    val surrendered = gs.copy(
+      tablePairs = Vector(TablePair(gs.players(gs.attackerIdx).hand.head)),
+      boutPhase = BoutPhase.SurrenderThrowIn
+    )
+
+    assertEquals(RandomBot.legalActionsFor(surrendered, defenderId), Vector.empty)
+    assertEquals(GameActor.promptedBotId(surrendered), None)
+  }
+
+  test("the bot loop prompts a bot thrower once every attack is covered") {
+    val gs = botDefenderGame()
+    val attackerId = gs.players(gs.attackerIdx).id
+    val covered = gs.copy(
+      players = gs.players.zipWithIndex.map { case (seat, idx) =>
+        if idx == gs.attackerIdx then seat.copy(hand = Vector(Card(Suit.Clubs, Rank.Six)))
+        else seat
+      },
+      tablePairs = Vector(
+        TablePair(Card(Suit.Clubs, Rank.Six), Some(Card(Suit.Diamonds, Rank.Seven)))
+      ),
+      boutPhase = BoutPhase.Defense
+    )
+
+    // The bot seat is the defender here, so the human attacker is the only
+    // thrower: no bot is prompted, even though the bout is waiting on a pass.
+    assertEquals(GameActor.promptedBotId(covered), None)
+    assert(GameEngine.applyAction(covered, GameAction.PassTurn(attackerId)).isRight)
+  }
+
+  test("no bot is prompted once the game is over") {
+    val gs = botDefenderGame()
+
+    assertEquals(GameActor.promptedBotId(gs.copy(boutPhase = BoutPhase.GameOver)), None)
+  }
