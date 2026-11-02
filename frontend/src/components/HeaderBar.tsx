@@ -89,11 +89,6 @@ export const SUBMENU_LABELS: Record<SubmenuId, string> = {
   cardback: 'Card Back',
 };
 
-/** Lag-switch range: an instant connection up to a deliberately awful one. */
-export const LAG_MIN_MS = 0;
-export const LAG_MAX_MS = 500;
-export const LAG_STEP_MS = 10;
-
 interface ProfileItem {
   id: string;
   label: string;
@@ -475,13 +470,11 @@ export function HeaderBar({ pingMs = 24, serverDelayMs = 12 }: HeaderBarProps) {
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [submenu, setSubmenu] = useState<SubmenuId | null>(null);
-  const [lagPing, setLagPing] = useState<number | null>(null);
   const [barsUpdating, setBarsUpdating] = useState(false);
   const previousLevel = useRef<number | null>(null);
 
-  // The lag-switch overrides the reported round-trip time until it is cleared.
-  const activePing = lagPing ?? pingMs;
-  const level = connectionLevel(activePing);
+  // The tracker follows the live measured round-trip time reported by the app.
+  const level = connectionLevel(pingMs);
   // Tier colour: green only for a good connection, yellow for two bars and red
   // for the last remaining bar, so the tracker reads at a glance.
   const barColor: BarColor = level >= 3 ? 'green' : level === 2 ? 'yellow' : 'red';
@@ -650,7 +643,7 @@ export function HeaderBar({ pingMs = 24, serverDelayMs = 12 }: HeaderBarProps) {
                     PING
                   </span>
                   <span class="connection-value" data-testid="ping-value">
-                    {activePing} ms
+                    {pingMs} ms
                   </span>
                 </span>
                 <span class="connection-delay">
@@ -683,23 +676,6 @@ export function HeaderBar({ pingMs = 24, serverDelayMs = 12 }: HeaderBarProps) {
                   );
                 })}
               </div>
-              <label class="lag-switch">
-                <span class="connection-label">LAG-SWITCH</span>
-                <input
-                  type="range"
-                  min={LAG_MIN_MS}
-                  max={LAG_MAX_MS}
-                  step={LAG_STEP_MS}
-                  value={activePing}
-                  data-testid="lag-switch"
-                  aria-label="Lag switch"
-                  onInput={(event) => {
-                    const next = Number((event.target as HTMLInputElement).value);
-                    setLagPing(Number.isFinite(next) ? next : null);
-                  }}
-                />
-                <output class="setting-value">{activePing} ms</output>
-              </label>
             </div>
           </div>
         ) : null}
