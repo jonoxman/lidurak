@@ -51,8 +51,13 @@ object BasicBot:
     else passes.headOption
 
   /**
-   * The lowest non-trump opening attack, or a random trump one when the hand
-   * holds only trumps. Equal lowest ranks are broken at random.
+   * The lowest non-trump opening attack, or a uniformly random trump one when
+   * the hand holds only trumps. Equal lowest non-trump ranks are broken at
+   * random.
+   *
+   * The trump branch samples the whole vector instead of ranking it: a trump
+   * hand has one card per rank, so a lowest-rank pick there would always play
+   * the same card and never the random trump the policy promises.
    */
   private def attackChoice(
       attacks: Vector[GameAction.InitialAttack],
@@ -60,8 +65,8 @@ object BasicBot:
       rng: Random
   ): GameAction.InitialAttack =
     val nonTrump = attacks.filter(attack => attack.cards.forall(_.suit != trumpSuit))
-    val pool = if nonTrump.nonEmpty then nonTrump else attacks
-    lowest(pool.map(attack => (attack.cards.map(_.rank.value).max, attack)), rng)
+    if nonTrump.isEmpty then attacks(rng.nextInt(attacks.size))
+    else lowest(nonTrump.map(attack => (attack.cards.map(_.rank.value).max, attack)), rng)
 
   /**
    * The cheapest legal cover or redirect: a non-trump one whenever possible,

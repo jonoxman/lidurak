@@ -94,7 +94,7 @@ class BasicBotSuite extends munit.FunSuite:
       boutPhase = BoutPhase.InitialAttack
     )
 
-    (0 until 12).foreach { seed =>
+    (0 until 20).foreach { seed =>
       BasicBot.chooseAction(gs, "p0", new Random(seed.toLong)) match
         case Some(action @ GameAction.InitialAttack("p0", List(attack))) =>
           assertEquals(attack.suit, Suit.Spades)
@@ -102,6 +102,14 @@ class BasicBotSuite extends munit.FunSuite:
           assertLegal(gs, action)
         case other => fail(s"expected a single trump opening attack, got $other")
     }
+
+    // The trump pick must come from the RNG rather than always being the lowest
+    // trump: every index the RNG returns selects that trump, lowest or not.
+    def pickWith(index: Int): Option[GameAction] =
+      BasicBot.chooseAction(gs, "p0", new Random { override def nextInt(bound: Int): Int = index })
+
+    assertEquals(pickWith(0), Some(GameAction.InitialAttack("p0", List(sixSpades))))
+    assertEquals(pickWith(1), Some(GameAction.InitialAttack("p0", List(aceSpades))))
   }
 
   // --- Defending ---
