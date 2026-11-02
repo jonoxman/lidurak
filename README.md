@@ -49,14 +49,14 @@ Press `Ctrl+C` to stop both servers cleanly.
 - **Navigation Menus:** `PLAY`, `PUZZLES`, `LEARN` and `WATCH` open on hover.
 - **Profile Dropdown:** Click the avatar (`Guest`) to open it. Rows are `Profile`, `Inbox`, `Preferences`, `Sign out`, `Language`, `Sound`, `Theme`, `Table` and `Card Back`.
   - Rows with a chevron (`Sound`, `Theme`, `Table`, `Card Back`) open their settings **in place of** the main list — no side flyout. A submenu header at the top shows a left-facing chevron plus the submenu name; clicking it returns to the main menu.
-- **Connection Tracker:** Shows `PING` and `SERVER DELAY` in capitals with a lowercase `ms` unit, e.g. `24 ms`, next to a four-bar signal indicator. The bars change instantly with the latency tier (4 bars ≤ 60 ms, 3 ≤ 150 ms, 2 ≤ 300 ms, 1 above) and play one short pop animation only when the tier actually changes — there is no constant pulsing.
+- **Connection Tracker:** Shows `PING` and `SERVER DELAY` in capitals with a lowercase `ms` unit, e.g. `24 ms`, next to a four-bar signal indicator. The bars change instantly with the latency tier (4 bars ≤ 60 ms, 3 ≤ 150 ms, 2 ≤ 300 ms, 1 above), and their colour follows the tier: **green** for 3–4 bars, **yellow** for 2 bars and **red** for the last remaining bar. They play one short pop animation only when the tier actually changes — there is no constant pulsing.
 - **Lag-Switch (development):** The slider under the connection metrics sets a manual ping from `0 ms` to `500 ms`. Moving it across a tier boundary immediately updates the `PING` readout, the number of active bars, and the one-shot bar animation.
 
 ### Appearance & Audio Submenus
 - **Theme:** `Device theme` (follows the OS), `Light`, or `Dark`, plus a global `Roundness` slider (`0–16 px`) that reshapes panels, buttons and inputs on every page.
 - **Table:** Six felt textures — `Emerald Felt` (default), `Midnight Navy`, `Burgundy Velvet`, `Charcoal Slate`, `Forest Moss`, `Vintage Oak`. `Brightness`, `Contrast` and `Hue` sliders retune the felt live: every texture preview swatch and the live game table itself pick up the selected texture and filters instantly, and only the felt is filtered — cards keep their true colours.
 - **Card Back:** Thirteen designs split into the original monochrome set (`Classic Hatch` default, `Royal Diamond`, `Celtic Weave`, `Hex Mesh`, `Chevron`, `Starburst`) and vibrant gradient backs (`Classic Crimson`, `Royal Sapphire`, `Emerald Gold`, `Sunset Prism`, `Amethyst Nebula`, `Cyber Neon`, `Coral Wave`). The choice applies to every face-down card in the app.
-- **Sound:** `Master volume` slider plus five sound packs (`Classic Felt`, `Arcade 8-Bit`, `Sci-Fi Synth`, `Acoustic Pluck`, `Modern Minimal`). Choosing a pack plays a random sample from that pack immediately, and dragging the volume slider auditions a sample at the new level.
+- **Sound:** `Master volume` slider plus five sound packs (`Classic Felt`, `Arcade 8-Bit`, `Sci-Fi Synth`, `Acoustic Pluck`, `Modern Minimal`). Choosing a pack plays a random sample from that pack immediately, and dragging the volume slider only updates the level and percentage while you drag — releasing the slider auditions exactly one sample at the new level.
 
 ### Creating a Match (Lobby Page)
 1. Open [http://localhost:5173](http://localhost:5173) in your browser.
@@ -71,8 +71,7 @@ Press `Ctrl+C` to stop both servers cleanly.
 
 ### Table Layout (Lichess 3-Column Shell)
 - **Left Sidebar:** Displays the **How to Play** quick-reference guide and the **Player Switcher** tabs (`p0`, `p1`, etc.) for testing multi-seat perspectives locally.
-- **Center Felt Table (3x3 Grid):**
-  - **Top Row (Opponent Seats):** Opponents are seated consistently in clockwise order relative to your bottom seat:
+- **Center Felt Table (3x3 Grid):**    - **Top Row (Opponent Seats):** Opponents are seated consistently in clockwise order relative to your bottom seat. Each opponent's face-down cards are centred inside their player box, with that player's card count shown as a small oval on the **top-left** corner of the hand (no `N cards` text underneath).
     - *2 Players:* Opponent sits directly across (`Top-Center`).
     - *3 Players:* Next clockwise player sits at `Top-Left`; third player sits at `Top-Right`.
     - *4 Players:* Opponents occupy `Top-Left`, `Top-Center`, and `Top-Right`.
@@ -82,9 +81,10 @@ Press `Ctrl+C` to stop both servers cleanly.
     - When reflection (`Perevod`) is legal, a card-sized **Reflection Outline** with a directional arrow pointing toward the next receiver appears immediately to the right of the attacking cards.
   - **Bottom Row:**
     - **Bottom-Center:** Your active **Hand** (trump cards feature a subtle golden border glow and corner badge). A gentle pulsing glow around your hand (when attacking) or around uncovered attacking cards (when defending) indicates that the game is waiting on your move.
-    - **Bottom-Right:** Client-side **Hand Sorting Controls** and contextual action buttons.
-- **Right Sidebar:** From top to bottom: the large digital **15-Second Turn Clock (`00:XX`)**, the **PLAYERS** list with presence dots, the **Talon Deck** stack, and the match results (`Winners` list and final `Durak`).
-  - The deck is drawn vertically with the revealed **Trump Card** lying horizontally and sticking out to its right (their left edges line up); the suit-specific `TRUMP` badge sits clearly below both, with no overlap.
+    - **Bottom-Right:** Contextual action buttons only (`Surrender` / `Pass`). The hand sorting control now lives in the right sidebar.
+- **Right Sidebar:** From top to bottom: the large digital **15-Second Turn Clock (`00:XX`)**, the **PLAYERS** list with presence dots, the **`DECK`** box, the **`SORT`** box, and the match results (`Winners` list and final `Durak`).
+  - The `DECK` box is titled like the `PLAYERS` box. Its assembly — the vertical talon stack, the horizontal trump card and the `TRUMP` badge — is centred as one block in the box: the revealed **Trump Card** lies horizontally and sticks out to the right of the deck (their left edges line up), and the suit-specific `TRUMP` badge sits clearly below both, with no overlap. The remaining-deck count is an oval on the **top-left** corner of the deck.
+  - The `SORT` box sits directly underneath the `DECK` box and holds the **Sort** dropdown (`Suit` | `Pairs` | `Rank`). Changing it reorders your hand immediately, and it never appears on the felt table.
 
 ### Card Faces
 - Number cards (`6`–`10`, plus `2`–`5` in 4-player games) show one suit pip per rank; aces show a single large ornate pip.
@@ -94,7 +94,7 @@ Press `Ctrl+C` to stop both servers cleanly.
 ### Playing Cards & Controls
 - **Drag-and-Drop with Magnetic Snapping:** Drag any card from your hand within `48px` of a valid drop zone (a target player outline, an uncovered attacking card to cover it, the throw-in slot, or the arrow reflection outline). The preview snaps into place; release the mouse to play the card.
 - **Fast Double-Click to Play:** Double-click any card in your hand to play it immediately whenever there is **only one unambiguous legal move** for that card (e.g., opening attack in standard mode, throwing in a matching rank, or covering when only one uncovered card can be beaten). If multiple targets are legal (such as in Chaos Mode or when a card can cover multiple uncovered cards), drag the card to your chosen target instead.
-- **Sorting Your Hand (`Suit` | `Pairs` | `Rank`):**
+- **Sorting Your Hand (`Suit` | `Pairs` | `Rank`):** pick the mode from the **`Sort`** box in the right sidebar, directly under the `DECK` box.
   - `Suit` *(Default)*: Groups cards by suit in ascending rank order.
   - `Pairs`: Groups identical ranks together regardless of suit to spot multi-card throw-ins easily.
   - `Rank`: Sorts strictly by ascending rank with all trump cards grouped highest.

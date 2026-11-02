@@ -67,6 +67,16 @@ const view: PlayerGameView = {
   maxBoutAttacks: 6,
 };
 
+// A multi-suit hand, so the sidebar sort mode visibly changes the order.
+const sortableView: PlayerGameView = {
+  ...view,
+  myHand: [
+    { suit: 'clubs', rank: 'ace' },
+    { suit: 'hearts', rank: 'six' },
+    { suit: 'spades', rank: 'king' },
+  ],
+};
+
 const getGameView = client.getGameView as unknown as ReturnType<typeof vi.fn>;
 const sendAction = client.sendAction as unknown as ReturnType<typeof vi.fn>;
 
@@ -126,6 +136,130 @@ describe('GamePage', () => {
     expect(within(right as HTMLElement).getByTestId('talon-count').textContent).toBe('10');
     expect(within(right as HTMLElement).getByTestId('trump-indicator')).toBeTruthy();
     expect(within(arena as HTMLElement).queryByTestId('talon-count')).toBeNull();
+  });
+
+  it('titles the deck box, centres the assembly and puts the counter top-left', async () => {
+    getGameView.mockResolvedValue({
+      ...view,
+      bottomTrumpCard: { suit: 'spades', rank: 'nine' },
+    });
+
+    const { container } = render(
+      <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('talon-count')).toBeTruthy());
+
+    const deckBox = container.querySelector(
+      '[data-zone="sidebar-right"] [data-zone="table-deck"]',
+    ) as HTMLElement;
+    expect(within(deckBox).getByText('Deck')).toBeTruthy();
+
+    const assembly = within(deckBox).getByTestId('deck-assembly');
+    expect(assembly.getAttribute('data-align')).toBe('center');
+    expect(assembly.contains(within(deckBox).getByTestId('talon-deck'))).toBe(true);
+    expect(assembly.contains(within(deckBox).getByTestId('trump-indicator'))).toBe(true);
+
+    const count = within(deckBox).getByTestId('talon-count');
+    expect(count.textContent).toBe('10');
+    expect(count.getAttribute('data-position')).toBe('top-left');
+  });
+
+  it('renders the hand-sort box directly under the deck box, outside the arena', async () => {
+    getGameView.mockResolvedValue(sortableView);
+
+    const { container } = render(
+      <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
+    );
+
+    await waitFor(() => expect(screen.getByLabelText('Sort hand')).toBeTruthy());
+
+    const right = container.querySelector('[data-zone="sidebar-right"]') as HTMLElement;
+    const deckBox = right.querySelector('[data-zone="table-deck"]') as HTMLElement;
+    const sortBox = right.querySelector('[data-zone="hand-sort-box"]') as HTMLElement;
+
+    expect(sortBox).not.toBeNull();
+    expect(sortBox.classList.contains('sidebar-box')).toBe(true);
+    expect(sortBox.classList.contains('sidebar-sort-box')).toBe(true);
+    // Immediately after the deck box, and never inside the felt arena.
+    expect(deckBox.nextElementSibling).toBe(sortBox);
+    expect(sortBox.querySelector('[data-testid="sort-bar"]')).not.toBeNull();
+    expect(within(sortBox).getByRole('combobox', { name: 'Sort hand' })).toBeTruthy();
+    expect(container.querySelector('[data-zone="table-arena"] [data-testid="sort-bar"]')).toBeNull();
+    expect(
+      container.querySelector('[data-zone="player-controls"] [data-testid="sort-bar"]'),
+    ).toBeNull();
+
+    const select = within(sortBox).getByRole('combobox') as HTMLSelectElement;
+    expect(Array.from(select.options).map((option) => option.value)).toEqual([
+      'suit',
+      'pairs',
+      'rank',
+    ]);
+    expect(Array.from(select.options).map((option) => option.textContent)).toEqual([
+      'Suit',
+      'Pairs',
+      'Rank',
+    ]);
+    expect(select.value).toBe('suit');
+  });
+
+  it('reorders the active player\'s hand when the sidebar sort mode changes', async () => {
+    getGameView.mockResolvedValue(sortableView);
+
+    const { container } = render(
+      <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
+    );
+
+    await waitFor(() => expect(screen.getByLabelText('Sort hand')).toBeTruthy());
+
+    const handOrder = (): string[] =>
+      Array.from(
+        (container.querySelector('[data-zone="player-hand"]') as HTMLElement).querySelectorAll(
+          '.card-slot',
+        ),
+      ).map((slot) => `${slot.getAttribute('data-suit')}:${slot.getAttribute('data-rank')}`);
+
+    expect(handOrder()).toEqual(['hearts:six', 'clubs:ace', 'spades:king']);
+
+    fireEvent.change(screen.getByLabelText('Sort hand'), { target: { value: 'pairs' } });
+
+    expect(handOrder()).toEqual(['hearts:six', 'spades:king', 'clubs:ace']);
+    expect((screen.getByLabelText('Sort hand') as HTMLSelectElement).value).toBe('pairs');
+  });
+
+  it('centres opponent cards and shows a top-left counter instead of text', async () => {
+    getGameView.mockResolvedValue({
+      ...view,
+      opponents: [
+        { id: 'p1', name: 'Bob', cardCount: 6, hasPassed: false, finishRank: null },
+        { id: 'p2', name: 'Carol', cardCount: 3, hasPassed: false, finishRank: null },
+      ],
+    });
+
+    const { container } = render(
+      <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('opponent-card-count-p1')).toBeTruthy());
+
+    const seats = Array.from(
+      container.querySelectorAll('[data-testid="opponent"]'),
+    ) as HTMLElement[];
+    expect(seats).toHaveLength(2);
+
+    const bobSeat = screen.getByTestId('seat-clock-p1').closest('.seat') as HTMLElement;
+    const bobCount = screen.getByTestId('opponent-card-count-p1');
+    expect(bobCount.textContent).toBe('6');
+    expect(bobCount.getAttribute('data-position')).toBe('top-left');
+    expect(bobSeat.querySelector('.opponent-hand .opponent-cards')).not.toBeNull();
+    expect(bobSeat.querySelector('.opponent-count')).toBeNull();
+    expect(bobSeat.textContent).not.toMatch(/6 cards/i);
+
+    expect(screen.getByTestId('opponent-card-count-p2').textContent).toBe('3');
+    expect(
+      screen.getByTestId('seat-clock-p2').closest('.seat')!.textContent,
+    ).not.toMatch(/cards/i);
   });
 
   it('switches the hotseat player from the left sidebar tabs', async () => {
@@ -219,7 +353,7 @@ describe('GamePage', () => {
     expect(container.querySelector('.game-hint')).toBeNull();
   });
 
-  it('shows only contextual pass controls and the sort bar in the third column', async () => {
+  it('shows only contextual pass controls in the third column', async () => {
     getGameView.mockResolvedValue({
       ...view,
       attackerIdx: 0,
@@ -234,7 +368,8 @@ describe('GamePage', () => {
     await waitFor(() => expect(screen.getByText('Pass')).toBeTruthy());
 
     const controls = container.querySelector('[data-zone="player-controls"]') as HTMLElement;
-    expect(controls.querySelector('[data-testid="sort-bar"]')).not.toBeNull();
+    // Feedback #9: the sort dropdown moved to its own right-sidebar box.
+    expect(controls.querySelector('[data-testid="sort-bar"]')).toBeNull();
     expect(within(controls).getByRole('button', { name: 'Pass' })).toBeTruthy();
     expect(screen.queryByText('Redirect')).toBeNull();
     expect(within(controls).queryByRole('button', { name: 'Surrender' })).toBeNull();

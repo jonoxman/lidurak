@@ -161,13 +161,25 @@
   white-space: nowrap;
 }
 
+/* Feedback #12: the opponent hand is centred in its box and carries its card
+   count on the top-left corner instead of an `N cards` line underneath. */
+.opponent-hand {
+  display: grid;
+  grid-template-columns: max-content;
+  justify-content: center;
+  align-content: center;
+  align-items: center;
+  gap: 0;
+  min-width: 0;
+}
+
 /* Feedback #9: a fixed-size opponent row whose cards overlap more as the hand
    grows, without ever responding to the cursor. */
 .opponent-cards {
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
-  width: 100%;
+  justify-content: center;
   max-width: 208px;
   min-height: 32px;
   overflow: hidden;
@@ -189,11 +201,6 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-}
-
-.opponent-count {
-  font-size: 12px;
-  opacity: 0.85;
 }
 
 .opponent-rank {
@@ -350,14 +357,35 @@
 [data-zone='table-deck'] {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 16px;
+  align-items: center;
+  gap: 10px;
   min-width: 0;
   padding: 12px;
   background: var(--app-panel, var(--durak-panel));
   border: 1px solid var(--app-border, var(--durak-border));
   border-radius: var(--app-roundness, 8px);
   box-sizing: border-box;
+}
+
+/* Feedback #10: the deck title matches the PLAYERS box header. */
+.deck-title {
+  margin: 0;
+  align-self: stretch;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--app-text, var(--durak-text));
+  opacity: 0.8;
+}
+
+/* The deck, the trump to its right and the badge below travel as one centred
+   block, so their relative positions stay exactly as before. */
+.deck-assembly {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 16px;
+  min-width: 0;
 }
 
 /* One grid cell holds the vertical deck and the horizontal trump: both left
@@ -394,18 +422,43 @@
   opacity: 0.85;
 }
 
+/* Feedback #6: the counter oval sits on the top-left corner of the deck. */
 .talon-count {
   grid-column: 1;
   grid-row: 1;
-  justify-self: end;
-  align-self: end;
+  justify-self: start;
+  align-self: start;
   padding: 2px 8px;
-  transform: translate(14px, 14px);
+  transform: translate(-14px, -14px);
   background: var(--durak-bg);
   border: 1px solid var(--durak-border);
   border-radius: 999px;
   font-weight: 700;
   color: #f5f1e6;
+}
+
+/* Shared oval used by the deck and every opponent hand. */
+.deck-count-badge {
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  background: var(--durak-bg);
+  border: 1px solid var(--durak-border);
+  border-radius: 999px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  color: #f5f1e6;
+}
+
+/* Opponent counter ovals tuck onto the hand's top-left corner. */
+.opponent-card-count {
+  justify-self: start;
+  margin: -6px 0 -6px -6px;
+  padding: 0 7px;
+  font-size: 12px;
 }
 
 /* The bottom trump lies face up, perpendicular to the talon and centred on it. */
@@ -560,6 +613,17 @@
   justify-content: flex-end;
   gap: 10px;
   min-width: 0;
+}
+
+/* Feedback #9: the hand-sort dropdown lives in its own box in the right
+   sidebar, directly under the deck box. */
+.sidebar-sort-box {
+  align-items: stretch;
+  min-width: 0;
+}
+
+.sidebar-sort-box .sort-bar {
+  width: 100%;
 }
 
 /* Item 11: one compact dropdown replaces the three sort buttons. */
