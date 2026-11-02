@@ -9,7 +9,7 @@ export interface TablePair {
 }
 
 /** Seat kind: a human client or a server-driven bot. */
-export type PlayerType = 'human' | 'randomBot';
+export type PlayerType = 'human' | 'randomBot' | 'basicBot';
 
 export interface PublicPlayerSummary {
   id: string;

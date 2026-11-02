@@ -110,7 +110,10 @@ object GameRoutes:
               .handleErrorWith(failure => errorResponse(failure))
     }
 
-  /** Seat types are normalized to exactly `playerCount` entries of `"human"`/`"randomBot"`. */
+  /**
+   * Seat types are normalized to exactly `playerCount` entries of `"human"`,
+   * `"randomBot"` or `"basicBot"` (unknown values fall back to a human seat).
+   */
   private def configFor(request: CreateGameRequest): GameConfig =
     GameConfig(
       playerCount = request.playerCount,

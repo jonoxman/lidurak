@@ -10,6 +10,7 @@ import {
   isGameOverPhase,
   isInitialAttackPhase,
   parsePlayerGameView,
+  type PlayerType,
 } from '../types';
 
 const six = { suit: 'spades', rank: 'six' };
@@ -128,6 +129,16 @@ describe('backend token normalization', () => {
     expect(isInitialAttackPhase('InitialAttack')).toBe(true);
     expect(isInitialAttackPhase('initialAttack')).toBe(true);
     expect(isInitialAttackPhase('defense')).toBe(false);
+  });
+});
+
+describe('PlayerType', () => {
+  it('accepts basicBot alongside human and randomBot', () => {
+    const seats: PlayerType[] = ['human', 'randomBot', 'basicBot'];
+
+    expect(seats).toHaveLength(3);
+    expect(seats).toContain('basicBot');
+    expect(seats.indexOf('basicBot')).toBe(seats.indexOf('randomBot') + 1);
   });
 });
 
