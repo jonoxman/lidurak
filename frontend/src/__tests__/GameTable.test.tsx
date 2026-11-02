@@ -941,3 +941,144 @@ describe('seat boxes, clocks and the deck stack', () => {
     expect(defenderSeat.classList.contains('active-attacker')).toBe(false);
   });
 });
+
+describe('fixed play area, tight hand highlight and surrender shift', () => {
+  const makePairs = (count: number): TablePairData[] =>
+    Array.from({ length: count }, () => ({
+      attack: { suit: 'spades', rank: 'six' },
+      defense: null,
+    }));
+
+  const fourPlayers: OpponentSummary[] = [
+    ...activeOpponents,
+    { id: 'p3', name: 'Dave', cardCount: 6, hasPassed: false, finishRank: null },
+  ];
+
+  it('keeps the tinted play-area box at one fixed table-relative size', () => {
+    const snapshots = [0, 1, 6].map((count) => {
+      const { unmount } = render(
+        <GameTable
+          myId="p0"
+          myHand={hand}
+          opponents={activeOpponents}
+          tablePairs={makePairs(count)}
+          trumpSuit="diamonds"
+          defenderId="p1"
+        />,
+      );
+
+      const box = screen.getByTestId('play-area-box') as HTMLElement;
+      const snapshot = {
+        className: box.className,
+        fixedSize: box.getAttribute('data-fixed-size'),
+        inlineWidth: box.style.width,
+        inlineHeight: box.style.height,
+      };
+      expect(box.querySelectorAll('.table-pair')).toHaveLength(count);
+      unmount();
+      return snapshot;
+    });
+
+    // Same class, same marker and no inline sizing at any card count.
+    expect(new Set(snapshots.map((snapshot) => JSON.stringify(snapshot))).size).toBe(1);
+    expect(snapshots[0].fixedSize).toBe('true');
+    expect(snapshots[0].inlineWidth).toBe('');
+    expect(snapshots[0].inlineHeight).toBe('');
+  });
+
+  it('wraps every hand card directly inside the turn-highlight box', () => {
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={[]}
+        trumpSuit="diamonds"
+        defenderId="p1"
+        awaitingAttack
+      />,
+    );
+
+    const highlight = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+    expect(highlight.classList.contains('hand-cards')).toBe(true);
+    expect(highlight.getAttribute('data-active')).toBe('true');
+
+    const slots = Array.from(highlight.children) as HTMLElement[];
+    expect(slots).toHaveLength(hand.length);
+    for (const slot of slots) {
+      expect(slot.classList.contains('hand-slot')).toBe(true);
+      expect(slot.parentElement).toBe(highlight);
+    }
+
+    const cards = Array.from(highlight.querySelectorAll('.card-slot'));
+    expect(cards).toHaveLength(hand.length);
+    for (const card of cards) expect(highlight.contains(card)).toBe(true);
+  });
+
+  it('leaves the hand highlight inactive when nobody waits on the viewer', () => {
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={tablePairs}
+        trumpSuit="diamonds"
+        defenderId="p1"
+      />,
+    );
+
+    expect(screen.getByTestId('hand-turn-highlight').getAttribute('data-active')).toBe('false');
+  });
+
+  it('slides the cards in play toward the surrendering defender seat', () => {
+    const cases: Array<{
+      opponents: OpponentSummary[];
+      defenderId: string;
+      target: string;
+    }> = [
+      { opponents: [activeOpponents[0]], defenderId: 'p0', target: 'bottom' },
+      { opponents: [activeOpponents[0]], defenderId: 'p1', target: 'top-center' },
+      { opponents: activeOpponents, defenderId: 'p1', target: 'top-left' },
+      { opponents: activeOpponents, defenderId: 'p2', target: 'top-right' },
+      { opponents: fourPlayers, defenderId: 'p2', target: 'top-center' },
+    ];
+
+    for (const scenario of cases) {
+      const { unmount } = render(
+        <GameTable
+          myId="p0"
+          myHand={hand}
+          opponents={scenario.opponents}
+          tablePairs={tablePairs}
+          trumpSuit="diamonds"
+          defenderId={scenario.defenderId}
+          boutPhase="Surrendered"
+        />,
+      );
+
+      const group = screen.getByTestId('table-pairs-group');
+      expect(group.getAttribute('data-surrendered')).toBe('true');
+      expect(group.getAttribute('data-surrender-target')).toBe(scenario.target);
+      expect(group.querySelectorAll('.table-pair')).toHaveLength(tablePairs.length);
+      unmount();
+    }
+  });
+
+  it('does not shift the cards in play before a surrender', () => {
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={tablePairs}
+        trumpSuit="diamonds"
+        defenderId="p1"
+        boutPhase="Defense"
+      />,
+    );
+
+    const group = screen.getByTestId('table-pairs-group');
+    expect(group.getAttribute('data-surrendered')).toBe('false');
+    expect(group.getAttribute('data-surrender-target')).toBeNull();
+  });
+});

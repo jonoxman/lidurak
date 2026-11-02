@@ -49,6 +49,8 @@ export interface GameTableProps {
   awaitingAttack?: boolean;
   /** True while the viewer is the defender facing uncovered attacks. */
   defending?: boolean;
+  /** Backend bout phase; a surrendered bout slides toward the defender's seat. */
+  boutPhase?: string;
   /** True while a redirect is legal for the viewer. */
   canRedirect?: boolean;
   /** True while the viewer may throw in a matching card. */
@@ -351,6 +353,17 @@ export function seatForOffset(offset: number, playerCount: number): SeatPosition
   return seats[offset - 1] ?? 'top-right';
 }
 
+/** True for the backend phases that follow a defender's surrender. */
+export function isSurrenderedPhase(phase: string | undefined): boolean {
+  if (!phase) return false;
+  const token = phase.replace(/[^a-z]/gi, '').toLowerCase();
+  return (
+    token === 'surrendered' ||
+    token === 'surrenderthrowin' ||
+    token === 'phasesurrenderthrowin'
+  );
+}
+
 /** Assigns every opponent a deterministic seat relative to the viewer. */
 export function assignSeats(opponents: OpponentSummary[]): SeatAssignment[] {
   const playerCount = opponents.length + 1;
@@ -462,6 +475,7 @@ export function GameTable({
   chaosMode = false,
   awaitingAttack = false,
   defending = false,
+  boutPhase,
   canRedirect = false,
   canThrowIn = false,
   turnPlayerId,
@@ -549,6 +563,11 @@ export function GameTable({
     defenderId === myId
       ? 'bottom'
       : seats.find((seat) => seat.opponent.id === defenderId)?.position ?? 'top-center';
+
+  // Item 11: once the defender surrenders, the cards in play slide toward the
+  // surrendering player's box (their seat, or the viewer's own bottom edge).
+  const surrendered = isSurrenderedPhase(boutPhase);
+  const surrenderTarget: BoutAnchor = boutAnchor;
 
   const activeSeats = seats.filter((seat) => seat.opponent.finishRank == null);
   const redirectDirection: RedirectDirection = chaosMode
@@ -730,9 +749,17 @@ export function GameTable({
             : undefined
         }
       >
-        {/* Row 2 anchors the drop targets in front of each legal defender, so
-            every seat box keeps identical dimensions. */}
-        {attackTargets.map((target) => {
+        {/* Item 7: the tinted play area keeps one fixed, table-relative size, so
+            it never grows or shrinks with the number of cards in play. */}
+        <div
+          class="battlefield-tinted-box"
+          data-testid="play-area-box"
+          data-fixed-size="true"
+          data-surrendered={surrendered ? 'true' : 'false'}
+        >
+          {/* Row 2 anchors the drop targets in front of each legal defender, so
+              every seat box keeps identical dimensions. */}
+          {attackTargets.map((target) => {
           const zone = `target:${target.id}`;
           const anchor =
             seats.find((seat) => seat.opponent.id === target.id)?.position ?? 'top-center';
@@ -755,48 +782,59 @@ export function GameTable({
           );
         })}
 
-        {tablePairs.map((pair, index) => {
-          const zone = `cover:${index}`;
-          const coverable = !pair.defense && Boolean(onCoverDrop);
-          return (
-            <TablePair
-              key={index}
-              attack={pair.attack}
-              defense={pair.defense}
-              trumpSuit={trumpSuit}
-              pulse={defending && !pair.defense}
-              snap={snapZone === zone}
-              dropZone={coverable ? zone : undefined}
-              onAttackClick={
-                onTableCardClick && !pair.defense ? () => onTableCardClick(index) : undefined
-              }
-              onDragOverCard={coverable ? hoverZone(zone) : undefined}
-              onDragLeaveCard={coverable ? clearSnap : undefined}
-              onDropCard={
-                coverable
-                  ? (event) => dropOn(zone, event, (card) => onCoverDrop?.(card, index))
-                  : undefined
-              }
-            />
-          );
-        })}
+        {/* Item 11: the pairs group carries the surrender state, so CSS can
+            shift every card in play toward the surrendering player's box. */}
+        <div
+          class="table-pairs-group"
+          data-testid="table-pairs-group"
+          data-count={tablePairs.length}
+          data-surrendered={surrendered ? 'true' : 'false'}
+          data-surrender-target={surrendered ? surrenderTarget : undefined}
+        >
+          {tablePairs.map((pair, index) => {
+            const zone = `cover:${index}`;
+            const coverable = !pair.defense && Boolean(onCoverDrop);
+            return (
+              <TablePair
+                key={index}
+                attack={pair.attack}
+                defense={pair.defense}
+                trumpSuit={trumpSuit}
+                pulse={defending && !pair.defense}
+                snap={snapZone === zone}
+                dropZone={coverable ? zone : undefined}
+                onAttackClick={
+                  onTableCardClick && !pair.defense ? () => onTableCardClick(index) : undefined
+                }
+                onDragOverCard={coverable ? hoverZone(zone) : undefined}
+                onDragLeaveCard={coverable ? clearSnap : undefined}
+                onDropCard={
+                  coverable
+                    ? (event) => dropOn(zone, event, (card) => onCoverDrop?.(card, index))
+                    : undefined
+                }
+              />
+            );
+          })}
+        </div>
 
-        {canRedirect && tablePairs.length > 0 ? (
-          <div
-            class={`redirect-outline${snapZone === 'redirect' ? ' snap-active' : ''}`}
-            data-testid="redirect-outline"
-            data-drop-zone="redirect"
-            data-direction={redirectDirection}
-            aria-label="Reflect the attack"
-            onDragOver={hoverZone('redirect')}
-            onDragLeave={clearSnap}
-            onDrop={(event) =>
-              dropOn('redirect', event, (card) => onRedirectDrop?.(card))
-            }
-          >
-            <RedirectIcon chaosMode={chaosMode} direction={redirectDirection} />
-          </div>
-        ) : null}
+          {canRedirect && tablePairs.length > 0 ? (
+            <div
+              class={`redirect-outline${snapZone === 'redirect' ? ' snap-active' : ''}`}
+              data-testid="redirect-outline"
+              data-drop-zone="redirect"
+              data-direction={redirectDirection}
+              aria-label="Reflect the attack"
+              onDragOver={hoverZone('redirect')}
+              onDragLeave={clearSnap}
+              onDrop={(event) =>
+                dropOn('redirect', event, (card) => onRedirectDrop?.(card))
+              }
+            >
+              <RedirectIcon chaosMode={chaosMode} direction={redirectDirection} />
+            </div>
+          ) : null}
+        </div>
       </section>
 
       <section class={handClasses.join(' ')} data-zone="player-hand" aria-label="Your hand">
@@ -807,8 +845,12 @@ export function GameTable({
         >
           {formatSeatClock(viewerOnClock ? activeSeconds : 15)}
         </span>
+        {/* Item 8: one highlight box wraps the whole card row, with symmetric
+            padding so no lifted card can protrude out of it. */}
         <div
           class={handCardClasses.join(' ')}
+          data-testid="hand-turn-highlight"
+          data-active={awaitingAttack || defending ? 'true' : 'false'}
           data-overlap={handLayoutState.overlap}
           data-hidden-left={handLayoutState.hiddenLeft}
           data-hidden-right={handLayoutState.hiddenRight}

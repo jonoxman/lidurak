@@ -221,41 +221,90 @@
   grid-column: 1 / -1;
   grid-row: 2;
   display: flex;
+  align-self: stretch;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+}
+
+/* Item 7: the tinted play area is one fixed box sized relative to the table
+   (the whole of row 2), so its dimensions never depend on the card count. */
+.battlefield-tinted-box {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  width: 88%;
+  height: 100%;
+  min-height: 150px;
+  padding: 16px;
+  background: rgba(38, 36, 33, 0.55);
+  border-radius: 10px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+/* Item 11: every card in play lives in one group, so a surrender slides the
+   whole bout toward the surrendering seat with a single transform. */
+.table-pairs-group {
+  display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: center;
   gap: 22px;
   min-width: 0;
-  min-height: 220px;
-  padding: 16px;
-  background: rgba(38, 36, 33, 0.55);
-  border-radius: 10px;
-  box-sizing: border-box;
+  transition: transform 320ms ease;
 }
 
-/* Item 12: the bout sits directly in front of the defending player. */
+.table-pairs-group[data-surrendered='true'] {
+  filter: saturate(0.85);
+}
+
+.table-pairs-group[data-surrendered='true'][data-surrender-target='top-left'] {
+  transform: translate(-40px, -22px);
+}
+
+.table-pairs-group[data-surrendered='true'][data-surrender-target='top-center'] {
+  transform: translate(0, -26px);
+}
+
+.table-pairs-group[data-surrendered='true'][data-surrender-target='top-right'] {
+  transform: translate(40px, -22px);
+}
+
+.table-pairs-group[data-surrendered='true'][data-surrender-target='bottom'] {
+  transform: translate(0, 26px);
+}
+
+/* Item 12: the bout sits directly in front of the defending player. The box
+   keeps its fixed size; only its position and card alignment move. */
 .bout-area[data-anchor='top-left'] {
-  justify-self: start;
-  align-self: start;
   justify-content: flex-start;
 }
 
 .bout-area[data-anchor='top-center'] {
-  justify-self: center;
-  align-self: start;
   justify-content: center;
 }
 
 .bout-area[data-anchor='top-right'] {
-  justify-self: end;
-  align-self: start;
   justify-content: flex-end;
 }
 
 .bout-area[data-anchor='bottom'] {
-  justify-self: center;
-  align-self: end;
   justify-content: center;
+}
+
+.bout-area[data-anchor='top-left'] .battlefield-tinted-box,
+.bout-area[data-anchor='top-center'] .battlefield-tinted-box,
+.bout-area[data-anchor='top-right'] .battlefield-tinted-box {
+  align-items: flex-start;
+}
+
+.bout-area[data-anchor='bottom'] .battlefield-tinted-box {
+  align-items: flex-end;
 }
 
 /* Target outlines live in the bout row, facing the defender's seat. */
@@ -571,7 +620,9 @@
   max-width: 100%;
   min-width: 0;
   gap: 0;
-  padding: 4px 6px;
+  /* Item 8: symmetric side padding plus enough top headroom for the lifted
+     (playable/selected -8..-10px) cards, so no card can protrude. */
+  padding: 14px 8px 8px;
   border-radius: 8px;
   box-sizing: border-box;
 }
@@ -821,9 +872,18 @@
   .bout-area {
     grid-column: 1;
     grid-row: 2;
+    min-height: 0;
+  }
+
+  .battlefield-tinted-box {
+    width: 100%;
+    min-height: 120px;
     gap: 14px;
-    min-height: 140px;
     padding: 10px;
+  }
+
+  .table-pairs-group {
+    gap: 14px;
   }
 
   [data-zone='player-hand'] {
@@ -853,7 +913,7 @@
   }
 
   .hand-cards {
-    padding: 2px 4px;
+    padding: 10px 4px 4px;
   }
 
   .talon-stack {
