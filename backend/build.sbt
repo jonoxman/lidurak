@@ -16,5 +16,8 @@ lazy val root = (project in file("."))
       "org.typelevel" %% "munit-cats-effect" % "2.0.0" % Test
     ),
     testFrameworks += new TestFramework("munit.Framework"),
-    fork := true
+    fork := true,
+    // Forked runs inherit the terminal directly, so slf4j INFO lines from Ember
+    // are printed as-is instead of being relayed through sbt as `[error]`.
+    outputStrategy := Some(StdoutOutput)
   )
