@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/preact';
 import {
   GameTable,
+  defenderDoubleClickAction,
   redirectOnlyAction,
   HAND_CARD_WIDTH,
   HAND_MIN_OVERLAP,
@@ -1031,6 +1032,71 @@ describe('hand highlight geometry, redirect double-click and review mode', () =>
     expect(redirectOnlyAction(card, { ...onlyRedirect, isAttacker: true })).toBeNull();
     expect(redirectOnlyAction(card, { ...onlyRedirect, canRedirect: false })).toBeNull();
     expect(redirectOnlyAction(card, { ...onlyRedirect, matchesTableRank: false })).toBeNull();
+  });
+
+  it('never covers when the same card could also be redirected', () => {
+    // A trump matching a non-trump attack's rank: both cover and redirect are
+    // legal, so a double-click has to abstain.
+    const trumpSix: CardData = { suit: 'hearts', rank: 'six' };
+    const ambiguous = {
+      playerId: 'p0',
+      coverableAttackIndices: [0],
+      canCover: true,
+      canRedirect: true,
+      canThrowIn: false,
+      matchesTableRank: true,
+    };
+
+    expect(defenderDoubleClickAction(trumpSix, ambiguous)).toBeNull();
+    // Two cover targets plus a redirect is equally ambiguous.
+    expect(
+      defenderDoubleClickAction(trumpSix, {
+        ...ambiguous,
+        coverableAttackIndices: [0, 1],
+      }),
+    ).toBeNull();
+  });
+
+  it('covers when covering is the only legal move for the card', () => {
+    const cover: CardData = { suit: 'spades', rank: 'seven' };
+
+    expect(
+      defenderDoubleClickAction(cover, {
+        playerId: 'p0',
+        coverableAttackIndices: [0],
+        canCover: true,
+        canRedirect: true,
+        canThrowIn: false,
+        // The card is not on the table's ranks, so it cannot reflect.
+        matchesTableRank: false,
+      }),
+    ).toEqual({ type: 'coverCard', playerId: 'p0', attackIndex: 0, defenseCard: cover });
+
+    expect(
+      defenderDoubleClickAction(cover, {
+        playerId: 'p0',
+        coverableAttackIndices: [],
+        canCover: false,
+        canRedirect: false,
+        canThrowIn: false,
+        matchesTableRank: false,
+      }),
+    ).toBeNull();
+  });
+
+  it('redirects through the defender resolver when no cover is available', () => {
+    const card: CardData = { suit: 'clubs', rank: 'king' };
+
+    expect(
+      defenderDoubleClickAction(card, {
+        playerId: 'p0',
+        coverableAttackIndices: [],
+        canCover: true,
+        canRedirect: true,
+        canThrowIn: false,
+        matchesTableRank: true,
+      }),
+    ).toEqual({ type: 'redirectAttack', playerId: 'p0', cards: [card] });
   });
 
   it('shows the pass countdown in the same badge as the surrender countdown', () => {

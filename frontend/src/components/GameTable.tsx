@@ -6,7 +6,7 @@ import type { SortMode } from './SortBar';
 import { TablePair } from './TablePair';
 import { useSettings } from '../state/settings';
 import { getTableFilterCss } from '../styles/tableTextures';
-import { buildRedirectAttack, type GameAction } from '../types';
+import { buildCoverCard, buildRedirectAttack, type GameAction } from '../types';
 import '../styles/table.css';
 
 export interface OpponentSummary {
@@ -323,6 +323,49 @@ export function redirectOnlyAction(
     !context.canThrowIn &&
     context.matchesTableRank;
   return onlyRedirect ? buildRedirectAttack(context.playerId, [card]) : null;
+}
+
+export interface DefenderDoubleClickContext {
+  playerId: string;
+  /** Indices of the uncovered attacks this card can legally cover. */
+  coverableAttackIndices: number[];
+  /** Covering is legal for this seat right now. */
+  canCover: boolean;
+  canRedirect: boolean;
+  canThrowIn: boolean;
+  /** The card matches a rank on the table, the redirect precondition. */
+  matchesTableRank: boolean;
+}
+
+/**
+ * Resolves a double-clicked defender card into exactly one action, or `null`
+ * when the card is ambiguous. A card that could both cover and redirect (for
+ * example a trump matching a non-trump attack's rank) has two legal plays, so
+ * it is never guessed: the player drags it to the target or redirect outline.
+ */
+export function defenderDoubleClickAction(
+  card: CardData,
+  context: DefenderDoubleClickContext,
+): GameAction | null {
+  const coverTargets = context.canCover ? context.coverableAttackIndices : [];
+  // Reflecting this card is possible in its own right, not merely because the
+  // seat has a redirect available for some other card.
+  const canRedirectCard = context.canRedirect && context.matchesTableRank;
+
+  if (coverTargets.length === 1 && !canRedirectCard) {
+    return buildCoverCard(context.playerId, coverTargets[0], card);
+  }
+  if (coverTargets.length > 0) return null;
+
+  return redirectOnlyAction(card, {
+    playerId: context.playerId,
+    canRedirect: context.canRedirect,
+    canCover: false,
+    canThrowIn: context.canThrowIn,
+    isAttacker: false,
+    isDefender: true,
+    matchesTableRank: context.matchesTableRank,
+  });
 }
 
 const suitIndex = (suit: string): number => SUIT_ORDER[suit.toLowerCase()] ?? 9;

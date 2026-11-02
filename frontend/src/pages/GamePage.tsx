@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { ActionBar } from '../components/ActionBar';
-import { GameTable, TableDeck, cardKey, redirectOnlyAction } from '../components/GameTable';
+import { GameTable, TableDeck, cardKey, defenderDoubleClickAction } from '../components/GameTable';
 import { SortBar, type SortMode } from '../components/SortBar';
 import { getGameView, sendAction as sendActionRest } from '../api/client';
 import { GameWebSocket } from '../api/websocket';
@@ -526,22 +526,17 @@ export function GamePage({
         }
         return indices;
       }, []);
-      if (hasLegalAction(view.legalActions, 'cover') && beatable.length === 1) {
-        dispatch(buildCoverCard(playerId, beatable[0], card));
-        return;
-      }
-      // Item 8: a card with no cover target but a matching rank can only be
-      // reflected, so a double-click plays the redirect instead of guessing.
-      const redirect = redirectOnlyAction(card, {
+      // Item 8: cover, redirect or abstain — a card that could do both is
+      // ambiguous, so the resolver refuses to guess.
+      const defenderAction = defenderDoubleClickAction(card, {
         playerId,
+        coverableAttackIndices: beatable,
+        canCover: hasLegalAction(view.legalActions, 'cover'),
         canRedirect: hasLegalAction(view.legalActions, 'redirect'),
-        canCover: hasLegalAction(view.legalActions, 'cover') && beatable.length > 0,
         canThrowIn: hasLegalAction(view.legalActions, 'throwIn'),
-        isAttacker: false,
-        isDefender: true,
         matchesTableRank: tableRanks.has(card.rank.toLowerCase()),
       });
-      if (redirect) dispatch(redirect);
+      if (defenderAction) dispatch(defenderAction);
     }
   };
 
