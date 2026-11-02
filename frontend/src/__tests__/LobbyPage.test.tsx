@@ -193,6 +193,10 @@ describe('LobbyPage', () => {
     expect(loading.getAttribute('role')).toBe('status');
     expect(loading.className).toContain('server-loading-page');
     expect(loading.textContent).toContain('Starting game server, please wait');
+    // The readiness wheel is the spinning ring, not a static dash glyph.
+    const spinner = screen.getByTestId('lobby-loading-spinner');
+    expect(spinner.classList.contains('lobby-loading-spinner')).toBe(true);
+    expect(loading.contains(spinner)).toBe(true);
     expect(screen.queryByRole('button', { name: 'Create Game' })).toBeNull();
     expect(screen.queryByLabelText('Players')).toBeNull();
 

@@ -429,6 +429,29 @@ html[data-theme='light'] .error-banner {
   color: var(--app-text);
 }
 
+/* Lobby readiness wheel: a ring with a high-contrast arc that never stops. */
+.lobby-loading-spinner {
+  display: block;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border: 3px solid var(--app-border);
+  border-top-color: var(--app-accent);
+  border-right-color: var(--app-accent);
+  border-radius: 50%;
+  animation: lidurak-spin 0.85s linear infinite;
+}
+
+@keyframes lidurak-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .game-buttons {
   display: flex;
   flex-direction: column;
@@ -931,21 +954,6 @@ html[data-theme='light'] .cardback-preview {
 .connection-value {
   font-variant-numeric: tabular-nums;
   color: var(--app-text-strong);
-}
-
-/* Development lag-switch: drive the reported ping by hand. */
-.lag-switch {
-  grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: auto minmax(90px, 1fr) 52px;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.lag-switch input[type='range'] {
-  width: 100%;
-  accent-color: var(--app-accent);
 }
 
 .signal-bars {

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, within } from '@testing-library/preact';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/preact';
 import { HeaderBar, NAV_MENUS, PROFILE_ITEMS, connectionLevel } from '../components/HeaderBar';
 import { ALL_CARD_BACK_PATTERNS, CardBack } from '../components/CardBack';
 import { soundEngine } from '../audio/SoundEngine';
@@ -142,6 +142,11 @@ describe('HeaderBar', () => {
     expect(bars.querySelectorAll('.signal-bar[data-active="true"]')).toHaveLength(4);
     // Nothing is animating until the tier changes.
     expect(bars.classList.contains('connection-bars-updating')).toBe(false);
+
+    // The developer lag-switch is gone from the connection section.
+    expect(screen.queryByTestId('lag-switch')).toBeNull();
+    expect(screen.queryByLabelText('Lag switch')).toBeNull();
+    expect(screen.queryByText(/lag-switch/i)).toBeNull();
   });
 
   it('drops signal bars as latency worsens', () => {
@@ -191,16 +196,19 @@ describe('HeaderBar', () => {
     }
   });
 
-  it('lets the lag-switch override the ping and animate the bars on tier change', () => {
-    render(<HeaderBar pingMs={24} />);
+  it('follows the live measured ping and pops the bars only on a tier change', async () => {
+    const { rerender } = render(<HeaderBar pingMs={24} />);
     openProfile();
 
-    const lag = screen.getByTestId('lag-switch') as HTMLInputElement;
-    expect(lag.min).toBe('0');
-    expect(lag.max).toBe('500');
-    expect(lag.value).toBe('24');
+    expect(screen.getByTestId('ping-value').textContent).toBe('24 ms');
+    expect(
+      screen
+        .getByRole('img', { name: 'Connection strength: 4 of 4' })
+        .classList.contains('connection-bars-updating'),
+    ).toBe(false);
 
-    fireEvent.input(lag, { target: { value: '420' } });
+    // A worse reading from the app drops the tracker to a single red bar.
+    rerender(<HeaderBar pingMs={420} />);
 
     expect(screen.getByTestId('ping-value').textContent).toBe('420 ms');
     const bars = screen.getByRole('img', { name: 'Connection strength: 1 of 4' });
@@ -209,14 +217,25 @@ describe('HeaderBar', () => {
     expect(bars.classList.contains('connection-bars-updating')).toBe(true);
     expect(bars.getAttribute('data-updating')).toBe('true');
 
-    // Worsening from 1 to 1 bar keeps the tier: the counter is not re-pulsed.
-    fireEvent.input(lag, { target: { value: '0' } });
-    expect(screen.getByTestId('ping-value').textContent).toBe('0 ms');
+    // The pop is a single 360 ms pulse, not an idle animation.
+    await waitFor(
+      () =>
+        expect(
+          screen
+            .getByRole('img', { name: 'Connection strength: 1 of 4' })
+            .getAttribute('data-updating'),
+        ).toBe('false'),
+      { timeout: 1500 },
+    );
+
+    // Another reading in the same tier keeps the bars still.
+    rerender(<HeaderBar pingMs={900} />);
+    expect(screen.getByTestId('ping-value').textContent).toBe('900 ms');
     expect(
-      screen.getByRole('img', { name: 'Connection strength: 4 of 4' }).classList.contains(
-        'connection-bars-updating',
-      ),
-    ).toBe(true);
+      screen
+        .getByRole('img', { name: 'Connection strength: 1 of 4' })
+        .getAttribute('data-updating'),
+    ).toBe('false');
   });
 
   it('previews a pack sample and plays the volume sample only on slider release', () => {
