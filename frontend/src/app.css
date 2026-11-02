@@ -877,6 +877,15 @@ html[data-theme='light'] .error-banner {
   display: block;
   width: 34px;
   height: 48px;
+  border-radius: calc(var(--app-roundness) * 0.4);
+}
+
+/* Item 4: the six monochrome backs paint a light palette for the light theme
+   (see CardBack.tsx); the preview tile gets a crisp outline so the ivory frame
+   never melts into the settings panel. */
+html[data-theme='light'] .cardback-preview {
+  background: #ffffff;
+  box-shadow: inset 0 0 0 1px var(--app-border);
 }
 
 .cardback-preview .playing-card {

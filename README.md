@@ -56,6 +56,8 @@ Press `Ctrl+C` to stop both servers cleanly.
 - **Theme:** `Device theme` (follows the OS), `Light`, or `Dark`, plus a global `Roundness` slider (`0–16 px`) that reshapes panels, buttons and inputs on every page.
 - **Table:** Six felt textures — `Emerald Felt` (default), `Midnight Navy`, `Burgundy Velvet`, `Charcoal Slate`, `Forest Moss`, `Vintage Oak`. `Brightness`, `Contrast` and `Hue` sliders retune the felt live: every texture preview swatch and the live game table itself pick up the selected texture and filters instantly, and only the felt is filtered — cards keep their true colours.
 - **Card Back:** Thirteen designs split into the original monochrome set (`Classic Hatch` default, `Royal Diamond`, `Celtic Weave`, `Hex Mesh`, `Chevron`, `Starburst`) and vibrant gradient backs (`Classic Crimson`, `Royal Sapphire`, `Emerald Gold`, `Sunset Prism`, `Amethyst Nebula`, `Cyber Neon`, `Coral Wave`). The choice applies to every face-down card in the app.
+  - The six **monochrome** backs are theme-adaptive: they keep their warm charcoal look in the dark theme and repaint with a crisp ivory/slate palette in the light theme, so they stay high-contrast either way.
+  - The seven **colourful** gradient backs are identical in both themes; switching the theme never alters their gradients or motifs.
 - **Sound:** `Master volume` slider plus five sound packs (`Classic Felt`, `Arcade 8-Bit`, `Sci-Fi Synth`, `Acoustic Pluck`, `Modern Minimal`). Choosing a pack plays a random sample from that pack immediately, and dragging the volume slider only updates the level and percentage while you drag — releasing the slider auditions exactly one sample at the new level.
 
 ### Creating a Match (Lobby Page)
