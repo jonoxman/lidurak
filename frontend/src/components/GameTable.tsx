@@ -6,6 +6,7 @@ import type { SortMode } from './SortBar';
 import { TablePair } from './TablePair';
 import { useSettings } from '../state/settings';
 import { getTableFilterCss } from '../styles/tableTextures';
+import { buildRedirectAttack, type GameAction } from '../types';
 import '../styles/table.css';
 
 export interface OpponentSummary {
@@ -61,6 +62,11 @@ export interface GameTableProps {
   turnSecondsRemaining?: number;
   /** Display order of the viewer's own hand; the dropdown lives in the sidebar. */
   sortMode?: SortMode;
+  /**
+   * Review mode: hides the command controls, drop outlines, drags, double-click
+   * submission and turn glow, while hand sorting keeps working.
+   */
+  isReviewMode?: boolean;
   selectedKeys?: string[];
   /** Keys of hand cards that are legal to play right now; they lift off the hand. */
   playableKeys?: string[];
@@ -286,6 +292,39 @@ export function formatSeatClock(seconds: number): string {
 export const cardKey = (card: CardData): string =>
   `${card.suit.toLowerCase()}:${card.rank.toLowerCase()}`;
 
+export interface RedirectOnlyContext {
+  playerId: string;
+  /** Redirecting is legal for this seat right now. */
+  canRedirect: boolean;
+  /** The card can legally cover at least one uncovered attack. */
+  canCover: boolean;
+  /** The card is a legal throw-in for this seat. */
+  canThrowIn: boolean;
+  isAttacker: boolean;
+  isDefender: boolean;
+  /** The card matches a rank on the table, the redirect precondition. */
+  matchesTableRank: boolean;
+}
+
+/**
+ * Resolves a double-clicked hand card whose only legal play is a redirect.
+ * Returns `null` whenever any other move also applies, so an ambiguous card is
+ * never guessed between covering and reflecting.
+ */
+export function redirectOnlyAction(
+  card: CardData,
+  context: RedirectOnlyContext,
+): GameAction | null {
+  const onlyRedirect =
+    context.canRedirect &&
+    context.isDefender &&
+    !context.isAttacker &&
+    !context.canCover &&
+    !context.canThrowIn &&
+    context.matchesTableRank;
+  return onlyRedirect ? buildRedirectAttack(context.playerId, [card]) : null;
+}
+
 const suitIndex = (suit: string): number => SUIT_ORDER[suit.toLowerCase()] ?? 9;
 
 const rankValue = (rank: string): number => RANK_ORDER[rank.toLowerCase()] ?? 0;
@@ -481,6 +520,7 @@ export function GameTable({
   turnPlayerId,
   turnSecondsRemaining = 15,
   sortMode = 'suit',
+  isReviewMode = false,
   selectedKeys = [],
   playableKeys = [],
   onCardClick,
@@ -540,20 +580,21 @@ export function GameTable({
   // Rhythm nudges go only to the client that has to act: uncovered attacks for
   // the defender, the whole hand for the attacker who owes a play. The pulse
   // sits on the cards container so the highlight hugs the cards tightly.
+  const reviewMode = isReviewMode;
   const handClasses = ['player-hand'];
   const handCardClasses = ['hand-cards'];
-  if (awaitingAttack) {
+  if (!reviewMode && awaitingAttack) {
     handClasses.push('turn-pulse');
     handCardClasses.push('attacker-turn');
   }
-  if (defending) handCardClasses.push('defender-turn');
+  if (!reviewMode && defending) handCardClasses.push('defender-turn');
   const activeSeconds = Math.max(0, Math.min(15, turnSecondsRemaining));
   const viewerOnClock = turnPlayerId === myId;
 
   // Target outlines appear before the first card of a bout: one in front of the
   // clockwise defender, or every legal opponent under Chaos Mode.
   const attackTargets =
-    awaitingAttack && tablePairs.length === 0
+    !reviewMode && awaitingAttack && tablePairs.length === 0
       ? chaosMode
         ? opponents.filter((opponent) => opponent.finishRank == null && opponent.cardCount > 0)
         : opponents.filter((opponent) => opponent.id === defenderId)
@@ -585,7 +626,9 @@ export function GameTable({
           return next?.position ?? 'top-center';
         })();
 
-  const draggable = Boolean(onAttackDrop || onCoverDrop || onThrowInDrop || onRedirectDrop);
+  // Review mode freezes the table: no drags, no drop surfaces, no submission.
+  const draggable = !reviewMode && Boolean(onAttackDrop || onCoverDrop || onThrowInDrop || onRedirectDrop);
+  const throwInEnabled = !reviewMode && canThrowIn;
 
   const readDraggedCard = (event: DragLike): CardData | null => {
     if (dragCard) return dragCard;
@@ -656,6 +699,7 @@ export function GameTable({
       data-zone="table-arena"
       data-my-id={myId}
       data-chaos={chaosMode ? 'true' : 'false'}
+      data-review-mode={reviewMode ? 'true' : 'false'}
       data-dragging={dragCard ? 'true' : 'false'}
       data-texture={settings.tableTexture}
       style={{ '--table-filter': getTableFilterCss(settings.tableFilters) }}
@@ -740,11 +784,11 @@ export function GameTable({
         data-zone="bout"
         data-anchor={boutAnchor}
         aria-label="Battle"
-        data-drop-zone={canThrowIn ? 'throw-in' : undefined}
-        onDragOver={canThrowIn ? hoverZone('throw-in') : undefined}
-        onDragLeave={canThrowIn ? clearSnap : undefined}
+        data-drop-zone={throwInEnabled ? 'throw-in' : undefined}
+        onDragOver={throwInEnabled ? hoverZone('throw-in') : undefined}
+        onDragLeave={throwInEnabled ? clearSnap : undefined}
         onDrop={
-          canThrowIn
+          throwInEnabled
             ? (event) => dropOn('throw-in', event, (card) => onThrowInDrop?.(card))
             : undefined
         }
@@ -793,7 +837,7 @@ export function GameTable({
         >
           {tablePairs.map((pair, index) => {
             const zone = `cover:${index}`;
-            const coverable = !pair.defense && Boolean(onCoverDrop);
+            const coverable = !reviewMode && !pair.defense && Boolean(onCoverDrop);
             return (
               <TablePair
                 key={index}
@@ -818,7 +862,7 @@ export function GameTable({
           })}
         </div>
 
-          {canRedirect && tablePairs.length > 0 ? (
+          {!reviewMode && canRedirect && tablePairs.length > 0 ? (
             <div
               class={`redirect-outline${snapZone === 'redirect' ? ' snap-active' : ''}`}
               data-testid="redirect-outline"
@@ -850,7 +894,7 @@ export function GameTable({
         <div
           class={handCardClasses.join(' ')}
           data-testid="hand-turn-highlight"
-          data-active={awaitingAttack || defending ? 'true' : 'false'}
+          data-active={!reviewMode && (awaitingAttack || defending) ? 'true' : 'false'}
           data-overlap={handLayoutState.overlap}
           data-hidden-left={handLayoutState.hiddenLeft}
           data-hidden-right={handLayoutState.hiddenRight}
@@ -887,7 +931,11 @@ export function GameTable({
                 selected={selectedKeys.includes(cardKey(card))}
                 playable={playableKeys.includes(cardKey(card))}
                 onClick={onCardClick ? () => onCardClick(card) : undefined}
-                onDoubleClick={onCardDoubleClick ? () => onCardDoubleClick(card) : undefined}
+                onDoubleClick={
+                  !reviewMode && onCardDoubleClick
+                    ? () => onCardDoubleClick(card)
+                    : undefined
+                }
                 draggable={draggable}
                 onDragStart={(event) => {
                   setDragCard(card);
@@ -909,10 +957,13 @@ export function GameTable({
       </section>
 
       {/* Row 3, column 3 holds only the contextual action buttons; the hand
-          sorting dropdown lives in its own sidebar box under the deck. */}
-      <div class="player-controls" data-zone="player-controls" aria-label="Actions">
-        {children}
-      </div>
+          sorting dropdown lives in its own sidebar box under the deck. Review
+          mode renders no gameplay command at all. */}
+      {reviewMode ? null : (
+        <div class="player-controls" data-zone="player-controls" aria-label="Actions">
+          {children}
+        </div>
+      )}
     </div>
   );
 }

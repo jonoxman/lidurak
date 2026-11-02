@@ -45,12 +45,43 @@ export interface PlayerGameView {
   turnPlayerId?: string;
   /** Ids of players whose sockets are currently connected. */
   presentPlayers?: string[];
+  /** Face-down cards already in the discard pile. */
+  discardCount?: number;
+  /** Most recent discard, revealed face-up in the deck box. */
+  lastDiscardCards?: Card[];
+  /** Epoch-ms timestamps behind the split game/turn clocks. */
+  gameStartedAtMs?: number | null;
+  gameEndedAtMs?: number | null;
 }
 
 export interface GameAction {
   type: string;
   playerId: string;
   [key: string]: unknown;
+}
+
+/** One replayable step: its index, actor, action and every POV at that moment. */
+export interface ReplayFrame {
+  moveIndex: number;
+  playerId?: string | null;
+  action?: GameAction | null;
+  elapsedMs: number;
+  views: Record<string, PlayerGameView>;
+}
+
+/** A move recorded against the game clock, in milliseconds. */
+export interface RecordedMove {
+  moveIndex: number;
+  playerId: string;
+  action: GameAction;
+  elapsedMs: number;
+}
+
+/** Serialized match served by `GET /api/games/:gameId/replay`. */
+export interface GameReplay {
+  gameId: string;
+  moves: RecordedMove[];
+  frames: ReplayFrame[];
 }
 
 function fail(message: string): never {
@@ -140,6 +171,27 @@ export function parsePlayerGameView(value: unknown): PlayerGameView {
   }
   const presentPlayers = raw.presentPlayers;
   if (presentPlayers !== undefined) parseStringArray(presentPlayers, 'presentPlayers');
+  const discardCount = raw.discardCount;
+  if (discardCount !== undefined && typeof discardCount !== 'number') {
+    fail('discardCount must be a number');
+  }
+  const lastDiscardCards = raw.lastDiscardCards;
+  if (lastDiscardCards !== undefined && !Array.isArray(lastDiscardCards)) {
+    fail('lastDiscardCards must be an array of cards');
+  }
+  const parsedLastDiscard = ((lastDiscardCards as unknown[] | undefined) ?? []).map(parseCard);
+  const gameStartedAtMs = raw.gameStartedAtMs;
+  if (
+    gameStartedAtMs !== undefined &&
+    gameStartedAtMs !== null &&
+    typeof gameStartedAtMs !== 'number'
+  ) {
+    fail('gameStartedAtMs must be a number or null');
+  }
+  const gameEndedAtMs = raw.gameEndedAtMs;
+  if (gameEndedAtMs !== undefined && gameEndedAtMs !== null && typeof gameEndedAtMs !== 'number') {
+    fail('gameEndedAtMs must be a number or null');
+  }
   if (typeof myId !== 'string') fail('myId must be a string');
   if (!Array.isArray(raw.myHand)) fail('myHand must be an array of cards');
   if (!Array.isArray(raw.opponents)) fail('opponents must be an array');
@@ -177,6 +229,71 @@ export function parsePlayerGameView(value: unknown): PlayerGameView {
     turnSecondsRemaining: (turnSecondsRemaining as number | undefined) ?? 15,
     turnPlayerId: turnPlayerId as string | undefined,
     ...(presentPlayers === undefined ? {} : { presentPlayers: presentPlayers as string[] }),
+    discardCount: (discardCount as number | undefined) ?? 0,
+    lastDiscardCards: parsedLastDiscard,
+    gameStartedAtMs: (gameStartedAtMs as number | null | undefined) ?? null,
+    gameEndedAtMs: (gameEndedAtMs as number | null | undefined) ?? null,
+  };
+}
+
+function parseReplayAction(value: unknown): GameAction {
+  if (typeof value !== 'object' || value === null) fail('replay action must be an object');
+  const raw = value as Record<string, unknown>;
+  if (typeof raw.type !== 'string') fail('replay action type must be a string');
+  return {
+    ...raw,
+    type: raw.type,
+    playerId: typeof raw.playerId === 'string' ? raw.playerId : '',
+  } as GameAction;
+}
+
+function parseRecordedMove(value: unknown, index: number): RecordedMove {
+  if (typeof value !== 'object' || value === null) fail(`replay move ${index} must be an object`);
+  const raw = value as Record<string, unknown>;
+  if (typeof raw.playerId !== 'string') fail(`replay move ${index} playerId must be a string`);
+  return {
+    moveIndex: typeof raw.moveIndex === 'number' ? raw.moveIndex : index,
+    playerId: raw.playerId,
+    action: parseReplayAction(raw.action),
+    elapsedMs: typeof raw.elapsedMs === 'number' ? raw.elapsedMs : 0,
+  };
+}
+
+function parseReplayFrame(value: unknown, index: number): ReplayFrame {
+  if (typeof value !== 'object' || value === null) fail(`replay frame ${index} must be an object`);
+  const raw = value as Record<string, unknown>;
+  if (typeof raw.views !== 'object' || raw.views === null) {
+    fail(`replay frame ${index} views must be an object`);
+  }
+  const views: Record<string, PlayerGameView> = {};
+  for (const [playerId, frameView] of Object.entries(raw.views as Record<string, unknown>)) {
+    views[playerId] = parsePlayerGameView(frameView);
+  }
+  const playerId = raw.playerId;
+  if (playerId !== undefined && playerId !== null && typeof playerId !== 'string') {
+    fail(`replay frame ${index} playerId must be a string or null`);
+  }
+  const action = raw.action;
+  return {
+    moveIndex: typeof raw.moveIndex === 'number' ? raw.moveIndex : index,
+    playerId: (playerId as string | null | undefined) ?? null,
+    action: action === undefined || action === null ? null : parseReplayAction(action),
+    elapsedMs: typeof raw.elapsedMs === 'number' ? raw.elapsedMs : 0,
+    views,
+  };
+}
+
+/** Validates a serialized match before the review mode consumes it. */
+export function parseGameReplay(value: unknown): GameReplay {
+  if (typeof value !== 'object' || value === null) fail('expected a replay object');
+  const raw = value as Record<string, unknown>;
+  if (typeof raw.gameId !== 'string') fail('replay gameId must be a string');
+  if (!Array.isArray(raw.moves)) fail('replay moves must be an array');
+  if (!Array.isArray(raw.frames)) fail('replay frames must be an array');
+  return {
+    gameId: raw.gameId,
+    moves: raw.moves.map(parseRecordedMove),
+    frames: raw.frames.map(parseReplayFrame),
   };
 }
 

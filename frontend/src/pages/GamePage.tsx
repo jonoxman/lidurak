@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { ActionBar } from '../components/ActionBar';
-import { GameTable, TableDeck, cardKey } from '../components/GameTable';
+import { GameTable, TableDeck, cardKey, redirectOnlyAction } from '../components/GameTable';
 import { SortBar, type SortMode } from '../components/SortBar';
 import { getGameView, sendAction as sendActionRest } from '../api/client';
 import { GameWebSocket } from '../api/websocket';
@@ -519,14 +519,29 @@ export function GamePage({
       return;
     }
 
-    if (isDefender && hasLegalAction(view.legalActions, 'cover')) {
+    if (isDefender) {
       const beatable = view.tablePairs.reduce<number[]>((indices, pair, index) => {
         if (!pair.defense && isLegalCover(pair.attack, card, view.trumpSuit)) {
           indices.push(index);
         }
         return indices;
       }, []);
-      if (beatable.length === 1) dispatch(buildCoverCard(playerId, beatable[0], card));
+      if (hasLegalAction(view.legalActions, 'cover') && beatable.length === 1) {
+        dispatch(buildCoverCard(playerId, beatable[0], card));
+        return;
+      }
+      // Item 8: a card with no cover target but a matching rank can only be
+      // reflected, so a double-click plays the redirect instead of guessing.
+      const redirect = redirectOnlyAction(card, {
+        playerId,
+        canRedirect: hasLegalAction(view.legalActions, 'redirect'),
+        canCover: hasLegalAction(view.legalActions, 'cover') && beatable.length > 0,
+        canThrowIn: hasLegalAction(view.legalActions, 'throwIn'),
+        isAttacker: false,
+        isDefender: true,
+        matchesTableRank: tableRanks.has(card.rank.toLowerCase()),
+      });
+      if (redirect) dispatch(redirect);
     }
   };
 

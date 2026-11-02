@@ -1,4 +1,11 @@
-import { parsePlayerGameView, type GameAction, type PlayerGameView, type PlayerType } from '../types';
+import {
+  parseGameReplay,
+  parsePlayerGameView,
+  type GameAction,
+  type GameReplay,
+  type PlayerGameView,
+  type PlayerType,
+} from '../types';
 
 export interface CreatedGame {
   gameId: string;
@@ -86,6 +93,17 @@ export async function getGameView(gameId: string, playerId: string): Promise<Pla
     throw new Error(errorMessage(body, `Could not load the game view (HTTP ${response.status})`));
   }
   return parsePlayerGameView(body);
+}
+
+/** Fetches the recorded match for review mode (`GET /api/games/:gameId/replay`). */
+export async function getGameReplay(gameId: string): Promise<GameReplay> {
+  const response = await fetch(`/api/games/${encodeURIComponent(gameId)}/replay`);
+  const body = await readJson(response);
+
+  if (!response.ok) {
+    throw new Error(errorMessage(body, `Could not load the game replay (HTTP ${response.status})`));
+  }
+  return parseGameReplay(body);
 }
 
 export async function sendAction(
