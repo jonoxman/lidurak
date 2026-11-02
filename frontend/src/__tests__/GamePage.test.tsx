@@ -1208,7 +1208,6 @@ describe('GamePage', () => {
   it('loads the replay after game over and steps through frames while freezing the game clock', async () => {
     const finishedView: PlayerGameView = {
       ...view,
-      myName: 'Alice',
       myHand: [],
       tablePairs: [],
       boutPhase: 'GameOver',
@@ -1223,12 +1222,14 @@ describe('GamePage', () => {
       myHand: PlayerGameView['myHand'],
       tablePairs: PlayerGameView['tablePairs'],
       elapsedMs: number,
+      finishOrder: string[] = ['p1', 'p0'],
     ): PlayerGameView => ({
       ...finishedView,
       myId,
       myName: myId === 'p0' ? 'Alice' : 'Bob',
       myHand,
       tablePairs,
+      finishOrder,
       opponents: [
         myId === 'p0'
           ? { id: 'p1', name: 'Bob', cardCount: 2, hasPassed: false, finishRank: null }
@@ -1256,8 +1257,9 @@ describe('GamePage', () => {
             ],
             openingPairs,
             0,
+            [],
           ),
-          p1: frameView('p1', [], openingPairs, 0),
+          p1: frameView('p1', [], openingPairs, 0, []),
         },
       },
       {
@@ -1322,6 +1324,15 @@ describe('GamePage', () => {
     expect(ranks()).toContain('seven');
     expect(ranks()).not.toContain('king');
     expect((screen.getByTestId('review-prev-button') as HTMLButtonElement).disabled).toBe(true);
+
+    // The outcome banner and result summary stay bound to the finished match,
+    // even though this intermediate frame's finishOrder is still empty.
+    expect(screen.getByTestId('game-over-banner').textContent).toContain(
+      'Game over — Bob wins',
+    );
+    expect(screen.getByTestId('game-over-banner').textContent).toContain('Durak: you');
+    expect(screen.getByText('Bob wins')).toBeTruthy();
+    expect(container.querySelectorAll('.finish-order li')).toHaveLength(2);
 
     // And forward again to the final position.
     fireEvent.click(screen.getByTestId('review-next-button'));

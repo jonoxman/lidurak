@@ -464,16 +464,6 @@ export function GamePage({
   const selectIndices = (indices: Set<number>) => setSelection({ view, indices });
   const clearSelection = () => setSelection(null);
 
-  // Item 13: every seat resolves to a real name (opponent summary, the
-  // viewer's own `myName`, or a name remembered from a live/replay view),
-  // never a "You" placeholder or a raw seat id when a name is known.
-  const nameFor = (id: string): string => {
-    const opponent = view.opponents.find((candidate) => candidate.id === id);
-    if (opponent) return opponent.name;
-    if (view.myId === id && view.myName) return view.myName;
-    return knownNamesRef.current[id] ?? id;
-  };
-
   const selectedCards: GameCard[] = [...selected]
     .sort((left, right) => left - right)
     .map((index) => view.myHand[index])
@@ -695,6 +685,31 @@ export function GamePage({
         view
       : view;
 
+  // Item 13: every seat resolves to a real name (opponent summary, the
+  // viewer's own `myName`, the displayed replay frame, a name remembered from
+  // a live/replay view, or a synchronous scan of the loaded replay frames),
+  // never a "You" placeholder or a raw seat id when a name is known. The
+  // replay scan matters on the first render after the replay resolves, before
+  // the name-cache effect has run.
+  const nameFor = (id: string): string => {
+    const opponent =
+      view.opponents.find((candidate) => candidate.id === id) ??
+      displayedView.opponents.find((candidate) => candidate.id === id);
+    if (opponent) return opponent.name;
+    if (view.myId === id && view.myName) return view.myName;
+    if (displayedView.myId === id && displayedView.myName) return displayedView.myName;
+    const remembered = knownNamesRef.current[id];
+    if (remembered) return remembered;
+    for (const frame of replay?.frames ?? []) {
+      for (const frameView of Object.values(frame.views)) {
+        if (frameView.myId === id && frameView.myName) return frameView.myName;
+        const frameOpponent = frameView.opponents.find((candidate) => candidate.id === id);
+        if (frameOpponent) return frameOpponent.name;
+      }
+    }
+    return id;
+  };
+
   // Fixed seat order: neither the POV switcher nor the players list reorders
   // the active player.
   const playerOptions = seatOrderedPlayerIds(displayedView);
@@ -710,9 +725,13 @@ export function GamePage({
     };
   });
 
-  const winnerId = displayedView.finishOrder[0];
-  const durakId = displayedView.finishOrder[displayedView.finishOrder.length - 1];
-  const gameIsDraw = displayedView.isDraw;
+  // Item 12: the match outcome always comes from the finished game, never an
+  // intermediate replay frame. Early frames have an empty or one-entry
+  // `finishOrder`, so binding these to `displayedView` would erase the winner
+  // or label the only finished player as both winner and Durak.
+  const winnerId = view.finishOrder[0];
+  const durakId = view.finishOrder[view.finishOrder.length - 1];
+  const gameIsDraw = view.isDraw;
 
   // The replay clock is frozen at the frame's elapsed time (`00:00` on the
   // opening move); live play uses the recorded start/end timestamps.
@@ -1047,7 +1066,7 @@ export function GamePage({
                 </p>
               ) : null}
               <ol class="finish-order">
-                {displayedView.finishOrder.map((id) => (
+                {view.finishOrder.map((id) => (
                   <li key={id}>{nameFor(id)}</li>
                 ))}
               </ol>
