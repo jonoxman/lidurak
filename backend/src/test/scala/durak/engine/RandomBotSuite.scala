@@ -233,3 +233,108 @@ class RandomBotSuite extends munit.FunSuite:
 
     assert(moves > 0, "the bot never played a move")
   }
+
+  // --- Strict legal-move invariants ---
+
+  test("a surrendering defender is offered no moves at all") {
+    val gs = state(
+      Vector(
+        player("p0", List(card(Rank.King))),
+        player("p1", List(card(Rank.Six, Suit.Hearts), card(Rank.Seven))),
+        player("p2", List(card(Rank.Six, Suit.Clubs)))
+      ),
+      tablePairs = Vector(TablePair(card(Rank.Six))),
+      boutPhase = BoutPhase.SurrenderThrowIn
+    )
+
+    assertEquals(RandomBot.legalActionsFor(gs, "p1"), Vector.empty)
+    assertEquals(RandomBot.chooseAction(gs, "p1", new Random(5L)), None)
+    // The non-defenders may still throw in or settle the bout.
+    assert(RandomBot.legalActionsFor(gs, "p2").nonEmpty)
+  }
+
+  test("a bot never offers a redirect to a cardless opponent") {
+    val gs = state(
+      Vector(
+        player("p0", Nil),
+        player("p1", List(card(Rank.Six, Suit.Hearts), card(Rank.Seven)))
+      ),
+      tablePairs = Vector(TablePair(card(Rank.Six)))
+    )
+
+    val actions = RandomBot.legalActionsFor(gs, "p1")
+
+    assert(actions.nonEmpty, "the defender can still cover or surrender")
+    assert(
+      !actions.exists(_.isInstanceOf[GameAction.RedirectAttack]),
+      s"a cardless opponent must not be redirected to: $actions"
+    )
+    assertAllLegal(gs, actions)
+  }
+
+  test("bot self-play never produces an illegal redirect, self-cover or repeated surrender") {
+    for
+      playerCount <- 2 to 4
+      seed <- 1L to 8L
+    do
+      val start = GameEngine.createGame(
+        GameConfig(
+          playerCount = playerCount,
+          seed = seed,
+          playerTypes = Vector.fill(playerCount)("randomBot")
+        ),
+        Vector.tabulate(playerCount)(idx => s"b$idx")
+      )
+      val random = new Random(seed * 31L + playerCount)
+      var current = start
+      var moves = 0
+      var surrenderedInBout: Option[String] = None
+
+      while !current.isGameOver && moves < 3000 do
+        if current.boutPhase == BoutPhase.InitialAttack then surrenderedInBout = None
+        surrenderedInBout.foreach { defenderId =>
+          assertEquals(
+            RandomBot.legalActionsFor(current, defenderId),
+            Vector.empty,
+            s"the surrendering defender $defenderId was offered a move in ${current.boutPhase}"
+          )
+        }
+
+        val actor = current.players.indices
+          .map(idx => current.players(idx).id)
+          .find(playerId => RandomBot.legalActionsFor(current, playerId).nonEmpty)
+          .getOrElse(
+            fail(
+              s"no seat could act: $playerCount players, seed $seed, phase ${current.boutPhase}"
+            )
+          )
+        val action = RandomBot
+          .chooseAction(current, actor, random)
+          .getOrElse(fail(s"chooseAction returned nothing for $actor"))
+
+        action match
+          case GameAction.CoverCard(playerId, _, _) =>
+            assertEquals(playerId, current.players(current.defenderIdx).id)
+          case GameAction.RedirectAttack(playerId, cards) =>
+            assertEquals(playerId, current.players(current.defenderIdx).id)
+            assert(cards.nonEmpty, "a redirect must contain at least one card")
+            assert(
+              current.nextActivePlayerIdx(current.defenderIdx) != current.defenderIdx,
+              s"a redirect must never target the redirecting seat: $action"
+            )
+          case _ => ()
+
+        current = GameEngine.applyAction(current, actor, action) match
+          case Right(advanced) => advanced
+          case Left(error)      => fail(s"bot $actor played an illegal $action: $error")
+
+        action match
+          case GameAction.DeclareSurrender(playerId) => surrenderedInBout = Some(playerId)
+          case _                                      => ()
+        moves += 1
+
+      assert(
+        current.isGameOver,
+        s"the $playerCount-player bot match for seed $seed did not finish in $moves moves"
+      )
+  }

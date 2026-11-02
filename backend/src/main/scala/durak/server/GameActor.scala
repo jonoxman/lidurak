@@ -123,14 +123,7 @@ object GameActor:
     }
 
   /** The seat that issued `action`. */
-  def actorId(action: GameAction): String =
-    action match
-      case GameAction.InitialAttack(playerId, _)  => playerId
-      case GameAction.CoverCard(playerId, _, _)   => playerId
-      case GameAction.RedirectAttack(playerId, _) => playerId
-      case GameAction.ThrowInCards(playerId, _)   => playerId
-      case GameAction.DeclareSurrender(playerId)  => playerId
-      case GameAction.PassTurn(playerId)          => playerId
+  def actorId(action: GameAction): String = GameEngine.actorId(action)
 
   // --- Presence ---
 
@@ -238,7 +231,7 @@ object GameActor:
         .when(state.defenderIsDefenseless && isDefending)(
           GameAction.DeclareSurrender(playerId)
         )
-        .filter(action => GameEngine.applyAction(state, action).isRight)
+        .filter(action => GameEngine.applyAction(state, playerId, action).isRight)
 
     surrender.orElse(GameEngine.randomLegalAction(state, playerId, new scala.util.Random()))
 
@@ -254,7 +247,9 @@ object GameActor:
   /**
    * The seat the game is waiting on, when that seat is a bot with something to
    * play: the attacker during an opening attack, the defender while attacks are
-   * uncovered, and otherwise any thrower who has not passed yet.
+   * uncovered (and only before a surrender), and otherwise a non-defending
+   * thrower. A bot is never prompted once the game is over or from the
+   * surrendering defender's seat.
    */
   def promptedBotId(state: GameState): Option[String] =
     if state.isGameOver then None
@@ -269,12 +264,21 @@ object GameActor:
 
       candidates.flatMap(seat => botIdAt(state, seat)).headOption
 
-  /** Non-defending active seats that still have to pass or throw in. */
+  /**
+   * Non-defending active seats, un-passed throwers first. Seats that already
+   * passed stay in the list because a passed (or cardless) seat may still hold
+   * the single settling `PassTurn` that ends a bout whose throw-ins are done;
+   * [[botIdAt]] drops every seat without an engine-accepted move.
+   */
   private def throwerSeats(state: GameState): Vector[Int] =
     state.players.indices
       .filter { idx =>
         val seat = state.players(idx)
-        idx != state.defenderIdx && seat.isActive && seat.hasCards && !seat.hasPassed
+        idx != state.defenderIdx && seat.isActive
+      }
+      .sortBy { idx =>
+        val seat = state.players(idx)
+        (if seat.hasPassed then 1 else 0, idx)
       }
       .toVector
 
@@ -302,7 +306,8 @@ object GameActor:
               case Right(_) => botLoop(room) // the table moved on: reconsider
               case Left(_) =>
                 room.stateRef.get.flatMap { current =>
-                  if current != state then botLoop(room)
+                  // Never play for a superseded position, and never after game over.
+                  if current != state || current.isGameOver then botLoop(room)
                   else
                     RandomBot.chooseAction(current, botId) match
                       case None => awaitStateChange(room, current) *> botLoop(room)

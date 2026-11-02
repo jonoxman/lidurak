@@ -93,7 +93,7 @@ object PlayerGameView:
       attackerIdx = state.attackerIdx,
       defenderIdx = state.defenderIdx,
       boutPhase = state.boutPhase,
-      legalActions = legalActionsFor(state, viewer, viewerIdx),
+      legalActions = legalActionsFor(state, viewer.id),
       finishOrder = state.finishOrder,
       isDraw = state.isDraw,
       maxBoutAttacks = state.maxBoutAttacks,
@@ -113,79 +113,25 @@ object PlayerGameView:
     if state.turnDeadlineMs <= 0L then 0
     else Math.max(0L, (state.turnDeadlineMs - nowMs + 999L) / 1000L).toInt
 
-  private def legalActionsFor(
-      state: GameState,
-      viewer: PlayerState,
-      viewerIdx: Int
-  ): List[String] =
-    val available = availableActions(state, viewer, viewerIdx)
+  /**
+   * Action ids the engine accepts for this seat right now. Every candidate comes
+   * from [[GameEngine.legalActions]], which filters each one through
+   * `GameEngine.applyAction(state, viewerId, action)`, so the projection can
+   * never advertise a move the engine would reject for this seat (a redirect to
+   * itself, a cover of its own attack, any action after a surrender, and so on).
+   * A seat with nothing to play — including a surrendering defender — gets an
+   * empty list.
+   */
+  private def legalActionsFor(state: GameState, viewerId: String): List[String] =
+    val available = GameEngine.legalActions(state, viewerId).iterator.map(actionId).toSet
     ActionOrder.filter(available.contains)
 
-  private def availableActions(
-      state: GameState,
-      viewer: PlayerState,
-      viewerIdx: Int
-  ): Set[String] =
-    if !viewer.isActive then Set.empty
-    else
-      state.boutPhase match
-        case BoutPhase.InitialAttack =>
-          val isAttacker = viewerIdx == state.attackerIdx
-          if isAttacker && viewer.hasCards && state.maxBoutAttacks > 0 then Set("attack")
-          else Set.empty
-        case BoutPhase.Defense =>
-          if viewerIdx == state.defenderIdx then
-            Set(
-              Option.when(canCoverAny(state, viewer))("cover"),
-              Option.when(canRedirect(state, viewer))("redirect"),
-              Option.when(state.tablePairs.exists(_.defense.isEmpty))("surrender")
-            ).flatten
-          else
-            Set(
-              Option.when(canPassDefense(state, viewer))("pass"),
-              Option.when(canThrowIn(state, viewer))("throwIn")
-            ).flatten
-        case BoutPhase.SurrenderThrowIn =>
-          if viewerIdx == state.defenderIdx then Set.empty
-          else
-            Set(
-              Option.when(!viewer.hasPassed)("pass"),
-              Option.when(canThrowIn(state, viewer))("throwIn")
-            ).flatten
-        case BoutPhase.BoutOver | BoutPhase.GameOver =>
-          Set.empty
-
-  /** True when at least one uncovered attack can be covered from this hand. */
-  private def canCoverAny(state: GameState, defender: PlayerState): Boolean =
-    state.tablePairs.exists { pair =>
-      pair.defense.isEmpty &&
-      defender.hand.exists(card => isLegalCover(pair.attack, card, state.trumpSuit))
-    }
-
-  /** True when the defender can reflect the attack onto the next active player. */
-  private def canRedirect(state: GameState, defender: PlayerState): Boolean =
-    defender.isActive && state.canDefenderRedirect
-
-  /** Passing is only possible once the table is covered or the bout is full. */
-  private def canPassDefense(state: GameState, player: PlayerState): Boolean =
-    !player.hasPassed &&
-      (state.tablePairs.forall(_.defense.isDefined) ||
-        state.tablePairs.size >= state.maxBoutAttacks)
-
-  /** True when this player could add at least one card matching the table. */
-  private def canThrowIn(state: GameState, player: PlayerState): Boolean =
-    val tableRanks = state.tablePairs
-      .flatMap(pair => pair.attack.rank :: pair.defense.map(_.rank).toList)
-      .toSet
-    val defenderCanCover =
-      state.boutPhase != BoutPhase.Defense ||
-        state.players(state.defenderIdx).hand.size >
-          state.tablePairs.count(_.defense.isEmpty)
-    tableRanks.nonEmpty &&
-    player.hand.exists(card => tableRanks.contains(card.rank)) &&
-    state.tablePairs.size < state.maxBoutAttacks &&
-    defenderCanCover
-
-  /** Legal cover: same suit with a higher rank, or a trump against a non-trump. */
-  private def isLegalCover(attack: Card, defense: Card, trumpSuit: Suit): Boolean =
-    defense.covers(attack, trumpSuit)
+  /** The wire name of an engine action, as used by `legalActions`. */
+  private def actionId(action: GameAction): String =
+    action match
+      case _: GameAction.InitialAttack    => "attack"
+      case _: GameAction.CoverCard        => "cover"
+      case _: GameAction.PassTurn         => "pass"
+      case _: GameAction.DeclareSurrender => "surrender"
+      case _: GameAction.RedirectAttack   => "redirect"
+      case _: GameAction.ThrowInCards     => "throwIn"

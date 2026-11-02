@@ -126,14 +126,19 @@ case class GameState(
   def canDefenderRedirect: Boolean =
     val combinedSize = tablePairs.size + 1
     val defender = players.lift(defenderIdx)
-    val nextDefender = players.lift(nextActivePlayerIdx(defenderIdx))
+    val nextDefIdx = nextActivePlayerIdx(defenderIdx)
+    val nextDefender = players.lift(nextDefIdx)
 
     config.allowRedirect &&
+      attackerIdx != defenderIdx &&
       tablePairs.nonEmpty &&
       tablePairs.forall(_.defense.isEmpty) &&
       combinedSize <= 6 &&
       defender.exists(_.hand.exists(card => tablePairs.forall(_.attack.rank == card.rank))) &&
-      nextDefender.exists(_.hand.size >= combinedSize)
+      // The attack always moves on: never back to the seat that reflects it,
+      // and never to a seat that could not answer the combined attack.
+      nextDefIdx != defenderIdx &&
+      nextDefender.exists(seat => seat.isActive && seat.hand.size >= combinedSize)
 
   /**
    * True when the defender is under attack and cannot cover a single uncovered

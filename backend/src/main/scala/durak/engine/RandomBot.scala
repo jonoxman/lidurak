@@ -12,12 +12,21 @@ import scala.util.Random
  */
 object RandomBot:
 
-  /** Every action the engine accepts for `playerId` right now, in a stable order. */
+  /**
+   * Every action the engine accepts for `playerId` right now, in a stable
+   * order. A finished seat, a seat that is not prompted this turn, and a
+   * surrendering defender ([[BoutPhase.SurrenderThrowIn]]) get nothing.
+   */
   def legalActionsFor(state: GameState, playerId: String): Vector[GameAction] =
-    if state.boutPhase == BoutPhase.GameOver then Vector.empty
+    val playerIdx = state.players.indexWhere(_.id == playerId)
+    val surrenderedDefender =
+      state.boutPhase == BoutPhase.SurrenderThrowIn && playerIdx == state.defenderIdx
+
+    if state.boutPhase == BoutPhase.GameOver || playerIdx == -1 || surrenderedDefender then
+      Vector.empty
     else
       candidateActions(state, playerId)
-        .filter(action => GameEngine.applyAction(state, action).isRight)
+        .filter(action => GameEngine.applyAction(state, playerId, action).isRight)
         .distinct
 
   /** One uniformly chosen legal action, or `None` when the seat has no move. */
@@ -65,7 +74,10 @@ object RandomBot:
 
         val redirects =
           if isDefensePhase && isDefender && state.config.allowRedirect then
-            player.hand.map(card => GameAction.RedirectAttack(playerId, List(card)))
+            val attackRank = state.tablePairs.headOption.map(_.attack.rank)
+            player.hand
+              .filter(card => attackRank.contains(card.rank))
+              .map(card => GameAction.RedirectAttack(playerId, List(card)))
           else Vector.empty
 
         val surrenders =

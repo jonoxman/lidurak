@@ -386,3 +386,90 @@ class RedirectSuite extends munit.FunSuite:
     assertEquals(afterSecond.defenderInitialHandSize, originalAttackerHand.size)
     assertEquals(afterSecond.players(2).hand, Vector(card(Rank.Ace, Suit.Spades), card(Rank.King, Suit.Diamonds)))
   }
+
+  // --- Next-defender target invariants ---
+
+  test("a redirect is rejected when the opponent attacked with its last card") {
+    val sixSpades = card(Rank.Six, Suit.Spades)
+    val sixHearts = card(Rank.Six, Suit.Hearts)
+    val gs = twoPlayer(
+      attackerHand = Nil,
+      defenderHand = List(sixHearts, card(Rank.King, Suit.Hearts)),
+      tablePairs = Vector(TablePair(sixSpades))
+    )
+
+    // The cardless attacker is no longer in the rotation, so the only candidate
+    // receiver is the redirecting seat itself.
+    GameEngine.applyAction(gs, GameAction.RedirectAttack("p1", List(sixHearts))) match
+      case Left(error) => assert(error.contains("themselves"), error)
+      case Right(next) => fail(s"a redirect with no other receiver must be rejected: $next")
+  }
+
+  test("a player can never redirect an attack to itself") {
+    val sixSpades = card(Rank.Six, Suit.Spades)
+    val sixHearts = card(Rank.Six, Suit.Hearts)
+    val gs = state(
+      Vector(
+        player("p0", Nil).copy(finishRank = Some(1)),
+        player("p1", List(sixHearts))
+      ),
+      tablePairs = Vector(TablePair(sixSpades))
+    )
+
+    GameEngine.applyAction(gs, GameAction.RedirectAttack("p1", List(sixHearts))) match
+      case Left(error) => assert(error.contains("themselves"), error)
+      case Right(_)    => fail("the redirecting seat must never become its own defender")
+  }
+
+  test("a redirect is rejected when the next clockwise player cannot answer the combined attack") {
+    val sixSpades = card(Rank.Six, Suit.Spades)
+    val sixDiamonds = card(Rank.Six, Suit.Diamonds)
+    val sixHearts = card(Rank.Six, Suit.Hearts)
+    val gs = state(
+      Vector(
+        player("p0", List(card(Rank.Ace, Suit.Clubs))),
+        player("p1", List(sixHearts, card(Rank.King, Suit.Hearts))),
+        player("p2", List(card(Rank.Ace, Suit.Spades), card(Rank.King, Suit.Diamonds)))
+      ),
+      tablePairs = Vector(TablePair(sixSpades), TablePair(sixDiamonds))
+    )
+
+    // p2 holds two cards but the redirect would leave three uncovered attacks.
+    val result = GameEngine.applyAction(gs, GameAction.RedirectAttack("p1", List(sixHearts)))
+
+    assert(result.isLeft, result)
+    assertEquals(gs.tablePairs.size, 2)
+  }
+
+  test("a redirect is rejected when the next player holds one card short of the attack") {
+    val sixSpades = card(Rank.Six, Suit.Spades)
+    val sixHearts = card(Rank.Six, Suit.Hearts)
+    val gs = state(
+      Vector(
+        player("p0", List(card(Rank.Ace, Suit.Clubs))),
+        player("p1", List(sixHearts)),
+        player("p2", List(card(Rank.Ace, Suit.Spades)))
+      ),
+      tablePairs = Vector(TablePair(sixSpades))
+    )
+
+    // One attacking card plus the redirect needs two cards, and p2 holds one.
+    val result = GameEngine.applyAction(gs, GameAction.RedirectAttack("p1", List(sixHearts)))
+
+    assert(result.isLeft, result)
+  }
+
+  test("a move can only be applied for the seat that issued it") {
+    val sixSpades = card(Rank.Six, Suit.Spades)
+    val sixHearts = card(Rank.Six, Suit.Hearts)
+    val gs = twoPlayer(
+      attackerHand = List(card(Rank.Ace, Suit.Clubs), card(Rank.King, Suit.Clubs)),
+      defenderHand = List(sixHearts, card(Rank.King, Suit.Hearts)),
+      tablePairs = Vector(TablePair(sixSpades))
+    )
+    val action = GameAction.RedirectAttack("p1", List(sixHearts))
+
+    assertEquals(GameEngine.actorId(action), "p1")
+    assert(GameEngine.applyAction(gs, "p0", action).isLeft, "p0 must not play p1's move")
+    assert(GameEngine.applyAction(gs, "p1", action).isRight)
+  }

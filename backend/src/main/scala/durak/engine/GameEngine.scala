@@ -77,12 +77,36 @@ object GameEngine:
         applyPassTurn(state, playerId)
 
   /**
+   * Applies `action` on behalf of `playerId`, rejecting anything that names a
+   * different seat. This is the seat guard every caller uses: a move can only
+   * ever be applied for the seat that issued it, so nobody can act out of turn.
+   */
+  def applyAction(
+      state: GameState,
+      playerId: String,
+      action: GameAction
+  ): Either[String, GameState] =
+    val actor = actorId(action)
+    if actor != playerId then Left(s"$playerId cannot submit a move for $actor")
+    else applyAction(state, action)
+
+  /** The seat that issued `action`. */
+  def actorId(action: GameAction): String =
+    action match
+      case GameAction.InitialAttack(playerId, _)  => playerId
+      case GameAction.CoverCard(playerId, _, _)   => playerId
+      case GameAction.RedirectAttack(playerId, _) => playerId
+      case GameAction.ThrowInCards(playerId, _)   => playerId
+      case GameAction.DeclareSurrender(playerId)  => playerId
+      case GameAction.PassTurn(playerId)          => playerId
+
+  /**
    * Every action `playerId` could legally take right now, generated from their
-   * role in the current phase and filtered through [[applyAction]], so each
-   * returned action is guaranteed to be accepted by the engine.
+   * role in the current phase and filtered through [[applyAction]] for that same
+   * seat, so each returned action is guaranteed to be accepted by the engine.
    */
   def legalActions(state: GameState, playerId: String): List[GameAction] =
-    candidateActions(state, playerId).filter(action => applyAction(state, action).isRight)
+    candidateActions(state, playerId).filter(action => applyAction(state, playerId, action).isRight)
 
   /**
    * A random legal action for `playerId`, used when their turn clock expires.
@@ -173,6 +197,12 @@ object GameEngine:
         state.boutPhase == BoutPhase.Defense,
         s"Cannot cover cards during ${state.boutPhase} phase"
       )
+      // A seat can never both attack and defend the same bout, so a player can
+      // never cover its own attacking cards.
+      _ <- check(
+        state.attackerIdx != state.defenderIdx,
+        "A player cannot attack and defend the same bout"
+      )
       defender <- state.players.lift(state.defenderIdx).toRight("Invalid defender seat")
       _ <- check(defender.id == playerId, s"$playerId is not the defender")
       remainingHand <- removeCards(defender.hand, List(defenseCard))
@@ -194,6 +224,11 @@ object GameEngine:
   /**
    * Defender reflects the attack onto the next active player clockwise.
    * The redirected cards join the table uncovered, and the roles rotate.
+   *
+   * A redirect is only legal while nothing is covered yet, and only when a
+   * different active seat can take the combined attack; a cardless (or nearly
+   * cardless) next player would otherwise become the defender with no way to
+   * cover, and the redirecting seat would end up defending its own cards.
    */
   private def applyRedirectAttack(
       state: GameState,
@@ -206,6 +241,10 @@ object GameEngine:
         s"Cannot redirect during ${state.boutPhase} phase"
       )
       _ <- check(state.config.allowRedirect, "Redirecting is disabled in this game")
+      _ <- check(
+        state.attackerIdx != state.defenderIdx,
+        "A player cannot attack and defend the same bout"
+      )
       defender <- state.players.lift(state.defenderIdx).toRight("Invalid defender seat")
       _ <- check(defender.id == playerId, s"$playerId is not the defender")
       _ <- check(
@@ -229,10 +268,22 @@ object GameEngine:
         "A redirect may not grow the attack beyond 6 cards"
       )
       nextDefIdx = state.nextActivePlayerIdx(state.defenderIdx)
+      // A redirect always moves the attack to somebody else: the redirecting
+      // seat can never become the defender of the cards it just threw in.
+      _ <- check(
+        nextDefIdx != state.defenderIdx,
+        "A player cannot redirect an attack to themselves"
+      )
       nextDefender <- state.players.lift(nextDefIdx).toRight("Invalid next defender seat")
+      _ <- check(nextDefender.isActive, s"${nextDefender.name} is no longer in the game")
       _ <- check(
         nextDefender.hand.size >= state.tablePairs.size + cards.size,
         s"${nextDefender.name} does not have enough cards to defend the redirected attack"
+      )
+      // The target must also be able to answer the smallest possible attack.
+      _ <- check(
+        nextDefender.hand.size >= state.tablePairs.size + 1,
+        s"${nextDefender.name} has too few cards to defend the redirected attack"
       )
     yield
       val players = state.players
@@ -249,6 +300,13 @@ object GameEngine:
   /**
    * Defender gives up on the current bout. Throw-ins stay open to every other
    * active player, and players who cannot add anything are passed immediately.
+   *
+   * The phase moves to [[BoutPhase.SurrenderThrowIn]], where the surrendering
+   * defender has no legal action left (it can neither cover, redirect, throw
+   * in, pass nor surrender again). Non-defenders who hold no cards are passed
+   * right away, since they cannot throw anything in; when that leaves every
+   * non-defender passed, the remaining non-defender's settling pass resolves
+   * the bout.
    */
   private def applyDeclareSurrender(
       state: GameState,
@@ -258,6 +316,10 @@ object GameEngine:
       _ <- check(
         state.boutPhase == BoutPhase.Defense,
         s"Cannot surrender during ${state.boutPhase} phase"
+      )
+      _ <- check(
+        state.attackerIdx != state.defenderIdx,
+        "A player cannot attack and defend the same bout"
       )
       defender <- state.players.lift(state.defenderIdx).toRight("Invalid defender seat")
       _ <- check(defender.id == playerId, s"$playerId is not the defender")
