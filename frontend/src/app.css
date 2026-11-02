@@ -973,6 +973,22 @@ html[data-theme='light'] .error-banner {
   transition: opacity 160ms ease, transform 160ms ease;
 }
 
+/* Active bars are green only for 3-4 bars, yellow for 2 and red for 1. */
+.signal-bars[data-bar-color='green'] .signal-bar[data-active='true'],
+.signal-bar[data-active='true'][data-bar-color='green'] {
+  background: #2dc653;
+}
+
+.signal-bars[data-bar-color='yellow'] .signal-bar[data-active='true'],
+.signal-bar[data-active='true'][data-bar-color='yellow'] {
+  background: #eab308;
+}
+
+.signal-bars[data-bar-color='red'] .signal-bar[data-active='true'],
+.signal-bar[data-active='true'][data-bar-color='red'] {
+  background: #ef4444;
+}
+
 /* One short pop, only when the tier changes: no idle pulsing. */
 .connection-bars-updating .signal-bar[data-active='true'] {
   transform-origin: bottom center;
