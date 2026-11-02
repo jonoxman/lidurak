@@ -523,8 +523,10 @@
   height: 80px;
 }
 
+/* Feedback #15: nudge the horizontal trump right and up so it tucks under the
+   vertical talon instead of poking out past its left/bottom edges. */
 .table-trump-card {
-  transform: rotate(90deg);
+  transform: translate(8px, -6px) rotate(90deg);
 }
 
 .trump-badge {
@@ -936,6 +938,10 @@
     height: 48px;
   }
 
+  .table-trump-card {
+    transform: translate(5px, -4px) rotate(90deg);
+  }
+
   .table-trump-card,
   .table-trump-card .card-slot {
     width: 48px;
@@ -995,6 +1001,14 @@
       transparent 2px 7px
     ),
     radial-gradient(circle at 50% 30%, rgba(255, 255, 255, 0.06), transparent 65%);
+  --table-felt-light: #b5d6c5;
+  --table-felt-overlay-light: radial-gradient(
+      circle at 50% 30%,
+      #d6eadf,
+      #b5d6c5 70%
+    ),
+    repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.45) 0 2px, transparent 2px 7px);
+  --table-felt-border-light: #8cb8a2;
 }
 
 [data-zone='table-arena'][data-texture='midnight-navy'] {
@@ -1005,6 +1019,18 @@
       transparent 2px 8px
     ),
     radial-gradient(circle at 50% 25%, rgba(140, 170, 255, 0.08), transparent 70%);
+  --table-felt-light: #b8cce4;
+  --table-felt-overlay-light: radial-gradient(
+      circle at 50% 25%,
+      #d8e4f2,
+      #b8cce4 70%
+    ),
+    repeating-linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.4) 0 2px,
+      transparent 2px 8px
+    );
+  --table-felt-border-light: #8ea9ca;
 }
 
 [data-zone='table-arena'][data-texture='burgundy-velvet'] {
@@ -1019,6 +1045,18 @@
       rgba(0, 0, 0, 0.06) 0 3px,
       transparent 3px 9px
     );
+  --table-felt-light: #dcb6c2;
+  --table-felt-overlay-light: radial-gradient(
+      ellipse at 50% 20%,
+      #f0d8df,
+      #dcb6c2 65%
+    ),
+    repeating-radial-gradient(
+      circle at 50% 50%,
+      rgba(120, 60, 80, 0.06) 0 3px,
+      transparent 3px 9px
+    );
+  --table-felt-border-light: #be8e9d;
 }
 
 [data-zone='table-arena'][data-texture='charcoal-slate'] {
@@ -1029,6 +1067,14 @@
       transparent 1px 9px
     ),
     radial-gradient(circle at 50% 30%, rgba(255, 255, 255, 0.05), transparent 70%);
+  --table-felt-light: #cbd5e1;
+  --table-felt-overlay-light: radial-gradient(
+      circle at 50% 30%,
+      #e2e8f0,
+      #cbd5e1 70%
+    ),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.45) 0 1px, transparent 1px 9px);
+  --table-felt-border-light: #94a3b8;
 }
 
 [data-zone='table-arena'][data-texture='forest-moss'] {
@@ -1039,6 +1085,14 @@
       transparent 55%
     ),
     radial-gradient(circle at 80% 70%, rgba(120, 160, 100, 0.06), transparent 60%);
+  --table-felt-light: #c4d6b4;
+  --table-felt-overlay-light: radial-gradient(
+      circle at 20% 30%,
+      #dfe9d5,
+      #c4d6b4 65%
+    ),
+    radial-gradient(circle at 80% 70%, rgba(255, 255, 255, 0.4), transparent 60%);
+  --table-felt-border-light: #9ab386;
 }
 
 [data-zone='table-arena'][data-texture='vintage-oak'] {
@@ -1053,6 +1107,110 @@
       rgba(255, 220, 160, 0.05) 0 2px,
       transparent 2px 26px
     );
+  --table-felt-light: #dcc7a8;
+  --table-felt-overlay-light: radial-gradient(
+      circle at 50% 25%,
+      #efe3d0,
+      #dcc7a8 70%
+    ),
+    repeating-linear-gradient(90deg, rgba(120, 90, 50, 0.1) 0 3px, transparent 3px 11px);
+  --table-felt-border-light: #b89d78;
+}
+
+/* --- Light theme: pale felt and table chrome (feedback #4) ---
+   Every surface below is a stylesheet override, so switching the theme in the
+   header repaints the live arena without any `GameTable`/`GamePage` change. */
+
+:root[data-theme='light'] [data-zone='table-arena'] {
+  --table-felt: var(--table-felt-light, #d6eadf);
+  --table-felt-overlay: var(--table-felt-overlay-light, none);
+}
+
+:root[data-theme='light'] [data-zone='table-arena']::before {
+  box-shadow: inset 0 0 0 1px var(--table-felt-border-light, rgba(148, 163, 184, 0.6));
+}
+
+:root[data-theme='light'] .seat-box {
+  background: #f1f5f9;
+}
+
+:root[data-theme='light'] .opponent-avatar {
+  background: #e2e8f0;
+  border-color: #94a3b8;
+  color: #0f172a;
+}
+
+:root[data-theme='light'] .opponent-name {
+  color: #0f172a;
+}
+
+:root[data-theme='light'] .opponent-rank {
+  color: #b45309;
+}
+
+:root[data-theme='light'] .opponent-passed {
+  color: #3f6212;
+}
+
+:root[data-theme='light'] .seat-clock,
+:root[data-theme='light'] .hand-clock {
+  background: rgba(248, 250, 252, 0.9);
+  border-color: #94a3b8;
+  color: #1e293b;
+}
+
+:root[data-theme='light'] .seat-clock.active,
+:root[data-theme='light'] .hand-clock.active {
+  color: #0f172a;
+}
+
+:root[data-theme='light'] .battlefield-tinted-box {
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.45);
+}
+
+:root[data-theme='light'] .target-outline {
+  border-color: #4d7c1b;
+  background: rgba(120, 160, 60, 0.14);
+}
+
+:root[data-theme='light'] .redirect-outline {
+  border-color: #a16207;
+  background: rgba(202, 138, 4, 0.12);
+}
+
+:root[data-theme='light'] .talon-count,
+:root[data-theme='light'] .deck-count-badge {
+  background: #f8fafc;
+  border-color: #94a3b8;
+  color: #0f172a;
+}
+
+:root[data-theme='light'] .trump-badge {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+  color: #1e293b;
+}
+
+:root[data-theme='light'] .trump-badge.red .trump-symbol {
+  color: #b91c1c;
+}
+
+:root[data-theme='light'] .trump-badge.black .trump-symbol {
+  color: #1e293b;
+}
+
+:root[data-theme='light'] .sort-select {
+  background-color: #f8fafc;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
+/* The header preview swatches carry an inline dark background, so a pale veil
+   is the stylesheet-only way to keep them in step with the light theme. */
+:root[data-theme='light'] .texture-swatch {
+  box-shadow: inset 0 0 0 200px rgba(255, 255, 255, 0.62),
+    inset 0 0 0 1px rgba(100, 116, 139, 0.6);
 }
 
 /* Opt-in filter layer: filtering the whole arena also tints the cards, so the

@@ -347,11 +347,13 @@ export function Card({
 
         {trump ? (
           <g class="trump-marker" data-testid="trump-marker">
-            <circle cx="56" cy="15" r="9" fill="#d4af37" />
+            {/* Feedback #6: a compact 12-14px badge tucked into the top-right
+                corner, clear of the corner index and every center pip. */}
+            <circle cx="61" cy="10" r="6" fill="#d4af37" />
             <text
-              x="56"
-              y="15"
-              font-size={11}
+              x="61"
+              y="10"
+              font-size={8}
               text-anchor="middle"
               dominant-baseline="central"
               fill="#161512"

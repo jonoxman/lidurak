@@ -194,6 +194,68 @@ describe('Card', () => {
     expect(text.getAttribute('dominant-baseline')).toBe('central');
   });
 
+  it('keeps the gold trump badge compact so it never covers a pip', () => {
+    const ranks = [
+      'two',
+      'three',
+      'four',
+      'five',
+      'six',
+      'seven',
+      'eight',
+      'nine',
+      'ten',
+      'ace',
+      'jack',
+      'queen',
+      'king',
+    ];
+
+    for (const rank of ranks) {
+      const { container, unmount } = render(<Card suit="spades" rank={rank} trump />);
+      const circle = screen.getByTestId('trump-marker').querySelector('circle')!;
+      const cx = Number(circle.getAttribute('cx'));
+      const cy = Number(circle.getAttribute('cy'));
+      const r = Number(circle.getAttribute('r'));
+
+      // 70 viewBox units render into an 80px-wide card: a 12-14px badge.
+      const diameterPx = r * 2 * (80 / 70);
+      expect(r, rank).toBeLessThanOrEqual(6.5);
+      expect(diameterPx, rank).toBeGreaterThanOrEqual(12);
+      expect(diameterPx, rank).toBeLessThanOrEqual(14);
+
+      // Still fully inside the card frame.
+      const badge = { left: cx - r, right: cx + r, top: cy - r, bottom: cy + r };
+      expect(badge.left, rank).toBeGreaterThanOrEqual(2);
+      expect(badge.top, rank).toBeGreaterThanOrEqual(2);
+      expect(badge.right, rank).toBeLessThanOrEqual(68);
+      expect(badge.bottom, rank).toBeLessThanOrEqual(20);
+
+      // No pip's glyph box may intersect the badge's box.
+      for (const pip of Array.from(container.querySelectorAll('[data-pip]'))) {
+        const x = Number(pip.getAttribute('x'));
+        const y = Number(pip.getAttribute('y'));
+        const fontSize = Number(pip.getAttribute('font-size'));
+        const box = {
+          left: x - fontSize * 0.45,
+          right: x + fontSize * 0.45,
+          top: y - fontSize * 0.8,
+          bottom: y + fontSize * 0.2,
+        };
+        const overlaps =
+          box.right > badge.left &&
+          box.left < badge.right &&
+          box.bottom > badge.top &&
+          box.top < badge.bottom;
+        expect(overlaps, `${rank} pip at ${x},${y}`).toBe(false);
+      }
+
+      const text = screen.getByTestId('trump-marker').querySelector('text')!;
+      expect(Number(text.getAttribute('font-size')), rank).toBeLessThanOrEqual(9);
+      unmount();
+    }
+  });
+
   it('renders six distinct card back patterns', () => {
     expect(CARD_BACK_PATTERNS).toHaveLength(6);
 
