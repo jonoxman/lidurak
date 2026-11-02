@@ -1,7 +1,15 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/preact';
 import { Card } from '../components/Card';
-import { CARD_BACK_PATTERNS, CardBack } from '../components/CardBack';
+import {
+  CARD_BACK_PATTERNS,
+  COLORFUL_CARD_BACK_PATTERNS,
+  CardBack,
+  DARK_CARD_BACK_PALETTE,
+  LIGHT_CARD_BACK_PALETTE,
+  resolveCardBackTheme,
+} from '../components/CardBack';
+import { resetSettings, setSettings } from '../state/settings';
 
 describe('Card', () => {
   it('renders a face-up card with its rank and suit text', () => {
@@ -206,5 +214,101 @@ describe('Card', () => {
     const { container } = render(<CardBack />);
 
     expect(container.querySelector('svg')!.getAttribute('data-pattern')).toBe('classic-hatch');
+  });
+});
+
+describe('theme-adaptive card backs', () => {
+  afterEach(() => {
+    resetSettings();
+  });
+
+  it('keeps the original dark palette for the six monochrome backs', () => {
+    setSettings({ theme: 'dark' });
+    expect(CARD_BACK_PATTERNS).toHaveLength(6);
+
+    for (const pattern of CARD_BACK_PATTERNS) {
+      const { container, unmount } = render(<CardBack pattern={pattern} />);
+      const svg = container.querySelector('svg.card-back')!;
+
+      expect(svg.getAttribute('data-colorful'), pattern).toBe('false');
+      expect(svg.getAttribute('data-card-back-theme'), pattern).toBe('dark');
+
+      // The outer frame is a direct child of the svg, not the pattern tile.
+      const frame = Array.from(svg.children).filter(
+        (child) => child.tagName.toLowerCase() === 'rect',
+      )[0];
+      expect(frame.getAttribute('fill'), pattern).toBe(DARK_CARD_BACK_PALETTE.frame);
+      expect(frame.getAttribute('stroke'), pattern).toBe(DARK_CARD_BACK_PALETTE.frameStroke);
+      expect(svg.outerHTML, pattern).toContain(DARK_CARD_BACK_PALETTE.ink);
+      expect(svg.outerHTML, pattern).not.toContain(LIGHT_CARD_BACK_PALETTE.ink);
+      unmount();
+    }
+  });
+
+  it('repaints the six monochrome backs with the light palette', () => {
+    setSettings({ theme: 'light' });
+
+    for (const pattern of CARD_BACK_PATTERNS) {
+      const { container, unmount } = render(<CardBack pattern={pattern} />);
+      const svg = container.querySelector('svg.card-back')!;
+
+      expect(svg.getAttribute('data-card-back-theme'), pattern).toBe('light');
+
+      const frame = Array.from(svg.children).filter(
+        (child) => child.tagName.toLowerCase() === 'rect',
+      )[0];
+      expect(frame.getAttribute('fill'), pattern).toBe(LIGHT_CARD_BACK_PALETTE.frame);
+      expect(frame.getAttribute('stroke'), pattern).toBe(LIGHT_CARD_BACK_PALETTE.frameStroke);
+
+      // The pattern tile flips to the light base with contrasting strokes.
+      const tile = svg.querySelector('pattern')!;
+      expect(tile.querySelector('rect')!.getAttribute('fill'), pattern).toBe(
+        LIGHT_CARD_BACK_PALETTE.base,
+      );
+      expect(svg.outerHTML, pattern).toContain(LIGHT_CARD_BACK_PALETTE.ink);
+      expect(svg.outerHTML, pattern).not.toContain(DARK_CARD_BACK_PALETTE.ink);
+      unmount();
+    }
+  });
+
+  it('leaves every colourful card back identical in both themes', () => {
+    setSettings({ theme: 'dark' });
+    const darkMarkup: Record<string, string> = {};
+
+    for (const pattern of COLORFUL_CARD_BACK_PATTERNS) {
+      const { container, unmount } = render(<CardBack pattern={pattern} />);
+      const svg = container.querySelector('svg.card-back')!;
+
+      expect(svg.getAttribute('data-colorful'), pattern).toBe('true');
+      expect(svg.getAttribute('data-card-back-theme'), pattern).toBeNull();
+      darkMarkup[pattern] = svg.outerHTML;
+      unmount();
+    }
+
+    setSettings({ theme: 'light' });
+
+    for (const pattern of COLORFUL_CARD_BACK_PATTERNS) {
+      const { container, unmount } = render(<CardBack pattern={pattern} />);
+      const svg = container.querySelector('svg.card-back')!;
+
+      expect(svg.outerHTML, pattern).toBe(darkMarkup[pattern]);
+      unmount();
+    }
+  });
+
+  it('resolves the device theme from the applied document theme', () => {
+    setSettings({ theme: 'device' });
+
+    document.documentElement.setAttribute('data-theme', 'light');
+    expect(resolveCardBackTheme('device')).toBe('light');
+
+    document.documentElement.setAttribute('data-theme', 'dark');
+    expect(resolveCardBackTheme('device')).toBe('dark');
+
+    expect(resolveCardBackTheme('light')).toBe('light');
+    expect(resolveCardBackTheme('dark')).toBe('dark');
+    // Without an applied theme it falls back to the OS preference.
+    expect(resolveCardBackTheme('device', false, document.createElement('div'))).toBe('light');
+    expect(resolveCardBackTheme('device', true, document.createElement('div'))).toBe('dark');
   });
 });

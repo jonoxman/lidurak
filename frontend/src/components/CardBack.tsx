@@ -1,4 +1,10 @@
-import { useSettings } from '../state/settings';
+import { useEffect, useState } from 'preact/hooks';
+import {
+  prefersDarkScheme,
+  resolveTheme,
+  useSettings,
+  type ThemeMode,
+} from '../state/settings';
 
 export type CardBackPattern =
   | 'classic-hatch'
@@ -65,8 +71,81 @@ export interface CardBackProps {
   pattern?: CardBackPattern;
 }
 
-const BACK_BASE = '#262421';
-const BACK_INK = '#3a3733';
+/** Active theme a monochrome card back paints itself for. */
+export type CardBackTheme = 'light' | 'dark';
+
+/** Colours used by the six monochrome card backs. */
+export interface CardBackPalette {
+  /** Outer frame fill. */
+  frame: string;
+  /** Outer frame border. */
+  frameStroke: string;
+  /** Pattern tile background. */
+  base: string;
+  /** Inner face border. */
+  border: string;
+  /** Primary pattern strokes and fills. */
+  ink: string;
+  /** Secondary pattern strokes and fills. */
+  inkSoft: string;
+}
+
+/** The original dark-theme look, unchanged. */
+export const DARK_CARD_BACK_PALETTE: CardBackPalette = {
+  frame: '#262421',
+  frameStroke: '#3a3733',
+  base: '#262421',
+  border: '#3a3733',
+  ink: '#3a3733',
+  inkSoft: '#3a3733',
+};
+
+/** Crisp slate-on-ivory look so the monochrome backs read on a light theme. */
+export const LIGHT_CARD_BACK_PALETTE: CardBackPalette = {
+  frame: '#f1f5f9',
+  frameStroke: '#64748b',
+  base: '#e2e8f0',
+  border: '#94a3b8',
+  ink: '#334155',
+  inkSoft: '#475569',
+};
+
+export function cardBackPalette(theme: CardBackTheme): CardBackPalette {
+  return theme === 'light' ? LIGHT_CARD_BACK_PALETTE : DARK_CARD_BACK_PALETTE;
+}
+
+/**
+ * Resolves which palette a monochrome back should use. An explicit
+ * `light`/`dark` choice wins; `device` follows the theme already applied to
+ * `<html>` and falls back to `prefers-color-scheme`.
+ */
+export function resolveCardBackTheme(
+  theme: ThemeMode,
+  prefersDark = prefersDarkScheme(),
+  root?: HTMLElement | null,
+): CardBackTheme {
+  if (theme === 'light' || theme === 'dark') return theme;
+  const target = root ?? (typeof document === 'undefined' ? null : document.documentElement);
+  const applied = target?.getAttribute?.('data-theme');
+  if (applied === 'light' || applied === 'dark') return applied;
+  return resolveTheme(theme, prefersDark);
+}
+
+/** Re-renders when "Device theme" follows a change in the OS colour scheme. */
+function useCardBackTheme(theme: ThemeMode): CardBackTheme {
+  const [, bump] = useState(0);
+
+  useEffect(() => {
+    if (theme !== 'device') return undefined;
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined;
+    const query = window.matchMedia('(prefers-color-scheme: dark)');
+    const onChange = () => bump((tick) => tick + 1);
+    query.addEventListener?.('change', onChange);
+    return () => query.removeEventListener?.('change', onChange);
+  }, [theme]);
+
+  return resolveCardBackTheme(theme);
+}
 
 type ColorfulMotif = 'stripes' | 'diamonds' | 'rings' | 'rays' | 'sparkle' | 'grid' | 'waves';
 
@@ -200,52 +279,61 @@ function MotifTile({ id, motif }: { id: string; motif: ColorfulMotif }) {
 }
 
 /** The pattern tile for one monochrome card back design. */
-function PatternTile({ pattern }: { pattern: CardBackPattern }) {
+function PatternTile({
+  pattern,
+  palette,
+}: {
+  pattern: CardBackPattern;
+  palette: CardBackPalette;
+}) {
   const id = `card-back-${pattern}`;
+  const base = palette.base;
+  const ink = palette.ink;
+  const inkSoft = palette.inkSoft;
 
   switch (pattern) {
     case 'royal-diamond':
       return (
         <pattern id={id} width="12" height="12" patternUnits="userSpaceOnUse">
-          <rect width="12" height="12" fill={BACK_BASE} />
+          <rect width="12" height="12" fill={base} />
           <path
             d="M6 0 L12 6 L6 12 L0 6 Z"
             fill="none"
-            stroke={BACK_INK}
+            stroke={ink}
             stroke-width={1.2}
           />
-          <circle cx="6" cy="6" r="1" fill={BACK_INK} />
+          <circle cx="6" cy="6" r="1" fill={inkSoft} />
         </pattern>
       );
 
     case 'celtic-weave':
       return (
         <pattern id={id} width="14" height="14" patternUnits="userSpaceOnUse">
-          <rect width="14" height="14" fill={BACK_BASE} />
+          <rect width="14" height="14" fill={base} />
           <path
             d="M0 7 A7 7 0 0 1 14 7 A7 7 0 0 1 0 7"
             fill="none"
-            stroke={BACK_INK}
+            stroke={ink}
             stroke-width={1.8}
           />
           <path
             d="M7 0 A7 7 0 0 1 7 14 A7 7 0 0 1 7 0"
             fill="none"
-            stroke={BACK_INK}
+            stroke={inkSoft}
             stroke-width={1.8}
           />
-          <circle cx="7" cy="7" r="1.6" fill={BACK_INK} />
+          <circle cx="7" cy="7" r="1.6" fill={inkSoft} />
         </pattern>
       );
 
     case 'hex-mesh':
       return (
         <pattern id={id} width="14" height="12" patternUnits="userSpaceOnUse">
-          <rect width="14" height="12" fill={BACK_BASE} />
+          <rect width="14" height="12" fill={base} />
           <path
             d="M7 1 L12.2 4 L12.2 9 L7 12 L1.8 9 L1.8 4 Z"
             fill="none"
-            stroke={BACK_INK}
+            stroke={ink}
             stroke-width={1.4}
           />
         </pattern>
@@ -254,17 +342,17 @@ function PatternTile({ pattern }: { pattern: CardBackPattern }) {
     case 'chevron':
       return (
         <pattern id={id} width="12" height="10" patternUnits="userSpaceOnUse">
-          <rect width="12" height="10" fill={BACK_BASE} />
-          <path d="M0 8 L6 3 L12 8" fill="none" stroke={BACK_INK} stroke-width={1.8} />
-          <path d="M0 3 L6 -2 L12 3" fill="none" stroke={BACK_INK} stroke-width={1.2} />
+          <rect width="12" height="10" fill={base} />
+          <path d="M0 8 L6 3 L12 8" fill="none" stroke={ink} stroke-width={1.8} />
+          <path d="M0 3 L6 -2 L12 3" fill="none" stroke={inkSoft} stroke-width={1.2} />
         </pattern>
       );
 
     case 'starburst':
       return (
         <pattern id={id} width="16" height="16" patternUnits="userSpaceOnUse">
-          <rect width="16" height="16" fill={BACK_BASE} />
-          <g stroke={BACK_INK} stroke-width={1} stroke-linecap="round">
+          <rect width="16" height="16" fill={base} />
+          <g stroke={ink} stroke-width={1} stroke-linecap="round">
             <line x1="8" y1="8" x2="8" y2="0.5" />
             <line x1="8" y1="8" x2="8" y2="15.5" />
             <line x1="8" y1="8" x2="0.5" y2="8" />
@@ -274,7 +362,7 @@ function PatternTile({ pattern }: { pattern: CardBackPattern }) {
             <line x1="8" y1="8" x2="13.3" y2="2.7" />
             <line x1="8" y1="8" x2="2.7" y2="13.3" />
           </g>
-          <path d="M8 5 L10 8 L8 11 L6 8 Z" fill={BACK_INK} />
+          <path d="M8 5 L10 8 L8 11 L6 8 Z" fill={inkSoft} />
         </pattern>
       );
 
@@ -288,8 +376,8 @@ function PatternTile({ pattern }: { pattern: CardBackPattern }) {
           patternUnits="userSpaceOnUse"
           patternTransform="rotate(45)"
         >
-          <rect width="8" height="8" fill={BACK_BASE} />
-          <line x1="0" y1="0" x2="0" y2="8" stroke={BACK_INK} stroke-width="3" />
+          <rect width="8" height="8" fill={base} />
+          <line x1="0" y1="0" x2="0" y2="8" stroke={ink} stroke-width="3" />
         </pattern>
       );
   }
@@ -304,8 +392,12 @@ export function CardBack({ class: className, pattern }: CardBackProps) {
   const id = `card-back-${activePattern}`;
   const gradientId = `${id}-gradient`;
   const design = COLORFUL_DESIGNS[activePattern];
-  const frame = design ? design.frame : BACK_BASE;
-  const ink = design ? design.accent : BACK_INK;
+  // Colorful backs keep their palette in every theme; only the monochrome set
+  // adapts, so it stays readable on the light theme.
+  const theme = useCardBackTheme(settings.theme);
+  const palette = cardBackPalette(theme);
+  const frame = design ? design.frame : palette.frame;
+  const ink = design ? design.accent : palette.frameStroke;
 
   return (
     <svg
@@ -315,6 +407,7 @@ export function CardBack({ class: className, pattern }: CardBackProps) {
       aria-label="Card back"
       data-pattern={activePattern}
       data-colorful={design ? 'true' : 'false'}
+      data-card-back-theme={design ? undefined : theme}
     >
       <defs>
         {design ? (
@@ -327,7 +420,7 @@ export function CardBack({ class: className, pattern }: CardBackProps) {
             <MotifTile id={id} motif={design.motif} />
           </>
         ) : (
-          <PatternTile pattern={activePattern} />
+          <PatternTile pattern={activePattern} palette={palette} />
         )}
       </defs>
       <rect
@@ -350,7 +443,7 @@ export function CardBack({ class: className, pattern }: CardBackProps) {
         rx="4"
         ry="4"
         fill={design ? `url(#${gradientId})` : `url(#${id})`}
-        stroke={ink}
+        stroke={design ? design.accent : palette.border}
         stroke-width={1}
       />
       {design ? (
