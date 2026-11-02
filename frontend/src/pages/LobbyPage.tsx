@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import { checkServerHealth, createGame, type CreatedGame } from '../api/client';
+import type { PlayerType } from '../types';
 import '../styles/table.css';
 
 const DEFAULT_NAMES = ['Alice', 'Bob', 'Carol', 'Dave'];
@@ -8,6 +9,7 @@ const DEFAULT_NAMES = ['Alice', 'Bob', 'Carol', 'Dave'];
 const SEAT_TYPES = [
   { value: 'human', label: 'Human' },
   { value: 'randomBot', label: 'RandomBot' },
+  { value: 'basicBot', label: 'BasicBot' },
 ] as const;
 
 /** How often an unready backend is re-probed before the lobby unlocks. */
@@ -40,7 +42,7 @@ function isServerWarmupFailure(reason: unknown): boolean {
 export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
   const [playerCount, setPlayerCount] = useState(2);
   const [names, setNames] = useState<string[]>(DEFAULT_NAMES.slice(0, 2));
-  const [playerTypes, setPlayerTypes] = useState<string[]>(['human', 'human']);
+  const [playerTypes, setPlayerTypes] = useState<PlayerType[]>(['human', 'human']);
   const [allowRedirect, setAllowRedirect] = useState(true);
   const [chaosMode, setChaosMode] = useState(false);
   const [serverReady, setServerReady] = useState(initialServerReady);
@@ -100,7 +102,7 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
     );
   };
 
-  const changeType = (index: number, value: string) => {
+  const changeType = (index: number, value: PlayerType) => {
     setPlayerTypes((previous) =>
       previous.map((type, current) => (current === index ? value : type)),
     );
@@ -173,7 +175,7 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
                       data-testid={`player-type-${index}`}
                       value={playerTypes[index] ?? 'human'}
                       onChange={(event) =>
-                        changeType(index, (event.target as HTMLSelectElement).value)
+                        changeType(index, (event.target as HTMLSelectElement).value as PlayerType)
                       }
                     >
                       {SEAT_TYPES.map((seat) => (

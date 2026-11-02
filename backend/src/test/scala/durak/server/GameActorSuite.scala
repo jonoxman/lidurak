@@ -387,3 +387,57 @@ class GameActorSuite extends munit.FunSuite:
 
     assertEquals(GameActor.promptedBotId(gs.copy(boutPhase = BoutPhase.GameOver)), None)
   }
+
+  // --- BasicBot seats ---
+
+  test("a BasicBot seat plays its lowest non-trump opening attack") {
+    val seed = (0L until 200L)
+      .find { candidate =>
+        val game = GameEngine.createGame(
+          GameConfig(playerCount = 2, seed = candidate),
+          Vector("Bot", "Alice")
+        )
+        game.attackerIdx == 0 && game.players(0).hand.exists(_.suit != game.trumpSuit)
+      }
+      .getOrElse(fail("no seed seats p0 as the first attacker with a non-trump card"))
+
+    val room = GameActor
+      .create(
+        GameConfig(playerCount = 2, seed = seed, playerTypes = Vector("basicBot", "human")),
+        Vector("Bot", "Alice"),
+        turnSeconds = 15,
+        botDelayMin = 20.millis,
+        botDelayMax = 40.millis
+      )
+      .unsafeRunSync()
+    val start = room.stateRef.get.unsafeRunSync()
+    val expectedRank = start.players(0).hand.filter(_.suit != start.trumpSuit).map(_.rank.value).min
+
+    val after = awaitState(room, 3000.millis)(_.tablePairs.nonEmpty)
+    GameActor.stopClock(room).unsafeRunSync()
+
+    val attack = after.tablePairs.head.attack
+    assert(attack.suit != after.trumpSuit, s"BasicBot opened with a trump: $attack")
+    assertEquals(attack.rank.value, expectedRank)
+  }
+
+  test("the bot driver dispatches the basic policy for a basicBot seat") {
+    val gs = GameEngine.createGame(
+      GameConfig(playerCount = 2, seed = 5L, playerTypes = Vector("basicBot", "human")),
+      Vector("Bot", "Alice")
+    )
+    val attackerId = gs.players(gs.attackerIdx).id
+    val lowestNonTrump = gs.players(gs.attackerIdx).hand
+      .filter(_.suit != gs.trumpSuit)
+      .minByOption(_.rank.value)
+
+    assertEquals(gs.config.seatType(gs.attackerIdx), GameConfig.BasicBotSeat)
+    lowestNonTrump match
+      case None => fail("seed 5 attacker holds only trumps")
+      case Some(card) =>
+        GameActor.chooseBotAction(gs, attackerId) match
+          case Some(GameAction.InitialAttack(_, List(played))) =>
+            assertEquals(played.rank.value, card.rank.value)
+            assert(played.suit != gs.trumpSuit, s"BasicBot opened with a trump: $played")
+          case other => fail(s"expected a single opening attack, got $other")
+  }

@@ -1,4 +1,4 @@
-import { parsePlayerGameView, type GameAction, type PlayerGameView } from '../types';
+import { parsePlayerGameView, type GameAction, type PlayerGameView, type PlayerType } from '../types';
 
 export interface CreatedGame {
   gameId: string;
@@ -36,9 +36,10 @@ export async function createGame(
   playerNames: string[],
   allowRedirect = true,
   chaosMode = false,
-  playerTypes?: string[],
+  playerTypes?: readonly PlayerType[],
 ): Promise<CreatedGame> {
-  const seats = playerTypes ?? Array.from({ length: playerCount }, () => 'human');
+  const seats: readonly PlayerType[] =
+    playerTypes ?? Array.from({ length: playerCount }, (): PlayerType => 'human');
   const response = await fetch('/api/game/create', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

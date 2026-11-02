@@ -230,6 +230,35 @@ class GameRoutesSuite extends munit.FunSuite:
     assert(view.opponents.exists(seat => seat.id == "p0" && seat.isPresent), view.opponents.toString)
   }
 
+  test("POST /api/games seats a BasicBot from playerTypes and preserves it") {
+    val manager = newManager
+
+    val (status, json) = post(
+      manager,
+      "/api/games",
+      Json.obj(
+        "playerCount" -> 2.asJson,
+        "playerNames" -> List("Basic", "Alice").asJson,
+        "playerTypes" -> List("basicBot", "human").asJson
+      )
+    )
+
+    assertEquals(status, Status.Ok)
+    val gameId = json.hcursor
+      .get[String]("gameId")
+      .getOrElse(fail(s"missing gameId in ${json.noSpaces}"))
+    assertEquals(
+      json.hcursor.downField("playerTypes").as[List[String]].toOption,
+      Some(List("basicBot", "human"))
+    )
+
+    val (viewStatus, viewJson) = get(manager, s"/api/games/$gameId/view?player=p1")
+    assertEquals(viewStatus, Status.Ok)
+    val view = viewJson.as[PlayerGameView].getOrElse(fail(s"invalid view body: ${viewJson.noSpaces}"))
+    // A bot seat is always present, so the human sees it as connected.
+    assert(view.presentPlayers.contains("p0"), view.presentPlayers.toString)
+  }
+
   test("POST /api/games/:gameId/presence toggles presence for every viewer") {
     val manager = newManager
     val gameId = createGame(manager, 2)

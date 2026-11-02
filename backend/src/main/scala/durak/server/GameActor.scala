@@ -290,6 +290,21 @@ object GameActor:
       .filter(playerId => RandomBot.legalActionsFor(state, playerId).nonEmpty)
 
   /**
+   * The move a bot seat plays: [[BasicBot]]'s policy for a `"basicBot"` seat and
+   * [[RandomBot]]'s uniform pick for a `"randomBot"` seat. Both bots enumerate the
+   * same engine-accepted move set, so the action can be submitted as-is.
+   */
+  def chooseBotAction(
+      state: GameState,
+      botId: String,
+      rng: scala.util.Random = botRandom
+  ): Option[GameAction] =
+    val seatIdx = state.players.indexWhere(_.id == botId)
+    state.config.seatType(seatIdx) match
+      case GameConfig.BasicBotSeat => BasicBot.chooseAction(state, botId, rng)
+      case _                       => RandomBot.chooseAction(state, botId, rng)
+
+  /**
    * Drives every bot seat for the whole game. A single fiber owns all bot moves,
    * so a pending move can never race another one: each iteration re-reads the
    * state, and a state transition during the pause ends the pending move before
@@ -309,7 +324,7 @@ object GameActor:
                   // Never play for a superseded position, and never after game over.
                   if current != state || current.isGameOver then botLoop(room)
                   else
-                    RandomBot.chooseAction(current, botId) match
+                    chooseBotAction(current, botId) match
                       case None => awaitStateChange(room, current) *> botLoop(room)
                       case Some(action) => playBotAction(room, action) *> botLoop(room)
                 }
@@ -332,7 +347,7 @@ object GameActor:
   private def playBotAction(room: GameRoom, action: GameAction): IO[Unit] =
     IO.delay(
       logger.info(
-        s"RandomBot plays ${actionType(action)} as ${actorId(action)} in game ${room.gameId}"
+        s"Bot ${actorId(action)} plays ${actionType(action)} in game ${room.gameId}"
       )
     ).void *> applyAction(room, action).void
 

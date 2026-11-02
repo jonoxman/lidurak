@@ -47,7 +47,7 @@ describe('LobbyPage', () => {
     expect((screen.getByLabelText('Player 3') as HTMLInputElement).value).toBe('Carol');
   });
 
-  it('offers Human and RandomBot for every player row', async () => {
+  it('offers Human, RandomBot and BasicBot for every player row', async () => {
     render(<LobbyPage initialServerReady />);
 
     fireEvent.change(screen.getByLabelText('Players'), { target: { value: '4' } });
@@ -60,12 +60,34 @@ describe('LobbyPage', () => {
       expect(Array.from(select.options).map((option) => option.value)).toEqual([
         'human',
         'randomBot',
+        'basicBot',
       ]);
       expect(Array.from(select.options).map((option) => option.textContent)).toEqual([
         'Human',
         'RandomBot',
+        'BasicBot',
       ]);
     }
+  });
+
+  it('places BasicBot directly below RandomBot and sends it to createGame', async () => {
+    createGame.mockResolvedValue({ gameId: 'game-3', players: ['p0', 'p1'] });
+    render(<LobbyPage initialServerReady />);
+
+    const select = screen.getByTestId('player-type-0') as HTMLSelectElement;
+    const values = Array.from(select.options).map((option) => option.value);
+    expect(values.indexOf('basicBot')).toBe(values.indexOf('randomBot') + 1);
+    expect(select.querySelector('option[value="basicBot"]')?.textContent).toBe('BasicBot');
+
+    fireEvent.change(select, { target: { value: 'basicBot' } });
+    submitForm();
+
+    await waitFor(() =>
+      expect(createGame).toHaveBeenCalledWith(2, ['Alice', 'Bob'], true, false, [
+        'basicBot',
+        'human',
+      ]),
+    );
   });
 
   it('passes the selected player types to createGame', async () => {
