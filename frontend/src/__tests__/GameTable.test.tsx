@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/preact';
 import {
   GameTable,
+  defenderDoubleClickAction,
+  redirectOnlyAction,
   HAND_CARD_WIDTH,
   HAND_MIN_OVERLAP,
   OPPONENT_MIN_OVERLAP,
@@ -17,8 +19,10 @@ import {
   type OpponentSummary,
   type TablePairData,
 } from '../components/GameTable';
+import { ActionBar } from '../components/ActionBar';
 import { DEFAULT_SETTINGS, setSettings } from '../state/settings';
 import type { CardData } from '../components/Card';
+import tableCss from '../styles/table.css?raw';
 
 const hand: CardData[] = [
   { suit: 'spades', rank: 'six' },
@@ -939,6 +943,258 @@ describe('seat boxes, clocks and the deck stack', () => {
       .closest('.seat') as HTMLElement;
     expect(defenderSeat.classList.contains('active-defender')).toBe(true);
     expect(defenderSeat.classList.contains('active-attacker')).toBe(false);
+  });
+});
+
+describe('hand highlight geometry, redirect double-click and review mode', () => {
+  const cssBlock = (selector: string): string => {
+    const start = tableCss.indexOf(`\n${selector} {`);
+    expect(start).toBeGreaterThan(-1);
+    const end = tableCss.indexOf('}', start);
+    return tableCss.slice(start, end);
+  };
+
+  it('anchors the highlight from slot margins: first 0, the rest negative', () => {
+    renderSortableTable({ awaitingAttack: true });
+
+    const highlight = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+    const slots = Array.from(highlight.children) as HTMLElement[];
+    expect(slots).toHaveLength(sortableHand.length);
+
+    expect(slots[0].style.marginLeft).toBe('0px');
+    for (const slot of slots.slice(1)) {
+      expect(parseFloat(slot.style.marginLeft)).toBeLessThan(0);
+    }
+    // The box model aligns the container; no guessed transform is involved.
+    for (const slot of slots) expect(slot.style.transform).toBe('');
+
+    const highlightRule = cssBlock('.hand-cards');
+    expect(highlightRule).toContain('display: inline-flex');
+    expect(highlightRule).toContain('width: fit-content');
+    expect(highlightRule).toContain('box-sizing: border-box');
+
+    const slotRule = cssBlock('.hand-slot');
+    expect(slotRule).toContain('width: var(--hand-card-width');
+    expect(slotRule).toContain('height: var(--hand-card-height');
+    expect(slotRule).toContain('flex: 0 0 auto');
+  });
+
+  it('stacks surplus cards with negative margins instead of transforms', () => {
+    const ranks = ['six', 'seven', 'eight', 'nine', 'ten', 'jack', 'queen', 'king', 'ace'];
+    const suits = ['spades', 'hearts', 'clubs', 'diamonds'];
+    const bigHand: CardData[] = Array.from({ length: 40 }, (_, index) => ({
+      suit: suits[index % suits.length],
+      rank: ranks[index % ranks.length],
+    }));
+
+    renderSortableTable({ myHand: bigHand });
+
+    const highlight = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+    const slots = Array.from(highlight.children) as HTMLElement[];
+    expect(slots).toHaveLength(bigHand.length);
+    expect(highlight.querySelectorAll('.hand-slot[data-hidden="true"]').length).toBeGreaterThan(0);
+    expect(slots[0].style.marginLeft).toBe('0px');
+    for (const slot of slots) expect(slot.style.transform).toBe('');
+    // The hidden surplus stack overlaps fully, still through margin-left only.
+    expect(slots.some((slot) => slot.style.marginLeft === `-${HAND_CARD_WIDTH}px`)).toBe(true);
+  });
+
+  it('plays the redirect when it is the only legal move for the card', () => {
+    const card: CardData = { suit: 'clubs', rank: 'king' };
+
+    expect(
+      redirectOnlyAction(card, {
+        playerId: 'p0',
+        canRedirect: true,
+        canCover: false,
+        canThrowIn: false,
+        isAttacker: false,
+        isDefender: true,
+        matchesTableRank: true,
+      }),
+    ).toEqual({ type: 'redirectAttack', playerId: 'p0', cards: [card] });
+  });
+
+  it('never auto-plays a card that could cover, throw in or attack instead', () => {
+    const card: CardData = { suit: 'clubs', rank: 'king' };
+    const onlyRedirect = {
+      playerId: 'p0',
+      canRedirect: true,
+      canCover: false,
+      canThrowIn: false,
+      isAttacker: false,
+      isDefender: true,
+      matchesTableRank: true,
+    };
+
+    expect(redirectOnlyAction(card, { ...onlyRedirect, canCover: true })).toBeNull();
+    expect(redirectOnlyAction(card, { ...onlyRedirect, canThrowIn: true })).toBeNull();
+    expect(redirectOnlyAction(card, { ...onlyRedirect, isAttacker: true })).toBeNull();
+    expect(redirectOnlyAction(card, { ...onlyRedirect, canRedirect: false })).toBeNull();
+    expect(redirectOnlyAction(card, { ...onlyRedirect, matchesTableRank: false })).toBeNull();
+  });
+
+  it('never covers when the same card could also be redirected', () => {
+    // A trump matching a non-trump attack's rank: both cover and redirect are
+    // legal, so a double-click has to abstain.
+    const trumpSix: CardData = { suit: 'hearts', rank: 'six' };
+    const ambiguous = {
+      playerId: 'p0',
+      coverableAttackIndices: [0],
+      canCover: true,
+      canRedirect: true,
+      canThrowIn: false,
+      matchesTableRank: true,
+    };
+
+    expect(defenderDoubleClickAction(trumpSix, ambiguous)).toBeNull();
+    // Two cover targets plus a redirect is equally ambiguous.
+    expect(
+      defenderDoubleClickAction(trumpSix, {
+        ...ambiguous,
+        coverableAttackIndices: [0, 1],
+      }),
+    ).toBeNull();
+  });
+
+  it('covers when covering is the only legal move for the card', () => {
+    const cover: CardData = { suit: 'spades', rank: 'seven' };
+
+    expect(
+      defenderDoubleClickAction(cover, {
+        playerId: 'p0',
+        coverableAttackIndices: [0],
+        canCover: true,
+        canRedirect: true,
+        canThrowIn: false,
+        // The card is not on the table's ranks, so it cannot reflect.
+        matchesTableRank: false,
+      }),
+    ).toEqual({ type: 'coverCard', playerId: 'p0', attackIndex: 0, defenseCard: cover });
+
+    expect(
+      defenderDoubleClickAction(cover, {
+        playerId: 'p0',
+        coverableAttackIndices: [],
+        canCover: false,
+        canRedirect: false,
+        canThrowIn: false,
+        matchesTableRank: false,
+      }),
+    ).toBeNull();
+  });
+
+  it('redirects through the defender resolver when no cover is available', () => {
+    const card: CardData = { suit: 'clubs', rank: 'king' };
+
+    expect(
+      defenderDoubleClickAction(card, {
+        playerId: 'p0',
+        coverableAttackIndices: [],
+        canCover: true,
+        canRedirect: true,
+        canThrowIn: false,
+        matchesTableRank: true,
+      }),
+    ).toEqual({ type: 'redirectAttack', playerId: 'p0', cards: [card] });
+  });
+
+  it('shows the pass countdown in the same badge as the surrender countdown', () => {
+    render(
+      <ActionBar
+        legalActions={['pass', 'surrender']}
+        onAction={() => {}}
+        passCountdownSeconds={12}
+        surrenderSeconds={3}
+      />,
+    );
+
+    const pass = screen.getByTestId('pass-countdown');
+    expect(pass.className).toBe(screen.getByTestId('surrender-countdown').className);
+    expect(pass.textContent).toBe('12');
+    expect(pass.closest('button')?.textContent).toContain('Pass');
+    expect(screen.getByTestId('surrender-countdown').textContent).toBe('3');
+  });
+
+  it('leaves the pass button bare without a countdown', () => {
+    render(
+      <ActionBar legalActions={['pass']} onAction={() => {}} passCountdownSeconds={0} />,
+    );
+
+    expect(screen.queryByTestId('pass-countdown')).toBeNull();
+    expect(screen.getByText('Pass')).toBeTruthy();
+  });
+
+  it('hides every command control and drop surface in review mode', () => {
+    const { container, unmount } = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={uncoveredPair}
+        trumpSuit="diamonds"
+        defenderId="p0"
+        awaitingAttack
+        defending
+        canRedirect
+        canThrowIn
+        isReviewMode
+        onAttackDrop={() => {}}
+        onCoverDrop={() => {}}
+        onThrowInDrop={() => {}}
+        onRedirectDrop={() => {}}
+      >
+        <button type="button">Throw In</button>
+        <ActionBar legalActions={['pass', 'surrender']} onAction={() => {}} />
+      </GameTable>,
+    );
+
+    expect(container.querySelector('[data-zone="player-controls"]')).toBeNull();
+    expect(screen.queryByText('Throw In')).toBeNull();
+    expect(screen.queryByText('Pass')).toBeNull();
+    expect(screen.queryByText('Surrender')).toBeNull();
+    expect(screen.queryByTestId('redirect-outline')).toBeNull();
+    expect(container.querySelector('[data-drop-zone]')).toBeNull();
+    expect(container.querySelectorAll('[draggable="true"]')).toHaveLength(0);
+
+    const highlight = screen.getByTestId('hand-turn-highlight');
+    expect(highlight.getAttribute('data-active')).toBe('false');
+    expect(highlight.className).toContain('hand-cards');
+    expect(highlight.className).not.toContain('attacker-turn');
+    expect(highlight.className).not.toContain('defender-turn');
+    expect(
+      container.querySelector('[data-zone="table-arena"]')!.getAttribute('data-review-mode'),
+    ).toBe('true');
+    unmount();
+
+    // No opening target outlines either.
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={[]}
+        trumpSuit="diamonds"
+        defenderId="p1"
+        awaitingAttack
+        isReviewMode
+        onAttackDrop={() => {}}
+      />,
+    );
+    expect(screen.queryByTestId('target-outline-p1')).toBeNull();
+  });
+
+  it('keeps hand sorting working in review mode', () => {
+    renderSortableTable({ isReviewMode: true, sortMode: 'pairs' });
+
+    expect(handOrder()).toEqual(['hearts:six', 'spades:king', 'hearts:king', 'clubs:ace']);
+  });
+
+  it('shows the real player names instead of a POV placeholder', () => {
+    const { container } = renderSortableTable({ isReviewMode: true });
+
+    expect(within(screen.getAllByTestId('opponent')[0]).getByText('Bob')).toBeTruthy();
+    expect(container.textContent).not.toContain('You');
   });
 });
 

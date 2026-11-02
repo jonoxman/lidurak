@@ -612,29 +612,43 @@
   padding: 2px 0 8px;
 }
 
-/* Item 22: the highlight hugs the cards instead of the whole grid column. */
+/* Item 22 / Req 3: the highlight is an inline-flex box that takes its width from
+   the slots themselves. Because every slot is exactly card-sized and overlap is
+   only ever a negative `margin-left` on non-first slots, the box starts at the
+   first card's left edge and ends at the last card's right edge — no guessed
+   widths or offsets. Symmetric padding leaves headroom for lifted cards. */
 .hand-cards {
-  display: flex;
+  display: inline-flex;
   flex-wrap: nowrap;
   align-items: flex-end;
   justify-content: flex-start;
-  width: max-content;
+  width: fit-content;
   max-width: 100%;
   min-width: 0;
   gap: 0;
-  /* Item 8: symmetric side padding plus enough top headroom for the lifted
-     (playable/selected -8..-10px) cards, so no card can protrude. */
   padding: 14px 8px 8px;
   border-radius: 8px;
   box-sizing: border-box;
 }
 
-/* Feedback #9: the overlap is computed per card, so each slot carries its own
-   negative margin. Hidden slots stack at 100% and sit behind the visible row. */
+/* Feedback #9: every slot is exactly the size of the card it holds, and all
+   overlap comes from `margin-left` (set inline per card). Hidden surplus slots
+   stack at 100% overlap behind the visible row, never outside the container. */
 .hand-slot {
   display: flex;
   flex: 0 0 auto;
+  width: var(--hand-card-width, 80px);
+  height: var(--hand-card-height, 114px);
+  margin-right: 0;
   z-index: 1;
+}
+
+.hand-slot:first-child {
+  margin-left: 0;
+}
+
+.hand-slot:not(:first-child) {
+  margin-left: -8px;
 }
 
 .hand-slot[data-hidden='true'] {
@@ -912,6 +926,12 @@
   .seat-clock,
   .hand-clock {
     font-size: 11px;
+  }
+
+  /* Keep the slot box identical to the smaller mobile card. */
+  [data-zone='player-hand'] {
+    --hand-card-width: 48px;
+    --hand-card-height: 68px;
   }
 
   .hand-cards {

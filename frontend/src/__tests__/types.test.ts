@@ -9,6 +9,7 @@ import {
   hasLegalAction,
   isGameOverPhase,
   isInitialAttackPhase,
+  parseGameReplay,
   parsePlayerGameView,
   type PlayerType,
 } from '../types';
@@ -32,6 +33,76 @@ const sampleView = {
   isDraw: false,
   maxBoutAttacks: 6,
 };
+
+describe('discard pile and replay payloads', () => {
+  it('parses discard metadata and game timestamps when the backend sends them', () => {
+    const view = parsePlayerGameView({
+      ...sampleView,
+      discardCount: 7,
+      lastDiscardCards: [six, seven],
+      gameStartedAtMs: 1_700_000_000_000,
+      gameEndedAtMs: null,
+    });
+
+    expect(view.discardCount).toBe(7);
+    expect(view.lastDiscardCards).toEqual([six, seven]);
+    expect(view.gameStartedAtMs).toBe(1_700_000_000_000);
+    expect(view.gameEndedAtMs).toBeNull();
+  });
+
+  it('defaults the discard metadata so older views keep parsing', () => {
+    const view = parsePlayerGameView({ ...sampleView });
+
+    expect(view.discardCount).toBe(0);
+    expect(view.lastDiscardCards).toEqual([]);
+    expect(view.gameStartedAtMs).toBeNull();
+    expect(view.gameEndedAtMs).toBeNull();
+  });
+
+  it('rejects malformed discard cards instead of trusting the payload', () => {
+    expect(() => parsePlayerGameView({ ...sampleView, lastDiscardCards: 'nope' })).toThrow(
+      /lastDiscardCards/,
+    );
+  });
+
+  it('parses a replay payload with per-player views on every frame', () => {
+    const replay = parseGameReplay({
+      gameId: 'g1',
+      moves: [
+        {
+          moveIndex: 1,
+          playerId: 'p0',
+          action: { type: 'initialAttack', cards: [six] },
+          elapsedMs: 1200,
+        },
+      ],
+      frames: [
+        { moveIndex: 0, playerId: null, action: null, elapsedMs: 0, views: { p0: sampleView, p1: sampleView } },
+        {
+          moveIndex: 1,
+          playerId: 'p0',
+          action: { type: 'initialAttack', cards: [six] },
+          elapsedMs: 1200,
+          views: { p0: sampleView },
+        },
+      ],
+    });
+
+    expect(replay.gameId).toBe('g1');
+    expect(replay.moves).toHaveLength(1);
+    expect(replay.moves[0].action.type).toBe('initialAttack');
+    expect(replay.moves[0].elapsedMs).toBe(1200);
+    expect(replay.frames).toHaveLength(2);
+    expect(Object.keys(replay.frames[0].views).sort()).toEqual(['p0', 'p1']);
+    expect(replay.frames[0].views.p0.myHand).toEqual([six]);
+    expect(replay.frames[0].action).toBeNull();
+    expect(replay.frames[0].playerId).toBeNull();
+  });
+
+  it('rejects a replay without frames', () => {
+    expect(() => parseGameReplay({ gameId: 'g1', moves: [] })).toThrow(/frames/);
+  });
+});
 
 describe('PlayerGameView', () => {
   it('parses a sample view payload from the backend', () => {
