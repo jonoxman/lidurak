@@ -1,6 +1,7 @@
 package durak.server
 
 import cats.effect.*
+import cats.effect.std.Semaphore
 import durak.engine.*
 import fs2.concurrent.Topic
 import org.slf4j.LoggerFactory
@@ -8,15 +9,19 @@ import org.slf4j.LoggerFactory
 import scala.concurrent.duration.*
 
 /**
- * A live game: its authoritative state, its broadcast topic, its seats, its
- * turn clock and its bot driver. The clock wakes up for whichever player the
- * game is waiting on and plays a legal move if they do not; the bot driver does
- * the same, sooner and after a human-like pause, for computer-controlled seats.
+ * A live game: its authoritative state, its broadcast topic, its recorded
+ * replay history, its seats, its turn clock and its bot driver. The clock wakes
+ * up for whichever players the game is waiting on and plays legal moves if they
+ * do not; the bot driver does the same, sooner and after a human-like pause, for
+ * computer-controlled seats.
  */
 case class GameRoom(
   gameId: String,
   stateRef: Ref[IO, GameState],
   topic: Topic[IO, GameState],
+  replay: Ref[IO, SerializedGame],
+  // Serialises every submitted move, so a multi-card action applies as one unit.
+  lock: Semaphore[IO],
   playerIds: Vector[String],
   turnSeconds: Int,
   clockStop: Deferred[IO, Unit],
@@ -74,16 +79,22 @@ object GameActor:
   ): IO[GameRoom] =
     IO.delay(GameEngine.createGame(config, playerNames)).flatMap { initialState =>
       nowMs.flatMap { now =>
+        val gameId = GameManager.generateGameId()
         for
           stateRef <- Ref.of[IO, GameState](
             initialState.copy(turnDeadlineMs = now + turnSeconds.toLong * 1000L)
           )
           topic <- Topic[IO, GameState]
+          // The replay starts from the pristine deal, before any move or clock.
+          replay <- Ref.of[IO, SerializedGame](GameReplay.initial(gameId, initialState))
+          lock <- Semaphore[IO](1)
           clockStop <- Deferred[IO, Unit]
           room = GameRoom(
-            gameId = GameManager.generateGameId(),
+            gameId = gameId,
             stateRef = stateRef,
             topic = topic,
+            replay = replay,
+            lock = lock,
             playerIds = initialState.players.map(_.id),
             turnSeconds = turnSeconds,
             clockStop = clockStop,
@@ -97,30 +108,92 @@ object GameActor:
     }
 
   /**
-   * Validates and applies `action` atomically. A rejected action leaves the
-   * stored state untouched; a successful one restarts the turn clock for the
-   * next acting player and publishes the new state to the room's topic.
+   * Validates and applies `action` atomically, one move at a time. A rejected
+   * action leaves the stored state untouched; a successful one stamps the game
+   * timer, restarts the turn clock for the next acting players, appends to the
+   * replay history and publishes the new state to the room's topic.
+   *
+   * A multi-card [[GameAction.ThrowInCards]] is split into a single-card move
+   * per card, so every thrown-in card becomes its own step in the replay.
    */
   def applyAction(room: GameRoom, action: GameAction): IO[Either[String, GameState]] =
-    nowMs.flatMap { now =>
-      room.stateRef
-        .modify { current =>
+    room.lock.permit.use { _ =>
+      nowMs.flatMap { now =>
+        room.stateRef.get.flatMap { current =>
           GameEngine.applyAction(current, action) match
-            case Right(next) =>
-              val clocked = withTurnClock(room, next, now)
-              (clocked, Right(clocked): Either[String, GameState])
             case Left(error) =>
-              (current, Left(error): Either[String, GameState])
+              logRejected(
+                s"Invalid action ${actionType(action)} from player ${actorId(action)}: $error"
+              ).as(Left(error): Either[String, GameState])
+            case Right(_) =>
+              applyPieces(room, atomicPieces(action), now)
         }
-        .flatMap {
-          case Right(next) =>
-            room.topic.publish1(next).void.as(Right(next): Either[String, GameState])
-          case rejected @ Left(error) =>
-            logRejected(
-              s"Invalid action ${actionType(action)} from player ${actorId(action)}: $error"
-            ).as(rejected)
-        }
+      }
     }
+
+  /**
+   * Splits one client action into the atomic moves that get recorded: a
+   * throw-in of several cards becomes one throw-in per card, everything else is
+   * already atomic.
+   */
+  def atomicPieces(action: GameAction): List[GameAction] = action match
+    case GameAction.ThrowInCards(playerId, cards) if cards.size > 1 =>
+      cards.map(card => GameAction.ThrowInCards(playerId, List(card)))
+    case other => List(other)
+
+  /** Applies `pieces` in order, stopping at the first rejected move. */
+  private def applyPieces(
+      room: GameRoom,
+      pieces: List[GameAction],
+      now: Long
+  ): IO[Either[String, GameState]] =
+    def loop(
+        rest: List[GameAction],
+        previous: Option[GameState]
+    ): IO[Either[String, GameState]] =
+      rest match
+        case Nil =>
+          previous match
+            case Some(state) => IO.pure(Right(state))
+            case None        => room.stateRef.get.map(state => Right(state))
+        case piece :: tail =>
+          applyAtomicAction(room, piece, now).flatMap {
+            case Right(next) => loop(tail, Some(next))
+            case rejected    => IO.pure(rejected)
+          }
+
+    loop(pieces, None)
+
+  /**
+   * Applies one atomic move under the room's lock: the overall timer and the
+   * turn clock are stamped on the new state, the move joins the replay history,
+   * and the result is published to every subscriber.
+   */
+  private def applyAtomicAction(
+      room: GameRoom,
+      action: GameAction,
+      now: Long
+  ): IO[Either[String, GameState]] =
+    room.stateRef
+      .modify { current =>
+        GameEngine.applyAction(current, action) match
+          case Right(next) =>
+            val timed = withGameTimers(current, next, now)
+            val clocked = withTurnClock(room, timed, now)
+            (clocked, Right(clocked): Either[String, GameState])
+          case Left(error) =>
+            (current, Left(error): Either[String, GameState])
+      }
+      .flatMap {
+        case Right(next) =>
+          room.replay
+            .update(replay => GameReplay.appendMove(replay, action, next, now)) *>
+            room.topic.publish1(next).void.as(Right(next): Either[String, GameState])
+        case rejected @ Left(error) =>
+          logRejected(
+            s"Invalid action ${actionType(action)} from player ${actorId(action)}: $error"
+          ).as(rejected)
+      }
 
   /** The seat that issued `action`. */
   def actorId(action: GameAction): String = GameEngine.actorId(action)
@@ -165,6 +238,16 @@ object GameActor:
     else state.copy(turnDeadlineMs = nowMs + room.turnSeconds.toLong * 1000L)
 
   /**
+   * Stamps the overall game clock: it starts with the first move and keeps that
+   * start time on every later move, while the end time is frozen as soon as a
+   * move reaches [[BoutPhase.GameOver]].
+   */
+  private def withGameTimers(previous: GameState, next: GameState, nowMs: Long): GameState =
+    val startedAt = next.gameStartedAtMs.orElse(previous.gameStartedAtMs).orElse(Some(nowMs))
+    val endedAt = next.gameEndedAtMs.orElse(Option.when(next.isGameOver)(nowMs))
+    next.copy(gameStartedAtMs = startedAt, gameEndedAtMs = endedAt)
+
+  /**
    * Watches the acting player's deadline in short slices, so a state change
    * (including a defender becoming defenseless) is picked up promptly. Once the
    * effective deadline passes, one legal move is played on their behalf.
@@ -205,20 +288,60 @@ object GameActor:
       val turnStartMs = state.turnDeadlineMs - room.turnSeconds.toLong * 1000L
       Math.min(state.turnDeadlineMs, turnStartMs + DefenselessGraceSeconds.toLong * 1000L)
 
-  /** Plays one move for the clocked player; returns whether an action was applied. */
+  /**
+   * Plays every move the expired clock owes: one auto-action for the seat it
+   * was waiting on, or a `PassTurn` for every throw-in player who is still on
+   * the clock, so a bout never stalls with several throwers waiting.
+   * Returns whether at least one move was applied.
+   */
   private def autoPlay(room: GameRoom, state: GameState): IO[Boolean] =
-    state.turnPlayerId match
-      case None => IO.pure(false)
-      case Some(playerId) =>
-        autoActionFor(state, playerId) match
-          case None => IO.pure(false)
-          case Some(action) =>
+    val actions = autoActionsFor(state)
+    if actions.isEmpty then IO.pure(false)
+    else
+      def play(rest: List[GameAction], played: Boolean): IO[Boolean] =
+        rest match
+          case Nil => IO.pure(played)
+          case action :: tail =>
             IO.delay(
               logger.info(
                 s"Turn clock expired in game ${room.gameId}: auto-playing " +
-                  s"${actionType(action)} for $playerId"
+                  s"${actionType(action)} for ${actorId(action)}"
               )
-            ).void *> applyAction(room, action).as(true)
+            ).void *> applyAction(room, action).flatMap {
+              case Right(_) => play(tail, true)
+              // The bout moved on (or the move was refused): stop here.
+              case Left(_)  => IO.pure(played)
+            }
+
+      play(actions, false)
+
+  /** The moves the server plays when the clock of `state`'s prompted seats expires. */
+  private def autoActionsFor(state: GameState): List[GameAction] =
+    val prompted = state.promptedPlayerIds
+    if state.isThrowInPhase then
+      val passes = state.players
+        .filter(player => prompted.contains(player.id))
+        .map(player => GameAction.PassTurn(player.id))
+        .toList
+      if passes.nonEmpty then passes else settlingPassFor(state).toList
+    else
+      state.players
+        .filter(player => prompted.contains(player.id))
+        .flatMap(player => autoActionFor(state, player.id))
+        .toList
+
+  /**
+   * A surrender can auto-pass every thrower at once, which leaves nobody on the
+   * clock while the bout still needs one settling pass. The engine accepts that
+   * pass from any active non-defender, so send it for the first one.
+   */
+  private def settlingPassFor(state: GameState): Option[GameAction] =
+    state.players.zipWithIndex
+      .collectFirst {
+        case (player, idx) if idx != state.defenderIdx && player.isActive =>
+          GameAction.PassTurn(player.id)
+      }
+      .filter(action => GameEngine.applyAction(state, action).isRight)
 
   /**
    * The move the server plays on expiry: surrender when the defender is

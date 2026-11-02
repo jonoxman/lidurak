@@ -459,6 +459,10 @@ object GameEngine:
    * defense or handing it to a surrendering defender), refills hands in draw
    * order, applies the endgame rules, and — while the game goes on — rotates
    * the roles and opens the next bout's initial attack.
+   *
+   * A successful defense appends the bout to `discardPile` and publishes it as
+   * `lastDiscardCards`; a surrender hands the cards to the defender instead, so
+   * both the pile and the last visible discard stay untouched.
    */
   private def resolveBout(state: GameState): GameState =
     val surrendered = state.boutPhase == BoutPhase.SurrenderThrowIn
@@ -473,7 +477,13 @@ object GameEngine:
           tablePairs = Vector.empty
         )
       else
-        state.copy(tablePairs = Vector.empty, discardPile = state.discardPile ++ tableCards)
+        // A successful defense discards the whole bout and makes those cards the
+        // publicly visible discard, while the pile also keeps every earlier bout.
+        state.copy(
+          tablePairs = Vector.empty,
+          discardPile = state.discardPile ++ tableCards,
+          lastDiscardCards = tableCards
+        )
 
     val drawn = drawHands(afterTable, includeDefender = !surrendered)
     val cleared = drawn.copy(players = drawn.players.map(_.copy(hasPassed = false)))
