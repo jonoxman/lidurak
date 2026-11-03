@@ -65,6 +65,18 @@ export const CARD_BACK_LABELS: Record<CardBackPattern, string> = {
 
 export const DEFAULT_CARD_BACK_PATTERN: CardBackPattern = 'classic-hatch';
 
+/** SVG card frame corner radius (viewBox units) at the default roundness of 8. */
+export const SVG_CARD_CORNER_RADIUS = 6;
+
+/**
+ * ITEM-NEW-1b: maps the global Roundness setting (`0`–`16px`) onto the card
+ * SVG's `70x100` viewBox, yielding `0` at `0px`, `6` at the default `8px` and
+ * `12` at `16px`, so moving the Theme menu slider reshapes every card.
+ */
+export function svgCornerRadius(roundness: number): number {
+  return Math.round((roundness / 8) * SVG_CARD_CORNER_RADIUS * 10) / 10;
+}
+
 export interface CardBackProps {
   class?: string;
   /** Which design fills the back; defaults to the user's saved preference. */
@@ -389,6 +401,10 @@ export function CardBack({ class: className, pattern }: CardBackProps) {
   // header setting reaches every face-down card in the app.
   const settings = useSettings();
   const activePattern = pattern ?? settings.cardBack;
+  // Both the outer frame and the inner decorative border follow the slider.
+  const svgCorner = svgCornerRadius(settings.roundness);
+  const innerCorner = Math.max(0, svgCorner - 1.5);
+  const roundness = String(settings.roundness);
   const id = `card-back-${activePattern}`;
   const gradientId = `${id}-gradient`;
   const design = COLORFUL_DESIGNS[activePattern];
@@ -401,13 +417,15 @@ export function CardBack({ class: className, pattern }: CardBackProps) {
 
   return (
     <svg
-      class={`playing-card card-back${className ? ` ${className}` : ''}`}
+      class={`playing-card card-back playing-card-back${className ? ` ${className}` : ''}`}
       viewBox="0 0 70 100"
       role="img"
       aria-label="Card back"
       data-pattern={activePattern}
       data-colorful={design ? 'true' : 'false'}
       data-card-back-theme={design ? undefined : theme}
+      data-roundness={roundness}
+      style={{ borderRadius: 'var(--app-roundness, 8px)' }}
     >
       <defs>
         {design ? (
@@ -428,8 +446,8 @@ export function CardBack({ class: className, pattern }: CardBackProps) {
         y="1"
         width="68"
         height="98"
-        rx="6"
-        ry="6"
+        rx={svgCorner}
+        ry={svgCorner}
         fill={frame}
         stroke={ink}
         stroke-width={2}
@@ -440,8 +458,8 @@ export function CardBack({ class: className, pattern }: CardBackProps) {
         y="6"
         width="58"
         height="88"
-        rx="4"
-        ry="4"
+        rx={innerCorner}
+        ry={innerCorner}
         fill={design ? `url(#${gradientId})` : `url(#${id})`}
         stroke={design ? design.accent : palette.border}
         stroke-width={1}
@@ -453,8 +471,8 @@ export function CardBack({ class: className, pattern }: CardBackProps) {
           y="6"
           width="58"
           height="88"
-          rx="4"
-          ry="4"
+          rx={innerCorner}
+          ry={innerCorner}
           fill={`url(#${id})`}
           opacity="0.6"
         />

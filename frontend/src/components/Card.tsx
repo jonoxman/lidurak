@@ -5,7 +5,7 @@ import {
   useSettings,
   type ThemeMode,
 } from '../state/settings';
-import { CardBack } from './CardBack';
+import { CardBack, svgCornerRadius } from './CardBack';
 
 export interface CardData {
   suit: string;
@@ -53,6 +53,17 @@ const RANK_LABELS: Record<string, string> = {
 
 /** Cards whose centerpiece is a letter rather than repeating pips. */
 const FACE_RANKS = new Set(['jack', 'queen', 'king']);
+
+/**
+ * ITEM-NEW-3: classic, ornate serif for every rank number and letter drawn on
+ * a card sprite. The stack degrades through the serif faces that ship with
+ * Windows, macOS and Linux before falling back to the generic serif family.
+ */
+export const CARD_SERIF_FONT_FAMILY =
+  "'Cinzel', 'Playfair Display', 'Georgia', 'Times New Roman', 'Palatino Linotype', 'Book Antiqua', serif";
+
+/** The inline card wrappers follow the global Roundness setting. */
+export const CARD_BORDER_RADIUS = 'var(--app-roundness, 8px)';
 
 /**
  * Corner index geometry inside the `70x100` viewBox. The top-left index sits in
@@ -312,6 +323,10 @@ export function Card({
   const settings = useSettings();
   const theme = useCardFrontTheme(settings.theme);
   const palette = cardFrontPalette(theme);
+  // ITEM-NEW-1b: the Roundness slider drives both the SVG frame corners and
+  // the HTML wrapper, so every face-up card reshapes with the theme menu.
+  const svgCorner = svgCornerRadius(settings.roundness);
+  const roundness = String(settings.roundness);
 
   const classes = ['card-slot'];
   if (selected) classes.push('selected');
@@ -324,6 +339,8 @@ export function Card({
       <div
         class={classes.join(' ')}
         data-selected={selected ? 'true' : 'false'}
+        data-roundness={roundness}
+        style={{ borderRadius: CARD_BORDER_RADIUS }}
         onClick={onClick}
         onDblClick={onDoubleClick}
       >
@@ -350,6 +367,8 @@ export function Card({
       data-suit={suit.toLowerCase()}
       data-rank={rank.toLowerCase()}
       data-card-theme={theme}
+      data-roundness={roundness}
+      style={{ borderRadius: CARD_BORDER_RADIUS }}
       onClick={onClick}
       onDblClick={onDoubleClick}
       draggable={draggable}
@@ -363,6 +382,8 @@ export function Card({
         aria-label={`${rank} of ${suit}`}
         data-card-theme={theme}
         data-card-face={palette.face}
+        data-roundness={roundness}
+        style={{ borderRadius: CARD_BORDER_RADIUS }}
       >
         {/* Card face: the surface the pips are drawn on. */}
         <rect
@@ -370,8 +391,8 @@ export function Card({
           y="1"
           width="68"
           height="98"
-          rx="6"
-          ry="6"
+          rx={svgCorner}
+          ry={svgCorner}
           fill={palette.face}
           stroke={palette.border}
           stroke-width={1.5}
@@ -379,10 +400,13 @@ export function Card({
 
         {/* Top-left index, kept inside its own narrow corner band. */}
         <text
+          class="card-rank-index"
           data-index="top-rank"
+          data-font-style="serif"
           x={CARD_INDEX.topRank.x}
           y={CARD_INDEX.topRank.y}
           font-size={CARD_INDEX.topRank.fontSize}
+          font-family={CARD_SERIF_FONT_FAMILY}
           font-weight={700}
           fill={color}
         >
@@ -456,10 +480,13 @@ export function Card({
               );
             })}
             <text
+              class="card-face-letter"
               data-pip="face"
+              data-font-style="serif"
               x="35"
               y="50"
               font-size={30}
+              font-family={CARD_SERIF_FONT_FAMILY}
               font-weight={700}
               text-anchor="middle"
               dominant-baseline="central"
@@ -490,10 +517,13 @@ export function Card({
 
         {/* Bottom-right index, rotated 180 degrees by the reading direction. */}
         <text
+          class="card-rank-index"
           data-index="bottom-rank"
+          data-font-style="serif"
           x={CARD_INDEX.bottomRank.x}
           y={CARD_INDEX.bottomRank.y}
           font-size={CARD_INDEX.bottomRank.fontSize}
+          font-family={CARD_SERIF_FONT_FAMILY}
           font-weight={700}
           text-anchor="end"
           fill={color}
