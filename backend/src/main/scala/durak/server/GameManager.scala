@@ -74,6 +74,7 @@ object GameManager:
     P3pRedirectBob,
     Chaos4p,
     SurrenderHalfOff,
+    DefenselessSurrender,
     DiscardAndEndgame
   )
 
@@ -86,6 +87,9 @@ object GameManager:
   /** Bob has surrendered and Alice is being asked to throw in or pass. */
   val SurrenderHalfOff: String = "surrender-half-off"
 
+  /** Bob on defense with no legal cover or redirect: the client auto-surrenders. */
+  val DefenselessSurrender: String = "defenseless-surrender"
+
   /** Empty talon, Carol already out, Alice's last card about to make Bob Durak. */
   val DiscardAndEndgame: String = "discard-and-endgame"
 
@@ -95,6 +99,7 @@ object GameManager:
       case P3pRedirectBob     => Right(redirectBobPreset)
       case Chaos4p            => Right(chaos4pPreset)
       case SurrenderHalfOff    => Right(surrenderHalfOffPreset)
+      case DefenselessSurrender => Right(defenselessSurrenderPreset)
       case DiscardAndEndgame  => Right(discardAndEndgamePreset)
       case other =>
         Left(
@@ -332,6 +337,83 @@ object GameManager:
         boutPhase = BoutPhase.Defense,
         // Bob's hand held six cards when Alice opened the bout, so the bout can
         // still grow past the three cards already on the table.
+        defenderInitialHandSize = 6,
+        discardPile = Vector(
+          card(Rank.Ace, Suit.Diamonds),
+          card(Rank.King, Suit.Diamonds),
+          card(Rank.Queen, Suit.Diamonds),
+          card(Rank.Jack, Suit.Diamonds),
+          card(Rank.Ten, Suit.Diamonds),
+          card(Rank.Nine, Suit.Diamonds),
+          card(Rank.Eight, Suit.Diamonds)
+        ),
+        lastDiscardCards = Vector(
+          card(Rank.Nine, Suit.Diamonds),
+          card(Rank.Eight, Suit.Diamonds)
+        )
+      ),
+      defaultPlayerId = "p1"
+    )
+
+  /**
+   * `defenseless-surrender` (T-90 ITEM-PREV-4a): Bob (`p1`, `defaultPlayerId`) is
+   * defending Alice's (`p0`) `J♠` with `9♠` — the same suit but a lower rank —
+   * and every other card in his hand is an off-suit non-trump, so he has no
+   * legal cover. The two covered pairs rule out a redirect, which leaves
+   * `surrender` as his only legal action: the view reports
+   * `defenderDefenseless = true` and the client's `CLIENT_AUTO_SURRENDER_DELAY_MS`
+   * timer counts `3 → 2 → 1` on the `Surrender` button before it declares the
+   * surrender for him. The position keeps the 36-card conservation invariant
+   * (hands 18 + table 5 + talon 6 + discard 7).
+   */
+  private def defenselessSurrenderPreset: PresetGame =
+    PresetGame(
+      state = presetState(
+        names = Vector("Alice", "Bob", "Carol"),
+        hands = Vector(
+          Vector(
+            card(Rank.Seven, Suit.Hearts),
+            card(Rank.Six, Suit.Clubs),
+            card(Rank.Eight, Suit.Clubs),
+            card(Rank.Nine, Suit.Clubs),
+            card(Rank.Queen, Suit.Clubs),
+            card(Rank.King, Suit.Clubs)
+          ),
+          Vector(
+            card(Rank.Nine, Suit.Spades),
+            card(Rank.Six, Suit.Hearts),
+            card(Rank.Eight, Suit.Hearts),
+            card(Rank.Nine, Suit.Hearts),
+            card(Rank.Ten, Suit.Hearts),
+            card(Rank.Jack, Suit.Hearts)
+          ),
+          Vector(
+            card(Rank.Six, Suit.Spades),
+            card(Rank.Eight, Suit.Spades),
+            card(Rank.Ten, Suit.Spades),
+            card(Rank.Seven, Suit.Spades),
+            card(Rank.Ace, Suit.Spades),
+            card(Rank.Six, Suit.Diamonds)
+          )
+        ),
+        talon = Vector(
+          card(Rank.Seven, Suit.Clubs),
+          card(Rank.Ace, Suit.Clubs),
+          card(Rank.Queen, Suit.Hearts),
+          card(Rank.King, Suit.Hearts),
+          card(Rank.Ace, Suit.Hearts),
+          card(Rank.Seven, Suit.Diamonds)
+        ),
+        trumpSuit = Suit.Diamonds,
+        bottomTrumpCard = Some(card(Rank.Seven, Suit.Diamonds)),
+        tablePairs = Vector(
+          TablePair(card(Rank.Jack, Suit.Spades)),
+          TablePair(card(Rank.Ten, Suit.Clubs), Some(card(Rank.Jack, Suit.Clubs))),
+          TablePair(card(Rank.Queen, Suit.Spades), Some(card(Rank.King, Suit.Spades)))
+        ),
+        attackerIdx = 0,
+        defenderIdx = 1,
+        boutPhase = BoutPhase.Defense,
         defenderInitialHandSize = 6,
         discardPile = Vector(
           card(Rank.Ace, Suit.Diamonds),

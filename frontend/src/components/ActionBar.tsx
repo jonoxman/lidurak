@@ -51,16 +51,21 @@ export function ActionBar({
           key={button.action}
           type="button"
           class={`action-button ${button.variant}`}
+          data-testid={`${button.action}-button`}
           onClick={() => onAction({ type: button.type })}
         >
-          {button.label}
+          <span class="action-label">{button.label}</span>
           {button.action === 'pass' && passCountdownActive ? (
-            <span class="surrender-countdown" data-testid="pass-countdown">
+            <span class="surrender-countdown" data-testid="pass-countdown" aria-hidden="true">
               {passCountdownSeconds}
             </span>
           ) : null}
-          {button.action === 'surrender' && surrenderSeconds != null ? (
-            <span class="surrender-countdown" data-testid="surrender-countdown">
+          {button.action === 'surrender' && surrenderSeconds != null && surrenderSeconds > 0 ? (
+            <span
+              class="surrender-countdown"
+              data-testid="surrender-countdown"
+              aria-hidden="true"
+            >
               {surrenderSeconds}
             </span>
           ) : null}

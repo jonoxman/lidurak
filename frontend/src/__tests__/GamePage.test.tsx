@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/preact';
 import type { PlayerGameView } from '../types';
 
@@ -803,7 +803,7 @@ describe('GamePage', () => {
     expect(lifted[0].getAttribute('data-rank')).toBe('ace');
   });
 
-  it('renders the Surrender button on a defense state without auto-dispatching it', async () => {
+  it('renders a clickable Surrender button with a 3-second countdown and no instant dispatch', async () => {
     const hopelessView: PlayerGameView = {
       ...view,
       myHand: [{ suit: 'clubs', rank: 'two' }],
@@ -818,12 +818,15 @@ describe('GamePage', () => {
 
     render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
 
-    // ITEM-ADD-4a: the Surrender button is on screen and clickable as soon as a
-    // defense state with `surrender` in legalActions loads.
-    await waitFor(() => expect(screen.getByText('Surrender')).toBeTruthy());
+    // T-90 ITEM-PREV-4a: the Surrender button is on screen, enabled and
+    // clickable as soon as the defenseless defense loads.
+    await waitFor(() => expect(screen.getByTestId('surrender-button')).toBeTruthy());
     expect(screen.getByRole('button', { name: 'Surrender' })).toBeTruthy();
-    // ...and the client never arms a surrender timer that would remove it.
-    expect(screen.queryByTestId('surrender-countdown')).toBeNull();
+    expect(screen.getByTestId('surrender-button').hasAttribute('disabled')).toBe(false);
+    await waitFor(() =>
+      expect(screen.getByTestId('surrender-countdown').textContent).toBe('3'),
+    );
+    // ...and nothing is dispatched during the grace window.
     await new Promise((resolve) => setTimeout(resolve, 350));
     expect(sendAction).not.toHaveBeenCalled();
   });
@@ -848,8 +851,8 @@ describe('GamePage', () => {
 
     render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
 
-    await waitFor(() => expect(screen.getByText('Surrender')).toBeTruthy());
-    fireEvent.click(screen.getByRole('button', { name: 'Surrender' }));
+    await waitFor(() => expect(screen.getByTestId('surrender-button')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('surrender-button'));
 
     await waitFor(() => expect(sendAction).toHaveBeenCalledTimes(1));
     // No cloud of duplicate surrenders arrives after the click.
@@ -1119,7 +1122,9 @@ describe('GamePage', () => {
       attackerIdx: 0,
       defenderIdx: 1,
       boutPhase: 'defense',
-      legalActions: ['pass'],
+      // A legal throw-in keeps the client 1-second auto-pass disarmed, so the
+      // badge shows the server's own throw-in clock instead of `1`.
+      legalActions: ['pass', 'throwIn'],
       turnDeadlineMs: Date.now() + 12_000,
       turnSecondsRemaining: 12,
       turnPlayerId: 'p0',
@@ -2133,6 +2138,7 @@ describe('GamePage', () => {
       '3P Redirect (Bob POV)',
       '4P Chaos Targets',
       'Surrender Half-Off',
+      'Defenseless Auto-Surrender',
       'Discard & Endgame Durak',
     ]) {
       expect(within(panel).getByRole('button', { name: label })).toBeTruthy();
@@ -2142,5 +2148,205 @@ describe('GamePage', () => {
 
     await waitFor(() => expect(createPresetGameMock).toHaveBeenCalledWith('3p-redirect-bob'));
     await waitFor(() => expect(onNavigateGame).toHaveBeenCalledWith('preset-1', 'p1'));
+  });
+});
+
+/**
+ * T-90 ITEM-PREV-4a / ITEM-PREV-4b: the client-side auto-surrender (3 s) and
+ * auto-pass (1 s) delays, measured with fake timers.
+ */
+describe('GamePage client auto-surrender and auto-pass delays', () => {
+  const flush = async () => {
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  };
+
+  const renderGame = async (initialView: PlayerGameView) => {
+    getGameView.mockResolvedValue(initialView);
+    getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+    await flush();
+    await flush();
+  };
+
+  // A human defender facing an uncovered attack with no cover and no redirect.
+  const defenselessView: PlayerGameView = {
+    ...view,
+    myHand: [{ suit: 'clubs', rank: 'two' }],
+    tablePairs: [{ attack: { suit: 'spades', rank: 'six' }, defense: null }],
+    attackerIdx: 1,
+    defenderIdx: 0,
+    boutPhase: 'defense',
+    legalActions: ['surrender'],
+    defenderDefenseless: true,
+  };
+
+  // A human thrower in the surrender throw-in with no matching card to throw.
+  const autoPassView: PlayerGameView = {
+    ...view,
+    myHand: [{ suit: 'clubs', rank: 'two' }],
+    tablePairs: [
+      { attack: { suit: 'spades', rank: 'six' }, defense: { suit: 'hearts', rank: 'seven' } },
+    ],
+    attackerIdx: 0,
+    defenderIdx: 1,
+    boutPhase: 'surrenderThrowIn',
+    legalActions: ['pass'],
+    myHasPassed: false,
+  };
+
+  beforeEach(() => {
+    getGameView.mockReset();
+    getGameReplay.mockReset();
+    sendAction.mockReset();
+    createGameMock.mockReset();
+    createPresetGameMock.mockReset();
+    wsState.onUpdate = null;
+    wsState.presence = [];
+    Object.values(audio).forEach((spy) => spy.mockClear());
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('keeps Surrender clickable for 3 seconds and only then dispatches DeclareSurrender', async () => {
+    sendAction.mockResolvedValue({
+      ...defenselessView,
+      boutPhase: 'surrenderThrowIn',
+      legalActions: [],
+    });
+
+    await renderGame(defenselessView);
+
+    // The button is on screen, enabled and counting down from 3 immediately.
+    expect(screen.getByTestId('surrender-button').hasAttribute('disabled')).toBe(false);
+    expect(screen.getByTestId('surrender-countdown').textContent).toBe('3');
+
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    expect(sendAction).not.toHaveBeenCalled();
+
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(sendAction).not.toHaveBeenCalled();
+    expect(screen.getByTestId('surrender-countdown').textContent).toBe('2');
+
+    act(() => {
+      vi.advanceTimersByTime(1999);
+    });
+    expect(sendAction).not.toHaveBeenCalled();
+    expect(screen.getByTestId('surrender-countdown').textContent).toBe('1');
+
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(sendAction).toHaveBeenCalledTimes(1);
+    expect(sendAction).toHaveBeenCalledWith('game-1', {
+      type: 'declareSurrender',
+      playerId: 'p0',
+    });
+  });
+
+  it('dispatches exactly one surrender when the defender clicks inside the grace window', async () => {
+    sendAction.mockResolvedValue({
+      ...defenselessView,
+      boutPhase: 'surrenderThrowIn',
+      legalActions: [],
+    });
+
+    await renderGame(defenselessView);
+
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+    fireEvent.click(screen.getByTestId('surrender-button'));
+
+    expect(sendAction).toHaveBeenCalledTimes(1);
+    expect(sendAction).toHaveBeenCalledWith('game-1', {
+      type: 'declareSurrender',
+      playerId: 'p0',
+    });
+
+    // The armed 3-second timer was cancelled, so no duplicate ever arrives.
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(sendAction).toHaveBeenCalledTimes(1);
+  });
+
+  it('never auto-surrenders a defender who still has a legal cover', async () => {
+    const coverView: PlayerGameView = {
+      ...defenselessView,
+      myHand: [{ suit: 'spades', rank: 'nine' }],
+      legalActions: ['cover', 'surrender'],
+      defenderDefenseless: false,
+    };
+
+    await renderGame(coverView);
+
+    expect(screen.getByTestId('surrender-button').hasAttribute('disabled')).toBe(false);
+    expect(screen.queryByTestId('surrender-countdown')).toBeNull();
+
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(sendAction).not.toHaveBeenCalled();
+  });
+
+  it('waits a full second before auto-passing a thrower with no legal throw-in', async () => {
+    sendAction.mockResolvedValue({ ...autoPassView, myHasPassed: true });
+
+    await renderGame(autoPassView);
+
+    expect(screen.getByTestId('pass-button')).toBeTruthy();
+    expect(screen.getByTestId('pass-countdown').textContent).toBe('1');
+
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    expect(sendAction).not.toHaveBeenCalled();
+
+    act(() => {
+      vi.advanceTimersByTime(900);
+    });
+    expect(sendAction).not.toHaveBeenCalled();
+
+    act(() => {
+      vi.advanceTimersByTime(100);
+    });
+    expect(sendAction).toHaveBeenCalledTimes(1);
+    expect(sendAction).toHaveBeenCalledWith('game-1', {
+      type: 'passTurn',
+      playerId: 'p0',
+    });
+  });
+
+  it('dispatches exactly one PassTurn when the thrower clicks Pass inside the grace window', async () => {
+    sendAction.mockResolvedValue({ ...autoPassView, myHasPassed: true });
+
+    await renderGame(autoPassView);
+
+    act(() => {
+      vi.advanceTimersByTime(400);
+    });
+    fireEvent.click(screen.getByTestId('pass-button'));
+
+    expect(sendAction).toHaveBeenCalledTimes(1);
+    expect(sendAction).toHaveBeenCalledWith('game-1', {
+      type: 'passTurn',
+      playerId: 'p0',
+    });
+
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
+    expect(sendAction).toHaveBeenCalledTimes(1);
   });
 });
