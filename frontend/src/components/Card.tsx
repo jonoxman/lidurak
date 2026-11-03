@@ -74,110 +74,159 @@ export const CARD_CORNER_FONT_FAMILY =
 export const CARD_BORDER_RADIUS = 'var(--app-roundness, 8px)';
 
 /**
- * Corner index geometry inside the `70x100` viewBox. The top-left index sits in
- * a narrow band that ends at `y = 21` (rank) and `y = 34` (suit), which keeps the
- * two-digit `"10"` index clear of every pip row. The bottom-right index mirrors
- * it in the opposite corner. The renderer and the layout below both read these
- * constants, so the pip tables can never drift out of the reserved corners.
+ * Corner index geometry inside the `70x100` viewBox (T-90 ITEM-3a).
+ *
+ * The rank number/letter and its suit pip now share **one horizontal centre
+ * axis** (`x = 11.5` in the top-left corner, mirrored at `70 - 11.5 = 58.5` in
+ * the bottom-right corner) and both are drawn with `text-anchor="middle"`, so
+ * the suit sits exactly centred beneath the rank on every rank — including the
+ * two-character `"10"` and the single-character `2`–`9`, `J`, `Q`, `K`, `A`.
+ *
+ * The corner suit pip grew from `10` to `12` viewBox units (clearly readable at
+ * standard table zoom) and keeps `y = 34` (top) / `y = 82` (bottom), so the rank
+ * band still ends at `y = 21` and the pip rows below start at `y = 34`. The pip
+ * columns (`PIP_COLUMNS`) start far enough to the right of that `x = 11.5` axis
+ * that the wider two-digit `"10"` and the enlarged suit glyph never touch a pip.
  */
 export const CARD_INDEX = {
-  topRank: { x: 5, y: 21, fontSize: 15 },
-  topSuit: { x: 4, y: 34, fontSize: 10 },
-  bottomRank: { x: 65, y: 95, fontSize: 15 },
-  bottomSuit: { x: 65, y: 82, fontSize: 10 },
+  topRank: { x: 11.5, y: 21, fontSize: 15 },
+  topSuit: { x: 11.5, y: 34, fontSize: 12 },
+  bottomRank: { x: 58.5, y: 96, fontSize: 15 },
+  bottomSuit: { x: 58.5, y: 82, fontSize: 12 },
 } as const;
 
 /**
- * Pip glyph size. Small enough that a two-column layout plus the centre column
- * all fit between the corner indices, large enough to read on an 80px card.
+ * Pip glyph size (T-90 ITEM-3b): raised from `12` to `13` so the numbered-card
+ * face pips read a little larger, while the tightened columns and rows below
+ * keep every one of them clear of the corner indices, the trump badge and each
+ * other.
  */
-export const PIP_FONT_SIZE = 12;
+export const PIP_FONT_SIZE = 13;
 
-/** Centrepiece of an ace, sized to stay clear of the corner indices. */
-export const ACE_PIP = { x: 35, y: 58, fontSize: 40 } as const;
+/**
+ * Horizontal centre lines of the numbered-card pip grid. The columns sit
+ * slightly inward of the old `22`/`35`/`48` grid — `23.5`, `36`, `48.5` — so the
+ * larger 13pt glyphs still fit between the corner index band on the left and the
+ * trump badge on the right without touching each other.
+ */
+export const PIP_COLUMNS = { left: 23.5, center: 36, right: 48.5 } as const;
+
+/**
+ * Vertical centre lines of the numbered-card pip grid: rows from `y = 34` (just
+ * below the corner rank band and level with the corner suit glyph) down to
+ * `y = 70`, which clears the bottom-right corner index that starts at `y = 82`.
+ */
+export const PIP_ROWS = { top: 34, middle: 52, bottom: 70 } as const;
+
+/**
+ * The rectangle every numbered-card face pip is laid out inside. The ticket's
+ * geometry tests assert each pip centre sits on (or within) these bounds, and
+ * that the bounds stay tighter than the previous `y = 33`–`78` grid even though
+ * the glyphs are now larger.
+ */
+export const PIP_LAYOUT_BOUNDS = {
+  minX: PIP_COLUMNS.left,
+  maxX: PIP_COLUMNS.right,
+  minY: PIP_ROWS.top,
+  maxY: PIP_ROWS.bottom,
+} as const;
+
+/**
+ * Centrepiece of an ace. Nudged two units right of the exact card centre so the
+ * 40pt ornate pip clears the enlarged 12pt corner suit glyph in the top-left
+ * corner.
+ */
+export const ACE_PIP = { x: 37, y: 58, fontSize: 40 } as const;
 
 /** Golden corner badge on a trump card. */
 export const TRUMP_BADGE = { cx: 61, cy: 10, r: 6 } as const;
 
 /**
- * Standard pip arrangements inside the 70x100 viewBox: columns at `x = 22` and
- * `x = 48` (each pip glyph spans 11.4 units, so the columns and the `x = 35`
- * centre column never touch) with rows from `y = 33` to `y = 78`. The first row
- * starts below the corner index band, which is what keeps the wide `"10"` rank
- * text and the corner suit glyph free of pips.
+ * Standard pip arrangements inside the 70x100 viewBox (T-90 ITEM-3b): the three
+ * columns from `PIP_COLUMNS` (`23.5` / `36` / `48.5`) and rows from `y = 34` to
+ * `y = 70`. Every glyph is 13pt (12.35 units wide, 11.05 tall), so adjacent
+ * columns and rows stay strictly disjoint: the side columns span
+ * `17.325`–`29.675` and `42.325`–`54.675` while the centre column spans
+ * `29.825`–`42.175`, and the rows are 12 units apart — more than one glyph
+ * height. The first row starts below the corner rank band, and the last row
+ * ends above the bottom-right corner index, so the enlarged `"10"` rank text
+ * and the enlarged corner suit glyph are never touched.
  */
+const { left: LEFT, center: CENTER, right: RIGHT } = PIP_COLUMNS;
+const { top: TOP, middle: MIDDLE, bottom: BOTTOM } = PIP_ROWS;
+
 const PIP_LAYOUTS: Record<string, ReadonlyArray<{ x: number; y: number }>> = {
   two: [
-    { x: 35, y: 40 },
-    { x: 35, y: 71 },
+    { x: CENTER, y: TOP },
+    { x: CENTER, y: BOTTOM },
   ],
   three: [
-    { x: 35, y: 33 },
-    { x: 35, y: 55 },
-    { x: 35, y: 78 },
+    { x: CENTER, y: TOP },
+    { x: CENTER, y: MIDDLE },
+    { x: CENTER, y: BOTTOM },
   ],
   four: [
-    { x: 22, y: 33 },
-    { x: 48, y: 33 },
-    { x: 22, y: 78 },
-    { x: 48, y: 78 },
+    { x: LEFT, y: TOP },
+    { x: RIGHT, y: TOP },
+    { x: LEFT, y: BOTTOM },
+    { x: RIGHT, y: BOTTOM },
   ],
   five: [
-    { x: 22, y: 33 },
-    { x: 48, y: 33 },
-    { x: 22, y: 78 },
-    { x: 48, y: 78 },
-    { x: 35, y: 55 },
+    { x: LEFT, y: TOP },
+    { x: RIGHT, y: TOP },
+    { x: LEFT, y: BOTTOM },
+    { x: RIGHT, y: BOTTOM },
+    { x: CENTER, y: MIDDLE },
   ],
   six: [
-    { x: 22, y: 33 },
-    { x: 48, y: 33 },
-    { x: 22, y: 55 },
-    { x: 48, y: 55 },
-    { x: 22, y: 78 },
-    { x: 48, y: 78 },
+    { x: LEFT, y: TOP },
+    { x: RIGHT, y: TOP },
+    { x: LEFT, y: MIDDLE },
+    { x: RIGHT, y: MIDDLE },
+    { x: LEFT, y: BOTTOM },
+    { x: RIGHT, y: BOTTOM },
   ],
   seven: [
-    { x: 22, y: 33 },
-    { x: 48, y: 33 },
-    { x: 22, y: 55 },
-    { x: 48, y: 55 },
-    { x: 22, y: 78 },
-    { x: 48, y: 78 },
-    { x: 35, y: 55 },
+    { x: LEFT, y: TOP },
+    { x: RIGHT, y: TOP },
+    { x: LEFT, y: MIDDLE },
+    { x: RIGHT, y: MIDDLE },
+    { x: LEFT, y: BOTTOM },
+    { x: RIGHT, y: BOTTOM },
+    { x: CENTER, y: 43 },
   ],
   eight: [
-    { x: 22, y: 33 },
-    { x: 48, y: 33 },
-    { x: 22, y: 55 },
-    { x: 48, y: 55 },
-    { x: 22, y: 78 },
-    { x: 48, y: 78 },
-    { x: 35, y: 40 },
-    { x: 35, y: 71 },
+    { x: LEFT, y: TOP },
+    { x: RIGHT, y: TOP },
+    { x: LEFT, y: MIDDLE },
+    { x: RIGHT, y: MIDDLE },
+    { x: LEFT, y: BOTTOM },
+    { x: RIGHT, y: BOTTOM },
+    { x: CENTER, y: 40 },
+    { x: CENTER, y: 64 },
   ],
   nine: [
-    { x: 22, y: 33 },
-    { x: 48, y: 33 },
-    { x: 22, y: 48 },
-    { x: 48, y: 48 },
-    { x: 22, y: 63 },
-    { x: 48, y: 63 },
-    { x: 22, y: 78 },
-    { x: 48, y: 78 },
-    { x: 35, y: 55 },
+    { x: LEFT, y: TOP },
+    { x: RIGHT, y: TOP },
+    { x: LEFT, y: 46 },
+    { x: RIGHT, y: 46 },
+    { x: LEFT, y: 58 },
+    { x: RIGHT, y: 58 },
+    { x: LEFT, y: BOTTOM },
+    { x: RIGHT, y: BOTTOM },
+    { x: CENTER, y: MIDDLE },
   ],
   ten: [
-    { x: 22, y: 33 },
-    { x: 48, y: 33 },
-    { x: 22, y: 48 },
-    { x: 48, y: 48 },
-    { x: 22, y: 63 },
-    { x: 48, y: 63 },
-    { x: 22, y: 78 },
-    { x: 48, y: 78 },
-    { x: 35, y: 40 },
-    { x: 35, y: 71 },
+    { x: LEFT, y: TOP },
+    { x: RIGHT, y: TOP },
+    { x: LEFT, y: 46 },
+    { x: RIGHT, y: 46 },
+    { x: LEFT, y: 58 },
+    { x: RIGHT, y: 58 },
+    { x: LEFT, y: BOTTOM },
+    { x: RIGHT, y: BOTTOM },
+    { x: CENTER, y: 40 },
+    { x: CENTER, y: 64 },
   ],
 };
 
@@ -417,15 +466,21 @@ export function Card({
           font-size={CARD_INDEX.topRank.fontSize}
           font-family={CARD_CORNER_FONT_FAMILY}
           font-weight="700"
+          text-anchor="middle"
           fill={color}
         >
           {label}
         </text>
+        {/* T-90 ITEM-3a: the corner suit shares the rank's `x` and horizontal
+            centre axis, so it sits exactly centred beneath the rank text. */}
         <text
+          class="card-suit-index"
           data-index="top-suit"
+          data-testid="card-suit-top"
           x={CARD_INDEX.topSuit.x}
           y={CARD_INDEX.topSuit.y}
           font-size={CARD_INDEX.topSuit.fontSize}
+          text-anchor="middle"
           fill={color}
         >
           {symbol}
@@ -536,17 +591,19 @@ export function Card({
           font-size={CARD_INDEX.bottomRank.fontSize}
           font-family={CARD_CORNER_FONT_FAMILY}
           font-weight="700"
-          text-anchor="end"
+          text-anchor="middle"
           fill={color}
         >
           {label}
         </text>
         <text
+          class="card-suit-index"
           data-index="bottom-suit"
+          data-testid="card-suit-bottom"
           x={CARD_INDEX.bottomSuit.x}
           y={CARD_INDEX.bottomSuit.y}
           font-size={CARD_INDEX.bottomSuit.fontSize}
-          text-anchor="end"
+          text-anchor="middle"
           fill={color}
         >
           {symbol}

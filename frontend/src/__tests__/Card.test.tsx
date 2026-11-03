@@ -1,10 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/preact';
 import {
+  ACE_PIP,
   CARD_CORNER_FONT_FAMILY,
+  CARD_INDEX,
   CARD_SERIF_FONT_FAMILY,
   Card,
   cardFrontPalette,
+  PIP_COLUMNS,
+  PIP_FONT_SIZE,
+  PIP_LAYOUT_BOUNDS,
+  PIP_ROWS,
   resolveCardFrontTheme,
 } from '../components/Card';
 import {
@@ -116,7 +122,12 @@ describe('Card', () => {
     expect(pips).toHaveLength(1);
     expect(pips[0].getAttribute('data-pip')).toBe('ace');
     expect(Number(pips[0].getAttribute('font-size'))).toBeGreaterThanOrEqual(40);
-    expect(pips[0].getAttribute('x')).toBe('35');
+    // Nudged right of the exact centre so the 40pt centrepiece clears the
+    // enlarged 12pt corner suit glyph (`CARD_INDEX.topSuit`).
+    expect(pips[0].getAttribute('x')).toBe(String(ACE_PIP.x));
+    expect(Number(pips[0].getAttribute('x'))).toBeGreaterThan(
+      CARD_INDEX.topSuit.x + (CARD_INDEX.topSuit.fontSize * 0.95) / 2,
+    );
   });
 
   it('centers the J, Q and K letters on the card', () => {
@@ -630,15 +641,17 @@ describe('card sprite serif typography and Roundness (T-90-2)', () => {
     }
   });
 
-  it('keeps the rank band and pip layout untouched by the serif typography', () => {
+  it('keeps the rank band and pip layout on the ticket geometry', () => {
     const { container } = render(<Card suit="spades" rank="ten" />);
 
     const topRank = container.querySelector('[data-index="top-rank"]')!;
     const topSuit = container.querySelector('[data-index="top-suit"]')!;
-    expect(topRank.getAttribute('x')).toBe('5');
+    expect(topRank.getAttribute('x')).toBe('11.5');
     expect(topRank.getAttribute('y')).toBe('21');
     expect(topSuit.getAttribute('y')).toBe('34');
-    expect(container.querySelector('[data-pip="rank"]')!.getAttribute('y')).toBe('33');
+    expect(container.querySelector('[data-pip="rank"]')!.getAttribute('y')).toBe(
+      String(PIP_ROWS.top),
+    );
   });
 
   it('scales face-up card SVG frame corners and wrapper radii with Roundness', () => {
@@ -726,6 +739,204 @@ describe('card sprite serif typography and Roundness (T-90-2)', () => {
     expectBackRadii(16);
     expect(rectsOf(back.container)[0].getAttribute('rx')).toBe('12');
     expect(rectsOf(back.container)[1].getAttribute('rx')).toBe('10.5');
+  });
+});
+
+const CORNER_RANKS: Array<[string, string]> = [
+  ['two', '2'],
+  ['three', '3'],
+  ['four', '4'],
+  ['five', '5'],
+  ['six', '6'],
+  ['seven', '7'],
+  ['eight', '8'],
+  ['nine', '9'],
+  ['ten', '10'],
+  ['jack', 'J'],
+  ['queen', 'Q'],
+  ['king', 'K'],
+  ['ace', 'A'],
+];
+
+describe('corner pip alignment and face pip sizing (T-90 ITEM-3a / ITEM-3b)', () => {
+  afterEach(() => {
+    resetSettings();
+  });
+
+  it('ITEM-3a: shares one centred x axis between every corner rank and its suit pip', () => {
+    for (const [rank, label] of CORNER_RANKS) {
+      const { container, unmount } = render(<Card suit="hearts" rank={rank} />);
+
+      const rankTop = container.querySelector('[data-testid="card-rank-top"]')!;
+      const suitTop = container.querySelector('[data-testid="card-suit-top"]')!;
+      const rankBottom = container.querySelector('[data-testid="card-rank-bottom"]')!;
+      const suitBottom = container.querySelector('[data-testid="card-suit-bottom"]')!;
+
+      // Same `x` coordinate and the same middle anchor on both nodes, so the
+      // suit pip sits exactly centred beneath the rank on every rank.
+      expect(rankTop.getAttribute('x'), rank).toBe(suitTop.getAttribute('x'));
+      expect(rankBottom.getAttribute('x'), rank).toBe(suitBottom.getAttribute('x'));
+      for (const node of [rankTop, suitTop, rankBottom, suitBottom]) {
+        expect(node.getAttribute('text-anchor'), rank).toBe('middle');
+      }
+
+      // The two glyph boxes therefore share the same horizontal centre, for the
+      // single-character ranks (`2`–`9`, `J`, `Q`, `K`, `A`) and the two-digit
+      // `10` alike.
+      const rankCentre = (box: Box): number => (box.left + box.right) / 2;
+      expect(rankCentre(textBox(rankTop)), rank).toBeCloseTo(rankCentre(textBox(suitTop)), 5);
+      expect(rankCentre(textBox(rankBottom)), rank).toBeCloseTo(
+        rankCentre(textBox(suitBottom)),
+        5,
+      );
+
+      // The corner column is mirrored across the card centre.
+      expect(Number(rankBottom.getAttribute('x')), rank).toBeCloseTo(
+        70 - Number(rankTop.getAttribute('x')),
+        5,
+      );
+
+      expect(rankTop.textContent, rank).toBe(label);
+      expect(rankBottom.textContent, rank).toBe(label);
+      expect(suitTop.textContent, rank).toBe('♥');
+      expect(suitBottom.textContent, rank).toBe('♥');
+      expect(suitTop.getAttribute('data-index'), rank).toBe('top-suit');
+      expect(suitBottom.getAttribute('data-index'), rank).toBe('bottom-suit');
+
+      unmount();
+    }
+  });
+
+  it('ITEM-3a: enlarges the corner suit pip while keeping it clear of the rank text', () => {
+    for (const [rank, label] of CORNER_RANKS) {
+      const { container, unmount } = render(<Card suit="clubs" rank={rank} />);
+
+      for (const [rankId, suitId] of [
+        ['card-rank-top', 'card-suit-top'],
+        ['card-rank-bottom', 'card-suit-bottom'],
+      ]) {
+        const rankNode = container.querySelector(`[data-testid="${rankId}"]`)!;
+        const suitNode = container.querySelector(`[data-testid="${suitId}"]`)!;
+        const suitSize = Number(suitNode.getAttribute('font-size'));
+
+        // Lightly larger than the previous 10-unit corner suit (+1.5–2.5).
+        expect(suitSize, `${rank} ${suitId}`).toBeGreaterThanOrEqual(11.5);
+        expect(suitSize, `${rank} ${suitId}`).toBeLessThanOrEqual(12.5);
+
+        // The rank and the larger suit glyph never overlap: the suit sits in
+        // its own band (below the rank in the top-left corner, above it in the
+        // mirrored bottom-right corner) with clean vertical breathing room.
+        const rankBox = textBox(rankNode);
+        const suitBox = textBox(suitNode);
+        expect(overlaps(rankBox, suitBox), `${rank} ${rankId}/suit`).toBe(false);
+        const gap = Math.max(rankBox.top - suitBox.bottom, suitBox.top - rankBox.bottom);
+        expect(gap, `${rank} ${rankId}/gap`).toBeGreaterThanOrEqual(1);
+
+        // The suit glyph stays inside the card frame and the rank keeps its
+        // two-character `10` inside the left/right band.
+        expect(suitBox.left, `${rank} left`).toBeGreaterThan(2);
+        expect(suitBox.right, `${rank} right`).toBeLessThan(68);
+        expect(rankBox.left, `${rank} rank left`).toBeGreaterThan(1.5);
+        expect(rankBox.right, `${rank} rank right`).toBeLessThan(68.5);
+      }
+
+      expect(label).toBeTruthy();
+      unmount();
+    }
+  });
+
+  it('ITEM-3b: renders numbered-card face pips at the larger size inside the tightened bounds', () => {
+    // Larger than the previous 12-unit pips.
+    expect(PIP_FONT_SIZE).toBeGreaterThan(12);
+
+    // The grid is tighter than the previous `x = 22/35/48`, `y = 33..78` table:
+    // narrower overall and clearly shorter vertically.
+    const previousSpan = 48 - 22;
+    expect(PIP_LAYOUT_BOUNDS.maxX - PIP_LAYOUT_BOUNDS.minX).toBeLessThan(previousSpan);
+    expect(PIP_LAYOUT_BOUNDS.minX).toBeGreaterThan(22);
+    expect(PIP_LAYOUT_BOUNDS.maxX).toBeLessThan(55); // clear of the trump badge at x = 55
+    expect(PIP_LAYOUT_BOUNDS.minY).toBeGreaterThanOrEqual(CARD_INDEX.topSuit.y);
+    expect(PIP_LAYOUT_BOUNDS.maxY - PIP_LAYOUT_BOUNDS.minY).toBeLessThan(78 - 33);
+    expect(PIP_LAYOUT_BOUNDS.maxY).toBeLessThan(CARD_INDEX.bottomSuit.y);
+
+    // The columns are still far enough apart for a full 13pt glyph.
+    const glyphWidth = PIP_FONT_SIZE * 0.95;
+    expect(PIP_COLUMNS.center - PIP_COLUMNS.left).toBeGreaterThanOrEqual(glyphWidth);
+    expect(PIP_COLUMNS.right - PIP_COLUMNS.center).toBeGreaterThanOrEqual(glyphWidth);
+
+    for (const rank of NUMBER_RANKS) {
+      const { container, unmount } = render(<Card suit="diamonds" rank={rank} trump />);
+      const pips = Array.from(container.querySelectorAll('[data-pip="rank"]'));
+      expect(pips.length, rank).toBeGreaterThan(0);
+
+      for (const pip of pips) {
+        const x = Number(pip.getAttribute('x'));
+        const y = Number(pip.getAttribute('y'));
+        expect(Number(pip.getAttribute('font-size')), `${rank} size`).toBe(PIP_FONT_SIZE);
+        expect(x, `${rank} x=${x}`).toBeGreaterThanOrEqual(PIP_LAYOUT_BOUNDS.minX);
+        expect(x, `${rank} x=${x}`).toBeLessThanOrEqual(PIP_LAYOUT_BOUNDS.maxX);
+        expect(y, `${rank} y=${y}`).toBeGreaterThanOrEqual(PIP_LAYOUT_BOUNDS.minY);
+        expect(y, `${rank} y=${y}`).toBeLessThanOrEqual(PIP_LAYOUT_BOUNDS.maxY);
+      }
+
+      // No pip collides with a corner rank/suit index or the gold trump badge,
+      // and no two pips collide with each other, even with the larger glyphs.
+      const badge = screen.getByTestId('trump-marker').querySelector('circle')!;
+      const cx = Number(badge.getAttribute('cx'));
+      const cy = Number(badge.getAttribute('cy'));
+      const r = Number(badge.getAttribute('r'));
+      const badgeBox = { left: cx - r, right: cx + r, top: cy - r, bottom: cy + r };
+      const indices = Array.from(container.querySelectorAll('[data-index]'));
+
+      for (const pip of pips) {
+        const box = textBox(pip);
+        expect(overlaps(box, badgeBox), `${rank}: badge`).toBe(false);
+        for (const index of indices) {
+          expect(
+            overlaps(box, textBox(index)),
+            `${rank}: pip ${pip.getAttribute('x')},${pip.getAttribute('y')} vs ${index.getAttribute(
+              'data-index',
+            )}`,
+          ).toBe(false);
+        }
+      }
+
+      for (let first = 0; first < pips.length; first += 1) {
+        for (let second = first + 1; second < pips.length; second += 1) {
+          expect(
+            overlaps(textBox(pips[first]), textBox(pips[second])),
+            `${rank}: pips ${first}/${second}`,
+          ).toBe(false);
+        }
+      }
+
+      unmount();
+    }
+  });
+
+  it('ITEM-3b: leaves the court-card letters and the ace centrepiece geometry intact', () => {
+    for (const [rank, letter] of [
+      ['jack', 'J'],
+      ['queen', 'Q'],
+      ['king', 'K'],
+    ] as const) {
+      const { container, unmount } = render(<Card suit="spades" rank={rank} />);
+      const face = container.querySelector('[data-testid="card-face-letter"]')!;
+      expect(face.textContent, rank).toBe(letter);
+      expect(face.getAttribute('x'), rank).toBe('35');
+      expect(face.getAttribute('y'), rank).toBe('50');
+      expect(face.getAttribute('font-size'), rank).toBe('30');
+      for (const pip of Array.from(container.querySelectorAll('.face-pip'))) {
+        expect(pip.getAttribute('font-size'), rank).toBe('11');
+      }
+      unmount();
+    }
+
+    const ace = render(<Card suit="hearts" rank="ace" />);
+    const pip = ace.container.querySelector('[data-pip="ace"]')!;
+    expect(pip.getAttribute('font-size')).toBe(String(ACE_PIP.fontSize));
+    expect(pip.getAttribute('y')).toBe(String(ACE_PIP.y));
+    expect(pip.getAttribute('x')).toBe(String(ACE_PIP.x));
   });
 });
 
