@@ -9,6 +9,7 @@ vi.mock('../api/client', () => ({
 
 import * as client from '../api/client';
 import { LobbyPage } from '../pages/LobbyPage';
+import appCss from '../app.css?raw';
 
 const createGame = client.createGame as unknown as ReturnType<typeof vi.fn>;
 const checkServerHealth = client.checkServerHealth as unknown as ReturnType<typeof vi.fn>;
@@ -291,6 +292,28 @@ describe('LobbyPage', () => {
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('Unknown preset');
     expect(window.location.hash).not.toContain('preset-1');
+  });
+
+  it('T-90: styles the selected player count and primary action with royal blue', () => {
+    render(<LobbyPage initialServerReady />);
+
+    // The player-count selector and the primary button are the lobby's chrome.
+    expect(screen.getByLabelText('Players')).toBeTruthy();
+    const create = screen.getByRole('button', { name: 'Create Game' });
+    expect(create.classList.contains('green')).toBe(true);
+    expect(screen.getByLabelText('Allow redirects')).toBeTruthy();
+
+    // Dark and light values of the UI selection family.
+    expect(appCss).toContain('--ui-select-accent: #3b82f6');
+    expect(appCss).toContain('--ui-select-accent: #1d4ed8');
+    expect(appCss).toMatch(
+      /\.lobby-form \.field select\s*{[^}]*border-color: var\(--ui-select-border\)/,
+    );
+    expect(appCss).toMatch(
+      /\.lobby-form \.action-button\.green[^{]*{[^}]*background: var\(--ui-select-accent\)/,
+    );
+    // The checkbox tint follows the same family, never the attacker green.
+    expect(appCss).toMatch(/\.checkbox-field input\s*{[^}]*accent-color: var\(--ui-select-accent\)/);
   });
 
   it('shows an error banner when game creation fails for a real reason', async () => {

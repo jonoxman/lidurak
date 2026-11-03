@@ -12,6 +12,15 @@
   --app-input-bg: #161512;
   --app-shadow: 0 18px 36px rgba(0, 0, 0, 0.42);
   --app-roundness: 8px;
+  /* T-90 UI customization / navigation chrome family: Royal Blue / Cobalt.
+     Reserved exclusively for menu selections, POV tabs, hand-sorting, QA and
+     replay hover chrome and lobby form controls. Never green, never crimson or
+     amber (the gameplay families live in styles/table.css). */
+  --ui-select-accent: #3b82f6;
+  --ui-select-border: rgba(59, 130, 246, 0.85);
+  --ui-select-glow: rgba(59, 130, 246, 0.4);
+  --ui-select-surface: rgba(59, 130, 246, 0.16);
+  --ui-select-text: #bfdbfe;
 }
 
 /* Light durak palette: same structure, softer surfaces, readable contrast. */
@@ -37,6 +46,12 @@ html[data-theme='light'] {
   --durak-accent: #4f7d1c;
   --durak-danger: #b3261e;
   --durak-amber: #a9761b;
+  /* High-contrast cobalt selection chrome for the light theme. */
+  --ui-select-accent: #1d4ed8;
+  --ui-select-border: rgba(29, 78, 216, 0.9);
+  --ui-select-glow: rgba(29, 78, 216, 0.45);
+  --ui-select-surface: rgba(37, 99, 235, 0.14);
+  --ui-select-text: #1e3a8a;
 }
 
 /* Before JavaScript applies data-theme, follow a light OS preference. */
@@ -54,6 +69,11 @@ html[data-theme='light'] {
     --app-profile-hover: #1f6fa8;
     --app-input-bg: #ffffff;
     --app-shadow: 0 18px 36px rgba(31, 41, 55, 0.12);
+    --ui-select-accent: #1d4ed8;
+    --ui-select-border: rgba(29, 78, 216, 0.9);
+    --ui-select-glow: rgba(29, 78, 216, 0.45);
+    --ui-select-surface: rgba(37, 99, 235, 0.14);
+    --ui-select-text: #1e3a8a;
   }
 }
 
@@ -104,6 +124,26 @@ body {
   box-sizing: border-box;
 }
 
+/* T-90 ITEM-1a: the lobby's selected player count and the primary Create Game
+   action use the Royal Blue / Cobalt selection family. */
+.lobby-form .field select {
+  border-color: var(--ui-select-border);
+  box-shadow: inset 0 0 0 1px var(--ui-select-surface);
+}
+
+.lobby-form .action-button.green,
+.game-over-banner .action-button.banner-rematch-button {
+  background: var(--ui-select-accent);
+  color: #f8fafc;
+  box-shadow: 0 0 10px 2px var(--ui-select-glow);
+}
+
+.lobby-form .action-button.green:hover:not(:disabled),
+.game-over-banner .action-button.banner-rematch-button:hover:not(:disabled) {
+  background: var(--ui-select-accent);
+  box-shadow: 0 0 14px 3px var(--ui-select-glow);
+}
+
 .field {
   display: flex;
   flex-direction: column;
@@ -123,8 +163,10 @@ body {
 
 .field select:focus-visible,
 .field input:focus-visible {
-  outline: 2px solid var(--app-accent);
+  outline: 2px solid var(--ui-select-accent);
   outline-offset: 1px;
+  border-color: var(--ui-select-accent);
+  box-shadow: 0 0 10px 2px var(--ui-select-glow);
 }
 
 .field select option {
@@ -147,7 +189,7 @@ body {
 }
 
 .checkbox-field input {
-  accent-color: var(--app-accent);
+  accent-color: var(--ui-select-accent);
 }
 
 .error-banner {
@@ -194,9 +236,11 @@ html[data-theme='light'] .error-banner {
   text-decoration: none;
 }
 
-.player-tabs a:hover {
-  border-color: var(--app-accent);
-  color: var(--app-text-strong);
+.player-tabs a:hover,
+.player-tabs a:focus-visible {
+  border-color: var(--ui-select-accent);
+  color: var(--ui-select-text);
+  box-shadow: 0 0 10px 2px var(--ui-select-glow);
 }
 
 .game-page {
@@ -280,9 +324,11 @@ html[data-theme='light'] .error-banner {
   cursor: pointer;
 }
 
-.qa-scenario-button:hover:not(:disabled) {
-  border-color: var(--app-accent);
-  color: var(--app-text-strong);
+.qa-scenario-button:hover:not(:disabled),
+.qa-scenario-button:focus-visible {
+  border-color: var(--ui-select-accent);
+  color: var(--ui-select-text);
+  box-shadow: 0 0 10px 2px var(--ui-select-glow);
 }
 
 .qa-scenario-button:disabled {
@@ -349,14 +395,16 @@ html[data-theme='light'] .error-banner {
 }
 
 .hotseat-tab:hover {
-  border-color: var(--app-accent);
-  color: var(--app-text-strong);
+  border-color: var(--ui-select-accent);
+  color: var(--ui-select-text);
+  box-shadow: 0 0 8px 1px var(--ui-select-glow);
 }
 
 .hotseat-tab.active {
-  border-color: var(--app-accent);
-  background: var(--app-accent-soft);
-  color: var(--app-text-strong);
+  border-color: var(--ui-select-accent);
+  background: var(--ui-select-surface);
+  color: var(--ui-select-text);
+  box-shadow: 0 0 10px 2px var(--ui-select-glow);
 }
 
 .hotseat-name {
@@ -402,6 +450,15 @@ html[data-theme='light'] .error-banner {
   box-sizing: border-box;
 }
 
+/* T-90 ITEM-1a/1c: the running Game or Turn half glows cyan-teal, never the
+   attacker green or the defender crimson. */
+.clock-half[data-active='true'] {
+  background: var(--clock-active-surface);
+  box-shadow:
+    inset 0 0 0 1px var(--clock-active-border),
+    inset 0 0 12px var(--clock-active-glow);
+}
+
 /* The divider between the two vertical halves of the single clock panel. */
 .clock-half.turn-clock-half {
   border-top: 1px solid var(--app-border);
@@ -412,6 +469,13 @@ html[data-theme='light'] .error-banner {
   font-family: monospace;
   line-height: 1.1;
   color: var(--app-text-strong);
+}
+
+/* The final 5 seconds switch to warm orange-amber, distinct from the defender
+   crimson and from the normal teal clock. */
+.turn-clock[data-low-time='true'] {
+  color: var(--clock-low-accent);
+  text-shadow: 0 0 12px var(--clock-low-glow);
 }
 
 .status-badges {
@@ -524,41 +588,43 @@ html[data-theme='light'] .error-banner {
   box-shadow: none;
 }
 
-/* ITEM-ADD-2b: the attacking (green) and defending (amber) seats wear a soft,
-   diffused glow instead of the old sharp outline. */
+/* T-90 ITEM-1a/1c: the attacking seat wears the emerald-green Attacker family
+   and the defending seat wears the crimson Defender family — the same colours
+   as that role's hand glow, target outlines, uncovered pulse and table button.
+   A soft, diffused glow is used instead of the old sharp outline. */
 .status-badge[data-role='attacker'] {
-  border: 1px solid rgba(45, 198, 83, 0.55);
+  border: 1px solid var(--role-attacker-border);
   outline: none;
   box-shadow:
-    0 0 12px 2px rgba(45, 198, 83, 0.38),
-    inset 0 0 8px rgba(45, 198, 83, 0.14);
+    0 0 12px 2px var(--role-attacker-glow),
+    inset 0 0 8px var(--role-attacker-surface);
 }
 
 .status-badge[data-role='defender'] {
-  border: 1px solid rgba(245, 158, 11, 0.55);
+  border: 1px solid var(--role-defender-border);
   outline: none;
   box-shadow:
-    0 0 12px 2px rgba(245, 158, 11, 0.38),
-    inset 0 0 8px rgba(245, 158, 11, 0.14);
+    0 0 12px 2px var(--role-defender-glow),
+    inset 0 0 8px var(--role-defender-surface);
 }
 
 /* T-90-3 ITEM-1b: the light theme keeps the same diffused shape but uses much
    darker borders and a stronger multi-layer halo, so the attacking and
    defending rows are just as obvious on a white panel as on the dark one. */
 html[data-theme='light'] .status-badge[data-role='attacker'] {
-  border-color: rgba(21, 128, 61, 0.85);
+  border-color: var(--role-attacker-border);
   outline: none;
   box-shadow:
-    0 0 14px 3px rgba(21, 128, 61, 0.58),
-    inset 0 0 10px rgba(21, 128, 61, 0.24);
+    0 0 14px 3px var(--role-attacker-glow),
+    inset 0 0 10px var(--role-attacker-surface);
 }
 
 html[data-theme='light'] .status-badge[data-role='defender'] {
-  border-color: rgba(180, 83, 9, 0.88);
+  border-color: var(--role-defender-border);
   outline: none;
   box-shadow:
-    0 0 14px 3px rgba(180, 83, 9, 0.6),
-    inset 0 0 10px rgba(180, 83, 9, 0.25);
+    0 0 14px 3px var(--role-defender-glow),
+    inset 0 0 10px var(--role-defender-surface);
 }
 
 .game-meta {
@@ -715,7 +781,8 @@ html[data-theme='light'] .status-badge[data-role='defender'] {
 }
 
 .game-clock[data-active='true'] {
-  color: var(--app-accent);
+  color: var(--clock-active-accent);
+  text-shadow: 0 0 10px var(--clock-active-glow);
   opacity: 1;
 }
 
@@ -778,8 +845,10 @@ html[data-theme='light'] .status-badge[data-role='defender'] {
   cursor: pointer;
 }
 
-.review-nav-button:hover:not(:disabled) {
-  border-color: var(--app-accent);
+.review-nav-button:hover:not(:disabled),
+.review-nav-button:focus-visible {
+  border-color: var(--ui-select-accent);
+  box-shadow: 0 0 10px 2px var(--ui-select-glow);
 }
 
 .review-nav-button:disabled {
@@ -862,7 +931,7 @@ html[data-theme='light'] .status-badge[data-role='defender'] {
 .header-brand:hover,
 .header-brand:focus-visible,
 .header-brand:hover .header-logo {
-  color: var(--app-accent);
+  color: var(--ui-select-accent);
 }
 
 .header-nav {
@@ -889,9 +958,11 @@ html[data-theme='light'] .status-badge[data-role='defender'] {
   transition: color 120ms ease, background 120ms ease;
 }
 
-.header-menu-trigger:hover {
-  color: var(--app-text-strong);
-  background: var(--app-accent-soft);
+.header-menu-trigger:hover,
+.header-menu-trigger:focus-visible {
+  color: var(--ui-select-text);
+  background: var(--ui-select-surface);
+  box-shadow: 0 0 8px 1px var(--ui-select-glow), inset 0 0 0 1px var(--ui-select-border);
 }
 
 /* Hover opens the menu; the data-open flag mirrors it for keyboard users. */
@@ -933,9 +1004,11 @@ html[data-theme='light'] .status-badge[data-role='defender'] {
   border-radius: calc(var(--app-roundness) * 0.75);
 }
 
-.header-menu-dropdown a:hover {
-  color: var(--app-text-strong);
-  background: var(--app-accent-soft);
+.header-menu-dropdown a:hover,
+.header-menu-dropdown a:focus-visible {
+  color: var(--ui-select-text);
+  background: var(--ui-select-surface);
+  box-shadow: inset 0 0 0 1px var(--ui-select-border);
 }
 
 .header-profile {
@@ -1011,9 +1084,11 @@ html[data-theme='light'] .status-badge[data-role='defender'] {
 }
 
 .profile-item:hover,
-.profile-item.active {
-  color: var(--app-text-strong);
-  background: var(--app-accent-soft);
+.profile-item.active,
+.profile-item:focus-visible {
+  color: var(--ui-select-text);
+  background: var(--ui-select-surface);
+  box-shadow: inset 0 0 0 1px var(--ui-select-border);
 }
 
 .profile-item-label {
@@ -1035,7 +1110,7 @@ html[data-theme='light'] .status-badge[data-role='defender'] {
   width: 18px;
   height: 18px;
   flex: 0 0 auto;
-  color: var(--app-accent);
+  color: var(--ui-select-accent);
 }
 
 .profile-submenu-panel {
@@ -1067,8 +1142,8 @@ html[data-theme='light'] .status-badge[data-role='defender'] {
 
 .submenu-header:hover,
 .submenu-header:focus-visible {
-  color: var(--app-text-strong);
-  background: var(--app-accent-soft);
+  color: var(--ui-select-text);
+  background: var(--ui-select-surface);
 }
 
 .submenu-title {
@@ -1107,7 +1182,7 @@ html[data-theme='light'] .status-badge[data-role='defender'] {
 
 .setting-row input[type='range'] {
   width: 100%;
-  accent-color: var(--app-accent);
+  accent-color: var(--ui-select-accent);
 }
 
 .setting-value {
@@ -1154,13 +1229,15 @@ html[data-theme='light'] .status-badge[data-role='defender'] {
   transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
 }
 
-/* Pale green highlight for the sound packs and every settings grid. */
+/* T-90 ITEM-1a: every UI customization selection uses Royal Blue / Cobalt,
+   never the attacker's emerald green. */
 .pack-option:hover,
 .theme-option:hover,
 .texture-option:hover,
 .cardback-option:hover {
-  background: var(--app-accent-soft);
-  color: var(--app-text-strong);
+  background: var(--ui-select-surface);
+  color: var(--ui-select-text);
+  box-shadow: 0 0 8px 1px var(--ui-select-glow);
 }
 
 .pack-option.active,
@@ -1171,9 +1248,20 @@ html[data-theme='light'] .status-badge[data-role='defender'] {
 .theme-option[aria-pressed='true'],
 .texture-option[aria-pressed='true'],
 .cardback-option[aria-pressed='true'] {
-  border-color: var(--app-accent);
-  background: var(--app-accent-soft);
-  color: var(--app-text-strong);
+  border-color: var(--ui-select-accent);
+  background: var(--ui-select-surface);
+  color: var(--ui-select-text);
+  box-shadow: 0 0 10px 2px var(--ui-select-glow);
+}
+
+/* Selected felt / card-back previews carry the same blue ring and halo. */
+.texture-option.active .texture-swatch,
+.texture-option[aria-pressed='true'] .texture-swatch,
+.cardback-option.active .cardback-preview,
+.cardback-option[aria-pressed='true'] .cardback-preview {
+  outline: 2px solid var(--ui-select-accent);
+  outline-offset: 1px;
+  box-shadow: 0 0 10px 2px var(--ui-select-glow);
 }
 
 .texture-swatch {
@@ -1463,33 +1551,34 @@ html[data-theme='light'] .game-page .back-to-lobby:hover {
 /* Top navigation menus (PLAY / PUZZLES / LEARN / WATCH). */
 html[data-theme='light'] .header-menu-trigger:hover,
 html[data-theme='light'] .header-menu-trigger:focus-visible {
-  color: #14532d;
-  background: rgba(21, 128, 61, 0.16);
-  box-shadow: 0 0 10px 1px rgba(21, 128, 61, 0.4), inset 0 0 0 1px rgba(21, 128, 61, 0.4);
+  color: #1e3a8a;
+  background: rgba(37, 99, 235, 0.14);
+  box-shadow: 0 0 12px 2px rgba(29, 78, 216, 0.45), inset 0 0 0 1px rgba(29, 78, 216, 0.9);
 }
 
 html[data-theme='light'] .header-menu-dropdown {
   box-shadow:
     0 14px 28px rgba(15, 23, 42, 0.22),
-    0 0 0 1px rgba(21, 128, 61, 0.35);
+    0 0 0 1px rgba(29, 78, 216, 0.5);
 }
 
 html[data-theme='light'] .header-menu-dropdown a:hover,
 html[data-theme='light'] .header-menu-dropdown a:focus-visible {
-  color: #14532d;
-  background: rgba(21, 128, 61, 0.14);
-  box-shadow: inset 0 0 0 1px rgba(21, 128, 61, 0.5);
+  color: #1e3a8a;
+  background: rgba(37, 99, 235, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(29, 78, 216, 0.9);
 }
 
 /* Profile / Appearance dropdown rows. */
 html[data-theme='light'] .profile-item:hover,
-html[data-theme='light'] .profile-item.active {
-  color: #14532d;
-  background: rgba(21, 128, 61, 0.14);
-  box-shadow: inset 0 0 0 1px rgba(21, 128, 61, 0.45);
+html[data-theme='light'] .profile-item.active,
+html[data-theme='light'] .profile-item:focus-visible {
+  color: #1e3a8a;
+  background: rgba(37, 99, 235, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(29, 78, 216, 0.8);
 }
 
-/* Selected Theme / Table / Card Back / Sound options. */
+/* Selected Theme / Table / Card Back / Sound options: cobalt, never green. */
 html[data-theme='light'] .pack-option.active,
 html[data-theme='light'] .theme-option.active,
 html[data-theme='light'] .texture-option.active,
@@ -1498,119 +1587,128 @@ html[data-theme='light'] .pack-option[aria-pressed='true'],
 html[data-theme='light'] .theme-option[aria-pressed='true'],
 html[data-theme='light'] .texture-option[aria-pressed='true'],
 html[data-theme='light'] .cardback-option[aria-pressed='true'] {
-  border-color: #15803d;
-  background: rgba(21, 128, 61, 0.16);
-  box-shadow: 0 0 10px 2px rgba(21, 128, 61, 0.55);
-  color: #0f172a;
+  border-color: #1d4ed8;
+  background: rgba(37, 99, 235, 0.14);
+  box-shadow: 0 0 12px 2px rgba(29, 78, 216, 0.45);
+  color: #1e3a8a;
 }
 
 html[data-theme='light'] .pack-option:hover,
 html[data-theme='light'] .theme-option:hover,
 html[data-theme='light'] .texture-option:hover,
 html[data-theme='light'] .cardback-option:hover {
-  box-shadow: 0 0 10px 2px rgba(21, 128, 61, 0.35);
+  box-shadow: 0 0 12px 2px rgba(29, 78, 216, 0.3);
+  color: #1e3a8a;
 }
 
-/* The selected felt swatch and card-back preview get a dark emerald ring plus a
-   halo, so the chosen design is obvious inside the light dropdown. */
+/* The selected felt swatch and card-back preview get a cobalt ring plus a halo,
+   so the chosen design is obvious inside the light dropdown. */
 html[data-theme='light'] .texture-option.active .texture-swatch,
 html[data-theme='light'] .texture-option[aria-pressed='true'] .texture-swatch,
 html[data-theme='light'] .cardback-option.active .cardback-preview,
 html[data-theme='light'] .cardback-option[aria-pressed='true'] .cardback-preview {
-  outline: 2px solid #15803d;
+  outline: 2px solid #1d4ed8;
   outline-offset: 1px;
-  box-shadow: 0 0 10px 2px rgba(21, 128, 61, 0.6);
+  box-shadow: 0 0 12px 2px rgba(29, 78, 216, 0.45);
 }
 
 /* Left sidebar: active POV tab. */
 html[data-theme='light'] .hotseat-tab:hover {
-  border-color: #15803d;
-  box-shadow: 0 0 8px 1px rgba(21, 128, 61, 0.4);
-  color: #0f172a;
+  border-color: #1d4ed8;
+  box-shadow: 0 0 12px 2px rgba(29, 78, 216, 0.4);
+  color: #1e3a8a;
 }
 
 html[data-theme='light'] .hotseat-tab.active {
-  border-color: #15803d;
-  background: rgba(21, 128, 61, 0.14);
-  box-shadow: 0 0 10px 2px rgba(21, 128, 61, 0.5);
-  color: #0f172a;
+  border-color: #1d4ed8;
+  background: rgba(37, 99, 235, 0.14);
+  box-shadow: 0 0 12px 2px rgba(29, 78, 216, 0.45);
+  color: #1e3a8a;
 }
 
 /* Left sidebar: ⚡ QA Scenarios hover/focus. */
 html[data-theme='light'] .qa-scenario-button:hover:not(:disabled),
 html[data-theme='light'] .qa-scenario-button:focus-visible {
-  border-color: #15803d;
-  box-shadow: 0 0 10px 2px rgba(21, 128, 61, 0.55);
-  color: #0f172a;
+  border-color: #1d4ed8;
+  box-shadow: 0 0 12px 2px rgba(29, 78, 216, 0.45);
+  color: #1e3a8a;
 }
 
-/* Left sidebar: Replay navigation hover/focus. */
+/* Left sidebar: Replay navigation hover/focus uses the same chrome family. */
 html[data-theme='light'] .review-nav-button:hover:not(:disabled),
 html[data-theme='light'] .review-nav-button:focus-visible {
-  border-color: #b45309;
-  box-shadow: 0 0 10px 2px rgba(180, 83, 9, 0.55);
+  border-color: #1d4ed8;
+  box-shadow: 0 0 12px 2px rgba(29, 78, 216, 0.45);
 }
 
 /* Right sidebar: the running clock half and the low-time warning. */
 html[data-theme='light'] .clock-half[data-active='true'] {
-  background: rgba(21, 128, 61, 0.1);
+  background: var(--clock-active-surface);
   box-shadow:
-    inset 0 0 0 1px rgba(21, 128, 61, 0.6),
-    inset 0 0 12px rgba(21, 128, 61, 0.18);
+    inset 0 0 0 1px var(--clock-active-border),
+    inset 0 0 12px var(--clock-active-glow);
 }
 
 html[data-theme='light'] .clock-half.turn-clock-half[data-active='true'] {
-  background: rgba(180, 83, 9, 0.1);
+  background: var(--clock-active-surface);
   box-shadow:
-    inset 0 0 0 1px rgba(180, 83, 9, 0.62),
-    inset 0 0 12px rgba(180, 83, 9, 0.2);
+    inset 0 0 0 1px var(--clock-active-border),
+    inset 0 0 12px var(--clock-active-glow);
 }
 
 html[data-theme='light'] .game-clock[data-active='true'] {
-  color: #15803d;
-  text-shadow: 0 0 10px rgba(21, 128, 61, 0.55);
+  color: #0e7490;
+  text-shadow: 0 0 10px rgba(14, 116, 144, 0.64);
 }
 
 html[data-theme='light'] .turn-clock.active {
-  color: #92400e;
-  text-shadow: 0 0 10px rgba(180, 83, 9, 0.6);
+  color: #0e7490;
+  text-shadow: 0 0 10px rgba(14, 116, 144, 0.64);
 }
 
 html[data-theme='light'] .turn-clock[data-low-time='true'] {
-  color: #991b1b;
-  text-shadow: 0 0 12px rgba(185, 28, 28, 0.8);
+  color: #ea580c;
+  text-shadow: 0 0 12px rgba(194, 65, 12, 0.75);
 }
 
-/* Lobby: the player-count / seat selectors and every focused field get a dark
-   emerald focus glow instead of the pale accent outline. */
+/* Lobby: the player-count / seat selectors and every focused field. */
 html[data-theme='light'] .lobby-form .field select,
 html[data-theme='light'] .lobby-form .field input {
   border-color: #94a3b8;
 }
 
+html[data-theme='light'] .lobby-form .field select {
+  border-color: rgba(29, 78, 216, 0.9);
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.14);
+}
+
 html[data-theme='light'] .lobby-form .field select:focus-visible,
 html[data-theme='light'] .lobby-form .field input:focus-visible {
-  outline: 2px solid #15803d;
+  outline: 2px solid #1d4ed8;
   outline-offset: 1px;
-  border-color: #15803d;
-  box-shadow: 0 0 10px 2px rgba(21, 128, 61, 0.55);
+  border-color: #1d4ed8;
+  box-shadow: 0 0 12px 2px rgba(29, 78, 216, 0.45);
 }
 
-/* Lobby: the primary Create Game button. */
-html[data-theme='light'] .lobby-form .action-button.green {
+/* Lobby: the primary Create Game button and the game-over Rematch button. */
+html[data-theme='light'] .lobby-form .action-button.green,
+html[data-theme='light'] .game-over-banner .action-button.banner-rematch-button {
+  color: #f8fafc;
   box-shadow:
-    0 0 12px 2px rgba(21, 128, 61, 0.6),
-    inset 0 0 8px rgba(21, 128, 61, 0.35);
+    0 0 12px 2px rgba(29, 78, 216, 0.55),
+    inset 0 0 8px rgba(37, 99, 235, 0.3);
 }
 
-html[data-theme='light'] .lobby-form .action-button.green:hover:not(:disabled) {
+html[data-theme='light'] .lobby-form .action-button.green:hover:not(:disabled),
+html[data-theme='light'] .game-over-banner .action-button.banner-rematch-button:hover:not(:disabled) {
   box-shadow:
-    0 0 16px 4px rgba(21, 128, 61, 0.75),
-    inset 0 0 8px rgba(21, 128, 61, 0.4);
+    0 0 16px 4px rgba(29, 78, 216, 0.7),
+    inset 0 0 8px rgba(37, 99, 235, 0.35);
 }
 
-html[data-theme='light'] .player-tabs a:hover {
-  border-color: #15803d;
-  box-shadow: 0 0 10px 2px rgba(21, 128, 61, 0.5);
-  color: #0f172a;
+html[data-theme='light'] .player-tabs a:hover,
+html[data-theme='light'] .player-tabs a:focus-visible {
+  border-color: #1d4ed8;
+  box-shadow: 0 0 12px 2px rgba(29, 78, 216, 0.45);
+  color: #1e3a8a;
 }

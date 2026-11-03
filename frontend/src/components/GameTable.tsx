@@ -885,7 +885,7 @@ function RedirectIcon({
       height="102"
       rx={plateRadius}
       ry={plateRadius}
-      fill="rgba(217, 163, 38, 0.06)"
+      fill="rgba(168, 85, 247, 0.06)"
     />
   );
 
@@ -902,7 +902,7 @@ function RedirectIcon({
         <path
           d="M18 38 L54 50 M54 50 L41 49 M54 50 L45 41"
           fill="none"
-          stroke="#d9a326"
+          stroke="var(--redirect-accent, #a855f7)"
           stroke-width="4"
           stroke-linecap="round"
           stroke-linejoin="round"
@@ -910,7 +910,7 @@ function RedirectIcon({
         <path
           d="M18 50 L54 38 M54 38 L41 39 M54 38 L45 47"
           fill="none"
-          stroke="#d9a326"
+          stroke="var(--redirect-accent, #a855f7)"
           stroke-width="4"
           stroke-linecap="round"
           stroke-linejoin="round"
@@ -939,11 +939,14 @@ function RedirectIcon({
     >
       {plate}
       <g transform={`rotate(${rotation} 36 46)`}>
-        <path d="M36 16 L47 32 L41 32 L41 58 L31 58 L31 32 L25 32 Z" fill="#d9a326" />
+        <path
+          d="M36 16 L47 32 L41 32 L41 58 L31 58 L31 32 L25 32 Z"
+          fill="var(--redirect-accent, #a855f7)"
+        />
         <path
           d="M20 68 L52 68"
           fill="none"
-          stroke="#d9a326"
+          stroke="var(--redirect-accent, #a855f7)"
           stroke-width="3"
           stroke-linecap="round"
           opacity="0.8"
@@ -951,7 +954,7 @@ function RedirectIcon({
         <path
           d="M20 76 L52 76"
           fill="none"
-          stroke="#d9a326"
+          stroke="var(--redirect-accent, #a855f7)"
           stroke-width="3"
           stroke-linecap="round"
           opacity="0.45"

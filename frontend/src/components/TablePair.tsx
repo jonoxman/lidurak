@@ -39,7 +39,9 @@ export function TablePair({
     trumpSuit.length > 0 && card.suit.toLowerCase() === trumpSuit.toLowerCase();
 
   const classes = ['table-pair'];
-  if (pulse) classes.push('turn-pulse');
+  // T-90 ITEM-1c: an uncovered attacking card is a Defender prompt, exposed via
+  // the dedicated `table-card-uncovered` hook as well as the legacy pulse class.
+  if (pulse) classes.push('turn-pulse', 'table-card-uncovered');
   if (snap) classes.push('snap-active');
 
   // Item 8: an attack card sits flush with the top of an exact card-sized box,

@@ -459,11 +459,11 @@ describe('T-90-3 light-mode menu and appearance glows', () => {
       'true',
     );
     expect(cssRule(appCss, "html[data-theme='light'] .theme-option.active")).toContain(
-      'box-shadow: 0 0 10px 2px rgba(21, 128, 61, 0.55)',
+      'box-shadow: 0 0 12px 2px rgba(29, 78, 216, 0.45)',
     );
     expect(
       cssRule(appCss, "html[data-theme='light'] .theme-option[aria-pressed='true']"),
-    ).toContain('border-color: #15803d');
+    ).toContain('border-color: #1d4ed8');
 
     // Each submenu lives in place of the main list, so start from a clean tree.
     cleanup();
@@ -474,7 +474,7 @@ describe('T-90-3 light-mode menu and appearance glows', () => {
     expect(emerald.querySelector('.texture-swatch')).not.toBeNull();
     expect(
       cssRule(appCss, "html[data-theme='light'] .texture-option.active .texture-swatch"),
-    ).toContain('outline: 2px solid #15803d');
+    ).toContain('outline: 2px solid #1d4ed8');
 
     cleanup();
     render(<HeaderBar />);
@@ -484,29 +484,30 @@ describe('T-90-3 light-mode menu and appearance glows', () => {
     expect(classic.querySelector('.cardback-preview')).not.toBeNull();
     expect(
       cssRule(appCss, "html[data-theme='light'] .cardback-option.active .cardback-preview"),
-    ).toContain('box-shadow: 0 0 10px 2px rgba(21, 128, 61, 0.6)');
+    ).toContain('box-shadow: 0 0 12px 2px rgba(29, 78, 216, 0.45)');
 
     cleanup();
     render(<HeaderBar />);
     openSubmenu('Sound');
     expect(
       cssRule(appCss, "html[data-theme='light'] .pack-option.active"),
-    ).toContain('box-shadow: 0 0 10px 2px rgba(21, 128, 61, 0.55)');
+    ).toContain('box-shadow: 0 0 12px 2px rgba(29, 78, 216, 0.45)');
   });
 
   it('darkens the top navigation and profile menu hover/focus glows', () => {
     expect(
       cssRule(appCss, "html[data-theme='light'] .header-menu-trigger:hover"),
-    ).toContain('rgba(21, 128, 61, 0.4)');
+    ).toContain('rgba(29, 78, 216, 0.45)');
     expect(
       cssRule(appCss, "html[data-theme='light'] .header-menu-dropdown a:hover"),
-    ).toContain('rgba(21, 128, 61, 0.5)');
+    ).toContain('rgba(29, 78, 216, 0.9)');
     expect(cssRule(appCss, "html[data-theme='light'] .profile-item.active")).toContain(
-      'rgba(21, 128, 61, 0.45)',
+      'rgba(29, 78, 216, 0.8)',
     );
 
-    // Dark mode keeps the original flat accent-soft selection and no glow.
-    expect(cssRule(appCss, '.theme-option.active')).not.toContain('box-shadow');
-    expect(appCss).not.toMatch(/\n\.header-menu-trigger:hover\s*{[^}]*box-shadow/);
+    // Dark mode uses the same blue family, never the attacker green.
+    expect(cssRule(appCss, '.theme-option.active')).toContain('var(--ui-select-accent)');
+    expect(cssRule(appCss, '.theme-option.active')).not.toMatch(/#22c55e|#15803d/);
+    expect(appCss).not.toMatch(/\n\.header-menu-trigger:hover\s*{[^}]*#22c55e/);
   });
 });

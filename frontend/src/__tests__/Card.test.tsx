@@ -73,7 +73,9 @@ describe('Card', () => {
     expect(slot.getAttribute('data-trump')).toBe('true');
 
     const marker = screen.getByTestId('trump-marker');
-    expect(marker.querySelector('circle')!.getAttribute('fill')).toBe('#d4af37');
+    expect(marker.querySelector('circle')!.getAttribute('fill')).toBe(
+      'var(--trump-accent, #f59e0b)',
+    );
     expect(marker.querySelector('text')!.textContent).toBe('♠');
   });
 

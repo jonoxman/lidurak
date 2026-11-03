@@ -2031,17 +2031,23 @@ describe('GamePage', () => {
     // sharp 2px outline.
     expect(appCss).toMatch(/\.status-badge\[data-role='attacker'\]\s*{[^}]*outline:\s*none/);
     expect(appCss).toMatch(
-      /\.status-badge\[data-role='attacker'\]\s*{[^}]*box-shadow:[^}]*rgba\(45, 198, 83, 0\.38\)/,
+      /\.status-badge\[data-role='attacker'\]\s*{[^}]*box-shadow:[^}]*var\(--role-attacker-glow\)/,
     );
     expect(appCss).toMatch(
-      /\.status-badge\[data-role='attacker'\]\s*{[^}]*inset 0 0 8px rgba\(45, 198, 83, 0\.14\)/,
+      /\.status-badge\[data-role='attacker'\]\s*{[^}]*inset 0 0 8px var\(--role-attacker-surface\)/,
+    );
+    expect(appCss).toMatch(
+      /\.status-badge\[data-role='attacker'\]\s*{[^}]*border: 1px solid var\(--role-attacker-border\)/,
     );
     expect(appCss).toMatch(/\.status-badge\[data-role='defender'\]\s*{[^}]*outline:\s*none/);
     expect(appCss).toMatch(
-      /\.status-badge\[data-role='defender'\]\s*{[^}]*box-shadow:[^}]*rgba\(245, 158, 11, 0\.38\)/,
+      /\.status-badge\[data-role='defender'\]\s*{[^}]*box-shadow:[^}]*var\(--role-defender-glow\)/,
     );
     expect(appCss).toMatch(
-      /\.status-badge\[data-role='defender'\]\s*{[^}]*inset 0 0 8px rgba\(245, 158, 11, 0\.14\)/,
+      /\.status-badge\[data-role='defender'\]\s*{[^}]*inset 0 0 8px var\(--role-defender-surface\)/,
+    );
+    expect(appCss).toMatch(
+      /\.status-badge\[data-role='defender'\]\s*{[^}]*border: 1px solid var\(--role-defender-border\)/,
     );
     expect(appCss).not.toMatch(/outline:\s*2px solid #2dc653/);
     expect(appCss).not.toMatch(/outline:\s*2px solid #f59e0b/);
@@ -2049,22 +2055,22 @@ describe('GamePage', () => {
     // T-90-3 ITEM-1b: the light theme keeps the softer shape but now uses a
     // dark, high-alpha border plus a stronger multi-layer halo.
     expect(appCss).toMatch(
-      /html\[data-theme='light'\] \.status-badge\[data-role='attacker'\]\s*{[^}]*border-color: rgba\(21, 128, 61, 0\.85\)/,
+      /html\[data-theme='light'\] \.status-badge\[data-role='attacker'\]\s*{[^}]*border-color: var\(--role-attacker-border\)/,
     );
     expect(appCss).toMatch(
-      /html\[data-theme='light'\] \.status-badge\[data-role='attacker'\]\s*{[^}]*0 0 14px 3px rgba\(21, 128, 61, 0\.58\)/,
+      /html\[data-theme='light'\] \.status-badge\[data-role='attacker'\]\s*{[^}]*0 0 14px 3px var\(--role-attacker-glow\)/,
     );
     expect(appCss).toMatch(
-      /html\[data-theme='light'\] \.status-badge\[data-role='attacker'\]\s*{[^}]*inset 0 0 10px rgba\(21, 128, 61, 0\.24\)/,
+      /html\[data-theme='light'\] \.status-badge\[data-role='attacker'\]\s*{[^}]*inset 0 0 10px var\(--role-attacker-surface\)/,
     );
     expect(appCss).toMatch(
-      /html\[data-theme='light'\] \.status-badge\[data-role='defender'\]\s*{[^}]*border-color: rgba\(180, 83, 9, 0\.88\)/,
+      /html\[data-theme='light'\] \.status-badge\[data-role='defender'\]\s*{[^}]*border-color: var\(--role-defender-border\)/,
     );
     expect(appCss).toMatch(
-      /html\[data-theme='light'\] \.status-badge\[data-role='defender'\]\s*{[^}]*0 0 14px 3px rgba\(180, 83, 9, 0\.6\)/,
+      /html\[data-theme='light'\] \.status-badge\[data-role='defender'\]\s*{[^}]*0 0 14px 3px var\(--role-defender-glow\)/,
     );
     expect(appCss).toMatch(
-      /html\[data-theme='light'\] \.status-badge\[data-role='defender'\]\s*{[^}]*inset 0 0 10px rgba\(180, 83, 9, 0\.25\)/,
+      /html\[data-theme='light'\] \.status-badge\[data-role='defender'\]\s*{[^}]*inset 0 0 10px var\(--role-defender-surface\)/,
     );
 
     // ITEM-ADD-8a: every row has a name track, a centred count track and a
@@ -2107,42 +2113,42 @@ describe('GamePage', () => {
     // Right sidebar: stronger attacker / defender rows, presence dot and clock.
     expect(
       cssRule(appCss, "html[data-theme='light'] .clock-half[data-active='true']"),
-    ).toContain('rgba(21, 128, 61, 0.6)');
+    ).toContain('var(--clock-active-glow)');
     expect(
       cssRule(appCss, "html[data-theme='light'] .clock-half.turn-clock-half[data-active='true']"),
-    ).toContain('rgba(180, 83, 9, 0.62)');
+    ).toContain('var(--clock-active-glow)');
     expect(
       cssRule(appCss, "html[data-theme='light'] .turn-clock[data-low-time='true']"),
-    ).toContain('rgba(185, 28, 28, 0.8)');
+    ).toContain('#ea580c');
     expect(
       cssRule(tableCss, "[data-theme='light'] .presence-dot.present"),
     ).toContain('rgba(21, 128, 61, 0.7)');
 
-    // Left sidebar: active POV tab, QA buttons and replay controls.
+    // Left sidebar: active POV tab, QA buttons and replay controls all blue.
     expect(cssRule(appCss, "html[data-theme='light'] .hotseat-tab.active")).toContain(
-      'box-shadow: 0 0 10px 2px rgba(21, 128, 61, 0.5)',
+      'box-shadow: 0 0 12px 2px rgba(29, 78, 216, 0.45)',
     );
     expect(
       cssRule(appCss, "html[data-theme='light'] .qa-scenario-button:hover"),
-    ).toContain('rgba(21, 128, 61, 0.55)');
+    ).toContain('rgba(29, 78, 216, 0.45)');
     expect(
       cssRule(appCss, "html[data-theme='light'] .review-nav-button:hover"),
-    ).toContain('rgba(180, 83, 9, 0.55)');
+    ).toContain('rgba(29, 78, 216, 0.45)');
 
     // HAND SORTING: the selected mode and its hover/focus glow.
     expect(cssRule(tableCss, ":root[data-theme='light'] .sort-select")).toContain(
-      'rgba(21, 128, 61, 0.32)',
+      'var(--ui-select-glow)',
     );
     expect(cssRule(tableCss, ":root[data-theme='light'] .sort-select:hover")).toContain(
-      'rgba(21, 128, 61, 0.6)',
+      'var(--ui-select-glow)',
     );
 
-    // Dark mode keeps its original brighter tones and flat hand-sort control.
-    expect(cssRule(appCss, ".hotseat-tab.active")).toContain('border-color: var(--app-accent)');
+    // Dark mode uses the same blue chrome and emerald attacker family.
+    expect(cssRule(appCss, ".hotseat-tab.active")).toContain('var(--ui-select-accent)');
     expect(cssRule(appCss, ".status-badge[data-role='attacker']")).toContain(
-      'rgba(45, 198, 83, 0.38)',
+      'var(--role-attacker-glow)',
     );
-    expect(cssRule(tableCss, ".sort-select")).not.toContain('box-shadow');
+    expect(cssRule(tableCss, ".sort-select")).toContain('var(--ui-select-border)');
   });
 
   it('labels the last player out as DURAK once the match is over', async () => {
