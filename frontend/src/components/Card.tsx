@@ -61,7 +61,7 @@ const FACE_RANKS = new Set(['jack', 'queen', 'king']);
  * to the generic serif family.
  */
 export const CARD_SERIF_FONT_FAMILY =
-  "'Cinzel', 'Playfair Display', 'Georgia', 'Times New Roman', 'Palatino Linotype', 'Book Antiqua', serif";
+  "'Cinzel', 'Playfair Display', Georgia, 'Times New Roman', 'Palatino Linotype', 'Book Antiqua', serif";
 
 /**
  * T-90 ITEM-3a: clean sans-serif for the small rank numbers and letters in the
@@ -416,7 +416,7 @@ export function Card({
           y={CARD_INDEX.topRank.y}
           font-size={CARD_INDEX.topRank.fontSize}
           font-family={CARD_CORNER_FONT_FAMILY}
-          font-weight={700}
+          font-weight="700"
           fill={color}
         >
           {label}
@@ -497,7 +497,7 @@ export function Card({
               y="50"
               font-size={30}
               font-family={CARD_SERIF_FONT_FAMILY}
-              font-weight={700}
+              font-weight="700"
               text-anchor="middle"
               dominant-baseline="central"
               fill={color}
@@ -535,7 +535,7 @@ export function Card({
           y={CARD_INDEX.bottomRank.y}
           font-size={CARD_INDEX.bottomRank.fontSize}
           font-family={CARD_CORNER_FONT_FAMILY}
-          font-weight={700}
+          font-weight="700"
           text-anchor="end"
           fill={color}
         >

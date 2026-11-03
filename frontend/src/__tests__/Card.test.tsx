@@ -472,6 +472,14 @@ describe('card sprite serif typography and Roundness (T-90-2)', () => {
   });
 
   it('exposes the sans-serif corner stack and the classic serif court stack', () => {
+    // The exact stacks the ticket specifies: sans-serif for the corner
+    // indices, ornate serif for the large centre `J`/`Q`/`K` letters only.
+    expect(CARD_CORNER_FONT_FAMILY).toBe(
+      "Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+    );
+    expect(CARD_SERIF_FONT_FAMILY).toBe(
+      "'Cinzel', 'Playfair Display', Georgia, 'Times New Roman', 'Palatino Linotype', 'Book Antiqua', serif",
+    );
     expect(CARD_CORNER_FONT_FAMILY).toContain('Inter');
     expect(CARD_CORNER_FONT_FAMILY).toContain('system-ui');
     expect(CARD_CORNER_FONT_FAMILY).toContain('Segoe UI');
@@ -486,7 +494,7 @@ describe('card sprite serif typography and Roundness (T-90-2)', () => {
     expect(CARD_SERIF_FONT_FAMILY.trim().endsWith('serif')).toBe(true);
   });
 
-  it('ITEM-3a: draws every corner rank index in the sans-serif font', () => {
+  it('ITEM-3a: every corner rank number and letter uses CARD_CORNER_FONT_FAMILY (sans-serif)', () => {
     const ranks: Array<[string, string]> = [
       ['two', '2'],
       ['three', '3'],
@@ -524,7 +532,7 @@ describe('card sprite serif typography and Roundness (T-90-2)', () => {
     }
   });
 
-  it('ITEM-3b: keeps the fancy serif font only on the large J, Q and K letters', () => {
+  it('ITEM-3b: only the large J, Q and K centre letters use CARD_SERIF_FONT_FAMILY (serif)', () => {
     const faces = [
       ['jack', 'J'],
       ['queen', 'Q'],
@@ -554,7 +562,7 @@ describe('card sprite serif typography and Roundness (T-90-2)', () => {
     }
   });
 
-  it('ITEM-3a/3b: court cards use sans-serif corners and a serif centre letter', () => {
+  it('ITEM-3c: court cards pair sans-serif corner letters with a serif centre letter', () => {
     const faces = [
       ['jack', 'J'],
       ['queen', 'Q'],
@@ -570,13 +578,19 @@ describe('card sprite serif typography and Roundness (T-90-2)', () => {
         expect(corner.getAttribute('font-family'), `${rank} ${testId}`).toBe(
           CARD_CORNER_FONT_FAMILY,
         );
+        expect(corner.getAttribute('font-family'), `${rank} ${testId}`).not.toBe(
+          CARD_SERIF_FONT_FAMILY,
+        );
         expect(corner.getAttribute('data-font-style'), `${rank} ${testId}`).toBe('sans-serif');
+        expect(corner.getAttribute('font-weight'), `${rank} ${testId}`).toBe('700');
       }
 
       const centre = container.querySelector('[data-testid="card-face-letter"]')!;
       expect(centre.textContent, rank).toBe(letter);
       expect(centre.getAttribute('font-family'), rank).toBe(CARD_SERIF_FONT_FAMILY);
+      expect(centre.getAttribute('font-family'), rank).not.toBe(CARD_CORNER_FONT_FAMILY);
       expect(centre.getAttribute('data-font-style'), rank).toBe('serif');
+      expect(centre.getAttribute('font-weight'), rank).toBe('700');
 
       unmount();
     }
