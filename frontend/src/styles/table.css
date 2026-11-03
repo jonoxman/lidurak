@@ -665,6 +665,25 @@
   height: 100%;
 }
 
+/* Feedback ITEM-NEW-1b: the card front (where the pips are drawn) is
+   theme-dependent. White in the light theme, neutral grey in the dark theme —
+   the inline SVG face rect carries the same colours so the two can never
+   disagree, and this background also covers the SVG's rounded-corner boxes. */
+:root {
+  --card-face-bg: #cbd5e1;
+  --card-face-border: #94a3b8;
+}
+
+:root[data-theme='light'] {
+  --card-face-bg: #ffffff;
+  --card-face-border: #bababa;
+}
+
+.playing-card.card-face {
+  background-color: var(--card-face-bg);
+  border-radius: 6px;
+}
+
 .card-slot.clickable {
   cursor: pointer;
 }
@@ -1144,12 +1163,14 @@
     ),
     radial-gradient(circle at 50% 30%, rgba(255, 255, 255, 0.06), transparent 65%);
   --table-felt-light: #b5d6c5;
-  --table-felt-overlay-light: radial-gradient(
-      circle at 50% 30%,
-      #d6eadf,
-      #b5d6c5 70%
+  /* Same layer order, angles and frequencies as the dark overlay above; only
+     the palette stops differ, so the crosshatch is just as visible. */
+  --table-felt-overlay-light: repeating-linear-gradient(
+      45deg,
+      rgba(18, 74, 50, 0.18) 0 2px,
+      transparent 2px 7px
     ),
-    repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.45) 0 2px, transparent 2px 7px);
+    radial-gradient(circle at 50% 30%, rgba(255, 255, 255, 0.34), transparent 65%);
   --table-felt-border-light: #8cb8a2;
 }
 
@@ -1162,16 +1183,12 @@
     ),
     radial-gradient(circle at 50% 25%, rgba(140, 170, 255, 0.08), transparent 70%);
   --table-felt-light: #b8cce4;
-  --table-felt-overlay-light: radial-gradient(
-      circle at 50% 25%,
-      #d8e4f2,
-      #b8cce4 70%
-    ),
-    repeating-linear-gradient(
+  --table-felt-overlay-light: repeating-linear-gradient(
       135deg,
-      rgba(255, 255, 255, 0.4) 0 2px,
+      rgba(28, 48, 92, 0.18) 0 2px,
       transparent 2px 8px
-    );
+    ),
+    radial-gradient(circle at 50% 25%, rgba(255, 255, 255, 0.36), transparent 70%);
   --table-felt-border-light: #8ea9ca;
 }
 
@@ -1190,12 +1207,12 @@
   --table-felt-light: #dcb6c2;
   --table-felt-overlay-light: radial-gradient(
       ellipse at 50% 20%,
-      #f0d8df,
-      #dcb6c2 65%
+      rgba(255, 255, 255, 0.4),
+      transparent 60%
     ),
     repeating-radial-gradient(
       circle at 50% 50%,
-      rgba(120, 60, 80, 0.06) 0 3px,
+      rgba(96, 26, 44, 0.16) 0 3px,
       transparent 3px 9px
     );
   --table-felt-border-light: #be8e9d;
@@ -1210,12 +1227,12 @@
     ),
     radial-gradient(circle at 50% 30%, rgba(255, 255, 255, 0.05), transparent 70%);
   --table-felt-light: #cbd5e1;
-  --table-felt-overlay-light: radial-gradient(
-      circle at 50% 30%,
-      #e2e8f0,
-      #cbd5e1 70%
+  --table-felt-overlay-light: repeating-linear-gradient(
+      90deg,
+      rgba(30, 41, 59, 0.16) 0 1px,
+      transparent 1px 9px
     ),
-    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.45) 0 1px, transparent 1px 9px);
+    radial-gradient(circle at 50% 30%, rgba(255, 255, 255, 0.42), transparent 70%);
   --table-felt-border-light: #94a3b8;
 }
 
@@ -1230,10 +1247,10 @@
   --table-felt-light: #c4d6b4;
   --table-felt-overlay-light: radial-gradient(
       circle at 20% 30%,
-      #dfe9d5,
-      #c4d6b4 65%
+      rgba(255, 255, 255, 0.45),
+      transparent 55%
     ),
-    radial-gradient(circle at 80% 70%, rgba(255, 255, 255, 0.4), transparent 60%);
+    radial-gradient(circle at 80% 70%, rgba(74, 104, 54, 0.18), transparent 60%);
   --table-felt-border-light: #9ab386;
 }
 
@@ -1250,12 +1267,16 @@
       transparent 2px 26px
     );
   --table-felt-light: #dcc7a8;
-  --table-felt-overlay-light: radial-gradient(
-      circle at 50% 25%,
-      #efe3d0,
-      #dcc7a8 70%
+  --table-felt-overlay-light: repeating-linear-gradient(
+      90deg,
+      rgba(92, 64, 32, 0.22) 0 3px,
+      transparent 3px 11px
     ),
-    repeating-linear-gradient(90deg, rgba(120, 90, 50, 0.1) 0 3px, transparent 3px 11px);
+    repeating-linear-gradient(
+      88deg,
+      rgba(122, 90, 48, 0.16) 0 2px,
+      transparent 2px 26px
+    );
   --table-felt-border-light: #b89d78;
 }
 
@@ -1348,11 +1369,11 @@
   color: #0f172a;
 }
 
-/* The header preview swatches carry an inline dark background, so a pale veil
-   is the stylesheet-only way to keep them in step with the light theme. */
+/* Feedback ITEM-4: the swatches now carry the light palette themselves (base +
+   overlay, same texture geometry as dark), so only a thin outline remains here.
+   The old inset white veil is gone: it washed the grain out of every preview. */
 :root[data-theme='light'] .texture-swatch {
-  box-shadow: inset 0 0 0 200px rgba(255, 255, 255, 0.62),
-    inset 0 0 0 1px rgba(100, 116, 139, 0.6);
+  box-shadow: inset 0 0 0 1px rgba(100, 116, 139, 0.6);
 }
 
 /* Opt-in filter layer: filtering the whole arena also tints the cards, so the

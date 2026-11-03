@@ -13,6 +13,30 @@ import {
   textureFilter,
 } from '../styles/tableTextures';
 
+/** Splits a CSS `background-image` value into its top-level layers. */
+const backgroundLayers = (image: string): string[] => {
+  const layers: string[] = [];
+  let depth = 0;
+  let current = '';
+
+  for (const char of image) {
+    if (char === '(') depth += 1;
+    if (char === ')') depth -= 1;
+    if (char === ',' && depth === 0) {
+      layers.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += char;
+  }
+  if (current.trim()) layers.push(current.trim());
+  return layers;
+};
+
+/** A layer with its colour stops removed, leaving only its texture geometry. */
+const layerGeometry = (layer: string): string =>
+  layer.replace(/rgba?\([^)]*\)|#[0-9a-fA-F]{3,8}|\btransparent\b/g, 'COLOR');
+
 /** Rough perceived lightness of a `#rrggbb` colour, 0 (black) to 1 (white). */
 const luminance = (hex: string): number => {
   const value = hex.replace('#', '');
@@ -164,7 +188,7 @@ describe('table textures', () => {
     expect(dark.backgroundColor).toBe('#16203a');
     expect(dark['--table-theme']).toBe('dark');
     expect(light.backgroundColor).toBe('#b8cce4');
-    expect(light.backgroundImage).toContain('#d8e4f2');
+    expect(light.backgroundImage).toBe(tableTexture('midnight-navy').lightOverlay);
     expect(light['--table-felt']).toBe('#b8cce4');
     expect(light['--table-felt-border-light']).toBe('#8ea9ca');
     expect(light['--table-theme']).toBe('light');
@@ -178,6 +202,36 @@ describe('table textures', () => {
       getTableTextureStyle({ tableTexture: 'vintage-oak', theme: 'light' }).backgroundColor,
     ).toBe('#dcc7a8');
     expect(getTableTextureStyle({ tableTexture: 'vintage-oak' }).backgroundColor).toBe('#3a2b1c');
+  });
+
+  it('keeps the light felt on the exact same texture geometry as the dark felt', () => {
+    for (const preset of TABLE_TEXTURES) {
+      const dark = backgroundLayers(preset.overlay);
+      const light = backgroundLayers(preset.lightOverlay);
+
+      // Same number of layers, in the same order…
+      expect(light, preset.id).toHaveLength(dark.length);
+      // …with identical gradient types, angles, positions and pattern stops.
+      expect(light.map(layerGeometry), preset.id).toEqual(dark.map(layerGeometry));
+      // The light version is a different palette, not the same overlay repeated.
+      expect(preset.lightOverlay, preset.id).not.toBe(preset.overlay);
+      expect(preset.lightOverlay, preset.id).not.toContain(preset.lightBase);
+    }
+  });
+
+  it('paints every light overlay layer with a visible tint', () => {
+    for (const preset of TABLE_TEXTURES) {
+      const layers = backgroundLayers(preset.lightOverlay);
+      const tinted = layers.filter((layer) => /rgba\(0, 0, 0|rgba\(\d+, \d+, \d+, 0\.[1-9]/.test(layer));
+
+      // Every layer carries real ink (a dark/white tint or a highlight), never
+      // a flat transparent wash that would hide the grain.
+      expect(tinted.length, preset.id).toBeGreaterThan(0);
+      for (const layer of layers) {
+        expect(layerGeometry(layer), preset.id).toContain('COLOR');
+      }
+      expect(luminance(preset.lightBase), preset.id).toBeGreaterThan(0.6);
+    }
   });
 
   it('follows the applied data-theme when no theme is passed', () => {

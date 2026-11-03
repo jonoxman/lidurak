@@ -24,7 +24,12 @@ export interface TableTexturePreset {
   overlay: string;
   /** Pale felt base used while the light theme is active. */
   lightBase: string;
-  /** Pale grain overlay for the light theme. */
+  /**
+   * Pale grain overlay for the light theme. It keeps the exact layer order,
+   * gradient types, angles, positions and pattern frequencies of `overlay` and
+   * only swaps the colour stops, so the texture itself is identical in both
+   * themes and only the palette differs.
+   */
   lightOverlay: string;
   /** Harmonious frame/border colour for the light-theme felt. */
   lightBorder: string;
@@ -55,7 +60,7 @@ export const TABLE_TEXTURES: readonly TableTexturePreset[] = [
       'repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.035) 0 2px, transparent 2px 7px), radial-gradient(circle at 50% 30%, rgba(255, 255, 255, 0.06), transparent 65%)',
     lightBase: '#b5d6c5',
     lightOverlay:
-      'radial-gradient(circle at 50% 30%, #d6eadf, #b5d6c5 70%), repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.45) 0 2px, transparent 2px 7px)',
+      'repeating-linear-gradient(45deg, rgba(18, 74, 50, 0.18) 0 2px, transparent 2px 7px), radial-gradient(circle at 50% 30%, rgba(255, 255, 255, 0.34), transparent 65%)',
     lightBorder: '#8cb8a2',
   },
   {
@@ -66,7 +71,7 @@ export const TABLE_TEXTURES: readonly TableTexturePreset[] = [
       'repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.03) 0 2px, transparent 2px 8px), radial-gradient(circle at 50% 25%, rgba(140, 170, 255, 0.08), transparent 70%)',
     lightBase: '#b8cce4',
     lightOverlay:
-      'radial-gradient(circle at 50% 25%, #d8e4f2, #b8cce4 70%), repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.4) 0 2px, transparent 2px 8px)',
+      'repeating-linear-gradient(135deg, rgba(28, 48, 92, 0.18) 0 2px, transparent 2px 8px), radial-gradient(circle at 50% 25%, rgba(255, 255, 255, 0.36), transparent 70%)',
     lightBorder: '#8ea9ca',
   },
   {
@@ -77,7 +82,7 @@ export const TABLE_TEXTURES: readonly TableTexturePreset[] = [
       'radial-gradient(ellipse at 50% 20%, rgba(255, 170, 170, 0.09), transparent 60%), repeating-radial-gradient(circle at 50% 50%, rgba(0, 0, 0, 0.06) 0 3px, transparent 3px 9px)',
     lightBase: '#dcb6c2',
     lightOverlay:
-      'radial-gradient(ellipse at 50% 20%, #f0d8df, #dcb6c2 65%), repeating-radial-gradient(circle at 50% 50%, rgba(120, 60, 80, 0.06) 0 3px, transparent 3px 9px)',
+      'radial-gradient(ellipse at 50% 20%, rgba(255, 255, 255, 0.4), transparent 60%), repeating-radial-gradient(circle at 50% 50%, rgba(96, 26, 44, 0.16) 0 3px, transparent 3px 9px)',
     lightBorder: '#be8e9d',
   },
   {
@@ -88,7 +93,7 @@ export const TABLE_TEXTURES: readonly TableTexturePreset[] = [
       'repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.025) 0 1px, transparent 1px 9px), radial-gradient(circle at 50% 30%, rgba(255, 255, 255, 0.05), transparent 70%)',
     lightBase: '#cbd5e1',
     lightOverlay:
-      'radial-gradient(circle at 50% 30%, #e2e8f0, #cbd5e1 70%), repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.45) 0 1px, transparent 1px 9px)',
+      'repeating-linear-gradient(90deg, rgba(30, 41, 59, 0.16) 0 1px, transparent 1px 9px), radial-gradient(circle at 50% 30%, rgba(255, 255, 255, 0.42), transparent 70%)',
     lightBorder: '#94a3b8',
   },
   {
@@ -99,7 +104,7 @@ export const TABLE_TEXTURES: readonly TableTexturePreset[] = [
       'radial-gradient(circle at 20% 30%, rgba(150, 190, 120, 0.07), transparent 55%), radial-gradient(circle at 80% 70%, rgba(120, 160, 100, 0.06), transparent 60%)',
     lightBase: '#c4d6b4',
     lightOverlay:
-      'radial-gradient(circle at 20% 30%, #dfe9d5, #c4d6b4 65%), radial-gradient(circle at 80% 70%, rgba(255, 255, 255, 0.4), transparent 60%)',
+      'radial-gradient(circle at 20% 30%, rgba(255, 255, 255, 0.45), transparent 55%), radial-gradient(circle at 80% 70%, rgba(74, 104, 54, 0.18), transparent 60%)',
     lightBorder: '#9ab386',
   },
   {
@@ -110,7 +115,7 @@ export const TABLE_TEXTURES: readonly TableTexturePreset[] = [
       'repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.14) 0 3px, transparent 3px 11px), repeating-linear-gradient(88deg, rgba(255, 220, 160, 0.05) 0 2px, transparent 2px 26px)',
     lightBase: '#dcc7a8',
     lightOverlay:
-      'radial-gradient(circle at 50% 25%, #efe3d0, #dcc7a8 70%), repeating-linear-gradient(90deg, rgba(120, 90, 50, 0.1) 0 3px, transparent 3px 11px)',
+      'repeating-linear-gradient(90deg, rgba(92, 64, 32, 0.22) 0 3px, transparent 3px 11px), repeating-linear-gradient(88deg, rgba(122, 90, 48, 0.16) 0 2px, transparent 2px 26px)',
     lightBorder: '#b89d78',
   },
 ];

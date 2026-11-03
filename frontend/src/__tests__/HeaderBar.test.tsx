@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/pre
 import { HeaderBar, NAV_MENUS, PROFILE_ITEMS, connectionLevel } from '../components/HeaderBar';
 import { ALL_CARD_BACK_PATTERNS, CardBack } from '../components/CardBack';
 import { soundEngine } from '../audio/SoundEngine';
+import { TABLE_TEXTURES } from '../styles/tableTextures';
 import {
   clampRoundness,
   getSettings,
@@ -342,6 +343,48 @@ describe('HeaderBar', () => {
     expect(swatch.getAttribute('style')).toContain(
       'brightness(1.2) contrast(0.8) hue-rotate(25deg)',
     );
+  });
+
+  it('previews every table texture with the palette of the active theme', async () => {
+    const hexToRgb = (hex: string): string => {
+      const value = hex.replace('#', '');
+      const [r, g, b] = [0, 2, 4].map((offset) => parseInt(value.slice(offset, offset + 2), 16));
+      return `rgb(${r}, ${g}, ${b})`;
+    };
+
+    setSettings({ theme: 'dark' });
+    const view = render(<HeaderBar />);
+    openSubmenu('Table');
+
+    const panel = screen.getByTestId('submenu-table');
+    const swatch = (id: string) =>
+      panel.querySelector(`[data-testid="texture-swatch-${id}"]`) as HTMLElement;
+
+    for (const preset of TABLE_TEXTURES) {
+      const node = swatch(preset.id);
+      expect(node.getAttribute('data-texture-theme'), preset.id).toBe('dark');
+      expect(node.style.backgroundImage, preset.id).toBe(preset.overlay);
+      expect(node.getAttribute('style'), preset.id).toContain(hexToRgb(preset.base));
+      // Each preview is also addressable by its texture id.
+      expect(
+        panel.querySelector(`[data-testid="table-texture-${preset.id}"]`),
+        preset.id,
+      ).not.toBeNull();
+    }
+
+    // Switching the theme repaints the previews from the light palette; the
+    // texture layers themselves are unchanged.
+    setSettings({ theme: 'light' });
+    await waitFor(() => {
+      for (const preset of TABLE_TEXTURES) {
+        const node = swatch(preset.id);
+        expect(node.getAttribute('data-texture-theme'), preset.id).toBe('light');
+        expect(node.style.backgroundImage, preset.id).toBe(preset.lightOverlay);
+        expect(node.getAttribute('style'), preset.id).toContain(hexToRgb(preset.lightBase));
+      }
+    });
+
+    view.unmount();
   });
 
   it('selects one of the colourful card back designs', () => {

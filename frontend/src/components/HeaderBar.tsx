@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { SoundEngine, soundEngine } from '../audio/SoundEngine';
 import { ALL_CARD_BACK_PATTERNS, CARD_BACK_LABELS, CardBack } from './CardBack';
-import { TABLE_TEXTURES, getTableFilterCss } from '../styles/tableTextures';
+import {
+  TABLE_TEXTURES,
+  getTableFilterCss,
+  resolveTableTheme,
+  tableTexturePalette,
+} from '../styles/tableTextures';
 import {
   ROUNDNESS_MAX,
   ROUNDNESS_MIN,
@@ -342,32 +347,41 @@ function TableSubmenu() {
   const { brightness, contrast, hue } = settings.tableFilters;
   // Every swatch previews the live filter, so slider drags repaint them in place.
   const filterCss = getTableFilterCss({ brightness, contrast, hue });
+  // Swatches follow the applied theme, so each preset previews the very texture
+  // the arena paints: same layers, only the colour palette changes per theme.
+  const resolvedTheme = resolveTableTheme(settings.theme);
 
   return (
     <div class="settings-submenu" data-testid="submenu-table">
       <div class="texture-grid" role="group" aria-label="Table textures">
-        {TABLE_TEXTURES.map((texture) => (
-          <button
-            type="button"
-            key={texture.id}
-            class={`texture-option${settings.tableTexture === texture.id ? ' active' : ''}`}
-            aria-label={texture.name}
-            aria-pressed={settings.tableTexture === texture.id}
-            onClick={() => setSettings({ tableTexture: texture.id })}
-          >
-            <span
-              class="texture-swatch"
-              data-testid={`texture-swatch-${texture.id}`}
-              style={{
-                backgroundColor: texture.base,
-                backgroundImage: texture.overlay,
-                filter: filterCss,
-              }}
-              aria-hidden="true"
-            />
-            <span class="texture-name">{texture.name}</span>
-          </button>
-        ))}
+        {TABLE_TEXTURES.map((texture) => {
+          const palette = tableTexturePalette(texture, resolvedTheme);
+          return (
+            <button
+              type="button"
+              key={texture.id}
+              class={`texture-option${settings.tableTexture === texture.id ? ' active' : ''}`}
+              aria-label={texture.name}
+              aria-pressed={settings.tableTexture === texture.id}
+              data-testid={`table-texture-${texture.id}`}
+              data-texture-theme={resolvedTheme}
+              onClick={() => setSettings({ tableTexture: texture.id })}
+            >
+              <span
+                class="texture-swatch"
+                data-testid={`texture-swatch-${texture.id}`}
+                data-texture-theme={resolvedTheme}
+                style={{
+                  backgroundColor: palette.base,
+                  backgroundImage: palette.overlay,
+                  filter: filterCss,
+                }}
+                aria-hidden="true"
+              />
+              <span class="texture-name">{texture.name}</span>
+            </button>
+          );
+        })}
       </div>
 
       <label class="setting-row">
