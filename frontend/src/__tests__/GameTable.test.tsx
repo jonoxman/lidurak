@@ -2750,3 +2750,307 @@ describe('T-90-2 ITEM-PREV-4: defender hand glow before the surrender decision',
     });
   });
 });
+
+/**
+ * T-90-feedback-20261103_172808-1 ITEM-PREV-4a / ITEM-PREV-4b: the hand shows
+ * exactly ONE highlight outline — the tight `.hand-cards` box that wraps the
+ * rendered cards with a symmetric 4px margin. The outer
+ * `[data-zone="player-hand"]` column still carries `data-highlighted` /
+ * `data-highlight-variant` for testability, but it must never paint a second,
+ * vertically wider border, outline or glow.
+ */
+describe('T-90 ITEM-PREV-4a/4b: single tight hand highlight outline', () => {
+  const handZoneOf = (container: Element): HTMLElement =>
+    container.querySelector('[data-zone="player-hand"]') as HTMLElement;
+
+  const VISUAL_PROPERTIES = new Set([
+    'border',
+    'border-top',
+    'border-right',
+    'border-bottom',
+    'border-left',
+    'border-color',
+    'border-width',
+    'border-style',
+    'outline',
+    'outline-color',
+    'outline-width',
+    'outline-style',
+    'outline-offset',
+    'box-shadow',
+    'background',
+    'background-color',
+    'background-image',
+    'animation',
+    'animation-name',
+    'animation-duration',
+    'animation-timing-function',
+    'animation-iteration-count',
+    'animation-direction',
+    'animation-fill-mode',
+    'animation-play-state',
+    'animation-delay',
+  ]);
+
+  /** Parse `prop: value` declarations out of a rule body. */
+  const declarationsOf = (body: string): Array<{ property: string; value: string }> =>
+    body
+      .split(';')
+      .map((declaration) => declaration.trim())
+      .filter((declaration) => declaration.length > 0)
+      .map((declaration) => {
+        const [property, ...rest] = declaration.split(':');
+        return { property: property.trim().toLowerCase(), value: rest.join(':').trim() };
+      });
+
+  /**
+   * Every `selector { … }` rule block in table.css, comments removed. Parsing
+   * brace pairs keeps the @media-nested mobile/light overrides too, so the
+   * audit covers Dark mode, Light mode and every breakpoint.
+   */
+  const ruleBlocks = (): Array<{
+    selector: string;
+    declarations: Array<{ property: string; value: string }>;
+  }> => {
+    const source = tableCss.replace(/\/\*[\s\S]*?\*\//g, '');
+    return Array.from(source.matchAll(/([^{}]*)\{([^{}]*)\}/g)).map((match) => ({
+      selector: match[1].trim(),
+      declarations: declarationsOf(match[2]),
+    }));
+  };
+
+  /** Rule blocks that target the outer hand column. */
+  const outerHandZoneRules = (): ReturnType<typeof ruleBlocks> =>
+    ruleBlocks().filter((rule) => rule.selector.includes('player-hand'));
+
+  const baseRule = (selector: string): string => {
+    const start = tableCss.indexOf(`\n${selector} {`);
+    expect(start).toBeGreaterThan(-1);
+    return tableCss.slice(start, tableCss.indexOf('}', start));
+  };
+
+  it('pins the outer hand column to a neutral box in Dark and Light mode', () => {
+    const rules = outerHandZoneRules();
+    expect(rules.length).toBeGreaterThan(1);
+
+    const visual = rules.flatMap((rule) =>
+      rule.declarations.filter((declaration) => VISUAL_PROPERTIES.has(declaration.property)),
+    );
+    // Layout-only rules (grid placement, reserved card height) may target the
+    // wrapper, but every visual property must be an explicit neutral reset.
+    expect(visual.length).toBeGreaterThan(0);
+    for (const declaration of visual) {
+      expect(declaration.value).toMatch(/^(none|transparent)$/);
+    }
+
+    // The exact five-property reset exists once for Dark and once for Light.
+    const resets = rules.filter((rule) => {
+      const properties = rule.declarations.map((declaration) => declaration.property);
+      return ['border', 'outline', 'box-shadow', 'background', 'animation'].every((property) =>
+        properties.includes(property),
+      );
+    });
+    expect(resets).toHaveLength(2);
+    for (const reset of resets) {
+      const byProperty = Object.fromEntries(
+        reset.declarations.map((declaration) => [declaration.property, declaration.value]),
+      );
+      expect(byProperty).toMatchObject({
+        border: 'none',
+        outline: 'none',
+        'box-shadow': 'none',
+        background: 'transparent',
+        animation: 'none',
+      });
+    }
+    expect(resets.some((reset) => reset.selector.includes("data-theme='light'"))).toBe(true);
+    expect(resets.some((reset) => !reset.selector.includes("data-theme='light'"))).toBe(true);
+
+    // Every rule that paints a hand glow targets `.hand-cards` — never the
+    // wrapper — so the wrapper's data attributes can never add a second outline.
+    const glowRules = ruleBlocks().filter((rule) =>
+      [
+        'defenderHandPulse',
+        'attackerPulse',
+        'throwInPulse',
+        'lightDefenderHandPulse',
+        'lightAttackerHandPulse',
+      ].some((keyframe) =>
+        rule.declarations.some((declaration) => declaration.value.includes(keyframe)),
+      ),
+    );
+    expect(glowRules.length).toBeGreaterThan(0);
+    for (const rule of glowRules) {
+      for (const selector of rule.selector.split(',')) {
+        expect(selector).toContain('.hand-cards');
+        expect(selector).not.toContain('player-hand');
+      }
+    }
+  });
+
+  it('keeps the tight .hand-cards box hugging the cards without lift headroom', () => {
+    const rule = baseRule('.hand-cards');
+    expect(rule).toContain('display: inline-flex');
+    expect(rule).toContain('width: fit-content');
+    expect(rule).toContain('align-self: center');
+    expect(rule).toContain('height: fit-content');
+    expect(rule).toContain(`padding: ${HAND_BOX_PADDING}px;`);
+    // No asymmetric top/bottom padding and no reserved height: the outline hugs
+    // the top, bottom, left and right edges of the cards symmetrically.
+    expect(rule).not.toMatch(/padding-(top|bottom)/);
+    expect(rule).not.toMatch(/min-height/);
+    expect(rule).not.toMatch(/padding:\s*[^;]*\s[1-9][0-9]*px\s+[1-9][0-9]*px\s*;/);
+  });
+
+  it('glows only the tight box for a defenceless defender during the countdown', () => {
+    const { container } = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={uncoveredPair}
+        trumpSuit="clubs"
+        attackerId="p1"
+        defenderId="p0"
+        boutPhase="Defense"
+        defending
+        defenderDefenseless
+        turnPlayerId="p0"
+      />,
+    );
+
+    const zone = handZoneOf(container);
+    const box = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+    // Previous-4 is preserved: the decision has not been made yet, so the hand
+    // still glows crimson while the 3 → 2 → 1 countdown runs.
+    expect(box.classList.contains('hand-cards')).toBe(true);
+    expect(box.parentElement).toBe(zone);
+    expect(box.getAttribute('data-highlighted')).toBe('true');
+    expect(box.getAttribute('data-highlight-variant')).toBe('defender');
+    expect(box.classList.contains('defender-turn')).toBe(true);
+    expect(zone.getAttribute('data-highlighted')).toBe('true');
+    expect(zone.getAttribute('data-highlight-variant')).toBe('defender');
+
+    // Exactly one visual highlight container wraps the cards: the tight box.
+    // The wrapper's own `turn-pulse` / `defender-turn` state classes are inert
+    // because every glow rule also requires `.hand-cards`.
+    expect(zone.classList.contains('hand-cards')).toBe(false);
+    expect(zone.querySelectorAll('.hand-cards')).toHaveLength(1);
+    const glowing = Array.from(
+      zone.querySelectorAll('.hand-cards, .attacker-turn, .defender-turn, .throw-in-turn'),
+    );
+    expect(glowing).toHaveLength(1);
+    expect(glowing[0]).toBe(box);
+
+    // Both themes style the glow on `.hand-cards` only.
+    expect(
+      cssRule(
+        tableCss,
+        ".hand-cards[data-highlighted='true'][data-highlight-variant='defender']",
+      ),
+    ).toContain('defenderHandPulse');
+    expect(
+      cssRule(
+        tableCss,
+        ":root[data-theme='light'] .hand-cards[data-highlighted='true'][data-highlight-variant='defender']",
+      ),
+    ).toContain('lightDefenderHandPulse');
+  });
+
+  it('glows only the tight box for the opening attacker and an eligible thrower', () => {
+    const attacker = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={[]}
+        trumpSuit="clubs"
+        defenderId="p1"
+        boutPhase="InitialAttack"
+        awaitingAttack
+      />,
+    );
+
+    let zone = handZoneOf(attacker.container);
+    let box = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+    expect(box.classList.contains('hand-cards')).toBe(true);
+    expect(box.parentElement).toBe(zone);
+    expect(box.getAttribute('data-highlight-variant')).toBe('attacker');
+    expect(box.classList.contains('attacker-turn')).toBe(true);
+    expect(zone.querySelectorAll('.hand-cards')).toHaveLength(1);
+    expect(
+      zone.querySelectorAll('.hand-cards, .attacker-turn, .defender-turn, .throw-in-turn'),
+    ).toHaveLength(1);
+    attacker.unmount();
+
+    const thrower = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={uncoveredPair}
+        trumpSuit="clubs"
+        attackerId="p1"
+        defenderId="p2"
+        boutPhase="Defense"
+        canThrowIn
+      />,
+    );
+
+    zone = handZoneOf(thrower.container);
+    box = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+    expect(box.getAttribute('data-highlight-variant')).toBe('throw-in');
+    expect(box.classList.contains('throw-in-turn')).toBe(true);
+    expect(zone.querySelectorAll('.hand-cards')).toHaveLength(1);
+    expect(
+      zone.querySelectorAll('.hand-cards, .attacker-turn, .defender-turn, .throw-in-turn'),
+    ).toHaveLength(1);
+
+    // The attacker / throw-in glows are scoped to `.hand-cards` in both themes.
+    for (const variant of ['attacker', 'throw-in']) {
+      expect(
+        cssRule(tableCss, `.hand-cards[data-highlighted='true'][data-highlight-variant='${variant}']`),
+      ).not.toBe('');
+      expect(
+        cssRule(
+          tableCss,
+          `:root[data-theme='light'] .hand-cards[data-highlighted='true'][data-highlight-variant='${variant}']`,
+        ),
+      ).toContain('lightAttackerHandPulse');
+    }
+  });
+
+  it('drops the glow after Surrender and leaves a single neutral wrapper', () => {
+    const { container } = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={uncoveredPair}
+        trumpSuit="clubs"
+        attackerId="p1"
+        defenderId="p0"
+        boutPhase="Defense"
+        defending
+        defenderDefenseless
+        surrenderTriggered
+        turnPlayerId="p0"
+      />,
+    );
+
+    const zone = handZoneOf(container);
+    const box = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+    for (const node of [zone, box]) {
+      expect(node.getAttribute('data-highlighted')).toBe('false');
+      expect(node.getAttribute('data-highlight-variant')).toBe('none');
+      expect(node.getAttribute('data-surrendering')).toBe('true');
+    }
+    expect(box.classList.contains('defender-turn')).toBe(false);
+    expect(box.classList.contains('attacker-turn')).toBe(false);
+    expect(box.classList.contains('throw-in-turn')).toBe(false);
+    // The wrapper is neutral in this state as well, so no second outline appears.
+    expect(zone.querySelectorAll('.hand-cards, .attacker-turn, .defender-turn, .throw-in-turn')).toHaveLength(
+      1,
+    );
+  });
+});

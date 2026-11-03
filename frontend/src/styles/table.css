@@ -844,6 +844,30 @@
   padding: 2px 0 8px;
 }
 
+/* T-90-feedback-20261103_172808-1 ITEM-PREV-4a/4b: the OUTER hand column never
+   paints a highlight of its own. It keeps `data-highlighted` /
+   `data-highlight-variant` on the element for testability, but its border,
+   outline, box-shadow, background and animation are pinned to neutral in every
+   state, so the only outline around the hand is the tight `.hand-cards` box
+   below. Without this the column's reserved card height, its clock row and its
+   padding produced a second, vertically wider outline around the cards. */
+[data-zone='player-hand'],
+[data-zone='player-hand'][data-highlighted='true'],
+[data-zone='player-hand'][data-highlighted='false'],
+[data-zone='player-hand'][data-highlight-variant='defender'],
+[data-zone='player-hand'][data-highlight-variant='attacker'],
+[data-zone='player-hand'][data-highlight-variant='throw-in'],
+[data-zone='player-hand'][data-highlight-variant='none'],
+[data-zone='player-hand'][data-highlight-role='defender'],
+[data-zone='player-hand'][data-highlight-role='attacker'],
+[data-zone='player-hand'][data-highlight-role='throw-in'] {
+  border: none;
+  outline: none;
+  box-shadow: none;
+  background: transparent;
+  animation: none;
+}
+
 /* Item 22 / Req 3: the highlight is an inline-flex box that takes its width from
    the slots themselves. Because every slot is exactly card-sized and overlap is
    only ever a negative `margin-left` on non-first slots, the box starts at the
@@ -858,8 +882,14 @@
   width: fit-content;
   max-width: 100%;
   min-width: 0;
+  /* T-90 ITEM-PREV-4a: the box is never stretched by the grid/flex row, so its
+     outline always hugs the cards it wraps instead of the reserved column. */
+  align-self: center;
+  height: fit-content;
   gap: 0;
-  /* Symmetric, tight padding: exactly 4px of glow room on all four sides. */
+  /* Symmetric, tight padding: exactly 4px of glow room on all four sides. No
+     top/bottom headroom is reserved for lifted cards, so the outline never
+     grows vertically beyond the card bounding box. */
   padding: 4px;
   /* ITEM-NEW-1a: the hand highlight box rounds just past the cards it wraps. */
   border-radius: calc(var(--app-roundness, 8px) + 4px);
@@ -895,7 +925,11 @@
   pointer-events: none;
 }
 
-.hand-cards.attacker-turn {
+/* T-90 ITEM-PREV-4a: every visual hand glow is scoped to `.hand-cards` — the
+   opening-attacker glow is addressable through its class and its data
+   attributes, and the outer `[data-zone='player-hand']` column never glows. */
+.hand-cards.attacker-turn,
+.hand-cards[data-highlighted='true'][data-highlight-variant='attacker'] {
   animation: attackerPulse 2.4s infinite ease-in-out;
 }
 
@@ -904,22 +938,21 @@
    action is `surrender` and whose `3 → 2 → 1` countdown is running. The glow is
    removed the moment `Surrender` is pressed or fires by itself. */
 .hand-cards.defender-turn,
-.hand-cards[data-highlighted='true'][data-highlight-variant='defender'],
-[data-zone='player-hand'][data-highlighted='true'][data-highlight-variant='defender'] {
+.hand-cards[data-highlighted='true'][data-highlight-variant='defender'] {
   animation: defenderHandPulse 2.4s infinite ease-in-out;
 }
 
 /* Item 3b: a thrower who may add cards to the bout glows exactly like the
    opening attacker, so the seat that owes a throw-in is never missed. */
-.hand-cards.throw-in-turn {
+.hand-cards.throw-in-turn,
+.hand-cards[data-highlighted='true'][data-highlight-variant='throw-in'] {
   animation: throwInPulse 2.4s infinite ease-in-out;
 }
 
 /* T-90-2 ITEM-PREV-4: once the surrender is made — pressed manually or fired by
-   the countdown — neither the wrapper nor the tight hand box draws any glow. */
-[data-zone='player-hand'][data-surrendering='true'],
+   the countdown — the tight hand box draws no glow. The outer column is already
+   neutral through the rule above; this reset stays scoped to `.hand-cards`. */
 .hand-cards[data-surrendering='true'],
-[data-zone='player-hand'][data-highlighted='false'],
 .hand-cards[data-highlighted='false'] {
   animation: none;
   box-shadow: none;
@@ -1703,15 +1736,34 @@
   animation: lightDefenderHandPulse 2.4s infinite ease-in-out;
 }
 
-/* The column wrapper gets the same darker keyframes (no border, so the glow box
-   still hugs the cards tightly). */
-:root[data-theme='light'] [data-zone='player-hand'].turn-pulse .hand-cards,
-:root[data-theme='light'] [data-zone='player-hand'][data-highlighted='true'][data-highlight-variant='defender'] {
+/* T-90-feedback-20261103_172808-1 ITEM-PREV-4a: the outer hand column stays
+   completely neutral in the light theme too — no border, outline, box-shadow,
+   background or animation — so removing the double highlight is theme-proof.
+   The darker keyframes are applied to the tight `.hand-cards` box only (the
+   dark-theme rules are deliberately left untouched). */
+:root[data-theme='light'] [data-zone='player-hand'],
+:root[data-theme='light'] [data-zone='player-hand'][data-highlighted='true'],
+:root[data-theme='light'] [data-zone='player-hand'][data-highlighted='false'],
+:root[data-theme='light'] [data-zone='player-hand'][data-highlight-variant='defender'],
+:root[data-theme='light'] [data-zone='player-hand'][data-highlight-variant='attacker'],
+:root[data-theme='light'] [data-zone='player-hand'][data-highlight-variant='throw-in'],
+:root[data-theme='light'] [data-zone='player-hand'][data-highlight-variant='none'],
+:root[data-theme='light'] [data-zone='player-hand'][data-highlight-role='defender'],
+:root[data-theme='light'] [data-zone='player-hand'][data-highlight-role='attacker'],
+:root[data-theme='light'] [data-zone='player-hand'][data-highlight-role='throw-in'] {
+  border: none;
+  outline: none;
+  box-shadow: none;
+  background: transparent;
+  animation: none;
+}
+
+:root[data-theme='light'] .hand-cards[data-highlighted='true'][data-highlight-variant='defender'] {
   animation-name: lightDefenderHandPulse;
 }
 
-:root[data-theme='light'] [data-zone='player-hand'][data-highlight-variant='attacker'],
-:root[data-theme='light'] [data-zone='player-hand'][data-highlight-variant='throw-in'] {
+:root[data-theme='light'] .hand-cards[data-highlighted='true'][data-highlight-variant='attacker'],
+:root[data-theme='light'] .hand-cards[data-highlighted='true'][data-highlight-variant='throw-in'] {
   animation-name: lightAttackerHandPulse;
 }
 

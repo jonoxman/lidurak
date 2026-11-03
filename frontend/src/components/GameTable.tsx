@@ -1105,6 +1105,11 @@ export function GameTable({
     !reviewMode &&
     hand.length > 0 &&
     hand.every((card) => activePlayableKeys.includes(cardKey(card)));
+  // T-90 ITEM-PREV-4a/4b: the highlight data attributes are mirrored onto the
+  // outer `[data-zone="player-hand"]` wrapper for testability only. Every
+  // visual glow rule is scoped to `.hand-cards`, and the wrapper is pinned to
+  // border/outline/box-shadow/background/animation `none` in both themes, so
+  // exactly one tight outline is ever drawn around the rendered cards.
   const handClasses = ['player-hand'];
   const handCardClasses = ['hand-cards'];
   // Item 3b: the glow belongs to every player who can act — the opening
