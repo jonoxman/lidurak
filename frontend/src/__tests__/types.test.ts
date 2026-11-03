@@ -104,6 +104,108 @@ describe('discard pile and replay payloads', () => {
   });
 });
 
+describe('finished games and replay payloads', () => {
+  const finishedView = {
+    ...sampleView,
+    myHand: [],
+    tablePairs: [],
+    boutPhase: 'GameOver',
+    legalActions: [],
+    finishOrder: ['p1', 'p0'],
+    winners: ['p1'],
+    durak: 'p0',
+    promptedPlayerIds: ['p0'],
+    bottomTrumpCard: null,
+    // The backend encodes these as JSON null once the match is over.
+    turnPlayerId: null,
+    turnDeadlineMs: null,
+    gameStartedAtMs: 0,
+    gameEndedAtMs: 5000,
+  };
+
+  it('parses a finished view whose idle clock fields arrive as null', () => {
+    const view = parsePlayerGameView(finishedView);
+
+    expect(view.boutPhase).toBe('GameOver');
+    expect(isGameOverPhase(view.boutPhase)).toBe(true);
+    expect(view.myHand).toEqual([]);
+    expect(view.legalActions).toEqual([]);
+    expect(view.bottomTrumpCard).toBeNull();
+    expect(view.turnPlayerId).toBeUndefined();
+    expect(view.turnDeadlineMs).toBe(0);
+    expect(view.gameEndedAtMs).toBe(5000);
+    expect(view.winners).toEqual(['p1']);
+    expect(view.durak).toBe('p0');
+    expect(view.promptedPlayerIds).toEqual(['p0']);
+  });
+
+  it('treats snake and camel phase spellings as game over', () => {
+    expect(isGameOverPhase('game_over')).toBe(true);
+    expect(isGameOverPhase('gameOver')).toBe(true);
+    expect(isGameOverPhase('GAME_OVER')).toBe(true);
+  });
+
+  it('rejects malformed optional result fields instead of trusting them', () => {
+    expect(() => parsePlayerGameView({ ...finishedView, durak: 7 })).toThrow(/durak/);
+    expect(() => parsePlayerGameView({ ...finishedView, winners: [1] })).toThrow(/winners/);
+    expect(() =>
+      parsePlayerGameView({ ...finishedView, promptedPlayerIds: 'p0' }),
+    ).toThrow(/promptedPlayerIds/);
+    expect(() =>
+      parsePlayerGameView({ ...finishedView, turnDeadlineMs: 'soon' }),
+    ).toThrow(/turnDeadlineMs/);
+    expect(() =>
+      parsePlayerGameView({ ...finishedView, turnPlayerId: 4 }),
+    ).toThrow(/turnPlayerId/);
+  });
+
+  it('accepts the backend replay payload with its extra state fields', () => {
+    const replay = parseGameReplay({
+      gameId: 'g1',
+      config: { playerCount: 2 },
+      initialState: { boutPhase: 'InitialAttack' },
+      moves: [
+        {
+          moveIndex: 1,
+          playerId: 'p0',
+          action: { type: 'initialAttack', playerId: 'p0', cards: [six] },
+          elapsedMs: 0,
+          stateAfter: { boutPhase: 'Defense' },
+        },
+      ],
+      frames: [
+        {
+          moveIndex: 0,
+          playerId: null,
+          action: null,
+          elapsedMs: 0,
+          state: {},
+          views: { p0: sampleView, p1: { ...sampleView, myId: 'p1' } },
+        },
+        {
+          moveIndex: 1,
+          playerId: 'p0',
+          action: { type: 'initialAttack', playerId: 'p0' },
+          elapsedMs: 0,
+          state: {},
+          views: {
+            p0: finishedView,
+            p1: { ...finishedView, myId: 'p1', myName: 'Bob' },
+          },
+        },
+      ],
+    });
+
+    const finalFrame = replay.frames[replay.frames.length - 1];
+    expect(replay.frames).toHaveLength(2);
+    expect(replay.frames[0].playerId).toBeNull();
+    expect(replay.moves[0].elapsedMs).toBe(0);
+    expect(isGameOverPhase(finalFrame.views.p0.boutPhase)).toBe(true);
+    expect(finalFrame.views.p1.myName).toBe('Bob');
+    expect(finalFrame.views.p0.durak).toBe('p0');
+  });
+});
+
 describe('PlayerGameView', () => {
   it('parses a sample view payload from the backend', () => {
     const view = parsePlayerGameView(JSON.parse(JSON.stringify(sampleView)));

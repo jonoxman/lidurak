@@ -20,6 +20,7 @@ import {
   type GameAction,
   type GameReplay,
   type PlayerGameView,
+  type ReplayFrame,
 } from '../types';
 
 const EMPTY_SELECTION: Set<number> = new Set();
@@ -107,6 +108,48 @@ export function seatNumber(id: string): number {
 export function seatOrderedPlayerIds(view: PlayerGameView): string[] {
   const ids = [view.myId, ...view.opponents.map((opponent) => opponent.id)];
   return [...ids].sort((left, right) => seatNumber(left) - seatNumber(right));
+}
+
+/**
+ * ITEM-13: the active user is labelled `Name (You)` in the POV switchers and
+ * the PLAYERS list; every other seat keeps its plain name.
+ */
+export function formatPlayerDisplayName(
+  seatId: string,
+  baseName: string,
+  activePlayerId: string,
+): string {
+  if (seatId !== activePlayerId) return baseName;
+  if (baseName.endsWith(' (You)')) return baseName;
+  return `${baseName} (You)`;
+}
+
+/** The viewed seat's frozen projection from one replay frame (first seat if absent). */
+export function replayFrameView(
+  frame: ReplayFrame | null | undefined,
+  playerId: string,
+): PlayerGameView | null {
+  if (!frame) return null;
+  return frame.views[playerId] ?? Object.values(frame.views)[0] ?? null;
+}
+
+/**
+ * ITEM-9 / ITEM-12: a match is finished when the authoritative view, the frame
+ * on screen, or the last recorded frame says so — so a finished game opened
+ * from its URL still shows the banner and the review controls.
+ */
+export function isFinishedMatch(
+  view: PlayerGameView | null,
+  displayedView: PlayerGameView | null,
+  replay: GameReplay | null,
+  playerId: string,
+): boolean {
+  if (view != null && isGameOverPhase(view.boutPhase)) return true;
+  if (displayedView != null && isGameOverPhase(displayedView.boutPhase)) return true;
+  const frames = replay?.frames ?? [];
+  if (frames.length === 0) return false;
+  const lastView = replayFrameView(frames[frames.length - 1], playerId);
+  return lastView != null && isGameOverPhase(lastView.boutPhase);
 }
 
 /** Seconds left on the 15-second clock, clamped to `0..15`. */
@@ -201,13 +244,20 @@ export function GamePage({
   const [replayFrameIdx, setReplayFrameIdx] = useState(0);
   // Item 13: names remembered from every live view and replay frame.
   const knownNamesRef = useRef<Record<string, string>>({});
+  // Game id whose replay was already fetched on mount, so the finished-game
+  // effect does not refetch and jump a reviewer back to the final frame.
+  const replayLoadedGameRef = useRef<string | null>(null);
   const lastActivityRef = useRef(Date.now());
 
   useEffect(() => {
     let active = true;
+    let replayView: PlayerGameView | null = null;
     setView(null);
     setLive(false);
     setSelection(null);
+    setReplay(null);
+    setReplayFrameIdx(0);
+    replayLoadedGameRef.current = null;
     previousViewRef.current = null;
 
     const socket = new GameWebSocket(gameId, playerId, (next) => {
@@ -218,6 +268,38 @@ export function GamePage({
     socketRef.current = socket;
     socket.connect();
 
+    // ITEM-12: the recorded match is the only source for a finished game whose
+    // live room is gone. Fetch it alongside the live view so opening a finished
+    // game's URL can hydrate the table and the review controls immediately
+    // instead of hanging on "Loading game".
+    try {
+      const replayRequest = getGameReplay(gameId);
+      if (replayRequest != null && typeof replayRequest.then === 'function') {
+        replayRequest
+          .then((loaded) => {
+            if (!active || loaded.frames.length === 0) return;
+            const finalView = replayFrameView(
+              loaded.frames[loaded.frames.length - 1],
+              playerId,
+            );
+            if (finalView == null) return;
+            replayView = finalView;
+            if (!isGameOverPhase(finalView.boutPhase)) return;
+            // The finished match is authoritative: show its final frame and
+            // open review mode on the last move.
+            setView((current) => current ?? finalView);
+            setReplay(loaded);
+            setReplayFrameIdx(loaded.frames.length - 1);
+            replayLoadedGameRef.current = gameId;
+          })
+          .catch((reason: unknown) => {
+            console.warn('Could not load the game replay', reason);
+          });
+      }
+    } catch (reason: unknown) {
+      console.warn('Could not load the game replay', reason);
+    }
+
     // The socket sends the current state on connect; this REST read covers the
     // window before it opens and keeps the table usable if WebSockets are down.
     getGameView(gameId, playerId)
@@ -226,6 +308,9 @@ export function GamePage({
       })
       .catch((reason: unknown) => {
         console.warn('Could not load the game view', reason);
+        // A finished game survives only in its replay, so fall back to it
+        // rather than leaving the page stuck on the loading state.
+        if (active && replayView != null) setView((current) => current ?? replayView);
       });
 
     return () => {
@@ -331,6 +416,9 @@ export function GamePage({
       setReplayFrameIdx(0);
       return;
     }
+    // The mount fetch already hydrated this finished match; refetching here
+    // would jump a reviewer back to the final frame.
+    if (replayLoadedGameRef.current === gameId) return;
     let active = true;
     try {
       if (typeof getGameReplay !== 'function') return;
@@ -341,6 +429,7 @@ export function GamePage({
           if (!active) return;
           setReplay(loaded);
           setReplayFrameIdx(Math.max(0, loaded.frames.length - 1));
+          replayLoadedGameRef.current = gameId;
         })
         .catch((reason: unknown) => {
           if (active) console.warn('Could not load the game replay', reason);
@@ -441,6 +530,47 @@ export function GamePage({
       clearInterval(ticker);
     };
   }, [defenseless, uncoveredCount, autoSurrenderMs, playerId]);
+
+  // ITEM-9: the match is finished when the live view, the frame on screen or
+  // the last recorded frame says so.
+  const replayFrames = replay?.frames ?? [];
+  const activeFrame =
+    replayFrames.length > 0
+      ? replayFrames[Math.min(Math.max(replayFrameIdx, 0), replayFrames.length - 1)]
+      : null;
+  const activeFrameView = replayFrameView(activeFrame, playerId);
+  const gameOver =
+    view != null && isFinishedMatch(view, activeFrameView, replay, playerId);
+  const reviewMode = gameOver;
+
+  // ITEM-FOLLOWUP-1: while reviewing, the left/right arrows step through the
+  // recorded frames, clamped to the first and last move.
+  useEffect(() => {
+    if (!reviewMode || replay == null || replay.frames.length === 0) return;
+    const frameCount = replay.frames.length;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.ctrlKey || event.altKey || event.metaKey) return;
+      const target = event.target as HTMLElement | null;
+      const tagName = target?.tagName?.toLowerCase();
+      if (
+        tagName === 'input' ||
+        tagName === 'select' ||
+        tagName === 'textarea' ||
+        target?.isContentEditable === true
+      ) {
+        return;
+      }
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        setReplayFrameIdx((index) => Math.max(0, index - 1));
+      } else if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        setReplayFrameIdx((index) => Math.min(frameCount - 1, index + 1));
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [reviewMode, replay]);
 
   if (!view) {
     return (
@@ -671,19 +801,13 @@ export function GamePage({
 
   // Item 12: a finished game is reviewed read-only against the selected replay
   // frame; a live match always renders the authoritative view.
-  const gameOver = isGameOverPhase(view.boutPhase);
-  const reviewMode = gameOver;
-  const replayFrames = replay?.frames ?? [];
-  const activeFrame =
-    replayFrames.length > 0
-      ? replayFrames[Math.min(Math.max(replayFrameIdx, 0), replayFrames.length - 1)]
-      : null;
-  const displayedView =
-    reviewMode && activeFrame
-      ? activeFrame.views[playerId] ??
-        activeFrame.views[Object.keys(activeFrame.views)[0]] ??
-        view
-      : view;
+  const displayedView = reviewMode && activeFrame ? activeFrameView ?? view : view;
+  // ITEM-9: the banner's winner, Durak and finish order always come from the
+  // final finished state — the live view while it is over, otherwise the last
+  // recorded frame — never from an intermediate replay frame.
+  const resultView = isGameOverPhase(view.boutPhase)
+    ? view
+    : replayFrameView(replayFrames[replayFrames.length - 1], playerId) ?? view;
 
   // Item 13: every seat resolves to a real name (opponent summary, the
   // viewer's own `myName`, the displayed replay frame, a name remembered from
@@ -729,9 +853,10 @@ export function GamePage({
   // intermediate replay frame. Early frames have an empty or one-entry
   // `finishOrder`, so binding these to `displayedView` would erase the winner
   // or label the only finished player as both winner and Durak.
-  const winnerId = view.finishOrder[0];
-  const durakId = view.finishOrder[view.finishOrder.length - 1];
-  const gameIsDraw = view.isDraw;
+  const winnerId = resultView.finishOrder[0];
+  const durakId =
+    resultView.durak ?? resultView.finishOrder[resultView.finishOrder.length - 1] ?? null;
+  const gameIsDraw = resultView.isDraw;
 
   // The replay clock is frozen at the frame's elapsed time (`00:00` on the
   // opening move); live play uses the recorded start/end timestamps.
@@ -783,7 +908,7 @@ export function GamePage({
             >
               {playersInSeatOrder.map((player) => (
                 <option key={player.id} value={player.id}>
-                  {player.name}
+                  {formatPlayerDisplayName(player.id, player.name, playerId)}
                 </option>
               ))}
             </select>
@@ -835,7 +960,9 @@ export function GamePage({
                   class={`hotseat-tab${id === playerId ? ' active' : ''}`}
                   onClick={() => onSwitchPlayer(id)}
                 >
-                  <span class="hotseat-name">{nameFor(id)}</span>
+                  <span class="hotseat-name">
+                    {formatPlayerDisplayName(id, nameFor(id), playerId)}
+                  </span>
                   <span class="hotseat-id">{id}</span>
                 </button>
               ))}
@@ -994,7 +1121,7 @@ export function GamePage({
 
           <section class="panel" aria-label="Player status">
             <h2>Players</h2>
-            <ul class="status-badges">
+            <ul class="status-badges players-list" data-testid="players-list">
               {playersInSeatOrder.map((player) => {
                 const present =
                   player.id === displayedView.myId
@@ -1017,7 +1144,9 @@ export function GamePage({
                       role="img"
                       aria-label={present ? 'Present' : 'Away'}
                     />
-                    <span class="status-name">{player.name}</span>
+                    <span class="status-name">
+                      {formatPlayerDisplayName(player.id, player.name, playerId)}
+                    </span>
                   </span>
                   <span class="status-count">{player.cardCount} cards</span>
                   {player.finishRank != null ? (
@@ -1066,7 +1195,7 @@ export function GamePage({
                 </p>
               ) : null}
               <ol class="finish-order">
-                {view.finishOrder.map((id) => (
+                {resultView.finishOrder.map((id) => (
                   <li key={id}>{nameFor(id)}</li>
                 ))}
               </ol>

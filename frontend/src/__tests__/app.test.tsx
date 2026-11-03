@@ -103,4 +103,25 @@ describe('parseRoute', () => {
       playerId: 'p0',
     });
   });
+
+  it('routes the /replay alias of a game and defaults the player', () => {
+    expect(parseRoute('#/g/game-1/replay')).toEqual({
+      name: 'game',
+      gameId: 'game-1',
+      playerId: 'p0',
+    });
+    expect(parseRoute('#/g/game-1/replay?player=p2')).toEqual({
+      name: 'game',
+      gameId: 'game-1',
+      playerId: 'p2',
+    });
+  });
+
+  it('defaults a whitespace-only player query parameter', () => {
+    expect(parseRoute('#/g/game-1?player=%20')).toEqual({
+      name: 'game',
+      gameId: 'game-1',
+      playerId: 'p0',
+    });
+  });
 });
