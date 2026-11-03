@@ -122,11 +122,15 @@ describe('Card', () => {
     expect(pips).toHaveLength(1);
     expect(pips[0].getAttribute('data-pip')).toBe('ace');
     expect(Number(pips[0].getAttribute('font-size'))).toBeGreaterThanOrEqual(40);
-    // Nudged right of the exact centre so the 40pt centrepiece clears the
-    // enlarged 12pt corner suit glyph (`CARD_INDEX.topSuit`).
+    // T-90-1 ITEM-3b: the 40pt centrepiece sits on the exact card centre
+    // `(35, 50)`, so its left/right (`35` / `35`) and top/bottom (`50` / `50`)
+    // margins match, and its carve-out clears the corner suit indices.
     expect(pips[0].getAttribute('x')).toBe(String(ACE_PIP.x));
-    expect(Number(pips[0].getAttribute('x'))).toBeGreaterThan(
-      CARD_INDEX.topSuit.x + (CARD_INDEX.topSuit.fontSize * 0.95) / 2,
+    expect(pips[0].getAttribute('y')).toBe(String(ACE_PIP.y));
+    expect(ACE_PIP.x).toBe(35);
+    expect(ACE_PIP.y).toBe(50);
+    expect(ACE_PIP.x).toBeGreaterThan(
+      CARD_INDEX.topSuit.x + (CARD_INDEX.topSuit.fontSize * GLYPH_METRICS.suitWidth) / 2,
     );
   });
 
@@ -300,6 +304,22 @@ describe('Card', () => {
 
 type Box = { left: number; right: number; top: number; bottom: number };
 
+/**
+ * Ink metrics of the glyphs the cards draw, in em units. They describe the
+ * painted ink rather than the advance box: a suit symbol's ink is about `0.8 em`
+ * wide (its advance box is a little wider), a digit/letter about `0.62 em`, and
+ * a `dominant-baseline="central"` glyph is centred on its `y` instead of
+ * hanging above a baseline. Measuring ink is what makes the T-90-1 centred grid
+ * (`22.5` / `35` / `47.5`, `32`–`68`) verifiable against the corner indices.
+ */
+const GLYPH_METRICS = {
+  textWidth: 0.62,
+  suitWidth: 0.8,
+  ascent: 0.75,
+  descent: 0.02,
+  centralHalfHeight: 0.39,
+} as const;
+
 /** Approximate glyph box of a rendered SVG `<text>`, in viewBox units. */
 const textBox = (node: Element): Box => {
   const text = node.textContent ?? '';
@@ -307,15 +327,18 @@ const textBox = (node: Element): Box => {
   const x = Number(node.getAttribute('x'));
   const y = Number(node.getAttribute('y'));
   const anchor = node.getAttribute('text-anchor') ?? 'start';
-  // Suit glyphs are close to a full em wide; digits and letters about 0.62 em.
   const wide = /[^0-9A-Za-z]/.test(text);
-  const width = text.length * fontSize * (wide ? 0.95 : 0.62);
+  const width =
+    text.length * fontSize * (wide ? GLYPH_METRICS.suitWidth : GLYPH_METRICS.textWidth);
   const left = anchor === 'middle' ? x - width / 2 : anchor === 'end' ? x - width : x;
+  const central = node.getAttribute('dominant-baseline') === 'central';
   return {
     left,
     right: left + width,
-    top: y - fontSize * 0.8,
-    bottom: y + fontSize * 0.05,
+    top: central ? y - fontSize * GLYPH_METRICS.centralHalfHeight : y - fontSize * GLYPH_METRICS.ascent,
+    bottom: central
+      ? y + fontSize * GLYPH_METRICS.centralHalfHeight
+      : y + fontSize * GLYPH_METRICS.descent,
   };
 };
 
@@ -855,12 +878,16 @@ describe('corner pip alignment and face pip sizing (T-90 ITEM-3a / ITEM-3b)', ()
     expect(PIP_LAYOUT_BOUNDS.maxX - PIP_LAYOUT_BOUNDS.minX).toBeLessThan(previousSpan);
     expect(PIP_LAYOUT_BOUNDS.minX).toBeGreaterThan(22);
     expect(PIP_LAYOUT_BOUNDS.maxX).toBeLessThan(55); // clear of the trump badge at x = 55
-    expect(PIP_LAYOUT_BOUNDS.minY).toBeGreaterThanOrEqual(CARD_INDEX.topSuit.y);
+    // T-90-1 ITEM-3a: the outer rows mirror across the card centre (`32 + 68`),
+    // so the grid keeps equal top/bottom margins; the top row still clears the
+    // corner rank band that ends at `y = 21`.
+    expect(PIP_LAYOUT_BOUNDS.minY + PIP_LAYOUT_BOUNDS.maxY).toBe(100);
+    expect(PIP_LAYOUT_BOUNDS.minY).toBeGreaterThan(CARD_INDEX.topRank.y);
     expect(PIP_LAYOUT_BOUNDS.maxY - PIP_LAYOUT_BOUNDS.minY).toBeLessThan(78 - 33);
     expect(PIP_LAYOUT_BOUNDS.maxY).toBeLessThan(CARD_INDEX.bottomSuit.y);
 
     // The columns are still far enough apart for a full 13pt glyph.
-    const glyphWidth = PIP_FONT_SIZE * 0.95;
+    const glyphWidth = PIP_FONT_SIZE * GLYPH_METRICS.suitWidth;
     expect(PIP_COLUMNS.center - PIP_COLUMNS.left).toBeGreaterThanOrEqual(glyphWidth);
     expect(PIP_COLUMNS.right - PIP_COLUMNS.center).toBeGreaterThanOrEqual(glyphWidth);
 
@@ -937,6 +964,242 @@ describe('corner pip alignment and face pip sizing (T-90 ITEM-3a / ITEM-3b)', ()
     expect(pip.getAttribute('font-size')).toBe(String(ACE_PIP.fontSize));
     expect(pip.getAttribute('y')).toBe(String(ACE_PIP.y));
     expect(pip.getAttribute('x')).toBe(String(ACE_PIP.x));
+  });
+});
+
+describe('centred card faces with equal margins (T-90-1 ITEM-3a / ITEM-3b)', () => {
+  afterEach(() => {
+    resetSettings();
+  });
+
+  const CARD_WIDTH = 70;
+  const CARD_HEIGHT = 100;
+  const CENTRE = { x: CARD_WIDTH / 2, y: CARD_HEIGHT / 2 };
+
+  const boundsOf = (pips: Element[]) => {
+    const xs = pips.map((pip) => Number(pip.getAttribute('x')));
+    const ys = pips.map((pip) => Number(pip.getAttribute('y')));
+    return {
+      minX: Math.min(...xs),
+      maxX: Math.max(...xs),
+      minY: Math.min(...ys),
+      maxY: Math.max(...ys),
+    };
+  };
+
+  it('ITEM-3a: centres every numbered-card pip grid on (35, 50) with equal margins', () => {
+    // The grid constants themselves are centred on the `70x100` canvas.
+    expect(PIP_COLUMNS.center).toBe(CENTRE.x);
+    expect(PIP_COLUMNS.left).toBe(22.5);
+    expect(PIP_COLUMNS.right).toBe(47.5);
+    expect(PIP_COLUMNS.left + PIP_COLUMNS.right).toBe(CARD_WIDTH);
+    expect(PIP_ROWS.middle).toBe(CENTRE.y);
+    expect(PIP_ROWS.top).toBe(32);
+    expect(PIP_ROWS.bottom).toBe(68);
+    expect(PIP_ROWS.top + PIP_ROWS.bottom).toBe(CARD_HEIGHT);
+    // The inner rows mirror the centre row.
+    expect(PIP_ROWS.middle - PIP_ROWS.upperMid).toBe(PIP_ROWS.lowerMid - PIP_ROWS.middle);
+    expect(PIP_ROWS.upperMid + PIP_ROWS.lowerMid).toBe(CARD_HEIGHT);
+
+    const columns = [PIP_COLUMNS.left, PIP_COLUMNS.center, PIP_COLUMNS.right];
+    const rows = [
+      PIP_ROWS.top,
+      PIP_ROWS.upperMid,
+      PIP_ROWS.middle,
+      PIP_ROWS.lowerMid,
+      PIP_ROWS.bottom,
+    ];
+
+    for (const rank of NUMBER_RANKS) {
+      const { container, unmount } = render(<Card suit="spades" rank={rank} />);
+      const pips = Array.from(container.querySelectorAll('[data-pip="rank"]'));
+      expect(pips.length, rank).toBeGreaterThan(1);
+
+      for (const pip of pips) {
+        expect(columns, `${rank} column`).toContain(Number(pip.getAttribute('x')));
+        expect(rows, `${rank} row`).toContain(Number(pip.getAttribute('y')));
+        expect(Number(pip.getAttribute('font-size')), rank).toBe(PIP_FONT_SIZE);
+      }
+
+      const { minX, maxX, minY, maxY } = boundsOf(pips);
+      // Equal left/right and top/bottom margins on the card canvas.
+      expect(minX + maxX, `${rank} horizontal margins`).toBe(CARD_WIDTH);
+      expect(minY + maxY, `${rank} vertical margins`).toBe(CARD_HEIGHT);
+      expect(CARD_WIDTH - maxX, `${rank} left margin`).toBeCloseTo(minX, 5);
+      expect(CARD_HEIGHT - maxY, `${rank} top margin`).toBeCloseTo(minY, 5);
+
+      // …and the resulting bounding box is centred on (35, 50).
+      expect((minX + maxX) / 2, `${rank} centre x`).toBe(CENTRE.x);
+      expect((minY + maxY) / 2, `${rank} centre y`).toBe(CENTRE.y);
+
+      unmount();
+    }
+  });
+
+  it('ITEM-3a: keeps the centre-column pips on x = 35 and the centre-row pips on y = 50', () => {
+    // `2`, `3`, `5`, `7`, `8`, `9` and `10` hold at least one centre-column pip.
+    for (const rank of ['two', 'three', 'five', 'seven', 'eight', 'nine', 'ten']) {
+      const { container, unmount } = render(<Card suit="hearts" rank={rank} />);
+      const centrePips = Array.from(container.querySelectorAll('[data-pip="rank"]')).filter(
+        (pip) => Number(pip.getAttribute('x')) === PIP_COLUMNS.center,
+      );
+      expect(centrePips.length, rank).toBeGreaterThan(0);
+      for (const pip of centrePips) {
+        expect(Number(pip.getAttribute('x')), rank).toBe(CENTRE.x);
+      }
+      unmount();
+    }
+
+    // The single middle pip of `3`, `5` and `9` sits dead on the card centre.
+    for (const rank of ['three', 'five', 'nine']) {
+      const { container, unmount } = render(<Card suit="clubs" rank={rank} />);
+      const centred = Array.from(container.querySelectorAll('[data-pip="rank"]')).filter(
+        (pip) =>
+          Number(pip.getAttribute('x')) === CENTRE.x && Number(pip.getAttribute('y')) === CENTRE.y,
+      );
+      expect(centred, rank).toHaveLength(1);
+      unmount();
+    }
+
+    // `6`, `7` and `8` carry a middle row on both side columns (`y = 50`).
+    for (const rank of ['six', 'seven', 'eight']) {
+      const { container, unmount } = render(<Card suit="diamonds" rank={rank} />);
+      const middleRow = Array.from(container.querySelectorAll('[data-pip="rank"]')).filter(
+        (pip) => Number(pip.getAttribute('y')) === PIP_ROWS.middle,
+      );
+      expect(middleRow, rank).toHaveLength(2);
+      expect(middleRow.map((pip) => Number(pip.getAttribute('x'))).sort(), rank).toEqual([
+        PIP_COLUMNS.left,
+        PIP_COLUMNS.right,
+      ]);
+      unmount();
+    }
+  });
+
+  it('ITEM-3b: centres the ace single pip on (35, 50) with equal margins', () => {
+    const { container } = render(<Card suit="hearts" rank="ace" />);
+    const pip = container.querySelector('[data-pip="ace"]')!;
+
+    expect(Number(pip.getAttribute('x'))).toBe(CENTRE.x);
+    expect(Number(pip.getAttribute('y'))).toBe(CENTRE.y);
+    expect(pip.getAttribute('text-anchor')).toBe('middle');
+    expect(pip.getAttribute('dominant-baseline')).toBe('central');
+
+    // Horizontal margins (35 / 35) and vertical margins (50 / 50) are equal.
+    const x = Number(pip.getAttribute('x'));
+    const y = Number(pip.getAttribute('y'));
+    expect(x - 0).toBe(CARD_WIDTH - x);
+    expect(y - 0).toBe(CARD_HEIGHT - y);
+
+    // The 40-unit centrepiece still clears every corner index and stays inside
+    // the card frame.
+    for (const index of Array.from(container.querySelectorAll('[data-index]'))) {
+      expect(overlaps(textBox(pip), textBox(index)), index.getAttribute('data-index')!).toBe(false);
+    }
+    const box = textBox(pip);
+    expect(box.left).toBeGreaterThan(2);
+    expect(box.right).toBeLessThan(68);
+    expect(box.top).toBeGreaterThan(2);
+    expect(box.bottom).toBeLessThan(98);
+  });
+
+  it('ITEM-3b: centres the J/Q/K court letters and mirrors their decoration pips around (35, 50)', () => {
+    // The four decoration corners are equidistant from the card centre: the left
+    // and right columns are 11 units away from `x = 35`, the top and bottom rows
+    // 17 units from `y = 50`, so every pair sums to the card's dimensions.
+    const CORNERS = {
+      'top-left': { x: 24, y: 33 },
+      'top-right': { x: 46, y: 33 },
+      'bottom-right': { x: 46, y: 67 },
+      'bottom-left': { x: 24, y: 67 },
+    } as const;
+    expect(CORNERS['top-left'].x + CORNERS['top-right'].x).toBe(CARD_WIDTH);
+    expect(CORNERS['top-left'].y + CORNERS['bottom-left'].y).toBe(CARD_HEIGHT);
+    for (const offset of Object.values(CORNERS)) {
+      expect(Math.abs(offset.x - CENTRE.x)).toBe(11);
+      expect(Math.abs(offset.y - CENTRE.y)).toBe(17);
+    }
+
+    for (const [rank, letter] of [
+      ['jack', 'J'],
+      ['queen', 'Q'],
+      ['king', 'K'],
+    ] as const) {
+      const { container, unmount } = render(<Card suit="clubs" rank={rank} />);
+
+      const face = container.querySelector('[data-testid="card-face-letter"]')!;
+      expect(face.textContent, rank).toBe(letter);
+      expect(Number(face.getAttribute('x')), rank).toBe(CENTRE.x);
+      expect(Number(face.getAttribute('y')), rank).toBe(CENTRE.y);
+      expect(face.getAttribute('text-anchor'), rank).toBe('middle');
+      expect(face.getAttribute('dominant-baseline'), rank).toBe('central');
+
+      const pips = Array.from(container.querySelectorAll('.face-pip'));
+      expect(pips.length, rank).toBeGreaterThan(0);
+      for (const pip of pips) {
+        const corner = pip.getAttribute('data-corner') as keyof typeof CORNERS;
+        expect(Number(pip.getAttribute('x')), `${rank} ${corner} x`).toBe(CORNERS[corner].x);
+        expect(Number(pip.getAttribute('y')), `${rank} ${corner} y`).toBe(CORNERS[corner].y);
+        // No decoration pip collides with the centred letter.
+        expect(overlaps(textBox(pip), textBox(face)), `${rank} ${corner}`).toBe(false);
+      }
+
+      // Any rank drawn with pips on both sides is mirrored on both axes.
+      const { minX, maxX, minY, maxY } = {
+        minX: Math.min(...pips.map((pip) => Number(pip.getAttribute('x')))),
+        maxX: Math.max(...pips.map((pip) => Number(pip.getAttribute('x')))),
+        minY: Math.min(...pips.map((pip) => Number(pip.getAttribute('y')))),
+        maxY: Math.max(...pips.map((pip) => Number(pip.getAttribute('y')))),
+      };
+      if (pips.length > 1) {
+        expect(minX + maxX, rank).toBe(CARD_WIDTH);
+        expect(minY + maxY, rank).toBe(CARD_HEIGHT);
+      }
+
+      unmount();
+    }
+  });
+
+  it('ITEM-3a: keeps the corner pip columns at 11.5 / 58.5 in size 12, clear of the face', () => {
+    for (const rank of ALL_RANKS) {
+      const { container, unmount } = render(<Card suit="spades" rank={rank} trump />);
+
+      const topRank = container.querySelector('[data-testid="card-rank-top"]')!;
+      const bottomRank = container.querySelector('[data-testid="card-rank-bottom"]')!;
+      const topSuit = container.querySelector('[data-testid="card-suit-top"]')!;
+      const bottomSuit = container.querySelector('[data-testid="card-suit-bottom"]')!;
+
+      expect(Number(topRank.getAttribute('x')), rank).toBe(11.5);
+      expect(Number(bottomRank.getAttribute('x')), rank).toBe(58.5);
+      expect(Number(topSuit.getAttribute('x')), rank).toBe(11.5);
+      expect(Number(bottomSuit.getAttribute('x')), rank).toBe(58.5);
+      expect(Number(topSuit.getAttribute('x')) + Number(bottomSuit.getAttribute('x'))).toBe(
+        CARD_WIDTH,
+      );
+      expect(Number(topSuit.getAttribute('font-size')), rank).toBe(12);
+      expect(Number(bottomSuit.getAttribute('font-size')), rank).toBe(12);
+      // The suit glyph shares the rank's centre axis in both corners.
+      expect(topSuit.getAttribute('x'), rank).toBe(topRank.getAttribute('x'));
+      expect(bottomSuit.getAttribute('x'), rank).toBe(bottomRank.getAttribute('x'));
+
+      const circle = container.querySelector('[data-testid="trump-marker"] circle')!;
+      const badge = {
+        left: Number(circle.getAttribute('cx')) - Number(circle.getAttribute('r')),
+        right: Number(circle.getAttribute('cx')) + Number(circle.getAttribute('r')),
+        top: Number(circle.getAttribute('cy')) - Number(circle.getAttribute('r')),
+        bottom: Number(circle.getAttribute('cy')) + Number(circle.getAttribute('r')),
+      };
+
+      // Zero overlap against any face pip or the gold trump badge.
+      for (const pip of cardPips(container)) {
+        const box = textBox(pip);
+        expect(overlaps(box, textBox(topSuit)), `${rank} top corner suit`).toBe(false);
+        expect(overlaps(box, textBox(bottomSuit)), `${rank} bottom corner suit`).toBe(false);
+        expect(overlaps(box, badge), `${rank} trump badge`).toBe(false);
+      }
+
+      unmount();
+    }
   });
 });
 
