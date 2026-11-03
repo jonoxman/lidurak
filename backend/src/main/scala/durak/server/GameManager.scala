@@ -273,9 +273,14 @@ object GameManager:
     )
 
   /**
-   * `surrender-half-off`: Bob (`p1`) has surrendered against `7♠`, Alice (`p0`)
-   * holds `7♥` and is asked to throw in or pass while the table stays half-off
-   * towards Bob's hand.
+   * `surrender-half-off` (ITEM-ADD-4a): Bob (`p1`) is defending against Alice's
+   * (`p0`) `7♠`, with two further pairs already covered so the compact table
+   * clustering is visible too. Bob holds `9♠`, so he has a legal cover and the
+   * Surrender button is offered from the first frame — and because a cover
+   * exists, the 3-second auto-surrender never arms. Alice still holds `7♥`, a
+   * rank that is on the table, so declaring surrender moves the bout into
+   * [[BoutPhase.SurrenderThrowIn]] and keeps it there waiting for her throw-in
+   * or pass, with the table's cards straddling the felt border 50% on / 50% off.
    */
   private def surrenderHalfOffPreset: PresetGame =
     PresetGame(
@@ -284,88 +289,110 @@ object GameManager:
         hands = Vector(
           Vector(
             card(Rank.Seven, Suit.Hearts),
+            card(Rank.Six, Suit.Clubs),
+            card(Rank.Eight, Suit.Clubs),
             card(Rank.Nine, Suit.Clubs),
-            card(Rank.Jack, Suit.Clubs),
             card(Rank.Queen, Suit.Clubs),
-            card(Rank.King, Suit.Clubs),
-            card(Rank.Ace, Suit.Clubs)
-          ),
-          Vector(
-            card(Rank.Eight, Suit.Hearts),
-            card(Rank.Nine, Suit.Hearts),
-            card(Rank.Ten, Suit.Hearts),
-            card(Rank.Jack, Suit.Hearts),
-            card(Rank.Queen, Suit.Hearts),
-            card(Rank.King, Suit.Hearts)
+            card(Rank.King, Suit.Clubs)
           ),
           Vector(
             card(Rank.Nine, Suit.Spades),
+            card(Rank.Six, Suit.Hearts),
+            card(Rank.Eight, Suit.Hearts),
+            card(Rank.Nine, Suit.Hearts),
+            card(Rank.Ten, Suit.Hearts),
+            card(Rank.Jack, Suit.Hearts)
+          ),
+          Vector(
+            card(Rank.Six, Suit.Spades),
+            card(Rank.Eight, Suit.Spades),
             card(Rank.Ten, Suit.Spades),
             card(Rank.Jack, Suit.Spades),
-            card(Rank.Queen, Suit.Spades),
-            card(Rank.King, Suit.Spades),
-            card(Rank.Ace, Suit.Spades)
+            card(Rank.Ace, Suit.Spades),
+            card(Rank.Six, Suit.Diamonds)
           )
         ),
         talon = Vector(
-          card(Rank.Seven, Suit.Diamonds),
-          card(Rank.Eight, Suit.Diamonds),
-          card(Rank.Nine, Suit.Diamonds),
-          card(Rank.Ten, Suit.Diamonds),
-          card(Rank.Jack, Suit.Diamonds),
-          card(Rank.Queen, Suit.Diamonds),
-          card(Rank.King, Suit.Diamonds),
-          card(Rank.Ace, Suit.Diamonds),
-          card(Rank.Six, Suit.Diamonds)
+          card(Rank.Seven, Suit.Clubs),
+          card(Rank.Ace, Suit.Clubs),
+          card(Rank.Queen, Suit.Hearts),
+          card(Rank.King, Suit.Hearts),
+          card(Rank.Ace, Suit.Hearts),
+          card(Rank.Seven, Suit.Diamonds)
         ),
         trumpSuit = Suit.Diamonds,
-        bottomTrumpCard = Some(card(Rank.Six, Suit.Diamonds)),
-        tablePairs = Vector(TablePair(card(Rank.Seven, Suit.Spades))),
+        bottomTrumpCard = Some(card(Rank.Seven, Suit.Diamonds)),
+        tablePairs = Vector(
+          TablePair(card(Rank.Seven, Suit.Spades)),
+          TablePair(card(Rank.Ten, Suit.Clubs), Some(card(Rank.Jack, Suit.Clubs))),
+          TablePair(card(Rank.Queen, Suit.Spades), Some(card(Rank.King, Suit.Spades)))
+        ),
         attackerIdx = 0,
         defenderIdx = 1,
-        boutPhase = BoutPhase.SurrenderThrowIn,
-        defenderInitialHandSize = 6
+        boutPhase = BoutPhase.Defense,
+        // Bob's hand held six cards when Alice opened the bout, so the bout can
+        // still grow past the three cards already on the table.
+        defenderInitialHandSize = 6,
+        discardPile = Vector(
+          card(Rank.Ace, Suit.Diamonds),
+          card(Rank.King, Suit.Diamonds),
+          card(Rank.Queen, Suit.Diamonds),
+          card(Rank.Jack, Suit.Diamonds),
+          card(Rank.Ten, Suit.Diamonds),
+          card(Rank.Nine, Suit.Diamonds),
+          card(Rank.Eight, Suit.Diamonds)
+        ),
+        lastDiscardCards = Vector(
+          card(Rank.Nine, Suit.Diamonds),
+          card(Rank.Eight, Suit.Diamonds)
+        )
       ),
-      defaultPlayerId = "p0"
+      defaultPlayerId = "p1"
     )
 
   /**
-   * `discard-and-endgame`: the talon is empty, Carol (`p2`) is already out and
-   * eight cards sit in the discard pile (four of them face-up). Alice (`p0`)
-   * holds one last card against Bob (`p1`), who cannot cover it, so Bob's
-   * surrender ends the match and labels him `DURAK`.
+   * `discard-and-endgame` (ITEM-ADD-8b / ITEM-PREV-7c): the talon is empty,
+   * Carol (`p2`) has already gone out with `0` cards (`finishOrder = ["p2"]`, so
+   * she is `WINNER`), and 31 cards sit in the discard pile with the last four
+   * face-up. Bob (`p1`) surrendered while defending, holding `3` cards and
+   * carrying no finishing rank — never `OUT` while he still has cards.
+   *
+   * Alice (`p0`) opened that bout with `7♠` and holds one last card, `7♥`, so a
+   * single throw-in ends the bout: the surrender settles at once, Alice leaves
+   * the game with `0` cards (`OUT`), and Bob is the last player holding cards,
+   * which labels him `DURAK`.
    */
   private def discardAndEndgamePreset: PresetGame =
-    val faceDown = Vector(
+    val aliceHand = Vector(card(Rank.Seven, Suit.Hearts))
+    val bobHand = Vector(
       card(Rank.Six, Suit.Clubs),
-      card(Rank.Seven, Suit.Clubs),
       card(Rank.Eight, Suit.Clubs),
       card(Rank.Nine, Suit.Clubs)
     )
-    val faceUp = Vector(
-      card(Rank.Two, Suit.Diamonds),
-      card(Rank.Three, Suit.Diamonds),
-      card(Rank.Four, Suit.Diamonds),
-      card(Rank.Five, Suit.Diamonds)
-    )
+    val aliceAttack = card(Rank.Seven, Suit.Spades)
+    // Everything else has already been played; the 3-player deck holds exactly
+    // 36 cards, so the pile keeps the position card-conserving (4 + 1 + 31).
+    val discardPile = Deck
+      .forPlayerCount(3)
+      .filterNot(card =>
+        aliceHand.contains(card) || bobHand.contains(card) || card == aliceAttack
+      )
     PresetGame(
       state = presetState(
         names = Vector("Alice", "Bob", "Carol"),
-        hands = Vector(
-          Vector(card(Rank.Eight, Suit.Spades)),
-          Vector(card(Rank.King, Suit.Hearts), card(Rank.Queen, Suit.Hearts)),
-          Vector.empty
-        ),
+        hands = Vector(aliceHand, bobHand, Vector.empty),
         talon = Vector.empty,
-        trumpSuit = Suit.Spades,
+        trumpSuit = Suit.Diamonds,
         bottomTrumpCard = None,
-        tablePairs = Vector.empty,
+        tablePairs = Vector(TablePair(aliceAttack)),
         attackerIdx = 0,
         defenderIdx = 1,
-        boutPhase = BoutPhase.InitialAttack,
-        defenderInitialHandSize = 2,
-        discardPile = faceDown ++ faceUp,
-        lastDiscardCards = faceUp,
+        boutPhase = BoutPhase.SurrenderThrowIn,
+        defenderInitialHandSize = bobHand.size,
+        discardPile = discardPile,
+        // Four revealed cards of the previous bout, so the box renders both the
+        // face-down stack (27) and the face-up row (4) immediately.
+        lastDiscardCards = discardPile.takeRight(4),
         finishOrder = Vector("p2"),
         finishRanks = Vector(None, None, Some(1))
       ),
