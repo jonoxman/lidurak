@@ -1121,6 +1121,23 @@ export function GamePage({
   // Item 12: a finished game is reviewed read-only against the selected replay
   // frame; a live match always renders the authoritative view.
   const displayedView = reviewMode && activeFrame ? activeFrameView ?? view : view;
+  // T-90 ITEM-PREV-4: the surrendering / defenceless defender never gets a glow
+  // around their hand — the highlight prompts a card move, and this seat has
+  // none. The state comes from the projection (the surrender phase, the
+  // server's `defenderDefenseless` flag or a `surrender`-only legal-action set),
+  // so it also covers the 3-second client auto-surrender countdown.
+  const viewerIsDefender = displayedView.defenderIdx === viewerSeatIndex(displayedView);
+  const surrenderingDefender =
+    !reviewMode &&
+    viewerIsDefender &&
+    (isSurrenderPhase(displayedView.boutPhase) || isClientAutoSurrenderState(displayedView));
+  const defenderDefenseless =
+    !reviewMode &&
+    viewerIsDefender &&
+    (displayedView.defenderDefenseless === true ||
+      (hasLegalAction(displayedView.legalActions, 'surrender') &&
+        !hasLegalAction(displayedView.legalActions, 'cover') &&
+        !hasLegalAction(displayedView.legalActions, 'redirect')));
   // ITEM-9: the banner's winner, Durak and finish order always come from the
   // final finished state — the live view while it is over, otherwise the last
   // recorded frame — never from an intermediate replay frame.
@@ -1505,9 +1522,12 @@ export function GamePage({
           }
           defending={
             !reviewMode &&
-            displayedView.defenderIdx === viewerSeatIndex(displayedView) &&
+            !surrenderingDefender &&
+            viewerIsDefender &&
             displayedView.tablePairs.some((pair) => !pair.defense)
           }
+          isSurrenderingDefender={surrenderingDefender}
+          defenderDefenseless={defenderDefenseless}
           canRedirect={!reviewMode && hasLegalAction(displayedView.legalActions, 'redirect')}
           canThrowIn={!reviewMode && hasLegalAction(displayedView.legalActions, 'throwIn')}
           isReviewMode={reviewMode}

@@ -968,7 +968,7 @@ describe('seat boxes, clocks and the deck stack', () => {
     expect(cards.querySelectorAll('.card-slot')).toHaveLength(handSize);
   });
 
-  it('marks the attacked defender hand differently from the attacker hand', () => {
+  it('keeps the defending viewer hand calm while the attack cards pulse', () => {
     const { container, unmount } = render(
       <GameTable
         myId="p0"
@@ -983,9 +983,12 @@ describe('seat boxes, clocks and the deck stack', () => {
       />,
     );
 
+    // T-90 ITEM-PREV-4: the defender is prompted by the uncovered cards on the
+    // felt and by their legal cards lifting, never by a red box around the hand.
     const cards = container.querySelector('.hand-cards') as HTMLElement;
-    expect(cards.classList.contains('defender-turn')).toBe(true);
+    expect(cards.classList.contains('defender-turn')).toBe(false);
     expect(cards.classList.contains('attacker-turn')).toBe(false);
+    expect(cards.getAttribute('data-highlighted')).toBe('false');
 
     const attackerSeat = screen
       .getByTestId('seat-clock-p1')
@@ -2449,5 +2452,146 @@ describe('T-90-3 ITEM-NEW: compact single-row play area and roundness', () => {
     expect(Number(plate!.getAttribute('rx'))).toBe(14);
     unmount();
     setSettings({ roundness: DEFAULT_SETTINGS.roundness });
+  });
+});
+
+describe('T-90 ITEM-PREV-4: no hand highlight for a surrendering defender', () => {
+  const handZoneOf = (container: Element): HTMLElement =>
+    container.querySelector('[data-zone="player-hand"]') as HTMLElement;
+
+  it('leaves the hand unhighlighted during SurrenderThrowIn', () => {
+    const { container } = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={uncoveredPair}
+        trumpSuit="clubs"
+        attackerId="p1"
+        defenderId="p0"
+        boutPhase="SurrenderThrowIn"
+        defending
+        isSurrenderingDefender
+        turnPlayerId="p0"
+      />,
+    );
+
+    const zone = handZoneOf(container);
+    const handBox = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+    for (const node of [zone, handBox]) {
+      expect(node.getAttribute('data-highlighted')).toBe('false');
+      expect(node.getAttribute('data-surrendering')).toBe('true');
+      expect(node.classList.contains('turn-pulse')).toBe(false);
+      expect(node.classList.contains('attacker-turn')).toBe(false);
+      expect(node.classList.contains('throw-in-turn')).toBe(false);
+      expect(node.classList.contains('defender-turn')).toBe(false);
+    }
+    expect(handBox.getAttribute('data-active')).toBe('false');
+    // The felt stops prompting a defender who already gave up the bout.
+    expect(container.querySelectorAll('.table-pair.turn-pulse')).toHaveLength(0);
+    // No crimson hand-glow rule is left in the stylesheet at all.
+    expect(tableCss).not.toContain('.hand-cards.defender-turn');
+    expect(tableCss).not.toContain('defenderPulse');
+  });
+
+  it('leaves a defenceless defender hand unhighlighted while the surrender countdown runs', () => {
+    const { container } = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={uncoveredPair}
+        trumpSuit="clubs"
+        attackerId="p1"
+        defenderId="p0"
+        boutPhase="Defense"
+        defending
+        defenderDefenseless
+        turnPlayerId="p0"
+      />,
+    );
+
+    const zone = handZoneOf(container);
+    const handBox = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+    expect(zone.getAttribute('data-defenseless')).toBe('true');
+    expect(handBox.getAttribute('data-defenseless')).toBe('true');
+    expect(handBox.getAttribute('data-highlighted')).toBe('false');
+    expect(handBox.getAttribute('data-active')).toBe('false');
+    expect(handBox.className).not.toMatch(/attacker-turn|throw-in-turn|defender-turn/);
+    expect(container.querySelectorAll('.table-pair.turn-pulse')).toHaveLength(0);
+  });
+
+  it('keeps the felt prompt and the card lift for a defender who can still answer', () => {
+    const { container } = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={uncoveredPair}
+        trumpSuit="clubs"
+        attackerId="p1"
+        defenderId="p0"
+        boutPhase="Defense"
+        defending
+        canRedirect
+        playableKeys={[cardKey(hand[0])]}
+      />,
+    );
+
+    expect(container.querySelectorAll('.table-pair.turn-pulse')).toHaveLength(1);
+    expect(container.querySelector('.card-slot.legal-playable')).not.toBeNull();
+    // The prompt is on the felt and the cards, not around the hand container.
+    expect(handZoneOf(container).getAttribute('data-highlighted')).toBe('false');
+    expect(
+      screen.getByTestId('hand-turn-highlight').getAttribute('data-highlighted'),
+    ).toBe('false');
+  });
+
+  it('still highlights an opening attacker and an eligible thrower', () => {
+    const first = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={[]}
+        trumpSuit="clubs"
+        defenderId="p1"
+        boutPhase="InitialAttack"
+        awaitingAttack
+      />,
+    );
+
+    let handBox = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+    expect(handBox.getAttribute('data-highlighted')).toBe('true');
+    expect(handBox.getAttribute('data-active')).toBe('true');
+    expect(handBox.classList.contains('attacker-turn')).toBe(true);
+    expect(
+      first.container.querySelector('[data-zone="player-hand"]')!.getAttribute('data-highlighted'),
+    ).toBe('true');
+    first.unmount();
+
+    const second = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={uncoveredPair}
+        trumpSuit="clubs"
+        attackerId="p1"
+        defenderId="p2"
+        boutPhase="SurrenderThrowIn"
+        canThrowIn
+      />,
+    );
+
+    handBox = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+    expect(handBox.getAttribute('data-highlighted')).toBe('true');
+    expect(handBox.classList.contains('throw-in-turn')).toBe(true);
+    expect(
+      second.container
+        .querySelector('[data-zone="player-hand"]')!
+        .getAttribute('data-surrendering'),
+    ).toBe('false');
+    second.unmount();
   });
 });
