@@ -24,7 +24,9 @@
   min-width: 0;
   min-height: 620px;
   padding: 20px;
-  /* ITEM-NEW-1a: the roundness slider rounds the table itself. */
+  /* ITEM-NEW-1a / ITEM-NEW-1b: the Theme menu Roundness slider rounds the felt
+     table itself. The 1.5 factor keeps the table's corner just outside the
+     cards' own radius, so the two roundings stay visually nested. */
   border-radius: calc(var(--app-roundness, 8px) * 1.5);
   box-sizing: border-box;
   position: relative;
