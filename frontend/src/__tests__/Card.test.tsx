@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/preact';
-import { Card } from '../components/Card';
+import { Card, cardFrontPalette, resolveCardFrontTheme } from '../components/Card';
 import {
   CARD_BACK_PATTERNS,
   COLORFUL_CARD_BACK_PATTERNS,
@@ -276,6 +276,185 @@ describe('Card', () => {
     const { container } = render(<CardBack />);
 
     expect(container.querySelector('svg')!.getAttribute('data-pattern')).toBe('classic-hatch');
+  });
+});
+
+type Box = { left: number; right: number; top: number; bottom: number };
+
+/** Approximate glyph box of a rendered SVG `<text>`, in viewBox units. */
+const textBox = (node: Element): Box => {
+  const text = node.textContent ?? '';
+  const fontSize = Number(node.getAttribute('font-size'));
+  const x = Number(node.getAttribute('x'));
+  const y = Number(node.getAttribute('y'));
+  const anchor = node.getAttribute('text-anchor') ?? 'start';
+  // Suit glyphs are close to a full em wide; digits and letters about 0.62 em.
+  const wide = /[^0-9A-Za-z]/.test(text);
+  const width = text.length * fontSize * (wide ? 0.95 : 0.62);
+  const left = anchor === 'middle' ? x - width / 2 : anchor === 'end' ? x - width : x;
+  return {
+    left,
+    right: left + width,
+    top: y - fontSize * 0.8,
+    bottom: y + fontSize * 0.05,
+  };
+};
+
+const overlaps = (a: Box, b: Box): boolean =>
+  a.right > b.left && a.left < b.right && a.bottom > b.top && a.top < b.bottom;
+
+const NUMBER_RANKS = [
+  'two',
+  'three',
+  'four',
+  'five',
+  'six',
+  'seven',
+  'eight',
+  'nine',
+  'ten',
+];
+const ALL_RANKS = [...NUMBER_RANKS, 'ace', 'jack', 'queen', 'king'];
+
+/** Every pip glyph on a face-up card: rank pips, the ace centrepiece and face decoration. */
+const cardPips = (container: Element): Element[] =>
+  Array.from(
+    container.querySelectorAll('[data-pip="rank"], [data-pip="ace"], [data-pip="decor"]'),
+  );
+
+describe('card face geometry and theme', () => {
+  afterEach(() => {
+    resetSettings();
+  });
+
+  it('keeps every pip clear of the corner rank and suit index on every rank', () => {
+    for (const rank of ALL_RANKS) {
+      const { container, unmount } = render(<Card suit="spades" rank={rank} />);
+      const pips = cardPips(container);
+      const indices = Array.from(container.querySelectorAll('[data-index]'));
+
+      expect(pips.length, rank).toBeGreaterThan(0);
+      expect(indices, rank).toHaveLength(4);
+
+      for (const pip of pips) {
+        for (const index of indices) {
+          expect(
+            overlaps(textBox(pip), textBox(index)),
+            `${rank}: pip at ${pip.getAttribute('x')},${pip.getAttribute('y')} overlaps ${index.getAttribute(
+              'data-index',
+            )}`,
+          ).toBe(false);
+        }
+      }
+
+      unmount();
+    }
+  });
+
+  it('keeps the two-digit 10 index clear of all ten pips', () => {
+    const { container } = render(<Card suit="hearts" rank="ten" />);
+
+    const rankIndex = container.querySelector('[data-index="top-rank"]')!;
+    const suitIndex = container.querySelector('[data-index="top-suit"]')!;
+    expect(rankIndex.textContent).toBe('10');
+
+    const rankBox = textBox(rankIndex);
+    const suitBox = textBox(suitIndex);
+    const pips = Array.from(container.querySelectorAll('[data-pip="rank"]'));
+    expect(pips).toHaveLength(10);
+
+    for (const pip of pips) {
+      const box = textBox(pip);
+      expect(overlaps(box, rankBox), `pip at ${pip.getAttribute('x')},${pip.getAttribute('y')}`).toBe(
+        false,
+      );
+      expect(overlaps(box, suitBox), `pip at ${pip.getAttribute('x')},${pip.getAttribute('y')}`).toBe(
+        false,
+      );
+      // Every glyph also stays inside the card face.
+      expect(box.left, 'left').toBeGreaterThan(2);
+      expect(box.right, 'right').toBeLessThan(68);
+      expect(box.top, 'top').toBeGreaterThan(2);
+      expect(box.bottom, 'bottom').toBeLessThan(98);
+    }
+  });
+
+  it('spaces the pips so no two of them touch each other', () => {
+    for (const rank of ALL_RANKS) {
+      const { container, unmount } = render(<Card suit="diamonds" rank={rank} />);
+      const boxes = cardPips(container).map(textBox);
+
+      for (let first = 0; first < boxes.length; first += 1) {
+        for (let second = first + 1; second < boxes.length; second += 1) {
+          expect(overlaps(boxes[first], boxes[second]), `${rank}: pips ${first}/${second}`).toBe(
+            false,
+          );
+        }
+      }
+
+      unmount();
+    }
+  });
+
+  it('keeps the pips clear of the gold trump badge', () => {
+    for (const rank of ALL_RANKS) {
+      const { container, unmount } = render(<Card suit="clubs" rank={rank} trump />);
+      const circle = screen.getByTestId('trump-marker').querySelector('circle')!;
+      const cx = Number(circle.getAttribute('cx'));
+      const cy = Number(circle.getAttribute('cy'));
+      const r = Number(circle.getAttribute('r'));
+      const badge = { left: cx - r, right: cx + r, top: cy - r, bottom: cy + r };
+
+      for (const pip of cardPips(container)) {
+        expect(overlaps(textBox(pip), badge), `${rank}: pip at ${pip.getAttribute('x')}`).toBe(
+          false,
+        );
+      }
+
+      unmount();
+    }
+  });
+
+  it('paints a white card front in the light theme and a grey front in the dark theme', () => {
+    setSettings({ theme: 'light' });
+    const light = render(<Card suit="spades" rank="ten" />);
+    const lightSvg = light.container.querySelector('svg.playing-card')!;
+    expect(lightSvg.getAttribute('data-card-theme')).toBe('light');
+    expect(light.container.querySelector('.card-slot')!.getAttribute('data-card-theme')).toBe(
+      'light',
+    );
+    expect(lightSvg.querySelector('rect')!.getAttribute('fill')).toBe('#ffffff');
+    expect(cardFrontPalette('light').face).toBe('#ffffff');
+    light.unmount();
+
+    setSettings({ theme: 'dark' });
+    const dark = render(<Card suit="hearts" rank="ten" />);
+    const darkSvg = dark.container.querySelector('svg.playing-card')!;
+    expect(darkSvg.getAttribute('data-card-theme')).toBe('dark');
+    expect(dark.container.querySelector('.card-slot')!.getAttribute('data-card-theme')).toBe(
+      'dark',
+    );
+    expect(darkSvg.querySelector('rect')!.getAttribute('fill')).toBe('#cbd5e1');
+    expect(cardFrontPalette('dark').face).toBe('#cbd5e1');
+    // White and grey are genuinely different card faces.
+    expect(cardFrontPalette('light').face).not.toBe(cardFrontPalette('dark').face);
+    dark.unmount();
+  });
+
+  it('resolves the device card front from the applied document theme', () => {
+    setSettings({ theme: 'device' });
+
+    document.documentElement.setAttribute('data-theme', 'light');
+    expect(resolveCardFrontTheme('device')).toBe('light');
+
+    document.documentElement.setAttribute('data-theme', 'dark');
+    expect(resolveCardFrontTheme('device')).toBe('dark');
+
+    expect(resolveCardFrontTheme('light', true)).toBe('light');
+    expect(resolveCardFrontTheme('dark', false)).toBe('dark');
+    // Without an applied theme it follows the OS preference.
+    expect(resolveCardFrontTheme('device', false, document.createElement('div'))).toBe('light');
+    expect(resolveCardFrontTheme('device', true, document.createElement('div'))).toBe('dark');
   });
 });
 
