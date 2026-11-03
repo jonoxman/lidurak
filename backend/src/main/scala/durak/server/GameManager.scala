@@ -220,6 +220,11 @@ object GameManager:
   /**
    * `chaos-4p`: a four-player Chaos table at Alice's opening attack, so every
    * other seat (`p1`, `p2`, `p3`) shows a target outline.
+   *
+   * Alice's (`p0`) six-card hand deliberately covers the four low ranks `2`, `3`,
+   * `4` and `5` that only exist in the 52-card four-player deck (T-90
+   * ITEM-3b QA): the active hand therefore shows the tightened pip layouts for
+   * those ranks in one click, next to a court card (`K`) and an ace (`A`).
    */
   private def chaos4pPreset: PresetGame =
     PresetGame(
@@ -227,12 +232,12 @@ object GameManager:
         names = Vector("Alice", "Bob", "Carol", "Dave"),
         hands = Vector(
           Vector(
-            card(Rank.Six, Suit.Clubs),
-            card(Rank.Seven, Suit.Clubs),
-            card(Rank.Eight, Suit.Clubs),
-            card(Rank.Nine, Suit.Clubs),
-            card(Rank.Ten, Suit.Clubs),
-            card(Rank.Jack, Suit.Clubs)
+            card(Rank.Two, Suit.Clubs),
+            card(Rank.Three, Suit.Clubs),
+            card(Rank.Four, Suit.Clubs),
+            card(Rank.Five, Suit.Clubs),
+            card(Rank.King, Suit.Clubs),
+            card(Rank.Ace, Suit.Clubs)
           ),
           Vector(
             card(Rank.Six, Suit.Hearts),
