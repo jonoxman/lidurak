@@ -2425,7 +2425,9 @@ describe('T-90-3 ITEM-NEW: compact single-row play area and roundness', () => {
     );
     expect(cssRule('.action-button')).toContain('border-radius: var(--app-roundness, 8px)');
     expect(tableCss).toContain('.playing-card text {');
-    expect(tableCss).toContain("font-family: Georgia, 'Times New Roman'");
+    // ITEM-NEW-3: the CSS rule overrides the SVG presentation attribute, so it
+    // must carry the same ornate serif stack as `CARD_SERIF_FONT_FAMILY`.
+    expect(tableCss).toContain("'Cinzel', 'Playfair Display', Georgia, 'Times New Roman'");
   });
 
   it('ITEM-NEW-1b: rounds the reflection SVG plate with the slider', () => {
