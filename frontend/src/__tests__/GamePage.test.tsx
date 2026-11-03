@@ -53,6 +53,16 @@ vi.mock('../api/websocket', () => ({
 import * as client from '../api/client';
 import { GamePage } from '../pages/GamePage';
 import appCss from '../app.css?raw';
+import tableCss from '../styles/table.css?raw';
+
+/** Declarations of the first rule whose selector text contains `selector`. */
+function cssRule(css: string, selector: string): string {
+  const start = css.indexOf(selector);
+  if (start === -1) return '';
+  const open = css.indexOf('{', start);
+  const close = css.indexOf('}', open);
+  return open === -1 || close === -1 ? '' : css.slice(open + 1, close);
+}
 
 /** The light-theme Back to lobby rules, from their selector up to the OS query. */
 const backToLobbyLightCss = (() => {
@@ -2036,12 +2046,25 @@ describe('GamePage', () => {
     expect(appCss).not.toMatch(/outline:\s*2px solid #2dc653/);
     expect(appCss).not.toMatch(/outline:\s*2px solid #f59e0b/);
     expect(appCss).not.toMatch(/\.status-badge[^{]*{[^}]*outline:\s*2px solid/);
-    // The light theme keeps the softer glow with darker, dimmer tones.
+    // T-90-3 ITEM-1b: the light theme keeps the softer shape but now uses a
+    // dark, high-alpha border plus a stronger multi-layer halo.
     expect(appCss).toMatch(
-      /html\[data-theme='light'\] \.status-badge\[data-role='attacker'\]\s*{[^}]*rgba\(21, 128, 61, 0\.26\)/,
+      /html\[data-theme='light'\] \.status-badge\[data-role='attacker'\]\s*{[^}]*border-color: rgba\(21, 128, 61, 0\.85\)/,
     );
     expect(appCss).toMatch(
-      /html\[data-theme='light'\] \.status-badge\[data-role='defender'\]\s*{[^}]*rgba\(180, 83, 9, 0\.26\)/,
+      /html\[data-theme='light'\] \.status-badge\[data-role='attacker'\]\s*{[^}]*0 0 14px 3px rgba\(21, 128, 61, 0\.58\)/,
+    );
+    expect(appCss).toMatch(
+      /html\[data-theme='light'\] \.status-badge\[data-role='attacker'\]\s*{[^}]*inset 0 0 10px rgba\(21, 128, 61, 0\.24\)/,
+    );
+    expect(appCss).toMatch(
+      /html\[data-theme='light'\] \.status-badge\[data-role='defender'\]\s*{[^}]*border-color: rgba\(180, 83, 9, 0\.88\)/,
+    );
+    expect(appCss).toMatch(
+      /html\[data-theme='light'\] \.status-badge\[data-role='defender'\]\s*{[^}]*0 0 14px 3px rgba\(180, 83, 9, 0\.6\)/,
+    );
+    expect(appCss).toMatch(
+      /html\[data-theme='light'\] \.status-badge\[data-role='defender'\]\s*{[^}]*inset 0 0 10px rgba\(180, 83, 9, 0\.25\)/,
     );
 
     // ITEM-ADD-8a: every row has a name track, a centred count track and a
@@ -2056,6 +2079,70 @@ describe('GamePage', () => {
       /\.status-badge\s*{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) auto minmax\(0, 1fr\)/,
     );
     expect(appCss).toMatch(/\.status-cards\s*{[^}]*justify-self:\s*center/);
+  });
+
+  it('T-90-3: darkens the sidebar, clock, POV and hand-sorting glows in light mode', async () => {
+    getGameView.mockResolvedValue(view);
+
+    const { container } = render(
+      <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('clock-panel')).toBeTruthy());
+
+    // The live markup exposes the running half and the low-time flag, so the
+    // light-theme rules can target exactly the emphasised clock.
+    const gameHalf = container.querySelector('.clock-half.game-clock-half') as HTMLElement;
+    const turnHalf = container.querySelector('.clock-half.turn-clock-half') as HTMLElement;
+    expect(gameHalf.getAttribute('data-active')).toBe(
+      screen.getByTestId('game-clock').getAttribute('data-active'),
+    );
+    expect(turnHalf.getAttribute('data-active')).toBe(
+      screen.getByTestId('turn-clock').getAttribute('data-active'),
+    );
+    expect(screen.getByTestId('turn-clock').getAttribute('data-low-time')).toMatch(
+      /^(true|false)$/,
+    );
+
+    // Right sidebar: stronger attacker / defender rows, presence dot and clock.
+    expect(
+      cssRule(appCss, "html[data-theme='light'] .clock-half[data-active='true']"),
+    ).toContain('rgba(21, 128, 61, 0.6)');
+    expect(
+      cssRule(appCss, "html[data-theme='light'] .clock-half.turn-clock-half[data-active='true']"),
+    ).toContain('rgba(180, 83, 9, 0.62)');
+    expect(
+      cssRule(appCss, "html[data-theme='light'] .turn-clock[data-low-time='true']"),
+    ).toContain('rgba(185, 28, 28, 0.8)');
+    expect(
+      cssRule(tableCss, "[data-theme='light'] .presence-dot.present"),
+    ).toContain('rgba(21, 128, 61, 0.7)');
+
+    // Left sidebar: active POV tab, QA buttons and replay controls.
+    expect(cssRule(appCss, "html[data-theme='light'] .hotseat-tab.active")).toContain(
+      'box-shadow: 0 0 10px 2px rgba(21, 128, 61, 0.5)',
+    );
+    expect(
+      cssRule(appCss, "html[data-theme='light'] .qa-scenario-button:hover"),
+    ).toContain('rgba(21, 128, 61, 0.55)');
+    expect(
+      cssRule(appCss, "html[data-theme='light'] .review-nav-button:hover"),
+    ).toContain('rgba(180, 83, 9, 0.55)');
+
+    // HAND SORTING: the selected mode and its hover/focus glow.
+    expect(cssRule(tableCss, ":root[data-theme='light'] .sort-select")).toContain(
+      'rgba(21, 128, 61, 0.32)',
+    );
+    expect(cssRule(tableCss, ":root[data-theme='light'] .sort-select:hover")).toContain(
+      'rgba(21, 128, 61, 0.6)',
+    );
+
+    // Dark mode keeps its original brighter tones and flat hand-sort control.
+    expect(cssRule(appCss, ".hotseat-tab.active")).toContain('border-color: var(--app-accent)');
+    expect(cssRule(appCss, ".status-badge[data-role='attacker']")).toContain(
+      'rgba(45, 198, 83, 0.38)',
+    );
+    expect(cssRule(tableCss, ".sort-select")).not.toContain('box-shadow');
   });
 
   it('labels the last player out as DURAK once the match is over', async () => {

@@ -10,6 +10,17 @@ vi.mock('../api/client', () => ({
 
 import * as client from '../api/client';
 import { App, parseRoute } from '../app';
+import appCss from '../app.css?raw';
+import tableCss from '../styles/table.css?raw';
+
+/** Declarations of the first rule whose selector text contains `selector`. */
+function cssRule(css: string, selector: string): string {
+  const start = css.indexOf(selector);
+  if (start === -1) return '';
+  const open = css.indexOf('{', start);
+  const close = css.indexOf('}', open);
+  return open === -1 || close === -1 ? '' : css.slice(open + 1, close);
+}
 
 const checkServerHealth = client.checkServerHealth as unknown as ReturnType<typeof vi.fn>;
 
@@ -56,6 +67,31 @@ describe('App', () => {
       () => expect(screen.getByRole('button', { name: 'Create Game' })).toBeTruthy(),
       { timeout: 3000 },
     );
+  });
+
+  it('T-90-3: darkens the lobby selection and Create Game glows in light mode', async () => {
+    render(<App />);
+
+    const create = await screen.findByRole('button', { name: 'Create Game' });
+    expect(create.classList.contains('green')).toBe(true);
+
+    // The player-count control is the lobby's active player selector.
+    const playerCount = document.querySelector('.lobby-form .field select');
+    expect(playerCount).not.toBeNull();
+
+    expect(
+      cssRule(appCss, "html[data-theme='light'] .lobby-form .field select:focus-visible"),
+    ).toContain('rgba(21, 128, 61, 0.55)');
+    expect(
+      cssRule(appCss, "html[data-theme='light'] .lobby-form .action-button.green"),
+    ).toContain('rgba(21, 128, 61, 0.6)');
+    expect(
+      cssRule(appCss, "html[data-theme='light'] .lobby-form .action-button.green:hover"),
+    ).toContain('rgba(21, 128, 61, 0.75)');
+
+    // Dark mode keeps the flat accent surface with no glow.
+    expect(cssRule(tableCss, '.action-button.green')).toContain('background: var(--durak-accent)');
+    expect(cssRule(tableCss, '.action-button.green')).not.toContain('box-shadow');
   });
 });
 

@@ -1637,7 +1637,7 @@ export function GamePage({
             data-testid="clock-panel"
             aria-label="Game and turn clocks"
           >
-            <div class="clock-half game-clock-half">
+            <div class="clock-half game-clock-half" data-active={gameClockActive ? 'true' : 'false'}>
               <h2>Game</h2>
               <span
                 class="game-clock"
@@ -1647,12 +1647,13 @@ export function GamePage({
                 {gameClock}
               </span>
             </div>
-            <div class="clock-half turn-clock-half">
+            <div class="clock-half turn-clock-half" data-active={displayViewerOnClock ? 'true' : 'false'}>
               <h2>Turn</h2>
               <span
                 class={clockClasses.join(' ')}
                 data-testid="turn-clock"
                 data-active={displayViewerOnClock ? 'true' : 'false'}
+                data-low-time={displayViewerOnClock && displaySeconds <= 5 ? 'true' : 'false'}
               >
                 {formatClock(displaySeconds)}
               </span>

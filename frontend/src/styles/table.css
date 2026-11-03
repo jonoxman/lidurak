@@ -1512,8 +1512,11 @@
 
 :root[data-theme='light'] .sort-select {
   background-color: #f8fafc;
-  border-color: #cbd5e1;
+  border-color: #64748b;
   color: #0f172a;
+  /* T-90-3 ITEM-1b: the active HAND SORTING mode reads dark and crisp on the
+     pale panel instead of melting into it. */
+  box-shadow: 0 0 8px 1px rgba(21, 128, 61, 0.32), inset 0 0 0 1px rgba(21, 128, 61, 0.16);
 }
 
 /* Feedback ITEM-4: the swatches now carry the light palette themselves (base +
@@ -1616,8 +1619,13 @@
   background: #b4afa6;
 }
 
+/* T-90-3 ITEM-1b: the online dot keeps a dark emerald core plus a real halo in
+   light mode, so it reads at a glance against the white PLAYERS panel. */
 [data-theme='light'] .presence-dot.present {
-  background: #4f7f16;
+  background: #15803d;
+  box-shadow:
+    0 0 8px 2px rgba(21, 128, 61, 0.7),
+    inset 0 0 0 1px rgba(6, 78, 59, 0.5);
 }
 
 /* The clock brightens only while this viewer is the player being waited on. */
@@ -1627,4 +1635,204 @@
 
 .turn-clock[data-active='false'] {
   opacity: 0.75;
+}
+
+/* ==========================================================================
+   T-90-3 ITEM-1a: darker, higher-contrast LIGHT-MODE emphasis glows.
+
+   Every rule below is scoped to `html[data-theme='light']` (plus
+   `[data-table-theme='light']` where the emphasis lives inside the arena), so
+   the dark-theme glows — `attackerPulse`, `throwInPulse`,
+   `defenderHandPulse`, `turnPulse`, the gold `#d4af37` trump border and the
+   base outline colours — stay byte-for-byte unchanged.
+   ========================================================================== */
+
+/* Light-mode pulse keyframes: same 2.4s rhythm as the dark ones, but they peak
+   at 0.82+ alpha with an inset inner glow, so the prompt is unmistakable on a
+   pale felt / white card surface. */
+@keyframes lightAttackerHandPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 6px 1px rgba(21, 128, 61, 0.5), inset 0 0 5px rgba(21, 128, 61, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 14px 3px rgba(21, 128, 61, 0.82), inset 0 0 8px rgba(21, 128, 61, 0.28);
+  }
+}
+
+@keyframes lightDefenderHandPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 6px 1px rgba(185, 28, 28, 0.55), inset 0 0 5px rgba(185, 28, 28, 0.22);
+  }
+  50% {
+    box-shadow: 0 0 16px 4px rgba(185, 28, 28, 0.85), inset 0 0 8px rgba(185, 28, 28, 0.3);
+  }
+}
+
+@keyframes lightUncoveredPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 4px 1px rgba(153, 27, 27, 0.55);
+  }
+  50% {
+    box-shadow: 0 0 14px 4px rgba(180, 83, 9, 0.9);
+  }
+}
+
+/* --- 1. Player-hand turn prompts -------------------------------------------
+   Default attack / throw-in prompt: deep forest-emerald border and a
+   multi-layer glow instead of the washed-out amber halo. */
+:root[data-theme='light'] .hand-cards.attacker-turn,
+:root[data-theme='light'] .hand-cards.throw-in-turn,
+:root[data-theme='light'] .hand-cards[data-highlighted='true'][data-highlight-variant='attacker'],
+:root[data-theme='light'] .hand-cards[data-highlighted='true'][data-highlight-variant='throw-in'],
+[data-table-theme='light'] .hand-cards.attacker-turn,
+[data-table-theme='light'] .hand-cards.throw-in-turn {
+  border: 1px solid rgba(15, 118, 54, 0.85);
+  animation: lightAttackerHandPulse 2.4s infinite ease-in-out;
+}
+
+/* Pre-surrender defender prompt: dark crimson border and glow, so it can never
+   be confused with the green attack / throw-in prompt on light felt. */
+:root[data-theme='light'] .hand-cards.defender-turn,
+:root[data-theme='light'] .hand-cards[data-highlighted='true'][data-highlight-variant='defender'],
+[data-table-theme='light'] .hand-cards.defender-turn,
+[data-table-theme='light'] .hand-cards[data-highlighted='true'][data-highlight-variant='defender'] {
+  border: 1px solid rgba(185, 28, 28, 0.9);
+  animation: lightDefenderHandPulse 2.4s infinite ease-in-out;
+}
+
+/* The column wrapper gets the same darker keyframes (no border, so the glow box
+   still hugs the cards tightly). */
+:root[data-theme='light'] [data-zone='player-hand'].turn-pulse .hand-cards,
+:root[data-theme='light'] [data-zone='player-hand'][data-highlighted='true'][data-highlight-variant='defender'] {
+  animation-name: lightDefenderHandPulse;
+}
+
+:root[data-theme='light'] [data-zone='player-hand'][data-highlight-variant='attacker'],
+:root[data-theme='light'] [data-zone='player-hand'][data-highlight-variant='throw-in'] {
+  animation-name: lightAttackerHandPulse;
+}
+
+/* --- 2. Players' cards on the felt and in hand ------------------------------
+   Trump cards: deep bronze/ochre instead of pale gold on a white card face. */
+:root[data-theme='light'] .card-slot.trump,
+[data-table-theme='light'] .card-slot.trump {
+  border-color: #b45309;
+  box-shadow: 0 0 10px 2px rgba(180, 83, 9, 0.48);
+}
+
+:root[data-theme='light'] .card-slot.trump.selected,
+[data-table-theme='light'] .card-slot.trump.selected {
+  box-shadow: 0 0 0 3px var(--durak-accent), 0 0 12px 3px rgba(180, 83, 9, 0.7);
+}
+
+/* Legal / lifted / hovered hand cards carry a real contact shadow and a dark
+   emerald ring, so the legal cards visibly pop off the pale felt. */
+:root[data-theme='light'] .hand-cards .card-slot.legal-playable {
+  box-shadow:
+    0 3px 10px 1px rgba(15, 118, 54, 0.35),
+    0 0 0 2px rgba(21, 128, 61, 0.55);
+}
+
+:root[data-theme='light'] .hand-cards .card-slot.legal-playable:hover {
+  box-shadow:
+    0 5px 14px 2px rgba(15, 118, 54, 0.45),
+    0 0 0 2px rgba(21, 128, 61, 0.75);
+}
+
+:root[data-theme='light'] .hand-cards .card-slot.selected {
+  box-shadow: 0 0 0 3px #15803d, 0 4px 12px 2px rgba(15, 118, 54, 0.4);
+}
+
+:root[data-theme='light'] .card-slot.clickable:hover {
+  box-shadow: 0 4px 12px 1px rgba(15, 23, 42, 0.3);
+}
+
+/* Dragged / snapped cards: a dark emerald ring plus a strong halo. */
+:root[data-theme='light'] .table-pair.snap-active .table-pair-attack .card-slot,
+:root[data-theme='light'] .table-pair-attack[data-drop-zone] .card-slot,
+[data-table-theme='light'] .table-pair.snap-active .table-pair-attack .card-slot,
+[data-table-theme='light'] .table-pair-attack[data-drop-zone] .card-slot {
+  box-shadow: 0 0 0 3px #15803d, 0 0 12px 3px rgba(21, 128, 61, 0.6);
+}
+
+/* Uncovered attacking card on the felt (`.table-pair.turn-pulse` is the class
+   GameTable emits for an uncovered attack): darker crimson/amber pulse. */
+:root[data-theme='light'] .table-pair .card-slot.clickable,
+[data-table-theme='light'] .table-pair .card-slot.clickable {
+  box-shadow: 0 0 0 2px #b45309, 0 0 10px 2px rgba(180, 83, 9, 0.5);
+}
+
+:root[data-theme='light'] .table-pair.turn-pulse .card-slot,
+[data-table-theme='light'] .table-pair.turn-pulse .card-slot {
+  animation: lightUncoveredPulse 2.4s infinite ease-in-out;
+  border-radius: var(--app-roundness, 8px);
+}
+
+/* --- 3. Target outlines, reflection outline and table action buttons ------- */
+:root[data-theme='light'] .target-outline,
+[data-table-theme='light'] .target-outline {
+  border-color: #3f6212;
+  background: rgba(63, 98, 18, 0.18);
+  box-shadow: 0 0 10px 2px rgba(63, 98, 18, 0.55);
+}
+
+:root[data-theme='light'] .target-outline.snap-active,
+[data-table-theme='light'] .target-outline.snap-active {
+  border-color: #14532d;
+  background: rgba(21, 128, 61, 0.32);
+  box-shadow:
+    0 0 16px 4px rgba(21, 128, 61, 0.8),
+    inset 0 0 10px rgba(21, 128, 61, 0.35);
+}
+
+:root[data-theme='light'] .redirect-outline,
+[data-table-theme='light'] .redirect-outline {
+  border-color: #92400e;
+  background: rgba(146, 64, 14, 0.18);
+  box-shadow: 0 0 10px 2px rgba(146, 64, 14, 0.55);
+}
+
+:root[data-theme='light'] .redirect-outline.snap-active,
+[data-table-theme='light'] .redirect-outline.snap-active {
+  border-color: #7c2d12;
+  background: rgba(180, 83, 9, 0.34);
+  box-shadow:
+    0 0 16px 4px rgba(180, 83, 9, 0.82),
+    inset 0 0 10px rgba(180, 83, 9, 0.35);
+}
+
+/* Surrender (crimson) and Pass (green/amber) buttons on the table. */
+:root[data-theme='light'] .action-button.red {
+  box-shadow:
+    0 0 12px 2px rgba(185, 28, 28, 0.65),
+    inset 0 0 8px rgba(127, 29, 29, 0.35);
+}
+
+:root[data-theme='light'] .action-button.green {
+  box-shadow:
+    0 0 12px 2px rgba(21, 128, 61, 0.6),
+    inset 0 0 8px rgba(21, 128, 61, 0.3);
+}
+
+:root[data-theme='light'] .action-button.amber {
+  box-shadow:
+    0 0 12px 2px rgba(180, 83, 9, 0.62),
+    inset 0 0 8px rgba(180, 83, 9, 0.3);
+}
+
+/* --- 4. Sidebar clocks, POV tabs, QA / Replay and HAND SORTING ------------- */
+:root[data-theme='light'] .seat-clock.active,
+:root[data-theme='light'] .hand-clock.active {
+  color: #7c2d12;
+  border-color: #b45309;
+  box-shadow: 0 0 10px 2px rgba(180, 83, 9, 0.6);
+}
+
+:root[data-theme='light'] .sort-select:hover,
+:root[data-theme='light'] .sort-select:focus-visible {
+  border-color: #15803d;
+  box-shadow: 0 0 12px 3px rgba(21, 128, 61, 0.6);
 }
