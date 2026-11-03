@@ -15,14 +15,13 @@ const isSortMode = (value: string): value is SortMode =>
   MODES.some((option) => option.mode === value);
 
 /**
- * Compact hand-sorting dropdown, rendered in the controls column beside the
- * hand. The chosen mode never leaves the browser: it only reorders the viewer's
- * own cards.
+ * Compact hand-sorting dropdown, rendered below the table. The chosen mode never
+ * leaves the browser: it only reorders the viewer's own cards.
  */
 export function SortBar({ mode, onModeChange }: SortBarProps) {
   return (
     <label class="sort-bar" data-testid="sort-bar" title="Sort the cards in your hand">
-      <span class="sort-label">Sort</span>
+      <span class="sort-label">HAND SORTING</span>
       <select
         class="sort-select"
         aria-label="Sort hand"

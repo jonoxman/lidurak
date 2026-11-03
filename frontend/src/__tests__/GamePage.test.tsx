@@ -6,6 +6,8 @@ vi.mock('../api/client', () => ({
   getGameView: vi.fn(),
   getGameReplay: vi.fn(),
   sendAction: vi.fn(),
+  createGame: vi.fn(),
+  createPresetGame: vi.fn(),
 }));
 
 const wsState = vi.hoisted(() => ({
@@ -115,12 +117,16 @@ const finishedFrameView = (
 const getGameView = client.getGameView as unknown as ReturnType<typeof vi.fn>;
 const getGameReplay = client.getGameReplay as unknown as ReturnType<typeof vi.fn>;
 const sendAction = client.sendAction as unknown as ReturnType<typeof vi.fn>;
+const createGameMock = client.createGame as unknown as ReturnType<typeof vi.fn>;
+const createPresetGameMock = client.createPresetGame as unknown as ReturnType<typeof vi.fn>;
 
 describe('GamePage', () => {
   beforeEach(() => {
     getGameView.mockReset();
     getGameReplay.mockReset();
     sendAction.mockReset();
+    createGameMock.mockReset();
+    createPresetGameMock.mockReset();
     wsState.onUpdate = null;
     wsState.presence = [];
     Object.values(audio).forEach((spy) => spy.mockClear());
@@ -202,7 +208,7 @@ describe('GamePage', () => {
     expect(count.getAttribute('data-position')).toBe('top-left');
   });
 
-  it('renders the hand-sort box directly under the deck box, outside the arena', async () => {
+  it('renders the HAND SORTING box directly below the table, outside the right column', async () => {
     getGameView.mockResolvedValue(sortableView);
 
     const { container } = render(
@@ -212,20 +218,29 @@ describe('GamePage', () => {
     await waitFor(() => expect(screen.getByLabelText('Sort hand')).toBeTruthy());
 
     const right = container.querySelector('[data-zone="sidebar-right"]') as HTMLElement;
-    const deckBox = right.querySelector('[data-zone="table-deck"]') as HTMLElement;
-    const sortBox = right.querySelector('[data-zone="hand-sort-box"]') as HTMLElement;
+    const arena = container.querySelector('[data-zone="table-arena"]') as HTMLElement;
+    const sortBox = container.querySelector('[data-zone="hand-sort-box"]') as HTMLElement;
 
+    // ITEM-ADD-7: the crowded right column no longer holds the sort control.
     expect(sortBox).not.toBeNull();
-    expect(sortBox.classList.contains('sidebar-box')).toBe(true);
-    expect(sortBox.classList.contains('sidebar-sort-box')).toBe(true);
-    // Immediately after the deck box, and never inside the felt arena.
-    expect(deckBox.nextElementSibling).toBe(sortBox);
-    expect(sortBox.querySelector('[data-testid="sort-bar"]')).not.toBeNull();
-    expect(within(sortBox).getByRole('combobox', { name: 'Sort hand' })).toBeTruthy();
-    expect(container.querySelector('[data-zone="table-arena"] [data-testid="sort-bar"]')).toBeNull();
+    expect(right.querySelector('[data-zone="hand-sort-box"]')).toBeNull();
+    expect(right.querySelector('[data-testid="sort-bar"]')).toBeNull();
+    expect(arena.querySelector('[data-testid="sort-bar"]')).toBeNull();
     expect(
       container.querySelector('[data-zone="player-controls"] [data-testid="sort-bar"]'),
     ).toBeNull();
+
+    // It is the next block after the felt table inside the same centre column.
+    expect(sortBox.previousElementSibling).toBe(arena);
+    expect(sortBox.parentElement).toBe(arena.parentElement);
+    expect(sortBox.parentElement?.classList.contains('table-column')).toBe(true);
+    expect(sortBox.classList.contains('hand-sort-box')).toBe(true);
+    expect(appCss).toMatch(/\.table-column\s*{[^}]*flex-direction:\s*column/);
+
+    // Both the panel title and the widget label read HAND SORTING.
+    expect(within(sortBox).getByRole('heading', { name: 'HAND SORTING' })).toBeTruthy();
+    expect(sortBox.querySelector('.sort-label')?.textContent).toBe('HAND SORTING');
+    expect(sortBox.querySelector('[data-testid="sort-bar"]')).not.toBeNull();
 
     const select = within(sortBox).getByRole('combobox') as HTMLSelectElement;
     expect(Array.from(select.options).map((option) => option.value)).toEqual([
@@ -894,7 +909,7 @@ describe('GamePage', () => {
     );
 
     await waitFor(() => expect(screen.getByText('Surrender')).toBeTruthy());
-    fireEvent.click(screen.getByRole('button', { name: /Surrender/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Surrender(\s+\d+)?$/ }));
 
     await waitFor(() => expect(sendAction).toHaveBeenCalledTimes(1));
     await new Promise((resolve) => setTimeout(resolve, 320));
@@ -1621,5 +1636,421 @@ describe('GamePage', () => {
     fireEvent.click(screen.getByTestId('review-prev-button'));
     await waitFor(() => expect(indicator()).toBe('Move 2 / 3'));
     expect(screen.getByTestId('game-over-banner')).toBeTruthy();
+  });
+
+  it('starts a rematch with the same seats, names, rules and bots', async () => {
+    getGameView.mockResolvedValue({
+      ...finishedFrameView('p0'),
+      playerTypes: ['human', 'basicBot'],
+      allowRedirect: false,
+      chaosMode: false,
+      durak: 'p0',
+    });
+    getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
+    createGameMock.mockResolvedValue({ gameId: 'game-2', players: ['p0', 'p1'] });
+    const onNavigateGame = vi.fn();
+
+    render(
+      <GamePage
+        gameId="game-1"
+        playerId="p0"
+        onSwitchPlayer={() => {}}
+        onNavigateGame={onNavigateGame}
+      />,
+    );
+
+    const rematchButton = await screen.findByTestId('banner-rematch-button');
+    expect(rematchButton.textContent).toBe('Rematch');
+    expect(rematchButton.closest('[data-testid="game-over-banner"]')).not.toBeNull();
+
+    fireEvent.click(rematchButton);
+
+    await waitFor(() =>
+      expect(createGameMock).toHaveBeenCalledWith(
+        2,
+        ['Alice', 'Bob'],
+        false,
+        false,
+        ['human', 'basicBot'],
+      ),
+    );
+    // The new match opens on the same seat the viewer was inspecting.
+    await waitFor(() => expect(onNavigateGame).toHaveBeenCalledWith('game-2', 'p0'));
+    // The finished match and its review state are dropped for the new table.
+    expect(screen.queryByTestId('review-nav')).toBeNull();
+  });
+
+  it('keeps the review frame when the POV menu switches players', async () => {
+    const frames = [
+      {
+        moveIndex: 1,
+        playerId: 'p0',
+        action: { type: 'initialAttack', playerId: 'p0' },
+        elapsedMs: 0,
+        views: {
+          p0: finishedFrameView('p0', {
+            boutPhase: 'defense',
+            myHand: [{ suit: 'hearts', rank: 'six' }],
+            tablePairs: [{ attack: { suit: 'spades', rank: 'seven' }, defense: null }],
+          }),
+          p1: finishedFrameView('p1', { boutPhase: 'defense' }),
+        },
+      },
+      {
+        moveIndex: 2,
+        playerId: 'p1',
+        action: { type: 'coverCard', playerId: 'p1' },
+        elapsedMs: 2000,
+        views: {
+          p0: finishedFrameView('p0', {
+            boutPhase: 'defense',
+            tablePairs: [
+              {
+                attack: { suit: 'spades', rank: 'seven' },
+                defense: { suit: 'hearts', rank: 'eight' },
+              },
+            ],
+          }),
+          p1: finishedFrameView('p1', { boutPhase: 'defense' }),
+        },
+      },
+      {
+        moveIndex: 3,
+        playerId: 'p0',
+        action: { type: 'passTurn', playerId: 'p0' },
+        elapsedMs: 4000,
+        views: { p0: finishedFrameView('p0'), p1: finishedFrameView('p1') },
+      },
+    ];
+    getGameView.mockImplementation(async (_gameId: string, viewer: string) =>
+      finishedFrameView(viewer === 'p1' ? 'p1' : 'p0', {
+        gameStartedAtMs: 1000,
+        gameEndedAtMs: 5000,
+      }),
+    );
+    getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames });
+
+    const { rerender } = render(
+      <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
+    );
+
+    const indicator = () => screen.getByTestId('review-move-indicator').textContent;
+    await waitFor(() => expect(indicator()).toBe('Move 3 / 3'));
+
+    fireEvent.click(screen.getByTestId('review-prev-button'));
+    await waitFor(() => expect(indicator()).toBe('Move 2 / 3'));
+    fireEvent.click(screen.getByTestId('review-prev-button'));
+    await waitFor(() => expect(indicator()).toBe('Move 1 / 3'));
+    const replayCalls = getGameReplay.mock.calls.length;
+
+    // ITEM-PB-12a: switching POV must not jump back to the final move.
+    rerender(<GamePage gameId="game-1" playerId="p1" onSwitchPlayer={() => {}} />);
+    await waitFor(() => expect(getGameView).toHaveBeenCalledWith('game-1', 'p1'));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 60));
+    });
+
+    expect(indicator()).toBe('Move 1 / 3');
+    expect(getGameReplay.mock.calls.length).toBe(replayCalls);
+    expect(screen.getByTestId('game-over-banner')).toBeTruthy();
+  });
+
+  it('replays each move sound while stepping through the review', async () => {
+    const frames = [
+      {
+        moveIndex: 1,
+        playerId: 'p0',
+        action: { type: 'initialAttack', playerId: 'p0' },
+        elapsedMs: 0,
+        views: {
+          p0: finishedFrameView('p0', {
+            boutPhase: 'defense',
+            talonCount: 10,
+            tablePairs: [{ attack: { suit: 'spades', rank: 'seven' }, defense: null }],
+          }),
+          p1: finishedFrameView('p1', { boutPhase: 'defense' }),
+        },
+      },
+      {
+        moveIndex: 2,
+        playerId: 'p1',
+        action: { type: 'coverCard', playerId: 'p1' },
+        elapsedMs: 1000,
+        views: {
+          p0: finishedFrameView('p0', {
+            boutPhase: 'defense',
+            talonCount: 10,
+            tablePairs: [
+              {
+                attack: { suit: 'spades', rank: 'seven' },
+                defense: { suit: 'hearts', rank: 'eight' },
+              },
+            ],
+          }),
+          p1: finishedFrameView('p1', { boutPhase: 'defense' }),
+        },
+      },
+      {
+        moveIndex: 3,
+        playerId: 'p0',
+        action: { type: 'passTurn', playerId: 'p0' },
+        elapsedMs: 2000,
+        views: {
+          p0: finishedFrameView('p0', {
+            boutPhase: 'defense',
+            talonCount: 6,
+            discardCount: 2,
+            tablePairs: [],
+          }),
+          p1: finishedFrameView('p1', { boutPhase: 'defense' }),
+        },
+      },
+      {
+        moveIndex: 4,
+        playerId: 'p1',
+        action: { type: 'passTurn', playerId: 'p1' },
+        elapsedMs: 3000,
+        views: { p0: finishedFrameView('p0'), p1: finishedFrameView('p1') },
+      },
+    ];
+    getGameView.mockResolvedValue(finishedFrameView('p0'));
+    getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames });
+
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    const indicator = () => screen.getByTestId('review-move-indicator').textContent;
+    await waitFor(() => expect(indicator()).toBe('Move 4 / 4'));
+
+    // Bout resolution that draws from the talon, then a cover, then the opener.
+    fireEvent.click(screen.getByTestId('review-prev-button'));
+    await waitFor(() => expect(indicator()).toBe('Move 3 / 4'));
+    expect(audio.playTalonDraw).toHaveBeenLastCalledWith(4);
+
+    fireEvent.click(screen.getByTestId('review-prev-button'));
+    await waitFor(() => expect(indicator()).toBe('Move 2 / 4'));
+    expect(audio.playDefendCard).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByTestId('review-prev-button'));
+    await waitFor(() => expect(indicator()).toBe('Move 1 / 4'));
+    expect(audio.playAttackCard).toHaveBeenLastCalledWith(1);
+
+    // Stepping forward replays the same sounds, ending on the game-over chime.
+    fireEvent.click(screen.getByTestId('review-next-button'));
+    await waitFor(() => expect(indicator()).toBe('Move 2 / 4'));
+    expect(audio.playDefendCard).toHaveBeenCalledTimes(2);
+
+    fireEvent.click(screen.getByTestId('review-next-button'));
+    await waitFor(() => expect(audio.playTalonDraw).toHaveBeenCalledTimes(2));
+
+    fireEvent.click(screen.getByTestId('review-next-button'));
+    await waitFor(() => expect(indicator()).toBe('Move 4 / 4'));
+    expect(audio.playGameOver).toHaveBeenCalledTimes(1);
+  });
+
+  it('never renders a non-move as its own replay step', async () => {
+    const tablePairs = [{ attack: { suit: 'spades', rank: 'seven' }, defense: null }];
+    const frames = [
+      {
+        moveIndex: 1,
+        playerId: 'p0',
+        action: { type: 'initialAttack', playerId: 'p0' },
+        elapsedMs: 0,
+        views: {
+          p0: finishedFrameView('p0', { boutPhase: 'defense', talonCount: 10, tablePairs }),
+          p1: finishedFrameView('p1', { boutPhase: 'defense' }),
+        },
+      },
+      // A pass that changed nothing: no table, discard, talon or phase diff.
+      {
+        moveIndex: 2,
+        playerId: 'p1',
+        action: { type: 'passTurn', playerId: 'p1' },
+        elapsedMs: 1000,
+        views: {
+          p0: finishedFrameView('p0', { boutPhase: 'defense', talonCount: 10, tablePairs }),
+          p1: finishedFrameView('p1', { boutPhase: 'defense' }),
+        },
+      },
+      {
+        moveIndex: 3,
+        playerId: 'p0',
+        action: { type: 'passTurn', playerId: 'p0' },
+        elapsedMs: 2000,
+        views: { p0: finishedFrameView('p0'), p1: finishedFrameView('p1') },
+      },
+    ];
+    getGameView.mockResolvedValue(finishedFrameView('p0'));
+    getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames });
+
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    const indicator = () => screen.getByTestId('review-move-indicator').textContent;
+    // Three recorded frames, two visible steps.
+    await waitFor(() => expect(indicator()).toBe('Move 2 / 2'));
+    fireEvent.click(screen.getByTestId('review-prev-button'));
+    await waitFor(() => expect(indicator()).toBe('Move 1 / 2'));
+    expect((screen.getByTestId('review-prev-button') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('centres the card count and outlines the attacking and defending seats', async () => {
+    getGameView.mockResolvedValue({
+      ...view,
+      opponents: [
+        { id: 'p1', name: 'Bob', cardCount: 6, hasPassed: false, finishRank: null },
+        { id: 'p2', name: 'Carol', cardCount: 4, hasPassed: false, finishRank: null },
+      ],
+      attackerIdx: 1,
+      defenderIdx: 2,
+      boutPhase: 'defense',
+      legalActions: ['pass'],
+    });
+
+    const { container } = render(
+      <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('players-list')).toBeTruthy());
+
+    const rows = Array.from(
+      container.querySelectorAll('[data-testid="players-list"] .status-badge'),
+    ) as HTMLElement[];
+    expect(rows.map((row) => row.getAttribute('data-role'))).toEqual([
+      'none',
+      'attacker',
+      'defender',
+    ]);
+    expect(rows.map((row) => row.querySelector('.status-name')?.getAttribute('data-role'))).toEqual([
+      'none',
+      'attacker',
+      'defender',
+    ]);
+
+    // ITEM-ADD-8a: every row has a name track, a centred count track and a
+    // dedicated status track, so a tag never moves the count.
+    for (const row of rows) {
+      expect(row.querySelector('.status-player')).not.toBeNull();
+      expect(row.querySelector('.status-cards')).not.toBeNull();
+      expect(row.querySelector('.status-state-slot')).not.toBeNull();
+    }
+    expect(screen.getByTestId('player-cards-p1').textContent).toBe('6 cards');
+    expect(appCss).toMatch(
+      /\.status-badge\s*{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) auto minmax\(0, 1fr\)/,
+    );
+    expect(appCss).toMatch(/\.status-cards\s*{[^}]*justify-self:\s*center/);
+    expect(appCss).toMatch(
+      /\.status-badge\[data-role='attacker'\]\s*{[^}]*outline:\s*2px solid #2dc653/,
+    );
+    expect(appCss).toMatch(
+      /\.status-badge\[data-role='defender'\]\s*{[^}]*outline:\s*2px solid #f59e0b/,
+    );
+  });
+
+  it('labels the last player out as DURAK once the match is over', async () => {
+    getGameView.mockResolvedValue({
+      ...view,
+      myHand: [],
+      tablePairs: [],
+      boutPhase: 'GameOver',
+      legalActions: [],
+      finishOrder: ['p1'],
+      winners: ['p1'],
+      durak: null,
+      isDraw: false,
+      opponents: [
+        { id: 'p1', name: 'Bob', cardCount: 0, hasPassed: false, finishRank: 1 },
+      ],
+    });
+    getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
+
+    const { container } = render(
+      <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
+    );
+
+    const durakTag = await screen.findByTestId('player-durak-tag-p0');
+    expect(durakTag.textContent).toBe('DURAK');
+    expect(durakTag.classList.contains('durak-tag')).toBe(true);
+    expect(durakTag.closest('.status-state-slot')).not.toBeNull();
+    expect(screen.queryByTestId('player-durak-tag-p1')).toBeNull();
+    expect(
+      within(screen.getByTestId('players-list')).getByText('WINNER'),
+    ).toBeTruthy();
+
+    // No role outline survives the final frame.
+    const rows = Array.from(
+      container.querySelectorAll('[data-testid="players-list"] .status-badge'),
+    ) as HTMLElement[];
+    expect(rows.every((row) => row.getAttribute('data-role') === 'none')).toBe(true);
+  });
+
+  it('locks every control when the inspected seat is a bot', async () => {
+    getGameView.mockResolvedValue({
+      ...view,
+      isBot: true,
+      playerTypes: ['randomBot', 'human'],
+      myHand: [{ suit: 'clubs', rank: 'six' }],
+      tablePairs: [],
+      attackerIdx: 0,
+      defenderIdx: 1,
+      boutPhase: 'initialAttack',
+      legalActions: ['attack', 'pass', 'surrender'],
+    });
+
+    const { container } = render(
+      <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('players-list')).toBeTruthy());
+
+    // ITEM-ADD-9: no attack, throw-in, surrender or pass is offered, and the
+    // table reports its locked state.
+    expect(container.querySelector('[data-zone="player-controls"]')).toBeNull();
+    expect(screen.queryByText('Attack')).toBeNull();
+    expect(screen.queryByText('Pass')).toBeNull();
+    expect(screen.queryByText('Surrender')).toBeNull();
+    expect(
+      container.querySelector('[data-zone="table-arena"]')?.getAttribute('data-bot-locked'),
+    ).toBe('true');
+
+    fireEvent.click(screen.getByLabelText('six of clubs'));
+    fireEvent.doubleClick(screen.getByLabelText('six of clubs'));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(sendAction).not.toHaveBeenCalled();
+  });
+
+  it('opens a QA scenario preset from the left sidebar in one click', async () => {
+    getGameView.mockResolvedValue(view);
+    getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
+    createPresetGameMock.mockResolvedValue({
+      gameId: 'preset-1',
+      players: ['p0', 'p1'],
+      playerTypes: ['human', 'human'],
+      defaultPlayerId: 'p1',
+    });
+    const onNavigateGame = vi.fn();
+
+    render(
+      <GamePage
+        gameId="game-1"
+        playerId="p0"
+        onSwitchPlayer={() => {}}
+        onNavigateGame={onNavigateGame}
+      />,
+    );
+
+    const panel = await screen.findByTestId('qa-scenarios');
+    expect(panel.closest('[data-zone="sidebar-left"]')).not.toBeNull();
+    for (const label of [
+      '3P Redirect (Bob POV)',
+      '4P Chaos Targets',
+      'Surrender Half-Off',
+      'Discard & Endgame Durak',
+    ]) {
+      expect(within(panel).getByRole('button', { name: label })).toBeTruthy();
+    }
+
+    fireEvent.click(within(panel).getByRole('button', { name: '3P Redirect (Bob POV)' }));
+
+    await waitFor(() => expect(createPresetGameMock).toHaveBeenCalledWith('3p-redirect-bob'));
+    await waitFor(() => expect(onNavigateGame).toHaveBeenCalledWith('preset-1', 'p1'));
   });
 });

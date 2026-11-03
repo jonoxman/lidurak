@@ -225,6 +225,77 @@ html[data-theme='light'] .error-banner {
   box-sizing: border-box;
 }
 
+/* ITEM-ADD-7: the felt table and the HAND SORTING box share one centre column,
+   stacked with an explicit gap so nothing can ever overlap. */
+.table-column {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.table-column > [data-zone='table-arena'] {
+  min-width: 0;
+}
+
+.hand-sort-box {
+  align-items: stretch;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.hand-sort-box .sort-bar {
+  width: 100%;
+}
+
+.lobby-page > .qa-scenarios-panel {
+  margin-top: 16px;
+}
+
+/* ⚡ QA Scenarios: compact one-click preset buttons in the lobby and the game's
+   left sidebar. */
+.qa-scenarios-panel {
+  gap: 8px;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.qa-scenario-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.qa-scenario-button {
+  min-width: 0;
+  padding: 7px 10px;
+  font-size: 12px;
+  text-align: left;
+  color: var(--app-text);
+  background: var(--app-input-bg);
+  border: 1px solid var(--app-border);
+  border-radius: calc(var(--app-roundness) * 0.75);
+  cursor: pointer;
+}
+
+.qa-scenario-button:hover:not(:disabled) {
+  border-color: var(--app-accent);
+  color: var(--app-text-strong);
+}
+
+.qa-scenario-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.qa-scenario-error {
+  margin: 0;
+  font-size: 12px;
+  color: #d9534f;
+}
+
 .game-sidebar {
   display: flex;
   flex-direction: column;
@@ -352,10 +423,13 @@ html[data-theme='light'] .error-banner {
   list-style: none;
 }
 
+/* ITEM-ADD-8a: three tracks — name (1fr), card count (auto, centred), status
+   (1fr). Equal side tracks keep the count on the row's midpoint whether a
+   WINNER / OUT / DURAK / PASSED tag is present or not. */
 .status-badge {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   min-width: 0;
   padding: 6px 8px;
@@ -363,10 +437,19 @@ html[data-theme='light'] .error-banner {
   border: 1px solid var(--app-border);
   border-radius: calc(var(--app-roundness) * 0.75);
   font-size: 13px;
+  box-sizing: border-box;
 }
 
 .status-badge.mine {
   border-color: var(--app-accent);
+}
+
+.status-player {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  justify-self: start;
 }
 
 .status-name {
@@ -376,10 +459,22 @@ html[data-theme='light'] .error-banner {
   color: var(--app-text-strong);
 }
 
-.status-count {
-  flex: 0 0 auto;
+.status-cards {
+  justify-self: center;
+  text-align: center;
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
   opacity: 0.85;
+}
+
+.status-state-slot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  justify-self: end;
+  gap: 4px;
+  min-width: 0;
 }
 
 .status-rank {
@@ -388,6 +483,80 @@ html[data-theme='light'] .error-banner {
   font-weight: 700;
   letter-spacing: 0.06em;
   color: #d9a326;
+}
+
+.status-tag {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+/* ITEM-ADD-8b: the last player out wears the DURAK pill. */
+.status-tag.durak-tag {
+  color: #161512;
+  background: #f59e0b;
+}
+
+.status-tag.passed-tag {
+  color: var(--app-text);
+  border: 1px solid var(--app-border);
+  opacity: 0.85;
+}
+
+/* ITEM-ADD-2: outline the seat currently attacking (green) and the seat being
+   attacked (amber) in the PLAYERS list. */
+.status-badge[data-role='attacker'] {
+  border-color: #2dc653;
+  outline: 2px solid #2dc653;
+  outline-offset: -2px;
+  box-shadow: 0 0 8px rgba(45, 198, 83, 0.35);
+}
+
+.status-badge[data-role='attacker'] .status-name {
+  border-radius: 4px;
+  outline: 2px solid #2dc653;
+  outline-offset: 2px;
+  color: #2dc653;
+}
+
+.status-badge[data-role='defender'] {
+  border-color: #f59e0b;
+  outline: 2px solid #f59e0b;
+  outline-offset: -2px;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.35);
+}
+
+.status-badge[data-role='defender'] .status-name {
+  border-radius: 4px;
+  outline: 2px solid #f59e0b;
+  outline-offset: 2px;
+  color: #f59e0b;
+}
+
+html[data-theme='light'] .status-badge[data-role='attacker'] {
+  border-color: #15803d;
+  outline-color: #15803d;
+  box-shadow: 0 0 8px rgba(21, 128, 61, 0.25);
+}
+
+html[data-theme='light'] .status-badge[data-role='attacker'] .status-name {
+  outline-color: #15803d;
+  color: #15803d;
+}
+
+html[data-theme='light'] .status-badge[data-role='defender'] {
+  border-color: #b45309;
+  outline-color: #b45309;
+  box-shadow: 0 0 8px rgba(180, 83, 9, 0.25);
+}
+
+html[data-theme='light'] .status-badge[data-role='defender'] .status-name {
+  outline-color: #b45309;
+  color: #b45309;
 }
 
 .game-meta {
@@ -572,7 +741,8 @@ html[data-theme='light'] .error-banner {
   color: var(--app-text);
 }
 
-.game-over-banner .banner-lobby-button {
+.game-over-banner .banner-lobby-button,
+.game-over-banner .banner-rematch-button {
   flex: 0 0 auto;
   padding: 6px 14px;
   font-size: 13px;

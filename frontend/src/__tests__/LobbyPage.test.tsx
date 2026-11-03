@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/preact';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/preact';
 
 vi.mock('../api/client', () => ({
   checkServerHealth: vi.fn(),
   createGame: vi.fn(),
+  createPresetGame: vi.fn(),
 }));
 
 import * as client from '../api/client';
@@ -11,6 +12,7 @@ import { LobbyPage } from '../pages/LobbyPage';
 
 const createGame = client.createGame as unknown as ReturnType<typeof vi.fn>;
 const checkServerHealth = client.checkServerHealth as unknown as ReturnType<typeof vi.fn>;
+const createPresetGame = client.createPresetGame as unknown as ReturnType<typeof vi.fn>;
 
 const submitForm = () => {
   const button = screen.getByRole('button', { name: /Create Game|Creating/ });
@@ -23,7 +25,9 @@ describe('LobbyPage', () => {
   beforeEach(() => {
     createGame.mockReset();
     checkServerHealth.mockReset();
+    createPresetGame.mockReset();
     checkServerHealth.mockResolvedValue(true);
+    window.location.hash = '';
   });
 
   it('renders a two-player form with a seat-type dropdown per player', () => {
@@ -247,6 +251,45 @@ describe('LobbyPage', () => {
 
     expect(await screen.findByTestId('server-loading')).toBeTruthy();
     expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('starts every QA scenario preset in one click', async () => {
+    createPresetGame.mockResolvedValue({
+      gameId: 'preset-1',
+      players: ['p0', 'p1'],
+      playerTypes: ['human', 'human'],
+      defaultPlayerId: 'p1',
+    });
+
+    render(<LobbyPage initialServerReady />);
+
+    const panel = screen.getByTestId('qa-scenarios');
+    expect(within(panel).getByRole('heading', { name: '⚡ QA Scenarios' })).toBeTruthy();
+    for (const label of [
+      '3P Redirect (Bob POV)',
+      '4P Chaos Targets',
+      'Surrender Half-Off',
+      'Discard & Endgame Durak',
+    ]) {
+      expect(within(panel).getByRole('button', { name: label })).toBeTruthy();
+    }
+
+    fireEvent.click(within(panel).getByRole('button', { name: '3P Redirect (Bob POV)' }));
+
+    await waitFor(() => expect(createPresetGame).toHaveBeenCalledWith('3p-redirect-bob'));
+    // The preset opens on the seat that makes the scenario readable.
+    await waitFor(() => expect(window.location.hash).toBe('#/g/preset-1?player=p1'));
+  });
+
+  it('surfaces a failed QA preset instead of navigating', async () => {
+    createPresetGame.mockRejectedValue(new Error('Unknown preset'));
+    render(<LobbyPage initialServerReady />);
+
+    fireEvent.click(screen.getByRole('button', { name: '4P Chaos Targets' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('Unknown preset');
+    expect(window.location.hash).not.toContain('preset-1');
   });
 
   it('shows an error banner when game creation fails for a real reason', async () => {
