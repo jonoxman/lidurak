@@ -36,6 +36,15 @@ case class GameState(
   def maxBoutAttacks: Int =
     Math.min(6, defenderInitialHandSize)
 
+  /** Ranks currently visible on the table, attacks and covers alike. */
+  def tableRanks: Set[Rank] =
+    tablePairs.iterator
+      .flatMap(pair => pair.attack.rank :: pair.defense.map(_.rank).toList)
+      .toSet
+
+  /** Attacking cards that the defender has not covered yet. */
+  def uncoveredCount: Int = tablePairs.count(_.defense.isEmpty)
+
   /** True once the game has reached its final state. */
   def isGameOver: Boolean = boutPhase == BoutPhase.GameOver
 

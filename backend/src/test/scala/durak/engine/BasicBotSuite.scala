@@ -96,7 +96,7 @@ class BasicBotSuite extends munit.FunSuite:
 
     (0 until 20).foreach { seed =>
       BasicBot.chooseAction(gs, "p0", new Random(seed.toLong)) match
-        case Some(action @ GameAction.InitialAttack("p0", List(attack))) =>
+        case Some(action @ GameAction.InitialAttack("p0", List(attack), _)) =>
           assertEquals(attack.suit, Suit.Spades)
           assert(Set(sixSpades, aceSpades).contains(attack), s"unexpected trump: $attack")
           assertLegal(gs, action)
@@ -293,7 +293,7 @@ class BasicBotSuite extends munit.FunSuite:
           )
 
         action match
-          case GameAction.InitialAttack(_, List(opening)) =>
+          case GameAction.InitialAttack(_, List(opening), _) =>
             if current.boutPhase == BoutPhase.InitialAttack then
               val hand = current.players(current.attackerIdx).hand
               val nonTrump = hand.filter(_.suit != current.trumpSuit)

@@ -22,13 +22,15 @@ case class CreateGameRequest(
   playerCount: Int,
   playerNames: List[String],
   allowRedirect: Boolean = true,
-  playerTypes: Option[Vector[String]] = None
+  playerTypes: Option[Vector[String]] = None,
+  chaosMode: Boolean = false
 )
 
 object CreateGameRequest:
   /**
-   * Decodes a create request. `allowRedirect` defaults to `true` and
-   * `playerTypes` to no bots, so older clients keep working unchanged.
+   * Decodes a create request. `allowRedirect` defaults to `true`, `chaosMode` to
+   * `false` and `playerTypes` to no bots, so older clients keep working
+   * unchanged.
    */
   given Decoder[CreateGameRequest] = Decoder.instance { cursor =>
     for
@@ -36,7 +38,16 @@ object CreateGameRequest:
       playerNames <- cursor.downField("playerNames").as[List[String]]
       allowRedirect <- cursor.downField("allowRedirect").as[Option[Boolean]].map(_.getOrElse(true))
       playerTypes <- cursor.downField("playerTypes").as[Option[Vector[String]]]
-    yield CreateGameRequest(playerCount, playerNames, allowRedirect, playerTypes)
+      chaosMode <- cursor.downField("chaosMode").as[Option[Boolean]].map(_.getOrElse(false))
+    yield CreateGameRequest(playerCount, playerNames, allowRedirect, playerTypes, chaosMode)
+  }
+
+/** Body of `POST /api/games/preset`. */
+case class PresetRequest(preset: String)
+
+object PresetRequest:
+  given Decoder[PresetRequest] = Decoder.instance { cursor =>
+    cursor.downField("preset").as[String].map(PresetRequest.apply)
   }
 
 /** Body of `POST /api/games/:gameId/presence`. */
@@ -73,6 +84,9 @@ object GameRoutes:
 
     case req @ POST -> Root / "api" / "games" =>
       createRoom(manager, req)
+
+    case req @ POST -> Root / "api" / "games" / "preset" =>
+      createPresetRoom(manager, req)
 
     case req @ POST -> Root / "api" / "game" / "create" =>
       createRoom(manager, req)
@@ -121,7 +135,8 @@ object GameRoutes:
 
   /**
    * Seat types are normalized to exactly `playerCount` entries of `"human"`,
-   * `"randomBot"` or `"basicBot"` (unknown values fall back to a human seat).
+   * `"randomBot"` or `"basicBot"` (unknown values fall back to a human seat),
+   * and `chaosMode` opens every attack to any seat holding cards.
    */
   private def configFor(request: CreateGameRequest): GameConfig =
     GameConfig(
@@ -130,7 +145,48 @@ object GameRoutes:
       playerTypes = GameConfig.normalizePlayerTypes(
         request.playerCount,
         request.playerTypes.getOrElse(Vector.empty)
-      )
+      ),
+      chaosMode = request.chaosMode
+    )
+
+  /**
+   * Starts one of the scripted QA positions in a fresh room, so a reviewer can
+   * jump straight to a Chaos table, a half-off surrender or an endgame.
+   */
+  private def createPresetRoom(manager: GameManager, req: Request[IO]): IO[Response[IO]] =
+    req.as[Json].attempt.flatMap {
+      case Left(error) =>
+        BadRequest(errorBody(s"Invalid JSON body: ${describe(error)}"))
+      case Right(json) =>
+        json.as[PresetRequest] match
+          case Left(error) =>
+            BadRequest(errorBody(s"Invalid preset request: ${error.getMessage}"))
+          case Right(request) =>
+            manager
+              .createPreset(request.preset)
+              .flatMap {
+                case Left(error) => BadRequest(errorBody(error))
+                case Right(room) =>
+                  room.stateRef.get.flatMap(state => Ok(presetResponse(room, state)))
+              }
+              .handleErrorWith(failure => errorResponse(failure))
+    }
+
+  /** The preset's room plus the seat the table should open on. */
+  private def presetResponse(room: GameRoom, state: GameState): Json =
+    val players = state.players.map { player =>
+      Json.obj("id" -> player.id.asJson, "name" -> player.name.asJson)
+    }
+    Json.obj(
+      "gameId" -> room.gameId.asJson,
+      "players" -> Json.fromValues(players),
+      "playerTypes" -> Json.fromValues(state.players.indices.map { idx =>
+        Json.fromString(state.config.seatType(idx))
+      }),
+      "defaultPlayerId" -> room.defaultPlayerId
+        .filter(state.players.map(_.id).contains)
+        .getOrElse(state.players.headOption.map(_.id).getOrElse("p0"))
+        .asJson
     )
 
   /**
@@ -168,7 +224,9 @@ object GameRoutes:
             case Left(error) =>
               BadRequest(errorBody(s"Invalid game action: ${error.getMessage}"))
             case Right(action) =>
-              GameActor.applyAction(room, action).flatMap {
+              // Only a human seat may be driven from the outside; a bot seat is
+              // played by the room's own bot driver.
+              GameActor.submitClientAction(room, action).flatMap {
                 case Left(error) => BadRequest(errorBody(error))
                 case Right(state) =>
                   val viewerId = GameActor.actorId(action)
@@ -289,7 +347,7 @@ object GameRoutes:
             GameActor.setPresence(room, playerId, isPresent)
           case None =>
             json.as[GameAction] match
-              case Right(action) => GameActor.applyAction(room, action).void
+              case Right(action) => GameActor.submitClientAction(room, action).void
               case Left(error) =>
                 GameActor.logRejected(
                   s"Invalid action payload in game $gameId from player $playerId: ${describe(error)}"

@@ -34,8 +34,13 @@ case class SerializedGame(
     gameId: String,
     config: GameConfig,
     initialState: GameState,
+    // Every visible action on the table, in order. Each one is a replay step.
     moves: Vector[RecordedMove],
-    frames: Vector[ReplayFrame]
+    frames: Vector[ReplayFrame],
+    // Actions that only moved bookkeeping (a pass that left the table and the
+    // phase untouched). They are never replay steps, but keeping them preserves
+    // the exact transition order, so `verifyReplay` can still re-derive the game.
+    skippedMoves: Vector[RecordedMove] = Vector.empty
 )
 
 object GameReplay:
@@ -51,32 +56,54 @@ object GameReplay:
     )
 
   /**
-   * Appends one applied move and its frame. The elapsed time is measured from
-   * the state's own game start, and the first move is always stamped `0`.
+   * True when `action` visibly changed the table and therefore belongs in the
+   * replay steps.
+   *
+   * A `PassTurn` that leaves `tablePairs` and `boutPhase` untouched is a
+   * "non-move": the state moves on (a thrower is marked as passed) but nothing
+   * on the table changes, so the replay must not show a step for it. The pass
+   * that actually settles a bout clears the table or picks the cards up and so
+   * changes the phase — it always stays visible.
+   */
+  def isVisibleMove(previous: GameState, action: GameAction, next: GameState): Boolean =
+    action match
+      case _: GameAction.PassTurn =>
+        next.tablePairs != previous.tablePairs || next.boutPhase != previous.boutPhase
+      case _ => true
+
+  /**
+   * Appends one applied move, and — when it is a visible action on the table —
+   * its replay frame. The elapsed time is measured from the state's own game
+   * start, and the first move is always stamped `0`. Frames are numbered by
+   * their own position, so a skipped non-move never leaves a gap in the replay
+   * viewer's steps.
    */
   def appendMove(
       replay: SerializedGame,
       action: GameAction,
       stateAfter: GameState,
-      nowMs: Long
+      nowMs: Long,
+      visible: Boolean = true
   ): SerializedGame =
-    val moveIndex = replay.moves.size + 1
+    val moveIndex = replay.moves.size + replay.skippedMoves.size + 1
     val startedAt = stateAfter.gameStartedAtMs
       .orElse(replay.initialState.gameStartedAtMs)
       .getOrElse(nowMs)
     val elapsedMs = if moveIndex <= 1 then 0L else Math.max(0L, nowMs - startedAt)
     val playerId = GameEngine.actorId(action)
     val move = RecordedMove(moveIndex, playerId, action, elapsedMs, stateAfter)
-    replay.copy(
-      moves = replay.moves :+ move,
-      frames = replay.frames :+ frame(
-        moveIndex,
-        Some(playerId),
-        Some(action),
-        elapsedMs,
-        stateAfter
+    if !visible then replay.copy(skippedMoves = replay.skippedMoves :+ move)
+    else
+      replay.copy(
+        moves = replay.moves :+ move,
+        frames = replay.frames :+ frame(
+          replay.frames.size,
+          Some(playerId),
+          Some(action),
+          elapsedMs,
+          stateAfter
+        )
       )
-    )
 
   /** A replay frame with the frozen per-seat projections at `elapsedMs`. */
   def frame(
@@ -105,12 +132,13 @@ object GameReplay:
     }.toMap
 
   /**
-   * Replays every recorded move from `initialState` through
-   * [[GameEngine.applyAction]] and checks that each recorded state is exactly
-   * reproduced, proving the history is deterministic and complete.
+   * Replays every recorded transition — visible moves and the skipped
+   * bookkeeping-only passes, in their original order — from `initialState`
+   * through [[GameEngine.applyAction]] and checks that each recorded state is
+   * exactly reproduced, proving the history is deterministic and complete.
    */
   def verifyReplay(serialized: SerializedGame): Either[String, Vector[GameState]] =
-    val moves = serialized.moves.sortBy(_.moveIndex)
+    val moves = (serialized.moves ++ serialized.skippedMoves).sortBy(_.moveIndex)
     val expectedIndices = (1 to moves.size).toVector
     if moves.map(_.moveIndex) != expectedIndices then
       Left(s"Move indices are not sequential: ${moves.map(_.moveIndex)}")

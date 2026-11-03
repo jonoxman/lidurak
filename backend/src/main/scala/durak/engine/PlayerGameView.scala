@@ -55,7 +55,20 @@ case class PlayerGameView(
   gameStartedAtMs: Option[Long] = None,
   gameEndedAtMs: Option[Long] = None,
   // Every seat the game is waiting on right now (several during a throw-in).
-  promptedPlayerIds: Vector[String] = Vector.empty
+  promptedPlayerIds: Vector[String] = Vector.empty,
+  // True when the viewer's seat is played by a computer: it accepts no input.
+  isBot: Boolean = false,
+  // Canonical seat types ("human", "randomBot", "basicBot") for every seat,
+  // so a rematch can seat the same players and bots again.
+  playerTypes: Vector[String] = Vector.empty,
+  // Match settings the table needs to draw itself.
+  allowRedirect: Boolean = true,
+  chaosMode: Boolean = false,
+  // Seats the current attacker may aim at. Populated during the initial attack
+  // (a single clockwise defender normally, every other seat in Chaos mode).
+  eligibleTargetIds: Vector[String] = Vector.empty,
+  // The seat a redirect would land on, so the table can point the arrow at it.
+  redirectTargetId: Option[String] = None
 )
 
 object PlayerGameView:
@@ -82,6 +95,9 @@ object PlayerGameView:
     // A finished game has no turn: its clock and its prompts are always idle,
     // whatever the caller's state was last stamped with.
     val gameOver = state.boutPhase == BoutPhase.GameOver
+    // Bots compute their own moves from `GameState`; a client looking at a bot
+    // seat must never be offered (or be able to send) a move for it.
+    val isBotSeat = state.config.isBotSeat(viewerIdx)
 
     PlayerGameView(
       myId = viewer.id,
@@ -108,7 +124,7 @@ object PlayerGameView:
       attackerIdx = state.attackerIdx,
       defenderIdx = state.defenderIdx,
       boutPhase = state.boutPhase,
-      legalActions = legalActionsFor(state, viewer.id),
+      legalActions = if isBotSeat then List.empty else legalActionsFor(state, viewer.id),
       finishOrder = state.finishOrder,
       isDraw = state.isDraw,
       maxBoutAttacks = state.maxBoutAttacks,
@@ -125,8 +141,33 @@ object PlayerGameView:
       lastDiscardCards = state.lastDiscardCards,
       gameStartedAtMs = state.gameStartedAtMs,
       gameEndedAtMs = state.gameEndedAtMs,
-      promptedPlayerIds = state.promptedPlayerSeats.map(idx => state.players(idx).id)
+      promptedPlayerIds = state.promptedPlayerSeats.map(idx => state.players(idx).id),
+      isBot = isBotSeat,
+      playerTypes = GameConfig.normalizePlayerTypes(
+        state.players.size,
+        state.config.playerTypes
+      ),
+      allowRedirect = state.config.allowRedirect,
+      chaosMode = state.config.chaosMode,
+      eligibleTargetIds =
+        if state.boutPhase == BoutPhase.InitialAttack then
+          GameEngine.eligibleInitialTargets(state).map(idx => state.players(idx).id)
+        else Vector.empty,
+      redirectTargetId = redirectTargetIdFor(state)
     )
+
+  /**
+   * The seat the defender's redirect would send the attack to: the single
+   * clockwise neighbour in a standard game, the deterministic eligible pick in
+   * Chaos mode. Empty whenever a redirect is not on offer.
+   */
+  private def redirectTargetIdFor(state: GameState): Option[String] =
+    if state.boutPhase != BoutPhase.Defense || !state.config.allowRedirect then None
+    else
+      val targetIdx =
+        if state.config.chaosMode then GameEngine.deterministicRedirectTarget(state)
+        else GameEngine.eligibleRedirectTargets(state).headOption
+      targetIdx.map(idx => state.players(idx).id)
 
   /** Whole seconds left on the turn clock, rounded up and never negative. */
   private def secondsRemaining(state: GameState, nowMs: Long): Int =

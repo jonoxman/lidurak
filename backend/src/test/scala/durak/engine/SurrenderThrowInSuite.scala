@@ -101,10 +101,11 @@ class SurrenderThrowInSuite extends munit.FunSuite:
       defenderInitialHandSize = 1
     )
 
-    val surrendered = GameEngine
+    // The bout is already at its card limit, so nobody can throw in and the
+    // surrender resolves in the same move, with no pass to wait for.
+    val next = GameEngine
       .applyAction(gs, GameAction.DeclareSurrender("p1"))
       .getOrElse(fail("expected a valid surrender"))
-    val next = pass(surrendered, "p0")
 
     assertEquals(next.tablePairs, Vector.empty)
     assertEquals(next.discardPile, Vector.empty)
@@ -127,10 +128,10 @@ class SurrenderThrowInSuite extends munit.FunSuite:
       defenderInitialHandSize = 2
     )
 
-    val surrendered = GameEngine
+    // The bout is at its card limit, so the surrender settles immediately.
+    val next = GameEngine
       .applyAction(gs, GameAction.DeclareSurrender("p1"))
       .getOrElse(fail("expected a valid surrender"))
-    val next = pass(surrendered, "p0")
 
     assertEquals(next.tablePairs, Vector.empty)
     assertEquals(next.discardPile, Vector.empty)
@@ -141,7 +142,8 @@ class SurrenderThrowInSuite extends munit.FunSuite:
   test("a valid surrender opens the surrender throw-in phase") {
     val attack = card(Rank.Six, Suit.Spades)
     val gs = twoPlayer(
-      attackerHand = List(card(Rank.Ace, Suit.Clubs)),
+      // p0 still holds a matching six, so the phase stays open for a throw-in.
+      attackerHand = List(card(Rank.Six, Suit.Hearts), card(Rank.Ace, Suit.Clubs)),
       defenderHand = List(card(Rank.Seven, Suit.Hearts)),
       tablePairs = Vector(TablePair(attack))
     )
@@ -196,11 +198,12 @@ class SurrenderThrowInSuite extends munit.FunSuite:
 
   test("surrender auto-passes cardless non-defenders and keeps the rest unpassed") {
     val gs = threePlayer(
-      attackerHand = List(card(Rank.Ace, Suit.Clubs)),
+      // p0 can still throw in a matching six, so only the cardless p2 is passed.
+      attackerHand = List(card(Rank.Six, Suit.Hearts), card(Rank.Ace, Suit.Clubs)),
       defenderHand = List(card(Rank.Seven, Suit.Hearts)),
       thirdHand = Nil,
       tablePairs = Vector(TablePair(card(Rank.Six, Suit.Spades))),
-      attackerPassed = true,
+      attackerPassed = false,
       thirdPassed = false
     )
 
@@ -230,9 +233,15 @@ class SurrenderThrowInSuite extends munit.FunSuite:
 
     assert(result.isRight, result)
     val next = result.getOrElse(fail("expected a valid surrender"))
-    assertEquals(next.maxBoutAttacks, 2)
-    assertEquals(next.players(0).hasPassed, true)
-    assertEquals(next.players(2).hasPassed, true)
+    // With no room for another card every thrower is passed at once, so the
+    // surrender resolves inside the same move and the defender takes the table.
+    assertEquals(gs.maxBoutAttacks, 2)
+    assertEquals(next.tablePairs, Vector.empty)
+    assertEquals(next.discardPile, Vector.empty)
+    assertEquals(
+      next.players(1).hand.toSet,
+      Set(card(Rank.Seven, Suit.Hearts), card(Rank.Six, Suit.Spades), card(Rank.Six, Suit.Hearts))
+    )
   }
 
   // --- Throw-ins ---
@@ -282,7 +291,8 @@ class SurrenderThrowInSuite extends munit.FunSuite:
     val attack = card(Rank.Six, Suit.Spades)
     val thrown = card(Rank.Six, Suit.Diamonds)
     val gs = twoPlayer(
-      attackerHand = List(thrown, card(Rank.Ace, Suit.Clubs)),
+      // A second matching six keeps the throw-in phase open after the first.
+      attackerHand = List(thrown, card(Rank.Six, Suit.Clubs), card(Rank.Ace, Suit.Clubs)),
       defenderHand = List(card(Rank.Seven, Suit.Hearts)),
       tablePairs = Vector(TablePair(attack)),
       boutPhase = BoutPhase.SurrenderThrowIn
@@ -447,10 +457,11 @@ class SurrenderThrowInSuite extends munit.FunSuite:
     val gs = threePlayer(
       attackerHand = List(card(Rank.Ace, Suit.Clubs)),
       defenderHand = List(card(Rank.Seven, Suit.Spades)),
-      thirdHand = List(thrown, card(Rank.King, Suit.Diamonds)),
+      // p2 keeps a second matching six and has not passed, so the bout stays open.
+      thirdHand = List(thrown, card(Rank.Six, Suit.Diamonds), card(Rank.King, Suit.Diamonds)),
       tablePairs = Vector(TablePair(card(Rank.Six, Suit.Spades))),
       attackerPassed = true,
-      thirdPassed = true,
+      thirdPassed = false,
       boutPhase = BoutPhase.SurrenderThrowIn
     )
 
@@ -458,8 +469,9 @@ class SurrenderThrowInSuite extends munit.FunSuite:
 
     assert(result.isRight, result)
     val next = result.getOrElse(fail("expected a valid throw-in"))
+    assertEquals(next.boutPhase, BoutPhase.SurrenderThrowIn)
     assertEquals(next.players(0).hasPassed, true)
-    assertEquals(next.players(2).hasPassed, true)
+    assertEquals(next.players(2).hasPassed, false)
   }
 
   // --- The surrendering defender has no legal actions ---
@@ -469,7 +481,8 @@ class SurrenderThrowInSuite extends munit.FunSuite:
     val sixHearts = card(Rank.Six, Suit.Hearts)
     val kingHearts = card(Rank.King, Suit.Hearts)
     val gs = twoPlayer(
-      attackerHand = List(card(Rank.Ace, Suit.Clubs)),
+      // p0 can still throw in, so the surrendered bout stays open for this test.
+      attackerHand = List(card(Rank.Six, Suit.Clubs), card(Rank.Ace, Suit.Clubs)),
       defenderHand = List(sixHearts, kingHearts),
       tablePairs = Vector(TablePair(six))
     )
@@ -526,24 +539,18 @@ class SurrenderThrowInSuite extends munit.FunSuite:
       defenderInitialHandSize = 1
     )
 
-    val surrendered = GameEngine
+    // A cardless attacker has no throw-in at all, so the surrender resolves
+    // inside the declaring move instead of waiting for a settling pass.
+    val settled = GameEngine
       .applyAction(gs, GameAction.DeclareSurrender("p1"))
       .getOrElse(fail("expected a valid surrender"))
 
-    assertEquals(surrendered.boutPhase, BoutPhase.SurrenderThrowIn)
-    assertEquals(surrendered.players(0).hasPassed, true)
-    assertEquals(surrendered.players(0).hand, Vector.empty)
-    // A cardless attacker has no throw-in, so only the settling pass is left.
-    assertEquals(
-      RandomBot.legalActionsFor(surrendered, "p0"),
-      Vector(GameAction.PassTurn("p0"))
-    )
-
-    val settled = pass(surrendered, "p0")
-
     assertEquals(settled.tablePairs, Vector.empty)
     assertEquals(settled.discardPile, Vector.empty)
+    assertEquals(settled.players(0).hand, Vector.empty)
     assertEquals(settled.players(1).hand.toSet, Set(held, attack))
+    // The cardless attacker went out, so the defender is the last one in.
+    assertEquals(settled.durak, Some("p1"))
   }
 
   test("a defense-phase throw-in is rejected when the defender cannot cover it") {

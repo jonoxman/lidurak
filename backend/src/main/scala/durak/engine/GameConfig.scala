@@ -6,12 +6,16 @@ package durak.engine
  * `playerTypes` names who plays each seat (`"human"`, `"randomBot"` or
  * `"basicBot"`). It may be empty or shorter than `playerCount`: any seat it does
  * not name is human.
+ *
+ * `chaosMode` opens every opening attack and every redirect to any other seat
+ * that still holds cards, instead of only the clockwise neighbour.
  */
 case class GameConfig(
   playerCount: Int,
   allowRedirect: Boolean = true,
   seed: Long = System.currentTimeMillis(),
-  playerTypes: Vector[String] = Vector.empty
+  playerTypes: Vector[String] = Vector.empty,
+  chaosMode: Boolean = false
 ):
 
   /** The raw seat type of `seatIdx`, defaulting to a human. */
