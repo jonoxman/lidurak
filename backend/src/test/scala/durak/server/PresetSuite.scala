@@ -189,6 +189,39 @@ class PresetSuite extends munit.FunSuite:
     assertEquals(view(manager, gameId, "p1").legalActions, List.empty)
   }
 
+  test("POST /api/games/preset starts a defenseless defender the client auto-surrenders") {
+    val manager = newManager
+    val (gameId, json) = startPreset(manager, "defenseless-surrender")
+
+    // T-90 ITEM-PREV-4a: the scenario opens on the defenseless defender.
+    assertEquals(json.hcursor.get[String]("defaultPlayerId").toOption, Some("p1"))
+
+    val bob = view(manager, gameId, "p1")
+    assertEquals(bob.myName, "Bob")
+    assertEquals(bob.boutPhase, BoutPhase.Defense)
+    assertEquals(bob.tablePairs.size, 3)
+    assertEquals(bob.tablePairs.head.attack, Card(Suit.Spades, Rank.Jack))
+    // No legal cover (9♠ cannot beat J♠) and no redirect (two covered pairs),
+    // so Surrender is the only action and the client's 3 s timer arms.
+    assertEquals(bob.defenderDefenseless, true)
+    assert(bob.legalActions.contains("surrender"), bob.legalActions.toString)
+    assert(!bob.legalActions.contains("cover"), bob.legalActions.toString)
+    assert(!bob.legalActions.contains("redirect"), bob.legalActions.toString)
+    assert(!bob.legalActions.contains("throwIn"), bob.legalActions.toString)
+    assertEquals(bob.myHasPassed, false)
+
+    val room = manager.getRoom(gameId).unsafeRunSync().getOrElse(fail("room is missing"))
+    val state = room.stateRef.get.unsafeRunSync()
+    val tableCards = state.tablePairs.flatMap(pair => pair.attack :: pair.defense.toList)
+    // 36-card conservation across hands + table + talon + discard pile.
+    assertEquals(
+      state.players.map(_.hand.size).sum + tableCards.size + state.talon.size + state.discardPile.size,
+      36
+    )
+    assertEquals(state.talon.size, 6)
+    assertEquals(state.discardPile.size, 7)
+  }
+
   test("POST /api/games/preset starts the discard endgame with Bob DURAK after one throw-in") {
     val manager = newManager
     val (gameId, json) = startPreset(manager, "discard-and-endgame")

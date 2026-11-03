@@ -270,6 +270,7 @@ export const QA_SCENARIOS: { id: string; label: string }[] = [
   { id: '3p-redirect-bob', label: '3P Redirect (Bob POV)' },
   { id: 'chaos-4p', label: '4P Chaos Targets' },
   { id: 'surrender-half-off', label: 'Surrender Half-Off' },
+  { id: 'defenseless-surrender', label: 'Defenseless Auto-Surrender' },
   { id: 'discard-and-endgame', label: 'Discard & Endgame Durak' },
 ];
 
@@ -336,6 +337,46 @@ export function isDefenselessDefender(view: PlayerGameView): boolean {
   );
 }
 
+/** T-90 ITEM-PREV-4a: grace before the client surrenders a lost defense. */
+export const CLIENT_AUTO_SURRENDER_DELAY_MS = 3000;
+
+/** T-90 ITEM-PREV-4b: grace before the client passes a thrower with no cards. */
+export const CLIENT_AUTO_PASS_DELAY_MS = 1000;
+
+/**
+ * T-90 ITEM-PREV-4a: the viewed human is defending in `PHASE_DEFENSE` with no
+ * legal answer at all (the server offers `surrender` but neither `cover` nor
+ * `redirect`, or flags the defender as defenseless outright), so the client may
+ * surrender on their behalf once the 3-second grace has elapsed.
+ */
+export function isClientAutoSurrenderState(view: PlayerGameView): boolean {
+  if (normalizeToken(view.boutPhase) !== 'defense') return false;
+  if (!hasLegalAction(view.legalActions, 'surrender')) return false;
+  if (view.defenderDefenseless === true) return true;
+  return (
+    !hasLegalAction(view.legalActions, 'cover') &&
+    !hasLegalAction(view.legalActions, 'redirect')
+  );
+}
+
+/**
+ * T-90 ITEM-PREV-4b: the viewed human is a thrower who cannot add a card — in
+ * `SurrenderThrowIn`, or in a `Defense` whose table is fully covered — while
+ * `pass` is legal and they have not passed yet.
+ */
+export function isClientAutoPassState(view: PlayerGameView): boolean {
+  if (!hasLegalAction(view.legalActions, 'pass')) return false;
+  if (hasLegalAction(view.legalActions, 'throwIn')) return false;
+  if (view.myHasPassed) return false;
+  const phase = normalizeToken(view.boutPhase);
+  if (phase === 'surrenderthrowin') return true;
+  return (
+    phase === 'defense' &&
+    view.tablePairs.length > 0 &&
+    view.tablePairs.every((pair) => pair.defense != null)
+  );
+}
+
 const isSurrenderPhase = (phase: string): boolean =>
   normalizeToken(phase) === 'surrenderthrowin';
 
@@ -380,6 +421,19 @@ export function GamePage({
   const [rematchPending, setRematchPending] = useState(false);
   const [presetPending, setPresetPending] = useState(false);
   const [presetError, setPresetError] = useState<string | null>(null);
+  // T-90 ITEM-PREV-4a: seconds left on the client-side auto-surrender badge
+  // (`3 -> 2 -> 1`), or null while no defenseless defense is armed.
+  const [surrenderSeconds, setSurrenderSeconds] = useState<number | null>(null);
+  // T-90 ITEM-PREV-4b: true while the 1-second client auto-pass is armed.
+  const [autoPassPending, setAutoPassPending] = useState(false);
+  const autoSurrenderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoSurrenderTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const autoSurrenderFiredKeyRef = useRef<string | null>(null);
+  const autoPassTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoPassFiredKeyRef = useRef<string | null>(null);
+  // The timers fire outside render, so they dispatch through the latest
+  // `dispatch` closure (which owns the socket/REST choice).
+  const dispatchRef = useRef<(action: GameAction) => void>(() => {});
   // Item 13: names remembered from every live view and replay frame.
   const knownNamesRef = useRef<Record<string, string>>({});
   // Game id whose replay was already fetched on mount, so the finished-game
@@ -667,11 +721,6 @@ export function GamePage({
           view.playerTypes[viewerSeatIndex(view)] !== 'human')),
   );
 
-  // ITEM-ADD-4a: the client never surrenders on the defender's behalf. No timer
-  // or effect dispatches `DeclareSurrender` here — the `Surrender` button stays
-  // visible and clickable until the human clicks it, and only the server's
-  // 15-second turn clock may take over.
-
   // ITEM-9: the match is finished when the live view, the frame on screen or
   // the last recorded frame says so.
   // ITEM-PB-12c: the defensive filter guarantees every step in `Move X / Y` is
@@ -685,6 +734,92 @@ export function GamePage({
   const gameOver =
     view != null && isFinishedMatch(view, activeFrameView, replay, playerId);
   const reviewMode = gameOver;
+
+  // T-90 ITEM-PREV-4a / ITEM-PREV-4b: the position key behind each client-side
+  // delay. It only changes when the position does, so an unrelated socket push
+  // never restarts a grace timer and a fired key never fires twice.
+  const tableKey = (tablePairs: PlayerGameView['tablePairs']): string =>
+    tablePairs
+      .map((pair) => `${cardKey(pair.attack)}/${pair.defense ? cardKey(pair.defense) : '-'}`)
+      .join(',');
+
+  const autoSurrenderKey =
+    view != null && !isBotViewer && !reviewMode && isClientAutoSurrenderState(view)
+      ? [
+          view.myId,
+          normalizeToken(view.boutPhase),
+          view.attackerIdx,
+          view.defenderIdx,
+          tableKey(view.tablePairs),
+          view.myHand.map(cardKey).join(','),
+        ].join('|')
+      : null;
+
+  const autoPassKey =
+    view != null && !isBotViewer && !reviewMode && isClientAutoPassState(view)
+      ? [
+          view.myId,
+          normalizeToken(view.boutPhase),
+          view.attackerIdx,
+          view.defenderIdx,
+          tableKey(view.tablePairs),
+        ].join('|')
+      : null;
+
+  // T-90 ITEM-PREV-4a: keep the Surrender button on screen and clickable for the
+  // full 3 seconds, count the badge down and dispatch once the grace elapses.
+  useEffect(() => {
+    if (autoSurrenderKey == null) {
+      setSurrenderSeconds(null);
+      autoSurrenderFiredKeyRef.current = null;
+      return;
+    }
+    if (autoSurrenderFiredKeyRef.current === autoSurrenderKey) return;
+    setSurrenderSeconds(CLIENT_AUTO_SURRENDER_DELAY_MS / 1000);
+    const tick = setInterval(() => {
+      setSurrenderSeconds((current) =>
+        current != null && current > 1 ? current - 1 : current,
+      );
+    }, 1000);
+    const timer = setTimeout(() => {
+      autoSurrenderFiredKeyRef.current = autoSurrenderKey;
+      setSurrenderSeconds(null);
+      dispatchRef.current(buildDeclareSurrender(playerId));
+    }, CLIENT_AUTO_SURRENDER_DELAY_MS);
+    autoSurrenderTickRef.current = tick;
+    autoSurrenderTimerRef.current = timer;
+    return () => {
+      clearInterval(tick);
+      clearTimeout(timer);
+      autoSurrenderTickRef.current = null;
+      autoSurrenderTimerRef.current = null;
+    };
+  }, [autoSurrenderKey, playerId]);
+
+  // T-90 ITEM-PREV-4b: wait a full second before passing for a thrower who has
+  // no legal throw-in card, so the Pass button stays readable and clickable.
+  useEffect(() => {
+    if (autoPassKey == null) {
+      autoPassFiredKeyRef.current = null;
+      setAutoPassPending(false);
+      return;
+    }
+    if (autoPassFiredKeyRef.current === autoPassKey) {
+      setAutoPassPending(false);
+      return;
+    }
+    setAutoPassPending(true);
+    const timer = setTimeout(() => {
+      autoPassFiredKeyRef.current = autoPassKey;
+      setAutoPassPending(false);
+      dispatchRef.current(buildPassTurn(playerId));
+    }, CLIENT_AUTO_PASS_DELAY_MS);
+    autoPassTimerRef.current = timer;
+    return () => {
+      clearTimeout(timer);
+      autoPassTimerRef.current = null;
+    };
+  }, [autoPassKey, playerId]);
 
   // ITEM-PB-12b: stepping to another frame replays that move's sound, so a
   // reviewer hears the match as it happened.
@@ -827,6 +962,34 @@ export function GamePage({
       });
   };
 
+  // The client timers dispatch through this render's `dispatch`, so they follow
+  // the same bot lock, socket/REST fallback and selection clearing as a click.
+  dispatchRef.current = dispatch;
+
+  /** T-90: a manual `Surrender` always wins over the 3-second client timer. */
+  const cancelAutoSurrender = () => {
+    autoSurrenderFiredKeyRef.current = autoSurrenderKey;
+    if (autoSurrenderTimerRef.current != null) {
+      clearTimeout(autoSurrenderTimerRef.current);
+      autoSurrenderTimerRef.current = null;
+    }
+    if (autoSurrenderTickRef.current != null) {
+      clearInterval(autoSurrenderTickRef.current);
+      autoSurrenderTickRef.current = null;
+    }
+    setSurrenderSeconds(null);
+  };
+
+  /** T-90: a manual `Pass` always wins over the 1-second client timer. */
+  const cancelAutoPass = () => {
+    autoPassFiredKeyRef.current = autoPassKey;
+    if (autoPassTimerRef.current != null) {
+      clearTimeout(autoPassTimerRef.current);
+      autoPassTimerRef.current = null;
+    }
+    setAutoPassPending(false);
+  };
+
   const toggleCard = (card: GameCard) => {
     // Durak cards are unique, so suit + rank identifies the selected hand card.
     const index = view.myHand.findIndex(
@@ -904,9 +1067,11 @@ export function GamePage({
   const handleActionBar = (action: { type: string }) => {
     switch (action.type) {
       case 'passTurn':
+        cancelAutoPass();
         dispatch(buildPassTurn(playerId));
         break;
       case 'declareSurrender':
+        cancelAutoSurrender();
         dispatch(buildDeclareSurrender(playerId));
         break;
       case 'redirect':
@@ -1143,9 +1308,12 @@ export function GamePage({
       })
       .finally(() => setPresetPending(false));
   };
-  // Req 14: the Pass button counts down while the viewer's throw-in clock runs.
-  const passCountdownSeconds =
+  // Req 14 / T-90 ITEM-PREV-4b: the Pass button counts down while the viewer's
+  // throw-in clock runs, and reads `1` while the client auto-pass is armed (the
+  // client timer is always the smaller of the two).
+  const serverPassCountdown =
     viewerOnClock && hasLegalAction(view.legalActions, 'pass') ? Math.max(1, seconds) : null;
+  const passCountdownSeconds = autoPassPending ? 1 : serverPassCountdown;
 
   return (
     <div class="page game-page">
@@ -1384,6 +1552,7 @@ export function GamePage({
               <ActionBar
                 legalActions={view.legalActions}
                 onAction={handleActionBar}
+                surrenderSeconds={surrenderSeconds}
                 passCountdownSeconds={passCountdownSeconds}
                 isBotSeat={isBotViewer}
               />
