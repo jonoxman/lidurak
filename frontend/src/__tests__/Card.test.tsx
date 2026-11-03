@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/preact';
 import {
+  CARD_CORNER_FONT_FAMILY,
   CARD_SERIF_FONT_FAMILY,
   Card,
   cardFrontPalette,
@@ -470,7 +471,14 @@ describe('card sprite serif typography and Roundness (T-90-2)', () => {
     resetSettings();
   });
 
-  it('exposes the classic serif font stack for card rank numbers and letters', () => {
+  it('exposes the sans-serif corner stack and the classic serif court stack', () => {
+    expect(CARD_CORNER_FONT_FAMILY).toContain('Inter');
+    expect(CARD_CORNER_FONT_FAMILY).toContain('system-ui');
+    expect(CARD_CORNER_FONT_FAMILY).toContain('Segoe UI');
+    expect(CARD_CORNER_FONT_FAMILY.trim().endsWith('sans-serif')).toBe(true);
+    expect(CARD_CORNER_FONT_FAMILY).not.toContain('Cinzel');
+    expect(CARD_CORNER_FONT_FAMILY).not.toContain('Georgia');
+
     expect(CARD_SERIF_FONT_FAMILY).toContain('Cinzel');
     expect(CARD_SERIF_FONT_FAMILY).toContain('Playfair Display');
     expect(CARD_SERIF_FONT_FAMILY).toContain('Georgia');
@@ -478,7 +486,7 @@ describe('card sprite serif typography and Roundness (T-90-2)', () => {
     expect(CARD_SERIF_FONT_FAMILY.trim().endsWith('serif')).toBe(true);
   });
 
-  it('draws every rank index and court letter in the serif font', () => {
+  it('ITEM-3a: draws every corner rank index in the sans-serif font', () => {
     const ranks: Array<[string, string]> = [
       ['two', '2'],
       ['three', '3'],
@@ -498,48 +506,113 @@ describe('card sprite serif typography and Roundness (T-90-2)', () => {
     for (const [rank, label] of ranks) {
       const { container, unmount } = render(<Card suit="hearts" rank={rank} />);
 
-      for (const index of ['top-rank', 'bottom-rank']) {
-        const node = container.querySelector(`[data-index="${index}"]`)!;
+      for (const testId of ['card-rank-top', 'card-rank-bottom']) {
+        const node = container.querySelector(`[data-testid="${testId}"]`)!;
         const family = node.getAttribute('font-family') ?? '';
-        expect(node.textContent, `${rank} ${index}`).toBe(label);
-        expect(node.classList.contains('card-rank-index'), `${rank} ${index}`).toBe(true);
-        expect(node.getAttribute('data-font-style'), `${rank} ${index}`).toBe('serif');
-        expect(family, `${rank} ${index}`).toBe(CARD_SERIF_FONT_FAMILY);
-        expect(family, `${rank} ${index}`).toMatch(/Georgia|Playfair Display|Times New Roman/);
-        expect(family, `${rank} ${index}`).toContain('serif');
-        expect(node.getAttribute('font-weight'), `${rank} ${index}`).toBe('700');
-      }
-
-      const court = ['jack', 'queen', 'king'].includes(rank);
-      const letter = container.querySelector('[data-pip="face"]');
-      if (court) {
-        const family = letter!.getAttribute('font-family') ?? '';
-        expect(letter!.textContent, rank).toBe(label);
-        expect(letter!.classList.contains('card-face-letter'), rank).toBe(true);
-        expect(letter!.getAttribute('data-font-style'), rank).toBe('serif');
-        expect(family, rank).toBe(CARD_SERIF_FONT_FAMILY);
-        expect(family, rank).toMatch(/Georgia|Playfair Display|Times New Roman/);
-        expect(letter!.getAttribute('font-weight'), rank).toBe('700');
-      } else {
-        expect(letter, rank).toBeNull();
+        expect(node, `${rank} ${testId}`).not.toBeNull();
+        expect(node.textContent, `${rank} ${testId}`).toBe(label);
+        expect(node.classList.contains('card-rank-index'), `${rank} ${testId}`).toBe(true);
+        expect(node.getAttribute('data-font-style'), `${rank} ${testId}`).toBe('sans-serif');
+        expect(family, `${rank} ${testId}`).toBe(CARD_CORNER_FONT_FAMILY);
+        expect(family, `${rank} ${testId}`).not.toBe(CARD_SERIF_FONT_FAMILY);
+        expect(family, `${rank} ${testId}`).not.toMatch(/Cinzel|Playfair Display|Times New Roman/);
+        expect(family, `${rank} ${testId}`).toMatch(/sans-serif$/);
+        expect(node.getAttribute('font-weight'), `${rank} ${testId}`).toBe('700');
       }
 
       unmount();
     }
   });
 
-  it('keeps the stylesheet serif rule in sync with the card font stack', () => {
-    // A CSS declaration beats the SVG `font-family` presentation attribute, so
-    // the shared `.playing-card text` rule is what actually renders the rank
-    // numbers and court letters: it must keep the ornate faces the ticket asks
-    // for instead of collapsing to a plain Georgia/Times stack.
-    const rule = /\.playing-card text \{([^}]*)\}/.exec(tableCss);
-    expect(rule).not.toBeNull();
-    const declaration = rule![1].replace(/\s+/g, ' ');
+  it('ITEM-3b: keeps the fancy serif font only on the large J, Q and K letters', () => {
+    const faces = [
+      ['jack', 'J'],
+      ['queen', 'Q'],
+      ['king', 'K'],
+    ] as const;
 
+    for (const [rank, letter] of faces) {
+      const { container, unmount } = render(<Card suit="clubs" rank={rank} />);
+      const node = container.querySelector('[data-testid="card-face-letter"]')!;
+      const family = node.getAttribute('font-family') ?? '';
+
+      expect(node.textContent, rank).toBe(letter);
+      expect(node.classList.contains('card-face-letter'), rank).toBe(true);
+      expect(node.getAttribute('data-font-style'), rank).toBe('serif');
+      expect(family, rank).toBe(CARD_SERIF_FONT_FAMILY);
+      expect(family, rank).not.toBe(CARD_CORNER_FONT_FAMILY);
+      expect(family, rank).toMatch(/Cinzel|Playfair Display|Times New Roman/);
+      expect(node.getAttribute('font-weight'), rank).toBe('700');
+      unmount();
+    }
+
+    // Number cards and aces render no centre court letter at all.
+    for (const rank of ['two', 'ten', 'ace']) {
+      const { container, unmount } = render(<Card suit="clubs" rank={rank} />);
+      expect(container.querySelector('[data-testid="card-face-letter"]'), rank).toBeNull();
+      unmount();
+    }
+  });
+
+  it('ITEM-3a/3b: court cards use sans-serif corners and a serif centre letter', () => {
+    const faces = [
+      ['jack', 'J'],
+      ['queen', 'Q'],
+      ['king', 'K'],
+    ] as const;
+
+    for (const [rank, letter] of faces) {
+      const { container, unmount } = render(<Card suit="diamonds" rank={rank} />);
+
+      for (const testId of ['card-rank-top', 'card-rank-bottom']) {
+        const corner = container.querySelector(`[data-testid="${testId}"]`)!;
+        expect(corner.textContent, `${rank} ${testId}`).toBe(letter);
+        expect(corner.getAttribute('font-family'), `${rank} ${testId}`).toBe(
+          CARD_CORNER_FONT_FAMILY,
+        );
+        expect(corner.getAttribute('data-font-style'), `${rank} ${testId}`).toBe('sans-serif');
+      }
+
+      const centre = container.querySelector('[data-testid="card-face-letter"]')!;
+      expect(centre.textContent, rank).toBe(letter);
+      expect(centre.getAttribute('font-family'), rank).toBe(CARD_SERIF_FONT_FAMILY);
+      expect(centre.getAttribute('data-font-style'), rank).toBe('serif');
+
+      unmount();
+    }
+  });
+
+  it('keeps the stylesheet rules in sync with both card font stacks', () => {
+    // A CSS declaration beats the SVG `font-family` presentation attribute, so
+    // these three rules are what actually renders the card text.
+    const ruleOf = (selector: string): string => {
+      const pattern = new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\{([^}]*)\\}`);
+      const match = pattern.exec(tableCss);
+      expect(match, selector).not.toBeNull();
+      return match![1].replace(/\s+/g, ' ');
+    };
+
+    // ITEM-3a: the corner indices are repainted sans-serif.
+    const corner = ruleOf('.playing-card .card-rank-index');
+    expect(corner).toContain('Inter');
+    expect(corner).toContain('system-ui');
+    expect(corner).toContain('Segoe UI');
+    // The declaration ends on the generic `sans-serif` fallback.
+    expect(corner.trim()).toMatch(/sans-serif;$/);
+    expect(corner).not.toContain('Cinzel');
+    expect(corner).not.toContain('Georgia');
+
+    // ITEM-3b: the large centre court letters keep the ornate serif stack.
+    const centre = ruleOf('.playing-card .card-face-letter');
     for (const face of ['Cinzel', 'Playfair Display', 'Georgia', 'Times New Roman', 'serif']) {
       expect(CARD_SERIF_FONT_FAMILY, face).toContain(face);
-      expect(declaration, face).toContain(face);
+      expect(centre, face).toContain(face);
+    }
+
+    // The shared glyph rule still carries the serif stack for the pips.
+    const glyphs = ruleOf('.playing-card text');
+    for (const face of ['Cinzel', 'Playfair Display', 'Georgia', 'Times New Roman', 'serif']) {
+      expect(glyphs, face).toContain(face);
     }
   });
 
