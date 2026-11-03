@@ -25,6 +25,10 @@ import {
   opponentOverlap,
   rowWidth,
   seatForOffset,
+  canonicalSeatOrder,
+  MIN_VISIBLE_STRIP_PX,
+  BOUT_CARD_WIDTH,
+  BOUT_MIN_VISIBLE_LEFT,
   sortHand,
   type OpponentSummary,
   type TablePairData,
@@ -67,6 +71,22 @@ function renderTable() {
 const seatNames = (opponentList: OpponentSummary[]): string[] =>
   assignSeats(opponentList).map((seat) => seat.position);
 
+const seatPositions = (
+  viewerId: string,
+  opponentList: OpponentSummary[],
+): Record<string, string> =>
+  Object.fromEntries(
+    assignSeats(opponentList, viewerId).map((seat) => [seat.opponent.id, seat.position]),
+  );
+
+const player = (id: string, name: string): OpponentSummary => ({
+  id,
+  name,
+  cardCount: 5,
+  hasPassed: false,
+  finishRank: null,
+});
+
 describe('clockwise seating', () => {
   it('computes relative clockwise offsets from the viewer', () => {
     expect(clockwiseOffset(3, 1, 4)).toBe(2);
@@ -89,6 +109,45 @@ describe('clockwise seating', () => {
       { id: 'p3', name: 'Dave', cardCount: 6, hasPassed: false, finishRank: null },
     ];
     expect(seatNames(fourPlayers)).toEqual(['top-left', 'top-center', 'top-right']);
+  });
+
+  it('ITEM-ADD-1a: keeps the 3-player row clockwise from every point of view', () => {
+    const alice = player('p0', 'Alice');
+    const bob = player('p1', 'Bob');
+    const carol = player('p2', 'Carol');
+
+    expect(canonicalSeatOrder([bob, carol], 'p0')).toEqual(['p0', 'p1', 'p2']);
+    expect(seatPositions('p0', [bob, carol])).toEqual({
+      p1: 'top-left',
+      p2: 'top-right',
+    });
+    expect(seatPositions('p1', [alice, carol])).toEqual({
+      p2: 'top-left',
+      p0: 'top-right',
+    });
+    expect(seatPositions('p2', [alice, bob])).toEqual({
+      p0: 'top-left',
+      p1: 'top-right',
+    });
+  });
+
+  it('ITEM-ADD-1a: keeps the 4-player row clockwise from every point of view', () => {
+    const everyone: OpponentSummary[] = [
+      player('p0', 'Alice'),
+      player('p1', 'Bob'),
+      player('p2', 'Carol'),
+      player('p3', 'Dave'),
+    ];
+    const seatsFor = (viewer: string): Record<string, string> =>
+      seatPositions(
+        viewer,
+        everyone.filter((entry) => entry.id !== viewer),
+      );
+
+    expect(seatsFor('p0')).toEqual({ p1: 'top-left', p2: 'top-center', p3: 'top-right' });
+    expect(seatsFor('p1')).toEqual({ p2: 'top-left', p3: 'top-center', p0: 'top-right' });
+    expect(seatsFor('p2')).toEqual({ p3: 'top-left', p0: 'top-center', p1: 'top-right' });
+    expect(seatsFor('p3')).toEqual({ p0: 'top-left', p1: 'top-center', p2: 'top-right' });
   });
 });
 
@@ -1380,7 +1439,7 @@ describe('feedback 7: tight glow, discard pile and reflection alignment', () => 
     expect(rule).toContain('align-items: center');
     expect(rule).toContain('justify-content: center');
     expect(rule).toContain(`padding: ${HAND_BOX_PADDING}px;`);
-    expect(rule).toContain('border-radius: calc(var(--card-radius, 8px) + 4px)');
+    expect(rule).toContain('border-radius: calc(var(--app-roundness, 8px) + 4px)');
     expect(rule).toContain('box-sizing: border-box');
 
     // Slots carry no wrapper spacing of their own; the only gap is the negative
@@ -1529,13 +1588,20 @@ describe('feedback 7: tight glow, discard pile and reflection alignment', () => 
       expect(slot.style.transform).toBe('');
     }
 
-    // Only the two visible face-up cards follow the hand geometry, measured on
-    // the width the single stack leaves behind.
-    const visibleAvailable = DISCARD_FALLBACK_WIDTH - DECK_CARD_WIDTH;
+    // ITEM-PREV-7a/7b: the row overlaps the stationary stack with the maximum
+    // allowed margin (only the 22px peek strip stays visible) and spreads the
+    // revealed cards over the rest of the pile width.
+    const visibleAvailable = DISCARD_FALLBACK_WIDTH - MIN_VISIBLE_STRIP_PX;
     const layout = handLayout(2, visibleAvailable, 0.5, DECK_CARD_WIDTH);
     const slots = Array.from(row.querySelectorAll('.discard-slot')) as HTMLElement[];
     expect(slots).toHaveLength(2);
     expect(row.querySelectorAll('.discard-slot[data-face="up"]')).toHaveLength(2);
+    expect(row.getAttribute('data-overlaps-facedown')).toBe('true');
+    expect(Number(row.getAttribute('data-facedown-overlap-px'))).toBe(
+      DECK_CARD_WIDTH - MIN_VISIBLE_STRIP_PX,
+    );
+    expect(row.style.marginLeft).toBe(`-${DECK_CARD_WIDTH - MIN_VISIBLE_STRIP_PX}px`);
+    expect(row.getAttribute('data-interactive-overflow')).toBe('false');
     expect(Number(row.getAttribute('data-overlap'))).toBe(layout.overlap);
     expect(Number(row.getAttribute('data-hidden-left'))).toBe(layout.hiddenLeft);
     expect(Number(row.getAttribute('data-hidden-right'))).toBe(layout.hiddenRight);
@@ -1555,6 +1621,49 @@ describe('feedback 7: tight glow, discard pile and reflection alignment', () => 
     expect(rule).toContain('min-width: 0');
     expect(rule).toContain('box-sizing: border-box');
     expect(cssRule('.table-discard')).toContain('overflow: hidden');
+  });
+
+  it('ITEM-PREV-7a: overlaps only when a face-down stack is present', () => {
+    setSettings({ roundness: DEFAULT_SETTINGS.roundness });
+    const { unmount } = render(
+      <TableDeck
+        talonCount={6}
+        bottomTrumpCard={null}
+        trumpSuit="spades"
+        discardCount={3}
+        lastDiscardCards={[
+          { suit: 'clubs', rank: 'seven' },
+          { suit: 'diamonds', rank: 'ace' },
+          { suit: 'hearts', rank: 'king' },
+        ]}
+      />,
+    );
+
+    const row = screen.getByTestId('discard-visible-row');
+    // No face-down stack: the row uses the whole pile width and never overlaps.
+    expect(row.getAttribute('data-overlaps-facedown')).toBe('false');
+    expect(Number(row.getAttribute('data-facedown-overlap-px'))).toBe(0);
+    expect(row.style.marginLeft).toBe('');
+    expect(Number(row.getAttribute('data-available-width'))).toBe(DISCARD_FALLBACK_WIDTH);
+    // Three deck-sized cards fit comfortably, so no cursor animation.
+    expect(row.getAttribute('data-interactive-overflow')).toBe('false');
+    expect(screen.queryByTestId('discard-facedown-stack')).toBeNull();
+    unmount();
+
+    // A deep face-up pile that cannot fit even at maximum overlap still marks
+    // itself interactive, so the cursor can slide the hidden cards.
+    render(
+      <TableDeck
+        talonCount={0}
+        bottomTrumpCard={null}
+        trumpSuit="spades"
+        discardCount={20}
+        lastDiscardCards={twentyDiscards}
+      />,
+    );
+    expect(screen.getByTestId('discard-visible-row').getAttribute('data-interactive-overflow')).toBe(
+      'true',
+    );
   });
 
   it('ITEM-7b: never lets the discard row exceed the available pile width', () => {
@@ -1669,6 +1778,7 @@ describe('feedback 7: tight glow, discard pile and reflection alignment', () => 
     expect(outline.getAttribute('data-align')).toBe('card');
 
     const groupRule = cssRule('.table-pairs-group');
+    expect(groupRule).toContain('flex-wrap: nowrap');
     expect(groupRule).toContain('align-items: flex-start');
     expect(groupRule).toContain('--bout-card-width: 80px');
     expect(groupRule).toContain('--bout-card-height: 114px');
@@ -1677,7 +1787,7 @@ describe('feedback 7: tight glow, discard pile and reflection alignment', () => 
     const pairRule = cssRule('.table-pair');
     expect(pairRule).toContain('grid-template-rows: var(--bout-card-height, 114px)');
     expect(pairRule).toContain('align-content: start');
-    expect(pairRule).toContain('padding: 0 20px var(--bout-card-offset, 15px) 0');
+    expect(pairRule).toContain('padding: 0 0 var(--bout-card-offset, 15px) 0');
     expect(pairRule).toContain('box-sizing: border-box');
 
     const outlineRule = cssRule('.redirect-outline');
@@ -1912,7 +2022,7 @@ describe('T-90-3: outline lift, discard stack, chaos targets, deflect arrow and 
 
   // --- ITEM-ADD-1: 3-player deflect arrow ---
 
-  it('ITEM-ADD-1: points Bob’s deflect arrow at Carol (top-right), never Alice', () => {
+  it('ITEM-ADD-1: seats Carol top-left from Bob’s POV and points the arrow there', () => {
     const bobHand: CardData[] = [
       { suit: 'hearts', rank: 'six' },
       { suit: 'hearts', rank: 'nine' },
@@ -1931,12 +2041,47 @@ describe('T-90-3: outline lift, discard stack, chaos targets, deflect arrow and 
       />,
     );
 
+    // ITEM-ADD-1a: from Bob's POV, Carol is the next player clockwise
+    // (top-left) and Alice sits across the table to the right.
+    const seats = Object.fromEntries(
+      screen.getAllByTestId('opponent').map((seat) => [
+        seat.querySelector('.opponent-name')!.textContent,
+        seat.getAttribute('data-seat'),
+      ]),
+    );
+    expect(seats).toEqual({ Alice: 'top-right', Carol: 'top-left' });
+
+    // ITEM-ADD-1b: the deflect arrow follows the very same mapping.
     const outline = screen.getByTestId('redirect-outline');
-    expect(outline.getAttribute('data-target-seat')).toBe('top-right');
+    expect(outline.getAttribute('data-target-seat')).toBe('top-left');
     expect(outline.getAttribute('data-target-player')).toBe('p2');
-    expect(outline.getAttribute('data-direction')).toBe('top-right');
-    expect(outline.getAttribute('data-target-seat')).not.toBe('top-left');
-    expect(outline.getAttribute('data-target-player')).not.toBe('p0');
+    expect(outline.getAttribute('data-direction')).toBe('top-left');
+  });
+
+  it('ITEM-ADD-1a: seats Alice top-left from Carol’s POV and keeps Bob top-right', () => {
+    const carolHand: CardData[] = [
+      { suit: 'clubs', rank: 'six' },
+      { suit: 'clubs', rank: 'nine' },
+    ];
+    render(
+      <GameTable
+        myId="p2"
+        myHand={carolHand}
+        opponents={[player('p0', 'Alice'), player('p1', 'Bob')]}
+        tablePairs={uncoveredPair}
+        trumpSuit="spades"
+        attackerId="p0"
+        defenderId="p2"
+      />,
+    );
+
+    const seats = Object.fromEntries(
+      screen.getAllByTestId('opponent').map((seat) => [
+        seat.querySelector('.opponent-name')!.textContent,
+        seat.getAttribute('data-seat'),
+      ]),
+    );
+    expect(seats).toEqual({ Alice: 'top-left', Bob: 'top-right' });
   });
 
   it('ITEM-ADD-1: follows the server’s redirectTargetId and the viewer’s own seat', () => {
@@ -2060,11 +2205,11 @@ describe('T-90-3: outline lift, discard stack, chaos targets, deflect arrow and 
     const topStart = tableCss.indexOf(topSelector);
     expect(topStart).toBeGreaterThan(-1);
     expect(tableCss.slice(topStart, tableCss.indexOf('}', topStart))).toContain(
-      'transform: translateY(-50%)',
+      'transform: translateY(calc(-50% - 12px))',
     );
     expect(
       cssRule(".table-pairs-group[data-surrendered='true'][data-surrender-target='bottom']"),
-    ).toContain('transform: translateY(50%)');
+    ).toContain('transform: translateY(calc(50% + 12px))');
 
     render(
       <GameTable
@@ -2083,6 +2228,28 @@ describe('T-90-3: outline lift, discard stack, chaos targets, deflect arrow and 
     expect(group.getAttribute('data-surrender-target')).toBe('bottom');
     // The cards stay put while more throw-ins land on the pile.
     expect(group.querySelectorAll('.table-pair')).toHaveLength(tablePairs.length);
+  });
+
+  it('ITEM-ADD-4b: normalises the surrender phase before straddling', () => {
+    for (const phase of ['SurrenderThrowIn', 'surrender_throw_in', 'SURRENDER_THROW_IN']) {
+      const { unmount } = render(
+        <GameTable
+          myId="p0"
+          myHand={hand}
+          opponents={activeOpponents}
+          tablePairs={tablePairs}
+          trumpSuit="diamonds"
+          defenderId="p1"
+          boutPhase={phase}
+        />,
+      );
+      const group = screen.getByTestId('table-pairs-group');
+      expect(group.getAttribute('data-surrendered')).toBe('true');
+      expect(group.getAttribute('data-surrender-target')).toBe('top-left');
+      // The play area keeps `overflow: visible` so the half-off cards show.
+      expect(cssRule('.battlefield-tinted-box')).toContain('overflow: visible');
+      unmount();
+    }
   });
 
   // --- ITEM-ADD-6: fixed table rows ---
@@ -2181,5 +2348,104 @@ describe('T-90-3: outline lift, discard stack, chaos targets, deflect arrow and 
 
     expect(screen.queryByText('Pass')).toBeNull();
     expect(screen.queryByText('Surrender')).toBeNull();
+  });
+});
+
+describe('T-90-3 ITEM-NEW: compact single-row play area and roundness', () => {
+  const cssRule = (selector: string): string => {
+    const start = tableCss.indexOf(`\n${selector} {`);
+    expect(start).toBeGreaterThan(-1);
+    const end = tableCss.indexOf('}', start);
+    return tableCss.slice(start, end);
+  };
+
+  it('ITEM-NEW-2a/2b: keeps six pairs plus the reflection outline in one compact row', () => {
+    const sixPairs: TablePairData[] = Array.from({ length: 6 }, () => ({
+      attack: { suit: 'spades', rank: 'six' },
+      defense: null,
+    }));
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={sixPairs}
+        trumpSuit="diamonds"
+        defenderId="p1"
+        canRedirect
+      />,
+    );
+
+    const group = screen.getByTestId('table-pairs-group');
+    expect(group.getAttribute('data-single-row')).toBe('true');
+    expect(group.getAttribute('data-min-visible-left')).toBe(String(BOUT_MIN_VISIBLE_LEFT));
+    expect(cssRule('.table-pairs-group')).toContain('flex-wrap: nowrap');
+
+    // The whole bout is anchored at the defender's edge of the play area.
+    expect(group.getAttribute('data-anchor-seat')).toBe('top-left');
+
+    const pairs = Array.from(group.querySelectorAll('.table-pair')) as HTMLElement[];
+    expect(pairs).toHaveLength(6);
+    expect(pairs[0].style.marginLeft).toBe('');
+    for (const pair of pairs.slice(1)) {
+      const margin = parseFloat(pair.style.marginLeft);
+      // Overlapped for compaction, but never over the rank/suit strip.
+      expect(margin).toBeLessThan(0);
+      expect(margin).toBeGreaterThanOrEqual(-(BOUT_CARD_WIDTH - BOUT_MIN_VISIBLE_LEFT));
+    }
+
+    // The reflection outline takes its own slot in the same compact row.
+    const outline = screen.getByTestId('redirect-outline') as HTMLElement;
+    expect(outline.style.marginLeft).toBe(pairs[pairs.length - 1].style.marginLeft);
+    expect(Number(group.getAttribute('data-overlap'))).toBeLessThanOrEqual(
+      BOUT_CARD_WIDTH - BOUT_MIN_VISIBLE_LEFT,
+    );
+  });
+
+  it('ITEM-NEW-1a: binds --app-roundness to every table element', () => {
+    expect(cssRule("[data-zone='table-arena']")).toContain(
+      'border-radius: calc(var(--app-roundness, 8px) * 1.5)',
+    );
+    expect(cssRule('.battlefield-tinted-box')).toContain(
+      'border-radius: calc(var(--app-roundness, 8px) * 1.5)',
+    );
+    expect(cssRule('.seat-box')).toContain('border-radius: var(--app-roundness, 8px)');
+    expect(cssRule('.target-outline')).toContain('border-radius: var(--app-roundness, 8px)');
+    expect(cssRule('.redirect-outline')).toContain('border-radius: var(--app-roundness, 8px)');
+    expect(cssRule('.card-slot')).toContain('border-radius: var(--app-roundness, 8px)');
+    expect(cssRule('.playing-card')).toContain('border-radius: var(--app-roundness, 8px)');
+    expect(cssRule('.playing-card.card-face')).toContain(
+      'border-radius: var(--app-roundness, 8px)',
+    );
+    expect(cssRule('.playing-card.card-back')).toContain(
+      'border-radius: var(--app-roundness, 8px)',
+    );
+    expect(cssRule('.hand-cards')).toContain(
+      'border-radius: calc(var(--app-roundness, 8px) + 4px)',
+    );
+    expect(cssRule('.action-button')).toContain('border-radius: var(--app-roundness, 8px)');
+    expect(tableCss).toContain('.playing-card text {');
+    expect(tableCss).toContain("font-family: Georgia, 'Times New Roman'");
+  });
+
+  it('ITEM-NEW-1b: rounds the reflection SVG plate with the slider', () => {
+    setSettings({ roundness: 16 });
+    const { unmount } = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={uncoveredPair}
+        trumpSuit="diamonds"
+        defenderId="p1"
+        canRedirect
+      />,
+    );
+
+    const plate = screen.getByTestId('redirect-outline').querySelector('rect');
+    expect(plate).not.toBeNull();
+    expect(Number(plate!.getAttribute('rx'))).toBe(14);
+    unmount();
+    setSettings({ roundness: DEFAULT_SETTINGS.roundness });
   });
 });

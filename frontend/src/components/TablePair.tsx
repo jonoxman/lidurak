@@ -10,6 +10,11 @@ export interface TablePairProps {
   snap?: boolean;
   /** Stable id of this pair as a drop zone (`cover:<index>`). */
   dropZone?: string;
+  /**
+   * ITEM-NEW-2b: inline single-row spacing, negative once the pairs have to
+   * overlap so every card keeps its left rank/suit strip visible.
+   */
+  marginLeft?: string;
   onAttackClick?: () => void;
   onDragOverCard?: (event: DragEvent) => void;
   onDragLeaveCard?: () => void;
@@ -24,6 +29,7 @@ export function TablePair({
   pulse = false,
   snap = false,
   dropZone,
+  marginLeft,
   onAttackClick,
   onDragOverCard,
   onDragLeaveCard,
@@ -39,7 +45,11 @@ export function TablePair({
   // Item 8: an attack card sits flush with the top of an exact card-sized box,
   // so the reflection outline can share the same top and bottom edges.
   return (
-    <div class={classes.join(' ')} data-card-align="top">
+    <div
+      class={classes.join(' ')}
+      data-card-align="top"
+      style={marginLeft ? { marginLeft } : undefined}
+    >
       <div
         class="table-pair-attack"
         data-card-align="top"
