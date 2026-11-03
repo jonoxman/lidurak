@@ -773,8 +773,9 @@ describe('felt texture and filters', () => {
 
     const arena = container.querySelector('[data-zone="table-arena"]') as HTMLElement;
     expect(arena.getAttribute('data-texture')).toBe('burgundy-velvet');
+    // The dark-theme calibration (×1.10) rides on top of the slider value.
     expect(arena.style.getPropertyValue('--table-filter')).toBe(
-      'brightness(1.4) contrast(1.1) hue-rotate(40deg)',
+      'brightness(1.54) contrast(1.1) hue-rotate(40deg)',
     );
 
     setSettings(DEFAULT_SETTINGS);

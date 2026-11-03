@@ -328,7 +328,8 @@ describe('HeaderBar', () => {
     const swatch = panel.querySelector(
       '[data-testid="texture-swatch-midnight-navy"]',
     ) as HTMLElement;
-    expect(swatch.getAttribute('style')).toContain('brightness(1) contrast(1) hue-rotate(0deg)');
+    // Dark mode is calibrated: the 100% default paints at 1.10.
+    expect(swatch.getAttribute('style')).toContain('brightness(1.1) contrast(1) hue-rotate(0deg)');
 
     fireEvent.input(within(panel).getByLabelText('Brightness'), { target: { value: '1.2' } });
     fireEvent.input(within(panel).getByLabelText('Contrast'), { target: { value: '0.8' } });
@@ -336,12 +337,12 @@ describe('HeaderBar', () => {
 
     expect(getSettings().tableFilters).toEqual({ brightness: 1.2, contrast: 0.8, hue: 25 });
     expect(document.documentElement.style.getPropertyValue('--table-filter')).toBe(
-      'brightness(1.2) contrast(0.8) hue-rotate(25deg)',
+      'brightness(1.32) contrast(0.8) hue-rotate(25deg)',
     );
     expect(document.documentElement.style.getPropertyValue('--table-texture-bg')).toBe('#16203a');
     // The preview swatches follow the sliders in real time.
     expect(swatch.getAttribute('style')).toContain(
-      'brightness(1.2) contrast(0.8) hue-rotate(25deg)',
+      'brightness(1.32) contrast(0.8) hue-rotate(25deg)',
     );
   });
 
