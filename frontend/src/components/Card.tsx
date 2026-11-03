@@ -84,9 +84,10 @@ export const CARD_BORDER_RADIUS = 'var(--app-roundness, 8px)';
  *
  * The corner suit pip grew from `10` to `12` viewBox units (clearly readable at
  * standard table zoom) and keeps `y = 34` (top) / `y = 82` (bottom), so the rank
- * band still ends at `y = 21` and the pip rows below start at `y = 34`. The pip
- * columns (`PIP_COLUMNS`) start far enough to the right of that `x = 11.5` axis
- * that the wider two-digit `"10"` and the enlarged suit glyph never touch a pip.
+ * band still ends at `y = 21`. T-90-1 ITEM-3a then re-centred the face grid, so
+ * the leftmost pip column (`x = 22.5`) begins just clear of that `x = 11.5` axis
+ * and its 12pt suit glyph: the wider two-digit `"10"` rank text and the enlarged
+ * corner suit never touch a face pip.
  */
 export const CARD_INDEX = {
   topRank: { x: 11.5, y: 21, fontSize: 15 },
@@ -104,25 +105,40 @@ export const CARD_INDEX = {
 export const PIP_FONT_SIZE = 13;
 
 /**
- * Horizontal centre lines of the numbered-card pip grid. The columns sit
- * slightly inward of the old `22`/`35`/`48` grid — `23.5`, `36`, `48.5` — so the
- * larger 13pt glyphs still fit between the corner index band on the left and the
- * trump badge on the right without touching each other.
+ * Horizontal centre lines of the numbered-card pip grid (T-90-1 ITEM-3a).
+ *
+ * The grid is strictly centred on the `70x100` card canvas: `left = 22.5`,
+ * `center = 35` (the exact horizontal centre axis) and `right = 47.5`, so
+ * `left + right = 70` and the left and right margins are identical (`22.5` from
+ * either edge). The spacing `12.5` still clears a full 13-unit suit glyph
+ * (whose ink is about `10.4` units wide), and the right column ends at `47.5`,
+ * well clear of the trump badge (`cx = 61`, `r = 6`).
  */
-export const PIP_COLUMNS = { left: 23.5, center: 36, right: 48.5 } as const;
+export const PIP_COLUMNS = { left: 22.5, center: 35, right: 47.5 } as const;
 
 /**
- * Vertical centre lines of the numbered-card pip grid: rows from `y = 34` (just
- * below the corner rank band and level with the corner suit glyph) down to
- * `y = 70`, which clears the bottom-right corner index that starts at `y = 82`.
+ * Vertical centre lines of the numbered-card pip grid (T-90-1 ITEM-3a): the
+ * outer rows sit at `y = 32` and `y = 68` (`top + bottom = 100`, so the top and
+ * bottom margins are both `32`), the centre row lands on the exact vertical
+ * centre axis `y = 50`, and the inner rows mirror it at `50 - 6 = 44` and
+ * `50 + 6 = 56`. The 12-unit row pitch keeps every 13-unit glyph disjoint, the
+ * first row clears the corner rank band above `y = 21`, and the last row clears
+ * the bottom-right corner index that starts at `y = 82`.
  */
-export const PIP_ROWS = { top: 34, middle: 52, bottom: 70 } as const;
+export const PIP_ROWS = {
+  top: 32,
+  upperMid: 44,
+  middle: 50,
+  lowerMid: 56,
+  bottom: 68,
+} as const;
 
 /**
- * The rectangle every numbered-card face pip is laid out inside. The ticket's
- * geometry tests assert each pip centre sits on (or within) these bounds, and
- * that the bounds stay tighter than the previous `y = 33`–`78` grid even though
- * the glyphs are now larger.
+ * The rectangle every numbered-card face pip is laid out inside. It is centred
+ * on the card: `minX + maxX = 70` and `minY + maxY = 100`, so the left/right and
+ * top/bottom margins are equal on both sides. The geometry tests assert every
+ * pip centre sits on (or within) these bounds, and that the bounds stay tighter
+ * than the previous `y = 33`–`78` grid even though the glyphs are larger.
  */
 export const PIP_LAYOUT_BOUNDS = {
   minX: PIP_COLUMNS.left,
@@ -132,28 +148,30 @@ export const PIP_LAYOUT_BOUNDS = {
 } as const;
 
 /**
- * Centrepiece of an ace. Nudged two units right of the exact card centre so the
- * 40pt ornate pip clears the enlarged 12pt corner suit glyph in the top-left
- * corner.
+ * Centrepiece of an ace (T-90-1 ITEM-3b): pinned to the exact card centre
+ * `(35, 50)` with `text-anchor="middle"` and `dominant-baseline="central"`, so
+ * its horizontal margins (`35` left / `35` right) and vertical margins (`50`
+ * top / `50` bottom) are equal on both sides. The 40-unit glyph keeps its carve
+ * out of the 12pt corner suit indices on every side.
  */
-export const ACE_PIP = { x: 37, y: 58, fontSize: 40 } as const;
+export const ACE_PIP = { x: 35, y: 50, fontSize: 40 } as const;
 
 /** Golden corner badge on a trump card. */
 export const TRUMP_BADGE = { cx: 61, cy: 10, r: 6 } as const;
 
 /**
- * Standard pip arrangements inside the 70x100 viewBox (T-90 ITEM-3b): the three
- * columns from `PIP_COLUMNS` (`23.5` / `36` / `48.5`) and rows from `y = 34` to
- * `y = 70`. Every glyph is 13pt (12.35 units wide, 11.05 tall), so adjacent
- * columns and rows stay strictly disjoint: the side columns span
- * `17.325`–`29.675` and `42.325`–`54.675` while the centre column spans
- * `29.825`–`42.175`, and the rows are 12 units apart — more than one glyph
- * height. The first row starts below the corner rank band, and the last row
- * ends above the bottom-right corner index, so the enlarged `"10"` rank text
- * and the enlarged corner suit glyph are never touched.
+ * Standard pip arrangements inside the 70x100 viewBox (T-90-1 ITEM-3a): the
+ * centred columns from `PIP_COLUMNS` (`22.5` / `35` / `47.5`) and the centred
+ * rows from `PIP_ROWS` (`32` / `44` / `50` / `56` / `68`). Every glyph is 13pt
+ * (about `10.4` units of ink wide and `10.1` tall), so adjacent columns and rows
+ * stay strictly disjoint: the side columns span `17.3`–`27.7` and `42.3`–`52.7`
+ * while the centre column spans `29.8`–`40.2`, and the 12-unit row pitch leaves
+ * roughly two units between glyphs. The first row clears the corner rank band,
+ * the last row clears the bottom-right corner index, and the outer rows/columns
+ * mirror across `(35, 50)`, so every rank's pip bounding box has equal margins.
  */
 const { left: LEFT, center: CENTER, right: RIGHT } = PIP_COLUMNS;
-const { top: TOP, middle: MIDDLE, bottom: BOTTOM } = PIP_ROWS;
+const { top: TOP, upperMid: UPPER, middle: MIDDLE, lowerMid: LOWER, bottom: BOTTOM } = PIP_ROWS;
 
 const PIP_LAYOUTS: Record<string, ReadonlyArray<{ x: number; y: number }>> = {
   two: [
@@ -193,7 +211,7 @@ const PIP_LAYOUTS: Record<string, ReadonlyArray<{ x: number; y: number }>> = {
     { x: RIGHT, y: MIDDLE },
     { x: LEFT, y: BOTTOM },
     { x: RIGHT, y: BOTTOM },
-    { x: CENTER, y: 43 },
+    { x: CENTER, y: UPPER },
   ],
   eight: [
     { x: LEFT, y: TOP },
@@ -202,16 +220,16 @@ const PIP_LAYOUTS: Record<string, ReadonlyArray<{ x: number; y: number }>> = {
     { x: RIGHT, y: MIDDLE },
     { x: LEFT, y: BOTTOM },
     { x: RIGHT, y: BOTTOM },
-    { x: CENTER, y: 40 },
-    { x: CENTER, y: 64 },
+    { x: CENTER, y: UPPER },
+    { x: CENTER, y: LOWER },
   ],
   nine: [
     { x: LEFT, y: TOP },
     { x: RIGHT, y: TOP },
-    { x: LEFT, y: 46 },
-    { x: RIGHT, y: 46 },
-    { x: LEFT, y: 58 },
-    { x: RIGHT, y: 58 },
+    { x: LEFT, y: UPPER },
+    { x: RIGHT, y: UPPER },
+    { x: LEFT, y: LOWER },
+    { x: RIGHT, y: LOWER },
     { x: LEFT, y: BOTTOM },
     { x: RIGHT, y: BOTTOM },
     { x: CENTER, y: MIDDLE },
@@ -219,14 +237,14 @@ const PIP_LAYOUTS: Record<string, ReadonlyArray<{ x: number; y: number }>> = {
   ten: [
     { x: LEFT, y: TOP },
     { x: RIGHT, y: TOP },
-    { x: LEFT, y: 46 },
-    { x: RIGHT, y: 46 },
-    { x: LEFT, y: 58 },
-    { x: RIGHT, y: 58 },
+    { x: LEFT, y: UPPER },
+    { x: RIGHT, y: UPPER },
+    { x: LEFT, y: LOWER },
+    { x: RIGHT, y: LOWER },
     { x: LEFT, y: BOTTOM },
     { x: RIGHT, y: BOTTOM },
-    { x: CENTER, y: 40 },
-    { x: CENTER, y: 64 },
+    { x: CENTER, y: UPPER },
+    { x: CENTER, y: LOWER },
   ],
 };
 
@@ -514,6 +532,7 @@ export function Card({
             y={ACE_PIP.y}
             font-size={ACE_PIP.fontSize}
             text-anchor="middle"
+            dominant-baseline="central"
             fill={color}
           >
             {symbol}
