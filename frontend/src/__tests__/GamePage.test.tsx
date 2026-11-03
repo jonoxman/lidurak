@@ -432,7 +432,7 @@ describe('GamePage', () => {
     ).toBe(false);
   });
 
-  it('pulses the defender hand and never the table banners while defending', async () => {
+  it('pulses the uncovered attacks and never the hand while defending', async () => {
     const defenseView: PlayerGameView = {
       ...view,
       myHand: [{ suit: 'hearts', rank: 'ace' }],
@@ -456,6 +456,120 @@ describe('GamePage', () => {
     expect(container.querySelector('.table-pair.turn-pulse .card-slot')).not.toBeNull();
     expect(container.querySelector('[data-zone="player-hand"]')!.textContent).not.toMatch(
       /Your turn|Waiting for/i,
+    );
+    // T-90 ITEM-PREV-4: a defender gets no highlight around the hand container.
+    expect(
+      container.querySelector('[data-zone="player-hand"]')!.getAttribute('data-highlighted'),
+    ).toBe('false');
+  });
+
+  it('T-90 ITEM-PREV-4: draws no hand highlight for the surrendering defender Bob', async () => {
+    const bobDefense: PlayerGameView = {
+      ...view,
+      myId: 'p1',
+      myName: 'Bob',
+      myHand: [
+        { suit: 'hearts', rank: 'six' },
+        { suit: 'diamonds', rank: 'nine' },
+      ],
+      opponents: [
+        { id: 'p0', name: 'Alice', cardCount: 6, hasPassed: false, finishRank: null },
+        { id: 'p2', name: 'Carol', cardCount: 4, hasPassed: false, finishRank: null },
+      ],
+      tablePairs: [
+        { attack: { suit: 'clubs', rank: 'six' }, defense: { suit: 'clubs', rank: 'nine' } },
+        { attack: { suit: 'spades', rank: 'seven' }, defense: null },
+      ],
+      trumpSuit: 'clubs',
+      attackerIdx: 0,
+      defenderIdx: 1,
+      boutPhase: 'Defense',
+      legalActions: ['surrender'],
+      defenderDefenseless: true,
+    };
+    getGameView.mockResolvedValue(bobDefense);
+
+    const first = render(
+      <GamePage gameId="game-1" playerId="p1" onSwitchPlayer={() => {}} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('surrender-button')).toBeTruthy());
+    const zone = first.container.querySelector('[data-zone="player-hand"]') as HTMLElement;
+    const handBox = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+    for (const node of [zone, handBox]) {
+      expect(node.getAttribute('data-highlighted')).toBe('false');
+      expect(node.classList.contains('turn-pulse')).toBe(false);
+      expect(node.classList.contains('attacker-turn')).toBe(false);
+      expect(node.classList.contains('throw-in-turn')).toBe(false);
+      expect(node.classList.contains('defender-turn')).toBe(false);
+    }
+    expect(zone.getAttribute('data-defenseless')).toBe('true');
+    expect(first.container.querySelectorAll('.table-pair.turn-pulse')).toHaveLength(0);
+    first.unmount();
+
+    // Bob has surrendered: his own seat is the defender of the throw-in round.
+    getGameView.mockResolvedValue({
+      ...bobDefense,
+      boutPhase: 'SurrenderThrowIn',
+      legalActions: [],
+      defenderDefenseless: false,
+    });
+    const second = render(
+      <GamePage gameId="game-1" playerId="p1" onSwitchPlayer={() => {}} />,
+    );
+
+    await waitFor(() =>
+      expect(
+        second.container.querySelector('[data-zone="player-hand"]'),
+      ).not.toBeNull(),
+    );
+    const surrenderedZone = second.container.querySelector(
+      '[data-zone="player-hand"]',
+    ) as HTMLElement;
+    expect(surrenderedZone.getAttribute('data-surrendering')).toBe('true');
+    expect(surrenderedZone.getAttribute('data-highlighted')).toBe('false');
+    expect(
+      screen.getByTestId('hand-turn-highlight').getAttribute('data-highlighted'),
+    ).toBe('false');
+    expect(second.container.querySelectorAll('.table-pair.turn-pulse')).toHaveLength(0);
+    second.unmount();
+  });
+
+  it('T-90 ITEM-PREV-4: still highlights Alice when she may throw in after the surrender', async () => {
+    getGameView.mockResolvedValue({
+      ...view,
+      myId: 'p0',
+      myName: 'Alice',
+      myHand: [{ suit: 'hearts', rank: 'seven' }],
+      opponents: [
+        { id: 'p1', name: 'Bob', cardCount: 7, hasPassed: false, finishRank: null },
+        { id: 'p2', name: 'Carol', cardCount: 4, hasPassed: true, finishRank: null },
+      ],
+      tablePairs: [
+        { attack: { suit: 'clubs', rank: 'six' }, defense: { suit: 'clubs', rank: 'nine' } },
+        { attack: { suit: 'spades', rank: 'seven' }, defense: null },
+      ],
+      trumpSuit: 'clubs',
+      attackerIdx: 0,
+      defenderIdx: 1,
+      boutPhase: 'SurrenderThrowIn',
+      legalActions: ['throwIn', 'pass'],
+      defenderDefenseless: false,
+    });
+
+    const { container } = render(
+      <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.getByTestId('hand-turn-highlight').getAttribute('data-highlighted'),
+      ).toBe('true'),
+    );
+    const zone = container.querySelector('[data-zone="player-hand"]') as HTMLElement;
+    expect(zone.getAttribute('data-surrendering')).toBe('false');
+    expect(screen.getByTestId('hand-turn-highlight').classList.contains('throw-in-turn')).toBe(
+      true,
     );
   });
 

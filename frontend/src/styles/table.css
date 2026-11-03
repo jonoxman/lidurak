@@ -899,10 +899,10 @@
   animation: attackerPulse 2.4s infinite ease-in-out;
 }
 
-.hand-cards.defender-turn {
-  animation: defenderPulse 2.4s infinite ease-in-out;
-}
-
+/* T-90 ITEM-PREV-4: the defender never gets a hand highlight. A defender who
+   can still cover or redirect is prompted by the uncovered cards in play and by
+   their legal cards lifting, so no red box/border/shadow is ever drawn around
+   the hand — including while the 3-second auto-surrender countdown runs. */
 /* Item 3b: a thrower who may add cards to the bout glows exactly like the
    opening attacker, so the seat that owes a throw-in is never missed. */
 .hand-cards.throw-in-turn {
@@ -1058,8 +1058,6 @@
   --attacker-glow: rgba(217, 163, 38, 0.8);
   --attacker-glow-soft: rgba(217, 163, 38, 0.35);
   --defender-accent: #c33;
-  --defender-glow: rgba(204, 51, 51, 0.8);
-  --defender-glow-soft: rgba(204, 51, 51, 0.35);
 }
 
 /* Item 17: gentle 2.4s rhythmic glow. */
@@ -1092,17 +1090,6 @@
   }
   50% {
     box-shadow: 0 0 12px 3px var(--attacker-glow);
-  }
-}
-
-/* The defender's hand glows crimson, matching their seat highlight. */
-@keyframes defenderPulse {
-  0%,
-  100% {
-    box-shadow: 0 0 2px var(--defender-glow-soft);
-  }
-  50% {
-    box-shadow: 0 0 12px 3px var(--defender-glow);
   }
 }
 
