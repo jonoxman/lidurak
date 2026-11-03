@@ -441,3 +441,138 @@ class GameActorSuite extends munit.FunSuite:
             assert(played.suit != gs.trumpSuit, s"BasicBot opened with a trump: $played")
           case other => fail(s"expected a single opening attack, got $other")
   }
+
+  // --- Bot timing (feedback item 2: the random bot plays instantly) ---
+
+  test("a RandomBot seat plays instantly and ignores the configured bot delay") {
+    val seed = (0L until 400L)
+      .find { candidate =>
+        GameEngine
+          .createGame(GameConfig(playerCount = 2, seed = candidate), Vector("Bot", "Alice"))
+          .attackerIdx == 0
+      }
+      .getOrElse(fail("no seed seats p0 as the first attacker"))
+    val startedAt = System.currentTimeMillis()
+
+    val room = GameActor
+      .create(
+        GameConfig(playerCount = 2, seed = seed, playerTypes = Vector("randomBot", "human")),
+        Vector("Bot", "Alice"),
+        turnSeconds = 15,
+        // Far longer than the test waits: a random bot must never use this window.
+        botDelayMin = 30.seconds,
+        botDelayMax = 60.seconds
+      )
+      .unsafeRunSync()
+    assertEquals(room.stateRef.get.unsafeRunSync().turnPlayerId, Some("p0"))
+
+    val after = awaitState(room, 5000.millis)(_.tablePairs.nonEmpty)
+    val elapsedMs = System.currentTimeMillis() - startedAt
+    GameActor.stopClock(room).unsafeRunSync()
+
+    assertEquals(after.boutPhase, BoutPhase.Defense)
+    assert(elapsedMs < 1000L, s"the random bot used the basic bot delay: ${elapsedMs}ms")
+  }
+
+  test("bot timing: a randomBot has no delay while a basicBot keeps the configured window") {
+    // An all-human room starts no bot fiber, so this only inspects the timing rule.
+    val room = newRoom()
+    val state = room.stateRef.get.unsafeRunSync().copy(
+      config = GameConfig(
+        playerCount = 2,
+        seed = 7L,
+        playerTypes = Vector(GameConfig.RandomBotSeat, GameConfig.BasicBotSeat)
+      )
+    )
+    GameActor.stopClock(room).unsafeRunSync()
+
+    assertEquals(GameActor.botSeatType(state, "p0"), GameConfig.RandomBotSeat)
+    assertEquals(GameActor.botDelayFor(room, state, "p0"), Option.empty[FiniteDuration])
+    assertEquals(GameActor.botSeatType(state, "p1"), GameConfig.BasicBotSeat)
+    GameActor.botDelayFor(room, state, "p1") match
+      case None => fail("a basic bot must keep a pause before it plays")
+      case Some(delay) =>
+        assert(delay >= GameActor.DefaultBotDelayMin, delay.toString)
+        assert(delay <= GameActor.DefaultBotDelayMax, delay.toString)
+  }
+
+  test("an all-RandomBot room reaches GameOver, publishes it and replays it") {
+    val room = GameActor
+      .create(
+        GameConfig(
+          playerCount = 2,
+          seed = 13L,
+          playerTypes = Vector(GameConfig.RandomBotSeat, GameConfig.RandomBotSeat)
+        ),
+        Vector("Bot A", "Bot B"),
+        turnSeconds = 15
+      )
+      .unsafeRunSync()
+
+    val finished = awaitState(room, 20.seconds)(_.isGameOver)
+    GameActor.stopClock(room).unsafeRunSync()
+
+    assertEquals(finished.boutPhase, BoutPhase.GameOver)
+    assert(finished.gameEndedAtMs.isDefined, "a finished game must freeze its end time")
+    assertEquals(finished.turnDeadlineMs, 0L)
+    assertEquals(finished.promptedPlayerIds, Set.empty)
+
+    // Every seat's projection is total, idle and actionless on the final state.
+    finished.players.foreach { player =>
+      val view = PlayerGameView.forViewer(finished, player.id)
+      assertEquals(view.boutPhase, BoutPhase.GameOver)
+      assertEquals(view.legalActions, List.empty)
+      assertEquals(view.promptedPlayerIds, Vector.empty)
+      assertEquals(view.turnDeadlineMs, 0L)
+      assertEquals(view.gameEndedAtMs, finished.gameEndedAtMs)
+    }
+
+    // The replay ends with the same finished game, one frozen view per seat.
+    val replay = room.replay.get.unsafeRunSync()
+    assert(replay.frames.nonEmpty, "a finished game must be recorded")
+    assertEquals(replay.frames.last.state.boutPhase, BoutPhase.GameOver)
+    assertEquals(replay.frames.last.views.keySet, room.playerIds.toSet)
+    assertEquals(replay.frames.last.views("p0").boutPhase, BoutPhase.GameOver)
+    assert(replay.moves.nonEmpty, "a finished game must record its moves")
+    assertEquals(replay.moves.last.stateAfter.boutPhase, BoutPhase.GameOver)
+  }
+
+  test("the move that ends the game is broadcast as GameOver with its end time") {
+    val room = newRoom()
+    val start = room.stateRef.get.unsafeRunSync()
+    val attack = Card(Suit.Spades, Rank.Six)
+    val cover = Card(Suit.Spades, Rank.Seven)
+    val finalBout = start.copy(
+      // Both hands are empty: this covered bout is the last of the match.
+      players = start.players.map(_.copy(hand = Vector.empty)),
+      talon = Vector.empty,
+      bottomTrumpCard = None,
+      tablePairs = Vector(TablePair(attack, Some(cover))),
+      attackerIdx = 0,
+      defenderIdx = 1,
+      boutPhase = BoutPhase.Defense,
+      defenderInitialHandSize = 1
+    )
+    room.stateRef.set(finalBout).unsafeRunSync()
+
+    val broadcast = room.topic
+      .subscribe(16)
+      .take(1)
+      .concurrently(
+        Stream.eval(
+          IO.sleep(100.millis) *> GameActor.applyAction(room, GameAction.PassTurn("p0")).void
+        )
+      )
+      .compile
+      .last
+      .unsafeRunSync()
+    GameActor.stopClock(room).unsafeRunSync()
+
+    assertEquals(broadcast.map(_.boutPhase), Some(BoutPhase.GameOver))
+    assert(broadcast.flatMap(_.gameEndedAtMs).isDefined, "the broadcast must carry the end time")
+    assertEquals(broadcast.map(_.turnDeadlineMs), Some(0L))
+
+    val replay = room.replay.get.unsafeRunSync()
+    assertEquals(replay.frames.last.state.boutPhase, BoutPhase.GameOver)
+    assertEquals(replay.frames.last.views("p1").boutPhase, BoutPhase.GameOver)
+  }

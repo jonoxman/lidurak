@@ -11,6 +11,8 @@ import org.http4s.circe.CirceEntityDecoder.*
 import org.http4s.circe.CirceEntityEncoder.*
 import org.http4s.headers.`Content-Type`
 
+import scala.concurrent.duration.*
+
 class GameRoutesSuite extends munit.FunSuite:
 
   private def newManager: GameManager = GameManager.create.unsafeRunSync()
@@ -359,4 +361,94 @@ class GameRoutesSuite extends munit.FunSuite:
   test("the replay endpoint returns 404 for an unknown game") {
     val (status, _) = get(newManager, "/api/games/missing/replay")
     assertEquals(status, Status.NotFound)
+  }
+
+  // --- Finished games & bare view URL (feedback items 9 / 12) ---
+
+  test("a view request with no player falls back to p0") {
+    val manager = newManager
+    val gameId = createGame(manager, 2)
+
+    val (missingStatus, missingJson) = get(manager, s"/api/games/$gameId/view")
+    assertEquals(missingStatus, Status.Ok)
+    assertEquals(missingJson.as[PlayerGameView].map(_.myId), Right("p0"))
+
+    val (blankStatus, blankJson) = get(manager, s"/api/games/$gameId/view?player=")
+    assertEquals(blankStatus, Status.Ok)
+    assertEquals(blankJson.as[PlayerGameView].map(_.myId), Right("p0"))
+  }
+
+  test("a RandomBot vs RandomBot game finishes and serves its view and replay without error") {
+    val manager = newManager
+    val startedAt = System.currentTimeMillis()
+    val (status, json) = post(
+      manager,
+      "/api/games",
+      Json.obj(
+        "playerCount" -> 2.asJson,
+        "playerNames" -> List("Bot A", "Bot B").asJson,
+        "playerTypes" -> List("randomBot", "randomBot").asJson
+      )
+    )
+    assertEquals(status, Status.Ok)
+    val gameId = json.hcursor
+      .get[String]("gameId")
+      .getOrElse(fail(s"missing gameId in ${json.noSpaces}"))
+    val room = manager.getRoom(gameId).unsafeRunSync().getOrElse(fail(s"room $gameId is missing"))
+
+    val deadline = System.currentTimeMillis() + 20_000L
+    var state = room.stateRef.get.unsafeRunSync()
+    while !state.isGameOver && System.currentTimeMillis() < deadline do
+      IO.sleep(25.millis).unsafeRunSync()
+      state = room.stateRef.get.unsafeRunSync()
+    val elapsedMs = System.currentTimeMillis() - startedAt
+    GameActor.stopClock(room).unsafeRunSync()
+
+    assertEquals(
+      state.boutPhase,
+      BoutPhase.GameOver,
+      s"the all-RandomBot game did not finish (${state.boutPhase})"
+    )
+    assert(elapsedMs < 5000L, s"an all-RandomBot game must finish in seconds, took ${elapsedMs}ms")
+
+    // Every seat reads the finished table through both documented view URLs.
+    room.playerIds.foreach { playerId =>
+      val (queryStatus, queryJson) = get(manager, s"/api/games/$gameId/view?player=$playerId")
+      assertEquals(queryStatus, Status.Ok)
+      val queryView = queryJson
+        .as[PlayerGameView]
+        .getOrElse(fail(s"invalid view body for $playerId: ${queryJson.noSpaces}"))
+      assertEquals(queryView.myId, playerId)
+      assertEquals(queryView.boutPhase, BoutPhase.GameOver)
+      assertEquals(queryView.legalActions, List.empty)
+      assertEquals(queryView.promptedPlayerIds, Vector.empty)
+      assertEquals(queryView.turnDeadlineMs, 0L)
+      assert(queryView.gameEndedAtMs.isDefined, queryJson.noSpaces)
+
+      val (pathStatus, pathJson) = get(manager, s"/api/game/$gameId/view/$playerId")
+      assertEquals(pathStatus, Status.Ok)
+      assertEquals(pathJson.as[PlayerGameView].map(_.boutPhase), Right(BoutPhase.GameOver))
+    }
+
+    // The bare game URL (no player) resolves too, defaulting to p0.
+    val (defaultStatus, defaultJson) = get(manager, s"/api/games/$gameId/view")
+    assertEquals(defaultStatus, Status.Ok)
+    assertEquals(defaultJson.as[PlayerGameView].map(_.myId), Right("p0"))
+
+    val (replayStatus, replayJson) = get(manager, s"/api/games/$gameId/replay")
+    assertEquals(replayStatus, Status.Ok)
+    val replay = replayJson
+      .as[SerializedGame]
+      .getOrElse(fail(s"invalid replay body: ${replayJson.noSpaces}"))
+    assert(replay.frames.nonEmpty, "a finished game must serve its frames")
+    assertEquals(replay.frames.last.state.boutPhase, BoutPhase.GameOver)
+    assertEquals(replay.frames.last.views.keySet, room.playerIds.toSet)
+    assertEquals(replay.frames.last.views("p0").boutPhase, BoutPhase.GameOver)
+    assertEquals(replay.frames.last.views("p0").legalActions, List.empty)
+    assert(replay.moves.nonEmpty, "a finished game must record its moves")
+    assertEquals(replay.moves.last.stateAfter.boutPhase, BoutPhase.GameOver)
+
+    val (aliasStatus, aliasJson) = get(manager, s"/api/game/$gameId/replay")
+    assertEquals(aliasStatus, Status.Ok)
+    assertEquals(aliasJson.as[SerializedGame].map(_.gameId), Right(gameId))
   }

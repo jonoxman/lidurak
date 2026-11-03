@@ -431,3 +431,110 @@ class PlayerViewSuite extends munit.FunSuite:
     assertEquals(decoded.map(_.myName), Right(""))
     assertEquals(decoded.map(_.myId), Right("p0"))
   }
+
+  // --- Game over projection (feedback items 9 / 12) ---
+
+  test("every seat can be projected at game over with an idle clock and no actions") {
+    val finished = state(
+      Vector(
+        player("p0", List.empty, finishRank = Some(1)),
+        player("p1", List(card(Rank.Six)), finishRank = Some(2))
+      ),
+      boutPhase = BoutPhase.GameOver,
+      finishOrder = Vector("p0", "p1")
+    ).copy(turnDeadlineMs = 9_000L, gameStartedAtMs = Some(1_000L), gameEndedAtMs = Some(2_500L))
+
+    List("p0", "p1").foreach { viewer =>
+      val view = PlayerGameView.forViewer(finished, viewer, nowMs = 4_000L)
+
+      assertEquals(view.boutPhase, BoutPhase.GameOver)
+      assertEquals(view.legalActions, List.empty)
+      assertEquals(view.promptedPlayerIds, Vector.empty)
+      assertEquals(view.turnPlayerId, None)
+      assertEquals(view.turnDeadlineMs, 0L)
+      assertEquals(view.turnSecondsRemaining, 0)
+      assertEquals(view.gameEndedAtMs, Some(2_500L))
+      assertEquals(view.winners, List("p0"))
+      assertEquals(view.durak, Some("p1"))
+    }
+  }
+
+  test("a draw with every hand empty still projects every seat without throwing") {
+    val drawn = state(
+      Vector(
+        player("p0", List.empty, finishRank = Some(1)),
+        player("p1", List.empty, finishRank = Some(1))
+      ),
+      boutPhase = BoutPhase.GameOver,
+      finishOrder = Vector("p0", "p1"),
+      isDraw = true
+    )
+
+    List("p0", "p1").foreach { viewer =>
+      val view = PlayerGameView.forViewer(drawn, viewer)
+
+      assertEquals(view.boutPhase, BoutPhase.GameOver)
+      assertEquals(view.isDraw, true)
+      assertEquals(view.winners, List("p0", "p1"))
+      assertEquals(view.durak, None)
+      assertEquals(view.legalActions, List.empty)
+      assertEquals(view.promptedPlayerIds, Vector.empty)
+      assertEquals(view.turnDeadlineMs, 0L)
+    }
+  }
+
+  // --- Throw-in projection (feedback item 3b) ---
+
+  test("every matching thrower sees throwIn right after the opening attack") {
+    val attack = card(Rank.Six)
+    val gs = state(
+      Vector(
+        player("p0", List(card(Rank.Nine, Suit.Clubs), card(Rank.Queen, Suit.Hearts))),
+        player("p1", List(card(Rank.Nine), card(Rank.Eight, Suit.Diamonds))),
+        player("p2", List(card(Rank.Six, Suit.Hearts), card(Rank.Ten, Suit.Diamonds))),
+        player("p3", List(card(Rank.Six, Suit.Diamonds), card(Rank.Ace)))
+      ),
+      tablePairs = Vector(TablePair(attack)),
+      boutPhase = BoutPhase.Defense,
+      defenderInitialHandSize = 4
+    ).copy(turnDeadlineMs = 10_000L)
+
+    // Both matching throwers may add a card, and the engine agrees with the view.
+    assertEquals(PlayerGameView.forViewer(gs, "p2").legalActions, List("throwIn"))
+    assertEquals(PlayerGameView.forViewer(gs, "p3").legalActions, List("throwIn"))
+    assertEquals(
+      GameEngine.legalActions(gs, "p2"),
+      List(GameAction.ThrowInCards("p2", List(card(Rank.Six, Suit.Hearts))))
+    )
+    // A seat without a matching rank keeps the clock but has nothing to add.
+    assertEquals(PlayerGameView.forViewer(gs, "p0").legalActions, List.empty)
+    assertEquals(PlayerGameView.forViewer(gs, "p1").legalActions, List("cover", "surrender"))
+
+    // The defender keeps the turn clock while an attack is still uncovered.
+    assertEquals(gs.turnPlayerId, Some("p1"))
+    assertEquals(gs.promptedPlayerIds, Set("p1"))
+    assertEquals(PlayerGameView.forViewer(gs, "p2").turnPlayerId, Some("p1"))
+  }
+
+  test("during a surrender throw-in every eligible thrower is prompted") {
+    val gs = state(
+      Vector(
+        player("p0", List(card(Rank.Ace, Suit.Clubs), card(Rank.Six, Suit.Hearts))),
+        player("p1", List(card(Rank.Seven), card(Rank.Eight))),
+        player("p2", List(card(Rank.King, Suit.Diamonds), card(Rank.Queen, Suit.Diamonds))),
+        player("p3", List(card(Rank.Six, Suit.Diamonds)))
+      ),
+      tablePairs = Vector(TablePair(card(Rank.Six))),
+      boutPhase = BoutPhase.SurrenderThrowIn,
+      defenderInitialHandSize = 4
+    )
+
+    assertEquals(PlayerGameView.forViewer(gs, "p0").legalActions, List("pass", "throwIn"))
+    assertEquals(PlayerGameView.forViewer(gs, "p3").legalActions, List("pass", "throwIn"))
+    assertEquals(PlayerGameView.forViewer(gs, "p2").legalActions, List("pass"))
+    assertEquals(PlayerGameView.forViewer(gs, "p1").legalActions, List.empty)
+
+    // Every seat that can still act is on the clock together.
+    assertEquals(gs.promptedPlayerIds, Set("p0", "p2", "p3"))
+    assertEquals(PlayerGameView.forViewer(gs, "p2").promptedPlayerIds, Vector("p0", "p2", "p3"))
+  }
