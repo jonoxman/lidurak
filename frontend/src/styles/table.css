@@ -755,9 +755,13 @@
   border-radius: var(--app-roundness, 8px);
 }
 
-/* ITEM-NEW-1b: every glyph on a card front uses the serif face stack. */
+/* ITEM-NEW-3: every glyph on a card front uses the same classic serif stack
+   as `CARD_SERIF_FONT_FAMILY` in `Card.tsx`. A CSS declaration wins over the
+   SVG `font-family` presentation attribute, so this rule must keep the ornate
+   faces (Cinzel, Playfair Display) that the ticket asks for. */
 .playing-card text {
-  font-family: Georgia, 'Times New Roman', 'Nimbus Roman', serif;
+  font-family: 'Cinzel', 'Playfair Display', Georgia, 'Times New Roman',
+    'Palatino Linotype', 'Book Antiqua', serif;
 }
 
 /* ITEM-NEW-1a: the face-down card backs round with the slider as well. */

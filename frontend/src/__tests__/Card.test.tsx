@@ -16,6 +16,7 @@ import {
   svgCornerRadius,
 } from '../components/CardBack';
 import { resetSettings, setSettings } from '../state/settings';
+import tableCss from '../styles/table.css?raw';
 
 describe('Card', () => {
   it('renders a face-up card with its rank and suit text', () => {
@@ -524,6 +525,21 @@ describe('card sprite serif typography and Roundness (T-90-2)', () => {
       }
 
       unmount();
+    }
+  });
+
+  it('keeps the stylesheet serif rule in sync with the card font stack', () => {
+    // A CSS declaration beats the SVG `font-family` presentation attribute, so
+    // the shared `.playing-card text` rule is what actually renders the rank
+    // numbers and court letters: it must keep the ornate faces the ticket asks
+    // for instead of collapsing to a plain Georgia/Times stack.
+    const rule = /\.playing-card text \{([^}]*)\}/.exec(tableCss);
+    expect(rule).not.toBeNull();
+    const declaration = rule![1].replace(/\s+/g, ' ');
+
+    for (const face of ['Cinzel', 'Playfair Display', 'Georgia', 'Times New Roman', 'serif']) {
+      expect(CARD_SERIF_FONT_FAMILY, face).toContain(face);
+      expect(declaration, face).toContain(face);
     }
   });
 
