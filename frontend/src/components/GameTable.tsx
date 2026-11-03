@@ -67,15 +67,22 @@ export interface GameTableProps {
   /** True while the viewer is the defender facing uncovered attacks. */
   defending?: boolean;
   /**
-   * T-90 ITEM-PREV-4: the viewed seat is the defender of a bout they already
+   * T-90-2 ITEM-PREV-4: the viewed seat is the defender of a bout they already
    * surrendered (or the phase is a surrender throw-in), so no hand glow may
    * prompt them for a move they no longer have.
    */
   isSurrenderingDefender?: boolean;
   /**
-   * T-90 ITEM-PREV-4: the viewed seat is the defender and holds no legal cover
-   * or redirect, so the client is about to surrender for them. Their hand is
-   * never highlighted, including during the 3-second auto-surrender countdown.
+   * T-90-2 ITEM-PREV-4: the user already pressed `Surrender` (or the 3-second
+   * client countdown pressed it for them) but the new projection has not landed
+   * yet. The red defender glow drops immediately while the command is in flight.
+   */
+  surrenderTriggered?: boolean;
+  /**
+   * T-90-2 ITEM-PREV-4: the viewed seat is the defender and holds no legal cover
+   * or redirect. This is only informational (`data-defenseless`): the decision to
+   * surrender has not been made yet, so the red hand glow still shows while the
+   * `3 → 2 → 1` countdown runs.
    */
   defenderDefenseless?: boolean;
   /** Backend bout phase; a surrendered bout slides toward the defender's seat. */
@@ -975,6 +982,7 @@ export function GameTable({
   awaitingAttack = false,
   defending = false,
   isSurrenderingDefender = false,
+  surrenderTriggered = false,
   defenderDefenseless = false,
   boutPhase,
   canRedirect = false,
@@ -1104,17 +1112,39 @@ export function GameTable({
   // the bout has been played. It is never suppressed because cards are already
   // on the table or because some of them are covered.
   //
-  // T-90 ITEM-PREV-4: a surrendering or defenceless defender is never prompted
-  // to make a card move, so their hand carries no glow at all — no crimson box,
-  // no border and no shadow. A defender who can still cover or redirect is
-  // prompted by the uncovered cards on the felt (`.table-pair.turn-pulse`) and
-  // by their legal cards lifting, never by a highlight around the hand.
+  // T-90-2 ITEM-PREV-4: the defender's hand keeps its red glow for the whole
+  // `Defense` phase while uncovered attacks remain — including a defenceless
+  // defender whose only legal action is `surrender` during the `3 → 2 → 1`
+  // countdown, because the decision to surrender has not been executed yet.
+  // The glow drops the instant `Surrender` is pressed (or presses itself) and
+  // stays off for the surrendered hand while the bout moves into
+  // `SurrenderThrowIn`.
   const surrenderingHand =
-    isSurrenderingDefender || (defending && isSurrenderedPhase(boutPhase));
-  const handPromptSuppressed = surrenderingHand || defenderDefenseless;
+    isSurrenderingDefender ||
+    surrenderTriggered ||
+    (defending && isSurrenderedPhase(boutPhase));
+  const defenderTurn =
+    !reviewMode &&
+    !surrenderingHand &&
+    defending &&
+    !awaitingAttack &&
+    tablePairs.some((pair) => !pair.defense);
   const throwInTurn = !reviewMode && canThrowIn;
   const handGlow =
-    !reviewMode && !handPromptSuppressed && (awaitingAttack || canThrowIn);
+    !reviewMode && !surrenderingHand && (awaitingAttack || canThrowIn || defenderTurn);
+  // `defender` draws the crimson red glow, distinct from the amber attacker and
+  // throw-in glows; `none` after the surrender decision is made.
+  const handHighlightVariant: 'none' | 'defender' | 'attacker' | 'throw-in' = !handGlow
+    ? 'none'
+    : defenderTurn
+      ? 'defender'
+      : awaitingAttack
+        ? 'attacker'
+        : 'throw-in';
+  if (handGlow && defenderTurn) {
+    handClasses.push('turn-pulse', 'defender-turn');
+    handCardClasses.push('defender-turn');
+  }
   if (handGlow && awaitingAttack) {
     handClasses.push('turn-pulse');
     handCardClasses.push('attacker-turn');
@@ -1434,7 +1464,7 @@ export function GameTable({
                 defense={pair.defense}
                 trumpSuit={trumpSuit}
                 marginLeft={boutSlotMargin(index)}
-                pulse={defending && !handPromptSuppressed && !pair.defense}
+                pulse={defending && !surrenderingHand && !pair.defense}
                 snap={snapZone === zone}
                 dropZone={coverable ? zone : undefined}
                 onAttackClick={
@@ -1486,6 +1516,8 @@ export function GameTable({
         aria-label="Your hand"
         data-turn-action={handTurnAction}
         data-highlighted={handGlow ? 'true' : 'false'}
+        data-highlight-variant={handHighlightVariant}
+        data-highlight-role={handHighlightVariant}
         data-surrendering={surrenderingHand ? 'true' : 'false'}
         data-defenseless={defenderDefenseless ? 'true' : 'false'}
         ref={handZoneRef}
@@ -1504,6 +1536,8 @@ export function GameTable({
           data-testid="hand-turn-highlight"
           data-active={handGlow ? 'true' : 'false'}
           data-highlighted={handGlow ? 'true' : 'false'}
+          data-highlight-variant={handHighlightVariant}
+          data-highlight-role={handHighlightVariant}
           data-surrendering={surrenderingHand ? 'true' : 'false'}
           data-defenseless={defenderDefenseless ? 'true' : 'false'}
           data-turn-action={handTurnAction}

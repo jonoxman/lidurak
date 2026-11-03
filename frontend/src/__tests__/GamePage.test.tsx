@@ -432,7 +432,7 @@ describe('GamePage', () => {
     ).toBe(false);
   });
 
-  it('pulses the uncovered attacks and never the hand while defending', async () => {
+  it('pulses the uncovered attacks and the red defender hand while defending', async () => {
     const defenseView: PlayerGameView = {
       ...view,
       myHand: [{ suit: 'hearts', rank: 'ace' }],
@@ -457,13 +457,18 @@ describe('GamePage', () => {
     expect(container.querySelector('[data-zone="player-hand"]')!.textContent).not.toMatch(
       /Your turn|Waiting for/i,
     );
-    // T-90 ITEM-PREV-4: a defender gets no highlight around the hand container.
+    // T-90-2 ITEM-PREV-4: the defending seat still has to decide, so the hand
+    // carries the crimson defender glow (distinct from the amber attacker one).
+    const handZone = container.querySelector('[data-zone="player-hand"]')!;
+    expect(handZone.getAttribute('data-highlighted')).toBe('true');
+    expect(handZone.getAttribute('data-highlight-variant')).toBe('defender');
+    expect(handZone.getAttribute('data-surrendering')).toBe('false');
     expect(
-      container.querySelector('[data-zone="player-hand"]')!.getAttribute('data-highlighted'),
-    ).toBe('false');
+      screen.getByTestId('hand-turn-highlight').getAttribute('data-highlight-variant'),
+    ).toBe('defender');
   });
 
-  it('T-90 ITEM-PREV-4: draws no hand highlight for the surrendering defender Bob', async () => {
+  it('T-90-2 ITEM-PREV-4: keeps Bob’s red glow until he surrenders, then drops it', async () => {
     const bobDefense: PlayerGameView = {
       ...view,
       myId: 'p1',
@@ -497,13 +502,34 @@ describe('GamePage', () => {
     const zone = first.container.querySelector('[data-zone="player-hand"]') as HTMLElement;
     const handBox = screen.getByTestId('hand-turn-highlight') as HTMLElement;
     for (const node of [zone, handBox]) {
-      expect(node.getAttribute('data-highlighted')).toBe('false');
-      expect(node.classList.contains('turn-pulse')).toBe(false);
+      // The countdown is still running: no decision yet, so the red glow shows.
+      expect(node.getAttribute('data-highlighted')).toBe('true');
+      expect(node.getAttribute('data-highlight-variant')).toBe('defender');
+      expect(node.getAttribute('data-surrendering')).toBe('false');
+      expect(node.classList.contains('defender-turn')).toBe(true);
       expect(node.classList.contains('attacker-turn')).toBe(false);
       expect(node.classList.contains('throw-in-turn')).toBe(false);
+    }
+    // `turn-pulse` lives on the wrapper, the glow class on the tight card box.
+    expect(zone.classList.contains('turn-pulse')).toBe(true);
+    expect(zone.getAttribute('data-defenseless')).toBe('true');
+    expect(first.container.querySelectorAll('.table-pair.turn-pulse')).toHaveLength(1);
+
+    // Pressing Surrender removes the red glow immediately, before any new view.
+    sendAction.mockResolvedValue({
+      ...bobDefense,
+      boutPhase: 'SurrenderThrowIn',
+      legalActions: [],
+      defenderDefenseless: false,
+    });
+    fireEvent.click(screen.getByTestId('surrender-button'));
+    for (const node of [zone, handBox]) {
+      expect(node.getAttribute('data-highlighted')).toBe('false');
+      expect(node.getAttribute('data-highlight-variant')).toBe('none');
+      expect(node.getAttribute('data-surrendering')).toBe('true');
       expect(node.classList.contains('defender-turn')).toBe(false);
     }
-    expect(zone.getAttribute('data-defenseless')).toBe('true');
+    expect(zone.classList.contains('turn-pulse')).toBe(false);
     expect(first.container.querySelectorAll('.table-pair.turn-pulse')).toHaveLength(0);
     first.unmount();
 
@@ -528,9 +554,11 @@ describe('GamePage', () => {
     ) as HTMLElement;
     expect(surrenderedZone.getAttribute('data-surrendering')).toBe('true');
     expect(surrenderedZone.getAttribute('data-highlighted')).toBe('false');
-    expect(
-      screen.getByTestId('hand-turn-highlight').getAttribute('data-highlighted'),
-    ).toBe('false');
+    expect(surrenderedZone.getAttribute('data-highlight-variant')).toBe('none');
+    const surrenderedBox = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+    expect(surrenderedBox.getAttribute('data-highlighted')).toBe('false');
+    expect(surrenderedBox.getAttribute('data-highlight-variant')).toBe('none');
+    expect(surrenderedBox.classList.contains('defender-turn')).toBe(false);
     expect(second.container.querySelectorAll('.table-pair.turn-pulse')).toHaveLength(0);
     second.unmount();
   });
@@ -2340,6 +2368,10 @@ describe('GamePage client auto-surrender and auto-pass delays', () => {
     // The button is on screen, enabled and counting down from 3 immediately.
     expect(screen.getByTestId('surrender-button').hasAttribute('disabled')).toBe(false);
     expect(screen.getByTestId('surrender-countdown').textContent).toBe('3');
+    // T-90-2 ITEM-PREV-4: the red defender glow is still on during the grace.
+    expect(
+      screen.getByTestId('hand-turn-highlight').getAttribute('data-highlight-variant'),
+    ).toBe('defender');
 
     act(() => {
       vi.advanceTimersByTime(0);
@@ -2366,6 +2398,11 @@ describe('GamePage client auto-surrender and auto-pass delays', () => {
       type: 'declareSurrender',
       playerId: 'p0',
     });
+    // “Presses itself”: the glow is gone as soon as the countdown fires.
+    const autoBox = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+    expect(autoBox.getAttribute('data-highlighted')).toBe('false');
+    expect(autoBox.getAttribute('data-highlight-variant')).toBe('none');
+    expect(autoBox.getAttribute('data-surrendering')).toBe('true');
   });
 
   it('dispatches exactly one surrender when the defender clicks inside the grace window', async () => {
