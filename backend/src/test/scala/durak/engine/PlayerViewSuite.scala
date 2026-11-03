@@ -374,6 +374,80 @@ class PlayerViewSuite extends munit.FunSuite:
     assert(keys.contains("talonCount"), keys.toString)
   }
 
+  // --- Own status projection (ITEM-ADD-8a / ITEM-ADD-8b) ---
+
+  test("the viewer's own pass flag and finishing rank are projected") {
+    val gs = state(
+      Vector(
+        player("p0", List.empty, hasPassed = true, finishRank = Some(1)),
+        player("p1", List(card(Rank.Seven)), hasPassed = true)
+      ),
+      boutPhase = BoutPhase.SurrenderThrowIn,
+      finishOrder = Vector("p0")
+    )
+
+    val finishedView = PlayerGameView.forViewer(gs, "p0")
+
+    assertEquals(finishedView.myHasPassed, true)
+    assertEquals(finishedView.myFinishRank, Some(1))
+    assertEquals(finishedView.myHand, List.empty)
+
+    // A seat that still holds cards is passed but never finished.
+    val waiting = PlayerGameView.forViewer(gs, "p1")
+
+    assertEquals(waiting.myHasPassed, true)
+    assertEquals(waiting.myFinishRank, None)
+  }
+
+  test("a seat still holding cards is never projected with a finishing rank") {
+    val gs = state(
+      Vector(
+        player("p0", List(card(Rank.Six))),
+        player("p1", List(card(Rank.Seven)), finishRank = Some(2)),
+        player("p2", List.empty, finishRank = Some(1))
+      ),
+      boutPhase = BoutPhase.GameOver,
+      finishOrder = Vector("p2", "p1")
+    )
+
+    // Bob keeps three-card hands in the QA preset: he must never read as OUT.
+    val alice = PlayerGameView.forViewer(gs, "p0")
+
+    assertEquals(
+      alice.opponents.map(seat => seat.id -> seat.finishRank).toMap,
+      Map("p1" -> None, "p2" -> Some(1))
+    )
+    assertEquals(alice.myFinishRank, None)
+
+    val bob = PlayerGameView.forViewer(gs, "p1")
+
+    assertEquals(bob.myFinishRank, None)
+    assertEquals(bob.myHasPassed, false)
+    // The finished seat still resolves its rank from `finishOrder`.
+    assertEquals(PlayerGameView.forViewer(gs, "p2").myFinishRank, Some(1))
+  }
+
+  test("the own status fields round-trip through JSON and default when absent") {
+    val gs = state(
+      Vector(player("p0", List.empty, hasPassed = true), player("p1", List(card(Rank.Seven)))),
+      boutPhase = BoutPhase.SurrenderThrowIn,
+      finishOrder = Vector("p0")
+    )
+
+    val view = PlayerGameView.forViewer(gs, "p0")
+    val json = view.asJson
+
+    assert(json.noSpaces.contains("\"myHasPassed\":true"), json.noSpaces)
+    assert(json.noSpaces.contains("\"myFinishRank\":1"), json.noSpaces)
+    assertEquals(io.circe.parser.decode[PlayerGameView](json.noSpaces), Right(view))
+
+    val legacy = io.circe.Json.fromJsonObject(
+      json.asObject.map(_.remove("myHasPassed")).getOrElse(io.circe.JsonObject.empty)
+    )
+
+    assertEquals(io.circe.parser.decode[PlayerGameView](legacy.noSpaces).map(_.myHasPassed), Right(false))
+  }
+
   // --- Presence ---
 
   test("present seats are projected to the opponents and the present list") {

@@ -1033,8 +1033,15 @@ export function GamePage({
       id,
       name: nameFor(id),
       cardCount: mine ? displayedView.myHand.length : opponent?.cardCount ?? 0,
-      finishRank: opponent?.finishRank ?? null,
-      hasPassed: mine ? false : opponent?.hasPassed ?? false,
+      // ITEM-ADD-8a / ITEM-ADD-8b: the active user's own row is labelled from
+      // their own status fields, exactly like every opponent row, so WINNER,
+      // OUT and PASSED show up for the viewer too.
+      finishRank: mine
+        ? displayedView.myFinishRank ?? null
+        : opponent?.finishRank ?? null,
+      hasPassed: mine
+        ? displayedView.myHasPassed ?? false
+        : opponent?.hasPassed ?? false,
       mine,
     };
   });

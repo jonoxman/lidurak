@@ -117,26 +117,79 @@ class PresetSuite extends munit.FunSuite:
     assertEquals(view(manager, gameId, "p3").defenderIdx, 3)
   }
 
-  test("POST /api/games/preset starts the half-off surrender scenario on Alice") {
+  test("POST /api/games/preset starts the half-off surrender scenario on Bob's defense") {
     val manager = newManager
     val (gameId, json) = startPreset(manager, "surrender-half-off")
 
-    assertEquals(json.hcursor.get[String]("defaultPlayerId").toOption, Some("p0"))
+    // ITEM-ADD-4a: the scenario opens on the defender, not on the thrower.
+    assertEquals(json.hcursor.get[String]("defaultPlayerId").toOption, Some("p1"))
 
+    val bob = view(manager, gameId, "p1")
+    assertEquals(bob.myName, "Bob")
+    assertEquals(bob.boutPhase, BoutPhase.Defense)
+    assertEquals(bob.myHand.size, 6)
+    assertEquals(bob.myFinishRank, None)
+    // Two covered pairs plus the uncovered attack keep the cluster on the felt.
+    assertEquals(bob.tablePairs.size, 3)
+    assertEquals(bob.tablePairs.count(_.defense.isEmpty), 1)
+    assertEquals(
+      bob.tablePairs.map(_.attack),
+      Vector(
+        Card(Suit.Spades, Rank.Seven),
+        Card(Suit.Clubs, Rank.Ten),
+        Card(Suit.Spades, Rank.Queen)
+      )
+    )
+    assert(bob.tablePairs.size < bob.maxBoutAttacks, bob.maxBoutAttacks.toString)
+    // A legal cover exists, so Surrender is on screen and nothing auto-surrenders.
+    assert(bob.myHand.contains(Card(Suit.Spades, Rank.Nine)), bob.myHand.toString)
+    assert(bob.legalActions.contains("cover"), bob.legalActions.toString)
+    assert(bob.legalActions.contains("surrender"), bob.legalActions.toString)
+    assertEquals(bob.defenderDefenseless, false)
+
+    val room = manager.getRoom(gameId).unsafeRunSync().getOrElse(fail("room is missing"))
+    val state = room.stateRef.get.unsafeRunSync()
+    // 36-card conservation across hands + table + talon + discard pile.
+    val tableCards = state.tablePairs.flatMap(pair => pair.attack :: pair.defense.toList)
+    assertEquals(
+      state.players.map(_.hand.size).sum + tableCards.size + state.talon.size + state.discardPile.size,
+      36
+    )
+    assertEquals(state.talon.size, 6)
+    assertEquals(state.discardPile.size, 7)
+    // Alice, the attacker, still holds a rank that is on the table.
+    assert(GameEngine.canPlayerThrowIn(state, 0))
+    assert(
+      state.players(0).hand.exists(handCard => state.tableRanks.contains(handCard.rank)),
+      state.players(0).hand.toString
+    )
+
+    // ITEM-ADD-4a: the surrender lands in the throw-in phase and stays there.
+    val afterSurrender = GameEngine
+      .applyAction(state, "p1", GameAction.DeclareSurrender("p1"))
+      .getOrElse(fail("the surrender was rejected"))
+    assertEquals(afterSurrender.boutPhase, BoutPhase.SurrenderThrowIn)
+    assertEquals(afterSurrender.durak, None)
+    assertEquals(afterSurrender.tablePairs.size, 3)
+    assert(GameEngine.canPlayerThrowIn(afterSurrender, 0))
+
+    val (status, actionJson) = post(
+      manager,
+      s"/api/games/$gameId/action",
+      Json.obj("type" -> "declareSurrender".asJson, "playerId" -> "p1".asJson)
+    )
+    assertEquals(status, Status.Ok, actionJson.noSpaces)
+
+    // Alice is asked to throw in or pass; the surrendered defender cannot act.
     val alice = view(manager, gameId, "p0")
     assertEquals(alice.boutPhase, BoutPhase.SurrenderThrowIn)
-    assertEquals(alice.tablePairs.map(_.attack), Vector(Card(Suit.Spades, Rank.Seven)))
-    assert(alice.myHand.contains(Card(Suit.Hearts, Rank.Seven)), alice.myHand.toString)
     assert(alice.legalActions.contains("throwIn"), alice.legalActions.toString)
     assert(alice.legalActions.contains("pass"), alice.legalActions.toString)
     assert(alice.promptedPlayerIds.contains("p0"), alice.promptedPlayerIds.toString)
-
-    // Bob, the surrendering defender, has nothing to do.
-    val bob = view(manager, gameId, "p1")
-    assertEquals(bob.legalActions, List.empty)
+    assertEquals(view(manager, gameId, "p1").legalActions, List.empty)
   }
 
-  test("POST /api/games/preset starts the discard endgame and Bob ends up DURAK") {
+  test("POST /api/games/preset starts the discard endgame with Bob DURAK after one throw-in") {
     val manager = newManager
     val (gameId, json) = startPreset(manager, "discard-and-endgame")
 
@@ -144,46 +197,70 @@ class PresetSuite extends munit.FunSuite:
 
     val alice = view(manager, gameId, "p0")
     assertEquals(alice.talonCount, 0)
-    assertEquals(alice.discardCount, 8)
-    assertEquals(alice.lastDiscardCards.size, 4)
+    assertEquals(alice.boutPhase, BoutPhase.SurrenderThrowIn)
+    assertEquals(alice.myHand, List(Card(Suit.Hearts, Rank.Seven)))
+    assertEquals(alice.myFinishRank, None)
+    assertEquals(alice.myHasPassed, false)
     assertEquals(alice.winners, List("p2"))
-    assertEquals(alice.myHand.size, 1)
-    assert(alice.legalActions.contains("attack"), alice.legalActions.toString)
+    // ITEM-PREV-7c: a deep pile whose last four cards are revealed face-up.
+    assertEquals(alice.discardCount, 31)
+    assertEquals(alice.lastDiscardCards.size, 4)
+    assertEquals(alice.discardCount - alice.lastDiscardCards.size, 27)
+    assert(alice.legalActions.contains("throwIn"), alice.legalActions.toString)
 
+    // ITEM-ADD-8b: Carol is out with 0 cards, Bob holds 3 and is not a winner.
+    val carolSeat = alice.opponents.filter(_.id != "p1")
+    assertEquals(carolSeat.map(_.id), List("p2"))
+    assertEquals(carolSeat.head.cardCount, 0)
+    assertEquals(carolSeat.head.finishRank, Some(1))
+
+    val bob = view(manager, gameId, "p1")
+    assertEquals(bob.myHand.size, 3)
+    assertEquals(bob.myFinishRank, None)
+    assert(!bob.winners.contains("p1"), bob.winners.toString)
+    assertEquals(bob.opponents.find(_.id == "p2").map(_.finishRank), Some(Some(1)))
+
+    val room = manager.getRoom(gameId).unsafeRunSync().getOrElse(fail("room is missing"))
+    val state = room.stateRef.get.unsafeRunSync()
+    assertEquals(state.talon, Vector.empty)
+    assertEquals(state.tablePairs.size, 1)
+    assertEquals(state.tablePairs.head.defense, None)
+    assertEquals(
+      state.players.map(_.hand.size).sum + state.tablePairs.size + state.discardPile.size,
+      36
+    )
+
+    // One throw-in of Alice's last card settles the surrendered bout: she goes
+    // out and Bob is left holding cards.
     val lastCard = alice.myHand.head
-    val (attackStatus, _) = post(
+    val (status, actionJson) = post(
       manager,
       s"/api/games/$gameId/action",
       Json.obj(
-        "type" -> "initialAttack".asJson,
+        "type" -> "throwInCards".asJson,
         "playerId" -> "p0".asJson,
         "cards" -> Json.arr(lastCard.asJson)
       )
     )
-    assertEquals(attackStatus, Status.Ok)
-
-    // Bob cannot cover the last card, so surrendering ends the match.
-    val bobBefore = view(manager, gameId, "p1")
-    assertEquals(bobBefore.defenderDefenseless, true)
-    assertEquals(bobBefore.legalActions, List("surrender"))
-
-    val (surrenderStatus, surrenderJson) = post(
-      manager,
-      s"/api/games/$gameId/action",
-      Json.obj("type" -> "declareSurrender".asJson, "playerId" -> "p1".asJson)
-    )
-    assertEquals(surrenderStatus, Status.Ok, surrenderJson.noSpaces)
-    val finished = surrenderJson
+    assertEquals(status, Status.Ok, actionJson.noSpaces)
+    val finished = actionJson
       .as[PlayerGameView]
-      .getOrElse(fail(s"invalid view body: ${surrenderJson.noSpaces}"))
+      .getOrElse(fail(s"invalid view body: ${actionJson.noSpaces}"))
     assertEquals(finished.boutPhase, BoutPhase.GameOver)
+    assertEquals(finished.myHand, List.empty)
+    assertEquals(finished.myFinishRank, Some(2))
+    assertEquals(finished.myHasPassed, false)
     assertEquals(finished.durak, Some("p1"))
     assertEquals(finished.winners, List("p2", "p0"))
     assertEquals(finished.legalActions, List.empty)
+    // Bob holds cards, so no seat ever sees him as OUT.
+    assertEquals(finished.opponents.find(_.id == "p1").map(_.finishRank), Some(None))
+    assertEquals(finished.opponents.find(_.id == "p1").map(_.cardCount), Some(5))
 
-    // The last player out carries the DURAK label from every seat's view.
+    // The last player standing carries the DURAK label from every seat's view.
     assertEquals(view(manager, gameId, "p0").durak, Some("p1"))
     assertEquals(view(manager, gameId, "p2").durak, Some("p1"))
+    assertEquals(view(manager, gameId, "p2").myFinishRank, Some(1))
   }
 
   test("an unknown preset is rejected with 400 and an error message") {
