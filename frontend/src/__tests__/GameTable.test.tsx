@@ -4,6 +4,10 @@ import {
   GameTable,
   defenderDoubleClickAction,
   redirectOnlyAction,
+  DECK_CARD_HEIGHT,
+  DECK_CARD_WIDTH,
+  DISCARD_FALLBACK_WIDTH,
+  HAND_BOX_PADDING,
   HAND_CARD_WIDTH,
   HAND_MIN_OVERLAP,
   OPPONENT_MIN_OVERLAP,
@@ -14,6 +18,7 @@ import {
   handLayout,
   handMargins,
   opponentOverlap,
+  rowWidth,
   seatForOffset,
   sortHand,
   type OpponentSummary,
@@ -1336,5 +1341,363 @@ describe('fixed play area, tight hand highlight and surrender shift', () => {
     const group = screen.getByTestId('table-pairs-group');
     expect(group.getAttribute('data-surrendered')).toBe('false');
     expect(group.getAttribute('data-surrender-target')).toBeNull();
+  });
+});
+
+describe('feedback 7: tight glow, discard pile and reflection alignment', () => {
+  const cssRule = (selector: string): string => {
+    const start = tableCss.indexOf(`\n${selector} {`);
+    expect(start).toBeGreaterThan(-1);
+    const end = tableCss.indexOf('}', start);
+    return tableCss.slice(start, end);
+  };
+
+  const twentyDiscards: CardData[] = Array.from({ length: 20 }, () => ({
+    suit: 'spades',
+    rank: 'six',
+  }));
+
+  // --- ITEM-3a: the glowing box hugs the rendered cards ---
+
+  it('ITEM-3a: sizes the highlight from the outer hand wrapper with tight symmetric padding', () => {
+    renderSortableTable({ awaitingAttack: true });
+
+    const handZone = document.querySelector('[data-zone="player-hand"]') as HTMLElement;
+    const highlight = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+    expect(highlight.parentElement).toBe(handZone);
+
+    const rule = cssRule('.hand-cards');
+    expect(rule).toContain('display: inline-flex');
+    expect(rule).toContain('flex: 0 0 auto');
+    expect(rule).toContain('width: fit-content');
+    expect(rule).toContain('max-width: 100%');
+    expect(rule).toContain('align-items: center');
+    expect(rule).toContain('justify-content: center');
+    expect(rule).toContain(`padding: ${HAND_BOX_PADDING}px;`);
+    expect(rule).toContain('border-radius: calc(var(--card-radius, 8px) + 4px)');
+    expect(rule).toContain('box-sizing: border-box');
+
+    // Slots carry no wrapper spacing of their own; the only gap is the negative
+    // overlap margin written inline, so the box ends on the last card's edge.
+    const slotRule = cssRule('.hand-slot');
+    expect(slotRule).toContain('box-sizing: border-box');
+    expect(slotRule).toContain('margin: 0');
+    expect(slotRule).not.toMatch(/padding:\s*[1-9]/);
+    // A bordered trump card paints inside its box, so it can never poke out.
+    expect(cssRule('.card-slot')).toContain('box-sizing: border-box');
+
+    const slots = Array.from(highlight.children) as HTMLElement[];
+    expect(slots).toHaveLength(sortableHand.length);
+    for (const slot of slots) {
+      expect(slot.style.marginTop).toBe('');
+      expect(slot.style.marginBottom).toBe('');
+      expect(slot.style.marginRight).toBe('');
+      expect(slot.style.padding).toBe('');
+    }
+    expect(slots[0].style.marginLeft).toBe('0px');
+  });
+
+  // --- ITEM-3b: glowing for every player able to throw in ---
+
+  it('ITEM-3b: glows for a seat that can only throw in after the opening attack', () => {
+    const { container } = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={uncoveredPair}
+        trumpSuit="diamonds"
+        attackerId="p1"
+        defenderId="p2"
+        canThrowIn
+      />,
+    );
+
+    const highlight = screen.getByTestId('hand-turn-highlight');
+    expect(highlight.getAttribute('data-active')).toBe('true');
+    expect(highlight.classList.contains('throw-in-turn')).toBe(true);
+    expect(highlight.classList.contains('attacker-turn')).toBe(false);
+    expect(
+      container.querySelector('[data-zone="player-hand"]')!.getAttribute('data-turn-action'),
+    ).toBe('throw-in');
+    expect(
+      container.querySelector('[data-zone="player-hand"]')!.classList.contains('turn-pulse'),
+    ).toBe(true);
+  });
+
+  it('ITEM-3b: keeps glowing while every attack on the table is already covered', () => {
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={tablePairs}
+        trumpSuit="diamonds"
+        attackerId="p1"
+        defenderId="p2"
+        boutPhase="Defense"
+        canThrowIn
+      />,
+    );
+
+    // All attacks in `tablePairs` except one are covered, and the glow stays.
+    const highlight = screen.getByTestId('hand-turn-highlight');
+    expect(highlight.getAttribute('data-active')).toBe('true');
+    expect(highlight.getAttribute('data-turn-action')).toBe('throw-in');
+  });
+
+  it('ITEM-3b: closes the glow again once no throw-in is legal', () => {
+    renderSortableTable({ canThrowIn: false });
+
+    expect(screen.getByTestId('hand-turn-highlight').getAttribute('data-active')).toBe('false');
+    expect(
+      document.querySelector('[data-zone="player-hand"]')!.getAttribute('data-turn-action'),
+    ).toBe('none');
+  });
+
+  it('ITEM-3b: never glows for a thrower while the review is frozen', () => {
+    renderSortableTable({ canThrowIn: true, isReviewMode: true });
+
+    const highlight = screen.getByTestId('hand-turn-highlight');
+    expect(highlight.getAttribute('data-active')).toBe('false');
+    expect(highlight.classList.contains('throw-in-turn')).toBe(false);
+  });
+
+  // --- ITEM-7a: no discard counter ---
+
+  it('ITEM-7a: renders no counter badge for the discarded cards', () => {
+    const { container } = render(
+      <TableDeck
+        talonCount={10}
+        bottomTrumpCard={{ suit: 'hearts', rank: 'king' }}
+        trumpSuit="hearts"
+        discardCount={8}
+        lastDiscardCards={[{ suit: 'clubs', rank: 'seven' }]}
+      />,
+    );
+
+    expect(screen.queryByTestId('discard-count')).toBeNull();
+    const pile = screen.getByTestId('discard-pile');
+    expect(pile.querySelector('.deck-count-badge')).toBeNull();
+    expect(pile.querySelector('.discard-count')).toBeNull();
+    expect(tableCss).not.toContain('.discard-count');
+
+    // Only the talon keeps its count oval.
+    expect(container.querySelectorAll('.deck-count-badge')).toHaveLength(1);
+    expect(within(pile).getByText('Discard')).toBeTruthy();
+  });
+
+  // --- ITEM-7b: hand overlap geometry so the pile always fits ---
+
+  it('ITEM-7b: draws every discard in one non-wrapping overlapping row', () => {
+    render(
+      <TableDeck
+        talonCount={6}
+        bottomTrumpCard={{ suit: 'hearts', rank: 'king' }}
+        trumpSuit="hearts"
+        discardCount={9}
+        lastDiscardCards={[
+          { suit: 'clubs', rank: 'seven' },
+          { suit: 'diamonds', rank: 'ace' },
+        ]}
+      />,
+    );
+
+    const pile = screen.getByTestId('discard-pile');
+    const row = screen.getByTestId('discard-stack');
+    expect(pile.contains(row)).toBe(true);
+    expect(pile.getAttribute('aria-label')).toBe('Discard pile');
+
+    const slots = Array.from(row.querySelectorAll('.discard-slot')) as HTMLElement[];
+    expect(slots).toHaveLength(9);
+    expect(slots[0].style.marginLeft).toBe('0px');
+    for (const slot of slots.slice(1)) {
+      expect(parseFloat(slot.style.marginLeft)).toBeLessThan(0);
+      expect(slot.style.transform).toBe('');
+    }
+
+    // The row uses the hand geometry verbatim, card for card.
+    const layout = handLayout(9, DISCARD_FALLBACK_WIDTH, 0.5, DECK_CARD_WIDTH);
+    expect(Number(row.getAttribute('data-overlap'))).toBe(layout.overlap);
+    expect(Number(row.getAttribute('data-hidden-left'))).toBe(layout.hiddenLeft);
+    expect(Number(row.getAttribute('data-hidden-right'))).toBe(layout.hiddenRight);
+    expect(Number(row.getAttribute('data-available-width'))).toBe(DISCARD_FALLBACK_WIDTH);
+    expect(Number(row.getAttribute('data-card-width'))).toBe(DECK_CARD_WIDTH);
+
+    // The box holds 8 deck-sized cards; the ninth stacks behind at full
+    // overlap and is marked hidden, exactly like an overflowing hand.
+    expect(layout.hiddenLeft + layout.hiddenRight).toBe(1);
+    expect(row.querySelectorAll('.discard-slot[data-hidden="true"]')).toHaveLength(1);
+    expect(rowWidth(layout, DECK_CARD_WIDTH)).toBeLessThanOrEqual(DISCARD_FALLBACK_WIDTH);
+
+    const rule = cssRule('.discard-stack');
+    expect(rule).toContain('flex-wrap: nowrap');
+    expect(rule).toContain('overflow: hidden');
+    expect(rule).toContain('max-width: 100%');
+    expect(rule).toContain('min-width: 0');
+    expect(rule).toContain('box-sizing: border-box');
+    expect(cssRule('.table-discard')).toContain('overflow: hidden');
+
+    // Earlier bouts face-down, the last bout face-up, all in the same row.
+    expect(row.querySelectorAll('.discard-slot[data-face="down"]')).toHaveLength(7);
+    expect(row.querySelectorAll('.discard-slot[data-face="up"]')).toHaveLength(2);
+  });
+
+  it('ITEM-7b: never lets the discard row exceed the available pile width', () => {
+    for (const count of [1, 2, 6, 18, 36, 52]) {
+      for (const available of [160, DISCARD_FALLBACK_WIDTH, 720]) {
+        const layout = handLayout(count, available, 0.5, DECK_CARD_WIDTH);
+        expect(rowWidth(layout, DECK_CARD_WIDTH)).toBeLessThanOrEqual(
+          Math.max(available, DECK_CARD_WIDTH),
+        );
+      }
+    }
+  });
+
+  it('ITEM-7b: slides the discarded overflow stack with the cursor like a hand', () => {
+    render(
+      <TableDeck
+        talonCount={6}
+        bottomTrumpCard={null}
+        trumpSuit="spades"
+        discardCount={twentyDiscards.length}
+        lastDiscardCards={twentyDiscards}
+      />,
+    );
+
+    const row = screen.getByTestId('discard-stack');
+    const hiddenTotal =
+      Number(row.getAttribute('data-hidden-left')) + Number(row.getAttribute('data-hidden-right'));
+    expect(hiddenTotal).toBeGreaterThan(0);
+    expect(row.querySelectorAll('.discard-slot[data-hidden="true"]')).toHaveLength(hiddenTotal);
+
+    row.getBoundingClientRect = () =>
+      ({
+        left: 100,
+        right: 300,
+        width: 200,
+        top: 0,
+        bottom: DECK_CARD_HEIGHT,
+        height: DECK_CARD_HEIGHT,
+        x: 100,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+
+    fireEvent.mouseMove(row, { clientX: 100 });
+    expect(Number(row.getAttribute('data-hidden-left'))).toBe(0);
+    expect(Number(row.getAttribute('data-hidden-right'))).toBe(hiddenTotal);
+
+    fireEvent.mouseMove(row, { clientX: 300 });
+    expect(Number(row.getAttribute('data-hidden-left'))).toBe(hiddenTotal);
+    expect(Number(row.getAttribute('data-hidden-right'))).toBe(0);
+
+    fireEvent.mouseLeave(row);
+    expect(Number(row.getAttribute('data-cursor-fraction'))).toBe(0.5);
+  });
+
+  // --- ITEM-7c: discard cards match the talon deck size ---
+
+  it('ITEM-7c: sizes discarded cards exactly like the talon deck cards', () => {
+    render(
+      <TableDeck
+        talonCount={8}
+        bottomTrumpCard={{ suit: 'hearts', rank: 'king' }}
+        trumpSuit="hearts"
+        discardCount={4}
+      />,
+    );
+
+    // One shared source of truth for the deck card size.
+    expect(tableCss).toContain('--deck-card-width: 80px');
+    expect(tableCss).toContain('--deck-card-height: 114px');
+    expect(cssRule('.talon-back')).toContain('width: var(--deck-card-width, 80px)');
+    expect(cssRule('.talon-back')).toContain('height: var(--deck-card-height, 114px)');
+
+    const slotRule = cssRule('.discard-slot');
+    expect(slotRule).toContain('width: var(--deck-card-width, 80px)');
+    expect(slotRule).toContain('height: var(--deck-card-height, 114px)');
+    const fillStart = tableCss.indexOf('.discard-slot .card-slot,');
+    expect(fillStart).toBeGreaterThan(-1);
+    expect(tableCss.slice(fillStart, tableCss.indexOf('}', fillStart))).toContain('width: 100%');
+
+    // The old shrunken 40x57 discard override is gone.
+    expect(tableCss).not.toContain('.discard-card');
+    expect(tableCss).not.toContain('grid-template-columns: 40px');
+
+    const pile = screen.getByTestId('discard-pile');
+    expect(pile.querySelectorAll('.discard-slot')).toHaveLength(4);
+    expect(pile.querySelectorAll('.discard-slot .discard-back')).toHaveLength(4);
+    expect(Number(screen.getByTestId('discard-stack').getAttribute('data-card-width'))).toBe(
+      DECK_CARD_WIDTH,
+    );
+    expect(DECK_CARD_HEIGHT).toBe(114);
+  });
+
+  // --- ITEM-8: the reflection outline lines up with the cards in play ---
+
+  it('ITEM-8: keeps the reflection outline in the card row, aligned top and bottom', () => {
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={uncoveredPair}
+        trumpSuit="diamonds"
+        defenderId="p1"
+        canRedirect
+      />,
+    );
+
+    const group = screen.getByTestId('table-pairs-group');
+    const outline = screen.getByTestId('redirect-outline');
+    expect(group.contains(outline)).toBe(true);
+    expect(outline.getAttribute('data-align')).toBe('card');
+
+    const groupRule = cssRule('.table-pairs-group');
+    expect(groupRule).toContain('align-items: flex-start');
+    expect(groupRule).toContain('--bout-card-width: 80px');
+    expect(groupRule).toContain('--bout-card-height: 114px');
+    expect(groupRule).toContain('--bout-card-offset: 15px');
+
+    const pairRule = cssRule('.table-pair');
+    expect(pairRule).toContain('grid-template-rows: var(--bout-card-height, 114px)');
+    expect(pairRule).toContain('align-content: start');
+    expect(pairRule).toContain('padding: 0 20px var(--bout-card-offset, 15px) 0');
+    expect(pairRule).toContain('box-sizing: border-box');
+
+    const outlineRule = cssRule('.redirect-outline');
+    expect(outlineRule).toContain('height: var(--bout-card-height, 114px)');
+    expect(outlineRule).toContain('width: var(--bout-card-width, 80px)');
+    expect(outlineRule).toContain('align-self: flex-start');
+    expect(outlineRule).toContain('box-sizing: border-box');
+    expect(outlineRule).toContain('margin: 0 0 var(--bout-card-offset, 15px) 0');
+    expect(outlineRule).not.toContain('margin-left');
+
+    // Every pair opts into the same top-aligned, exact card-sized box.
+    const pairs = Array.from(document.querySelectorAll('.table-pair'));
+    expect(pairs).toHaveLength(1);
+    for (const pair of pairs) {
+      expect(pair.getAttribute('data-card-align')).toBe('top');
+      const attack = pair.querySelector('.table-pair-attack') as HTMLElement;
+      expect(attack.getAttribute('data-card-align')).toBe('top');
+    }
+  });
+
+  it('ITEM-8: hides the reflection outline in review mode after the alignment fix', () => {
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={uncoveredPair}
+        trumpSuit="diamonds"
+        defenderId="p1"
+        canRedirect
+        isReviewMode
+      />,
+    );
+
+    expect(screen.queryByTestId('redirect-outline')).toBeNull();
   });
 });
