@@ -13,7 +13,7 @@ while [ $# -gt 0 ]; do
     *)
       shift
       ;;
-  esac
+    esac
 done
 
 mkdir -p .tickets .reviews .reviews/feedback_archive
@@ -132,7 +132,7 @@ try_agy_call() {
   local PROMPT_FILE=$2
   local OUT_FILE=$3
   local EXPECT_PATTERN=$4
-  local END_SENTINEL=${5:-"VERDICT: (APPROVED|CHANGES_REQUESTED)|===END_OF_TICKETS===|===END_OF_FILES===|===NO_TICKETS_NEEDED===|===AUDIT_PASSED==="}
+  local END_SENTINEL=${5:-"VERDICT: (APPROVED|CHANGES_REQUESTED)|===END_OF_TICKETS===|===END_OF_FILES===|===NO_TICKETS_NEEDED===|===AUDIT_PASSED===|===END_OF_QUESTIONS===|===NO_QUESTIONS==="}
   local ERR_LOG="${OUT_FILE}.err"
 
   rm -f "$OUT_FILE" "$ERR_LOG"
@@ -228,6 +228,26 @@ run_agy_pool() {
     send_alert "Antigravity Quota Exhausted or Offline (${ROLE})" "All models across all 3 Antigravity pools (${CHAIN[*]}) failed or hit quota limits during role ${ROLE}. The orchestrator is sleeping and retrying every 5 minutes. Please check 'agy' login or quota status."
     sleep 300
   done
+}
+
+# Helper to dump full current source files (up to ~150KB) so Architect & Auditor never miss lines > 160
+dump_full_codebase_context() {
+  for f in README.md ARCHITECTURE.md play-local.sh \
+           backend/src/main/scala/durak/Main.scala \
+           backend/src/main/scala/durak/engine/*.scala \
+           backend/src/main/scala/durak/server/*.scala \
+           frontend/src/types.ts \
+           frontend/src/app.tsx \
+           frontend/src/api/*.ts \
+           frontend/src/audio/*.ts \
+           frontend/src/pages/*.tsx \
+           frontend/src/components/*.tsx \
+           frontend/src/styles/*.css; do
+    [ -f "$f" ] || continue
+    echo "===SOURCE_FILE:${f}==="
+    cat "$f"
+    echo ""
+  done | head -c 150000
 }
 
 # Serialized FreeBuff admission & prompt submission (handles "This session was released" / "Enter: retry" automatically)
@@ -559,7 +579,7 @@ process_ticket_on_worker() {
     rm -f .tickets/STATUS .reviews/agent_notes.md
   )
 
-  local WORK_PROMPT="Implement EVERY single requirement and checklist item in @.tickets/${TICKET_NAME}.md following all rules in @AGENTS.md and @SPEC.md (including keeping ./README.md, ./ARCHITECTURE.md, and ./play-local.sh updated as specified). Do NOT skip or stub any bullet point. In .reviews/agent_notes.md, write a checklist confirming how each requirement in the ticket was implemented, verify all unit tests pass, and then run: echo DONE > .tickets/STATUS"
+  local WORK_PROMPT="Implement EVERY single requirement and checklist item in @.tickets/${TICKET_NAME}.md following all rules in @AGENTS.md and @SPEC.md (including end-to-end UI wiring, QA Scenario presets if specified, and keeping ./README.md, ./ARCHITECTURE.md, and ./play-local.sh updated). Do NOT skip or stub any bullet point. In .reviews/agent_notes.md, write a checklist confirming how each requirement in the ticket was implemented and wired into the live UI, verify all unit tests pass, and then run: echo DONE > .tickets/STATUS"
   run_worker_freebuff "$WORKER_ID" "$WORK_PROMPT"
 
   local PR_NUMBER=""
@@ -647,7 +667,6 @@ ${NOTES_BODY}" >/dev/null 2>&1 || true
     local REVIEW_FILE=".reviews/${TICKET_NAME}-review-${ROUND}.md"
     local PROMPT_FILE="${WT_DIR}/.reviews/review_prompt.txt"
 
-    # Layer 2 Enforcement: Mandatory Item-by-Item Requirement Verification Table in Reviewer
     cat << PROMPT_EOF > "$PROMPT_FILE"
 You are a Principal Code Reviewer conducting strict PR Review Round ${ROUND} of ${MAX_REVIEW_ROUNDS} for ticket ${TICKET_NAME}.
 CRITICAL INSTRUCTION: Do NOT use any tools, do NOT run bash commands, and do NOT read external files. The local unit test suite ('sbt test' / 'npm test') has ALREADY passed.
@@ -668,13 +687,13 @@ $(cat "$CHANGED_FILES_LIST")
 $(cat "$DIFF_FILE")
 </git_diff>
 
-STRICT COMPLETENESS & REVIEW GUIDELINES:
-1. **Mandatory Item-by-Item Audit:** You MUST begin your review with a "## Requirement Verification Checklist" section that lists EVERY single requirement, acceptance criterion, UI detail, and sub-bullet from <ticket_specification>.
+STRICT COMPLETENESS & WIRING REVIEW GUIDELINES:
+1. **Mandatory Item-by-Item Audit:** You MUST begin your review with a "## Requirement Verification Checklist" section that lists EVERY single requirement, acceptance criterion, UI detail, QA preset, and sub-bullet from <ticket_specification>.
 2. For each requirement, explicitly mark it as:
-   - \`[IMPLEMENTED]\` — and cite the exact file and function/CSS selector in <git_diff> that implements it.
-   - \`[MISSING]\` or \`[PARTIAL]\` — if the requirement or sub-bullet is absent, stubbed, or incomplete in <git_diff>.
-3. **Do NOT Trust Implementer Claims Blindly:** Verify against <git_diff>, not <implementer_notes_and_rebuttals>. If ANY requirement or sub-bullet in <ticket_specification> is marked \`[MISSING]\` or \`[PARTIAL]\`, or if there is a bug/layout violation, you MUST output \`VERDICT: CHANGES_REQUESTED\`.
-4. Only output \`VERDICT: APPROVED\` when 100% of requirements in <ticket_specification> are verified \`[IMPLEMENTED]\` in <git_diff> without logic or layout bugs.
+   - \`[IMPLEMENTED & WIRED]\` — and cite the exact file, function, and UI component render path in <git_diff> that implements AND displays it.
+   - \`[MISSING]\`, \`[PARTIAL]\`, or \`[UNWIRED DEAD CODE]\` — if the requirement is absent, incomplete, or implemented in a helper/model without actually being wired into the active UI/server routes.
+3. **Zero Tolerance for Partial Implementations:** Verify against <git_diff>, not <implementer_notes_and_rebuttals>. If ANY requirement in <ticket_specification> is marked \`[MISSING]\`, \`[PARTIAL]\`, or \`[UNWIRED DEAD CODE]\`, you MUST output \`VERDICT: CHANGES_REQUESTED\`.
+4. Only output \`VERDICT: APPROVED\` when 100% of requirements in <ticket_specification> are verified \`[IMPLEMENTED & WIRED]\` in <git_diff>.
 
 End your response with EXACTLY one of:
 VERDICT: APPROVED
@@ -707,7 +726,7 @@ $(cat "$REVIEW_FILE")" >/dev/null 2>&1 || true
     fi
 
     echo "🔧 Fixing review feedback on ${TICKET_NAME} (Round ${ROUND})" > "$STATUS_FILE"
-    local FIX_PROMPT="🚨 PR CODE REVIEW REJECTION (Round ${ROUND}): Read the reviewer's Requirement Verification Checklist in @.reviews/${TICKET_NAME}-review-${ROUND}.md and the ticket @.tickets/${TICKET_NAME}.md. Implement every item marked [MISSING] or [PARTIAL] and fix all bugs identified. Update .reviews/agent_notes.md, re-run tests until green, and run: echo DONE > .tickets/STATUS"
+    local FIX_PROMPT="🚨 PR CODE REVIEW REJECTION (Round ${ROUND}): Read the reviewer's Requirement Verification Checklist in @.reviews/${TICKET_NAME}-review-${ROUND}.md and the ticket @.tickets/${TICKET_NAME}.md. Implement and wire every item marked [MISSING], [PARTIAL], or [UNWIRED DEAD CODE] and fix all bugs identified. Update .reviews/agent_notes.md, re-run tests until green, and run: echo DONE > .tickets/STATUS"
     run_worker_freebuff "$WORKER_ID" "$FIX_PROMPT"
     ROUND=$(expr "$ROUND" + 1)
   done
@@ -807,11 +826,12 @@ You are a Principal Systems Architect. DO NOT use any internal tools, DO NOT run
 
 Break the CURRENT ACTIVE MILESTONE (${ACTIVE_M}) in <spec> down into atomic implementation tickets grouped into PARALLEL EXECUTION WAVES (WAVE:1, WAVE:2, etc.).
 
-CRITICAL COMPLETENESS & TRACEABILITY RULES:
+CRITICAL COMPLETENESS, TESTABILITY & TRACEABILITY RULES:
 1. First, output a \`===TRACEABILITY_MATRIX===\` block listing EVERY single requirement and sub-feature of ${ACTIVE_M} as \`REQ-01\`, \`REQ-02\`, ... and mapping each \`REQ-XX\` to the exact ticket filename that will implement it. ZERO requirements may be omitted.
-2. Inside each ticket, include a \`## Mandatory Acceptance Criteria Checklist\` containing the exact, unabridged technical details for every \`REQ-XX\` assigned to that ticket. Never summarize away specific UI details, formulas, or edge cases.
-3. Put tickets that touch independent files/subsystems into the SAME wave so they run in parallel, and put tickets that edit the exact same files into sequential waves.
-4. Ensure the final wave includes updating ./README.md, ./ARCHITECTURE.md, and ./play-local.sh (in a single ticket so parallel workers never conflict on docs).
+2. Inside each ticket, include a \`## Mandatory Acceptance Criteria Checklist\` containing the exact, unabridged technical details for every \`REQ-XX\` assigned to that ticket.
+3. Include QA Scenario Presets (e.g., Lobby or Left Sidebar quick-state loaders) for any complex or late-game features so the human can test them in 1 click.
+4. Put tickets that touch independent files/subsystems into the SAME wave, and put tickets that edit the exact same files into sequential waves.
+5. Ensure the final wave updates ./README.md, ./ARCHITECTURE.md, and ./play-local.sh (in a single ticket).
 
 <spec>
 $(cat SPEC.md)
@@ -838,7 +858,7 @@ PROMPT_EOF
   [ "$USE_GITHUB_PRS" -eq 1 ] && (retry_git_push origin main >/dev/null 2>&1 || true)
 }
 
-# === PHASE 1.5: HUMAN FEEDBACK PRIORITY QUEUE (WITH REQUIREMENT TRACEABILITY) ===
+# === PHASE 1.5: HUMAN FEEDBACK AMBIGUITY TRIAGE + TRACEABLE WAVE GENERATION ===
 check_and_compile_human_feedback() {
   if [ ! -f FEEDBACK.md ]; then return 0; fi
   local ACTIVE_FEEDBACK
@@ -855,6 +875,17 @@ RESET_EOF
     return 0
   fi
 
+  # If FEEDBACK.md ONLY contains unanswered deferred items from the last triage (where [YOUR DECISION]: is still blank), do not auto-trigger until edited
+  if grep -q "# Deferred Items from Previous Round" FEEDBACK.md 2>/dev/null; then
+    local NON_EMPTY_DECISIONS
+    NON_EMPTY_DECISIONS=$(grep -E "\[YOUR DECISION\]:[[:space:]]*[^[:space:]]+" FEEDBACK.md 2>/dev/null || true)
+    local OTHER_LINES
+    OTHER_LINES=$(sed '/<!--.*-->/d; /^# Deferred Items/d; /^[0-9]\+\./d; /\[ORCHESTRATOR QUESTION/d; /\[SUGGESTED OPTIONS/d; /\[YOUR DECISION\]:/d' FEEDBACK.md | tr -d '[:space:]')
+    if [ -z "$NON_EMPTY_DECISIONS" ] && [ -z "$OTHER_LINES" ]; then
+      return 0
+    fi
+  fi
+
   local TIMESTAMP
   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
   git rev-parse HEAD > .reviews/feedback_base_commit
@@ -862,7 +893,45 @@ RESET_EOF
   cp FEEDBACK.md FEEDBACK.backup.md
   cp FEEDBACK.md ".reviews/feedback_archive/FEEDBACK_${TIMESTAMP}.md"
   cp FEEDBACK.md FEEDBACK.in_progress.md
+  rm -f .reviews/deferred_feedback_items.md .reviews/ambiguity_questions_raw.txt
 
+  # --- STAGE 1.5A: PRE-FLIGHT AMBIGUITY DETECTION & INTERACTIVE HUMAN Q&A ---
+  echo "=================================================================="
+  echo "🔎 Stage 1.5A: Scanning FEEDBACK.md for potential ambiguities..."
+  echo "=================================================================="
+
+  cat << PROMPT_EOF > .reviews/ambiguity_check_prompt.txt
+You are a Principal Product & Systems Architect reviewing the human's numbered feature/bug list in <human_feedback>.
+CRITICAL: DO NOT use any tools, DO NOT run bash commands, and DO NOT read external files.
+
+Carefully inspect each numbered item in <human_feedback> against <current_codebase>.
+- If an item is clear, or only requires standard engineering judgment (including building a QA Scenario Preset to test it), do NOT ask a question about it.
+- ONLY ask a question if a numbered item is genuinely ambiguous, contradicts an existing rule, or has 2+ distinct gameplay/UI interpretations where guessing wrong would frustrate the user.
+
+<human_feedback>
+$(cat FEEDBACK.md)
+</human_feedback>
+
+<current_codebase>
+$(dump_full_codebase_context)
+</current_codebase>
+
+If NO items are genuinely ambiguous, output ONLY:
+===NO_QUESTIONS===
+
+If 1 or more items have genuine ambiguities, output each question using this EXACT format and end with ===END_OF_QUESTIONS===:
+===QUESTION:Q1|ITEM:1===
+ORIGINAL_REQUEST: [Exact quote of the numbered item from FEEDBACK.md]
+AMBIGUITY: [Concise 1-2 sentence explanation of what is ambiguous]
+OPTIONS: [Option A vs. Option B, or what needs to be decided]
+===END_OF_QUESTIONS===
+PROMPT_EOF
+
+  run_agy_pool "ARCHITECT" ".reviews/ambiguity_check_prompt.txt" ".reviews/ambiguity_questions_raw.txt" "===NO_QUESTIONS===|===QUESTION:"
+
+  python3 "$PROJECT_ROOT/agent-orchestration/qa-assistant.py"
+
+  # Check if all items were deferred during interactive triage
   for old_fb in .tickets/T-9*-feedback-*.md .tickets/T-95-audit-gap-*.md; do
     [ -e "$old_fb" ] || continue
     local bname
@@ -871,42 +940,44 @@ RESET_EOF
   done
 
   echo "=================================================================="
-  echo "🗣️  HUMAN FEEDBACK DETECTED IN FEEDBACK.md! Generating traceable waves..."
+  echo "🗣️  Stage 1.5B: Generating Parallel Waves + Implicit QA Scenario Presets..."
   echo "=================================================================="
 
-  # Layer 1 Enforcement: Mandatory Requirement Traceability Matrix (RTM) & Verbatim Checklists
   cat << PROMPT_EOF > .reviews/feedback_prompt.txt
 You are a Principal Systems Architect. DO NOT use any internal tools, DO NOT run bash commands, and DO NOT read external files.
 
-Decompose ALL requirements in <human_feedback> into atomic implementation tickets grouped into PARALLEL EXECUTION WAVES (WAVE:1, WAVE:2, WAVE:3).
+Decompose ALL non-deferred requirements in <resolved_human_feedback> into atomic implementation tickets grouped into PARALLEL EXECUTION WAVES (WAVE:1, WAVE:2, WAVE:3).
 
-CRITICAL ANTI-OMISSION & TRACEABILITY RULES:
-1. **Step 1 — Requirement Traceability Matrix (\`===TRACEABILITY_MATRIX===\`):** Before outputting any ticket, you MUST list EVERY single discrete item, sub-point, sentence, bug report, and UI tweak from <human_feedback> as \`REQ-01\`, \`REQ-02\`, ..., \`REQ-N\`, and map each \`REQ-XX\` to the exact \`T-90-feedback-${TIMESTAMP}-...\` ticket filename that implements it. ZERO items or sub-sentences from <human_feedback> may be left out or ignored!
-2. **Step 2 — Verbatim Acceptance Checklists:** Inside every ticket, include a section titled \`## Mandatory Acceptance Criteria Checklist\` that copies the FULL, UNABRIDGED details of each \`REQ-XX\` assigned to that ticket (including exact numbers, colors, layout positions, and edge cases). Never paraphrase or summarize away details from <human_feedback>.
-3. **Wave Scheduling:**
-   - Assign independent subsystems to the SAME wave so they run simultaneously.
-   - Assign tickets that modify the exact same files to sequential wave numbers so they never cause Git merge conflicts.
-4. **Real-Time Documentation:** Ensure the final wave updates ./README.md, ./ARCHITECTURE.md, and ./play-local.sh (in a single ticket so parallel workers never conflict on documentation files).
+CRITICAL ANTI-OMISSION, TESTABILITY & TRACEABILITY RULES:
+1. **Step 1 — Requirement Traceability Matrix (\`===TRACEABILITY_MATRIX===\`):** List EVERY discrete numbered item and sub-point from <resolved_human_feedback> (excluding any section marked DEFERRED ITEMS) as \`ITEM-1a\`, \`ITEM-1b\`, \`ITEM-2\`, ... and map each one to the exact \`T-90-feedback-${TIMESTAMP}-...\` ticket filename that implements it. ZERO non-deferred items may be omitted!
+2. **Step 2 — Implicit Testability & QA Scenario Presets (MANDATORY):**
+   For each numbered item in <resolved_human_feedback>, ask: *"Can the human user observe and test this change in under 15 seconds after opening http://localhost:5173?"*
+   - If the item involves a hard-to-reach or late-game state (e.g., endgame when talon deck is empty and players have 1–2 cards left, Durak elimination in 3P/4P, forced surrender edge cases, reflection chains, or timeout behaviors), you MUST include an explicit requirement in the backend/frontend tickets to add or update a **1-Click QA Scenario Preset** (e.g., a "⚡ QA Scenarios" selector in the Lobby or Left Sidebar that creates/loads a match pre-populated in that exact state) so the human can test it immediately!
+3. **Step 3 — Verbatim Acceptance Checklists & End-to-End Wiring:**
+   Inside every ticket, include a \`## Mandatory Acceptance Criteria Checklist\` copying the FULL, UNABRIDGED details of each item assigned to that ticket, and explicitly specify the exact frontend component (\`GamePage.tsx\`, \`GameTable.tsx\`, \`LobbyPage.tsx\`) and backend route/engine method where it must be wired into the live UI.
+4. **Wave Scheduling & Real-Time Docs:**
+   - Assign independent subsystems to the SAME wave, and tickets touching the same files to sequential waves.
+   - Ensure the final wave updates \`./README.md\`, \`./ARCHITECTURE.md\`, and \`./play-local.sh\` (in a single ticket).
 
 <agents_rules>
 $(cat AGENTS.md)
 </agents_rules>
 
-<human_feedback>
-$(cat FEEDBACK.md)
-</human_feedback>
+<resolved_human_feedback>
+$(cat .reviews/active_feedback_resolved.md)
+</resolved_human_feedback>
 
 <existing_project_files>
 $(find backend/src frontend/src play-local.sh README.md ARCHITECTURE.md -type f 2>/dev/null | sort)
 </existing_project_files>
 
 <current_code_context>
-$(head -n 120 README.md ARCHITECTURE.md play-local.sh backend/src/main/scala/**/*.scala frontend/src/app.tsx frontend/src/pages/*.tsx frontend/src/components/*.tsx 2>/dev/null | head -c 28000)
+$(dump_full_codebase_context)
 </current_code_context>
 
 Output your ===TRACEABILITY_MATRIX=== first, followed by each ticket using this EXACT delimiter format on its own line (including |WAVE:N), and end your entire response with ===END_OF_TICKETS===:
 ===TRACEABILITY_MATRIX===
-- REQ-01: [Exact requirement from FEEDBACK.md] -> T-90-feedback-${TIMESTAMP}-1-backend.md
+- ITEM-1: [Exact requirement] -> T-90-feedback-${TIMESTAMP}-1-backend.md
 ===TICKET:T-90-feedback-${TIMESTAMP}-1-backend.md|WAVE:1===
 [Full Markdown content of ticket 1 including ## Mandatory Acceptance Criteria Checklist]
 ===END_OF_TICKETS===
@@ -915,11 +986,17 @@ PROMPT_EOF
   run_agy_pool "ARCHITECT" ".reviews/feedback_prompt.txt" ".reviews/raw_feedback_tickets.txt" "===TICKET:|===NO_TICKETS_NEEDED==="
   extract_tickets_with_waves ".reviews/raw_feedback_tickets.txt"
 
-  cat << 'RESET_EOF' > FEEDBACK.md
+  # Restore FEEDBACK.md: either write back any deferred items (with questions) or reset to clean template
+  if [ -f .reviews/deferred_feedback_items.md ]; then
+    cp .reviews/deferred_feedback_items.md FEEDBACK.md
+    echo "📌 Wrote deferred items (with orchestrator questions) back to FEEDBACK.md for future review!"
+  else
+    cat << 'RESET_EOF' > FEEDBACK.md
 <!-- Write your plain-English UI/UX feedback, bugs, or usability requests below this line. -->
 <!-- Note: Your previous feedback is always backed up in FEEDBACK.backup.md and .reviews/feedback_archive/ -->
 
 RESET_EOF
+  fi
 
   git checkout main 2>/dev/null || true
   git add .tickets/ FEEDBACK.md FEEDBACK.backup.md 2>/dev/null || true
@@ -927,19 +1004,17 @@ RESET_EOF
   [ "$USE_GITHUB_PRS" -eq 1 ] && (retry_git_push origin main >/dev/null 2>&1 || true)
 }
 
-# === LAYER 3: PRE-HUMAN HOLISTIC SPEC AUDIT GATE ===
-# Compares the raw original FEEDBACK.backup.md against the actual integrated codebase on 'main'.
-# If any item was dropped, partially implemented, or overwritten during merges, it auto-generates
-# T-95-audit-gap tickets and loops back to execute them before alerting the human!
+# === LAYER 3: FULL-FILE HOLISTIC SPEC AUDIT & INTERACTIVE QA PLAYBOOK GENERATOR ===
 run_holistic_feedback_audit() {
-  if [ ! -f .reviews/feedback_base_commit ] || [ ! -f FEEDBACK.backup.md ]; then
+  if [ ! -f .reviews/feedback_base_commit ] || [ ! -f .reviews/active_feedback_resolved.md ]; then
     return 0
   fi
 
   local PASS_COUNT
   PASS_COUNT=$(cat .reviews/feedback_audit_passes 2>/dev/null || echo "0")
   if [ "$PASS_COUNT" -ge "$MAX_HOLISTIC_AUDIT_PASSES" ]; then
-    echo "ℹ️  Reached max holistic audit passes (${MAX_HOLISTIC_AUDIT_PASSES}); proceeding to human review."
+    echo "ℹ️  Reached max holistic audit passes (${MAX_HOLISTIC_AUDIT_PASSES}); generating QA Playbook."
+    generate_qa_playbook
     rm -f .reviews/feedback_base_commit .reviews/feedback_audit_passes
     return 0
   fi
@@ -953,7 +1028,7 @@ run_holistic_feedback_audit() {
   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
   echo "=================================================================="
-  echo "🕵️  Holistic Spec Audit (Pass ${PASS_COUNT}/${MAX_HOLISTIC_AUDIT_PASSES}): Verifying 100% of FEEDBACK.backup.md against main..."
+  echo "🕵️  Holistic Spec Audit (Pass ${PASS_COUNT}/${MAX_HOLISTIC_AUDIT_PASSES}): Verifying full codebase against FEEDBACK.md..."
   echo "=================================================================="
 
   git diff "${BASE_COMMIT}...HEAD" -- . \
@@ -969,33 +1044,35 @@ run_holistic_feedback_audit() {
 You are a Principal QA & Systems Auditor conducting a final pre-release audit on the integrated 'main' branch.
 CRITICAL: DO NOT use any tools, DO NOT run bash commands, and DO NOT read external files.
 
-Compare EVERY single item, sub-bullet, UI detail, and bug fix requested by the human in <original_human_feedback> against <cumulative_git_diff_on_main> and <current_main_source_files>.
+Compare EVERY single non-deferred numbered item, sub-bullet, UI detail, and QA Scenario Preset in <resolved_human_feedback> against <cumulative_git_diff_on_main> and the FULL source files in <current_main_source_files>.
 
-<original_human_feedback>
-$(cat FEEDBACK.backup.md)
-</original_human_feedback>
+<resolved_human_feedback>
+$(cat .reviews/active_feedback_resolved.md)
+</resolved_human_feedback>
 
 <cumulative_git_diff_on_main>
 $(cat .reviews/holistic_cumulative.diff)
 </cumulative_git_diff_on_main>
 
 <current_main_source_files>
-$(head -n 160 backend/src/main/scala/durak/engine/*.scala backend/src/main/scala/durak/server/*.scala frontend/src/app.tsx frontend/src/pages/*.tsx frontend/src/components/*.tsx frontend/src/styles/*.css 2>/dev/null | head -c 35000)
+$(dump_full_codebase_context)
 </current_main_source_files>
 
 AUDIT INSTRUCTIONS:
-1. First, output an \`===AUDIT_CHECKLIST===\` checking every discrete item and sub-point in <original_human_feedback> and marking it \`[VERIFIED ON MAIN]\` or \`[MISSING / INCOMPLETE]\`.
-2. If 100% of items in <original_human_feedback> are \`[VERIFIED ON MAIN]\`, end your response with \`===AUDIT_PASSED===\`.
-3. If ANY item or sub-point from <original_human_feedback> was ignored, partially implemented, or accidentally overwritten during branch merges, output 1 to 3 atomic remediation tickets using this EXACT format and end with \`===END_OF_TICKETS===\`:
+1. Output an \`===AUDIT_CHECKLIST===\` checking every numbered item and sub-point in <resolved_human_feedback> (ignoring items under DEFERRED ITEMS):
+   - Mark it \`[VERIFIED LIVE IN UI]\` ONLY if it is both implemented in the engine/logic AND actively rendered/wired in the frontend pages (\`LobbyPage.tsx\`, \`GamePage.tsx\`, \`GameTable.tsx\`, \`table.css\`).
+   - Mark it \`[MISSING / UNWIRED]\` if any part of the item was skipped, overwritten during a merge, or left unwired in the UI.
+2. If 100% of non-deferred items are \`[VERIFIED LIVE IN UI]\`, end your response with \`===AUDIT_PASSED===\`.
+3. If ANY non-deferred item is \`[MISSING / UNWIRED]\`, output 1 to 3 atomic remediation tickets using this EXACT format and end with \`===END_OF_TICKETS===\`:
 ===TICKET:T-95-audit-gap-${TIMESTAMP}-1.md|WAVE:1===
-[Full Markdown ticket specifying the exact missing requirements to implement, files to touch, and unit tests to run]
+[Full Markdown ticket specifying the exact missing requirements/wiring to implement, files to touch, and unit tests to run]
 ===END_OF_TICKETS===
 PROMPT_EOF
 
   run_agy_pool "ARCHITECT" ".reviews/holistic_audit_prompt.txt" ".reviews/holistic_audit_out.txt" "===AUDIT_PASSED===|===TICKET:"
 
   if grep -q "===TICKET:" .reviews/holistic_audit_out.txt 2>/dev/null; then
-    echo "⚠️  Holistic Audit detected unimplemented or incomplete items from FEEDBACK.md! Generating remediation wave..."
+    echo "⚠️  Holistic Audit detected missing or unwired items from FEEDBACK.md! Generating remediation wave..."
     extract_tickets_with_waves ".reviews/holistic_audit_out.txt"
     git checkout main 2>/dev/null || true
     git add .tickets/ 2>/dev/null || true
@@ -1004,9 +1081,54 @@ PROMPT_EOF
     return 1
   fi
 
-  echo "✅ Holistic Spec Audit PASSED! 100% of FEEDBACK.md items verified on main."
+  echo "✅ Holistic Spec Audit PASSED! 100% of non-deferred FEEDBACK.md items verified live on main."
+  generate_qa_playbook
   rm -f .reviews/feedback_base_commit .reviews/feedback_audit_passes
   return 0
+}
+
+# === GENERATE NUMBERED HUMAN QA PLAYBOOK (HOW TO SEE EVERY CHANGE IN <15 SECONDS) ===
+generate_qa_playbook() {
+  local SOURCE_SPEC=".reviews/active_feedback_resolved.md"
+  [ ! -f "$SOURCE_SPEC" ] && SOURCE_SPEC="FEEDBACK.backup.md"
+  [ ! -f "$SOURCE_SPEC" ] && return 0
+
+  echo "=================================================================="
+  echo "📋 Generating Step-by-Step Human QA Playbook (.reviews/QA_PLAYBOOK.md)..."
+  echo "=================================================================="
+
+  cat << PROMPT_EOF > .reviews/qa_playbook_prompt.txt
+You are the Lead QA Engineer preparing a concise, step-by-step verification guide for the Human Product Owner.
+CRITICAL: DO NOT use any tools, DO NOT run bash commands, and DO NOT read external files.
+
+For EVERY numbered item in <implemented_feedback>, write a clear entry showing the human **exact, concrete instructions on how to see and test that specific change in the browser** after running \`./play-local.sh\` (at \`http://localhost:5173\`).
+- Reference the exact buttons, Lobby options, QA Scenario Presets, player switcher tabs, or visual elements in <current_codebase>.
+- If any items were deferred or if you spotted any subtle follow-up questions during implementation, list them at the bottom under \`## Optional Follow-Up Questions / Deferred Items\`.
+
+<implemented_feedback>
+$(cat "$SOURCE_SPEC")
+</implemented_feedback>
+
+<current_codebase>
+$(dump_full_codebase_context)
+</current_codebase>
+
+Format your response in clean Markdown (with NO preamble) and end with \`===END_OF_FILES===\`:
+# 🧪 Interactive QA Playbook — How to Verify Recent Changes
+1. **Start the server:** Run \`./play-local.sh\` in Window 4 and open \`http://localhost:5173\`.
+
+## Item-by-Item Verification Steps
+### Item #1: [Short Title from Feedback]
+- **What Changed:** [1-sentence summary]
+- **How to See It Immediately:**
+  1. [Exact step 1 — e.g., click QA Preset X or select 3 players + Chaos Mode]
+  2. [Exact step 2 — what to click/drag and what visual/audio result to observe]
+===END_OF_FILES===
+PROMPT_EOF
+
+  run_agy_pool "REVIEWER_R1" ".reviews/qa_playbook_prompt.txt" ".reviews/QA_PLAYBOOK.raw.md" "===END_OF_FILES==="
+  sed '/===END_OF_FILES===/d' .reviews/QA_PLAYBOOK.raw.md > .reviews/QA_PLAYBOOK.md
+  cp .reviews/QA_PLAYBOOK.md QA_PLAYBOOK.md 2>/dev/null || true
 }
 
 advance_to_next_milestone() {
@@ -1144,7 +1266,7 @@ while true; do
     done
   fi
 
-  # Layer 3 Enforcement: Run Holistic Spec Audit against FEEDBACK.backup.md before pausing for human review!
+  # Layer 3 Enforcement: Run Full-File Holistic Audit & generate QA_PLAYBOOK.md before pausing for human review!
   if ! run_holistic_feedback_audit; then
     continue
   fi
@@ -1152,21 +1274,30 @@ while true; do
   rm -f FEEDBACK.in_progress.md
 
   ACTIVE_M=$(grep -oE "CURRENT ACTIVE MILESTONE: M[0-9]+" SPEC.md 2>/dev/null | head -n 1 | awk '{print $NF}' || echo "M1")
-  send_alert "Ready for Human Review (${ACTIVE_M})" "All current waves, PR reviews, and the Holistic Spec Audit for ${ACTIVE_M} have passed and merged into main. Test the build with ./play-local.sh, add notes to FEEDBACK.md, or type 'accept' in Window 1 to advance to the next milestone."
+  PLAYBOOK_PREVIEW=""
+  if [ -f .reviews/QA_PLAYBOOK.md ]; then
+    PLAYBOOK_PREVIEW=$(head -n 45 .reviews/QA_PLAYBOOK.md)
+  fi
+  send_alert "Ready for Human Review (${ACTIVE_M}) — QA Playbook Ready" "All current waves and the Holistic Spec Audit for ${ACTIVE_M} have passed. See QA_PLAYBOOK.md (or Window 1) for step-by-step instructions to view each numbered change:
+
+${PLAYBOOK_PREVIEW}"
 
   echo "=================================================================="
   echo "🏆 ALL WAVES & HOLISTIC SPEC AUDIT COMPLETED, MERGED & SYNCED!"
   echo "=================================================================="
-  echo "👉 How to test & review your build right now:"
-  echo "   1. Run './play-local.sh' in Window 4 and open http://localhost:5173"
-  echo "   2. Read live docs: ./README.md (User Guide) & ./ARCHITECTURE.md (Technical Docs)"
-  echo "   3. Ask codebase questions: ./agent-orchestration/ask-architect.sh \"Your question\""
-  echo "   4. To request UI/UX or bug fixes, write them in 'FEEDBACK.md' and press [ENTER]"
-  echo "   5. To sign off on this milestone and auto-start the next milestone, type 'accept'"
+  if [ -f .reviews/QA_PLAYBOOK.md ]; then
+    echo "📖 STEP-BY-STEP QA PLAYBOOK (Also saved to ./QA_PLAYBOOK.md):"
+    echo "------------------------------------------------------------------"
+    cat .reviews/QA_PLAYBOOK.md
+    echo "------------------------------------------------------------------"
+  fi
+  echo "👉 Next Actions:"
+  echo "   1. Run './play-local.sh' in Window 4 and follow the QA Playbook above at http://localhost:5173"
+  echo "   2. To request further tweaks (or answer any deferred items), edit 'FEEDBACK.md' and press [ENTER]"
+  echo "   3. To sign off on this milestone and auto-start the next milestone, type 'accept'"
   echo "------------------------------------------------------------------"
   read -r -p "Press [ENTER] after saving FEEDBACK.md, or type 'accept' to advance to the next milestone: " USER_CHOICE
 
-  # Human responded! Re-arm the single-email notification latch for the next run
   reset_alert_latch
 
   if [ "$USER_CHOICE" = "accept" ] || [ "$USER_CHOICE" = "approve" ]; then

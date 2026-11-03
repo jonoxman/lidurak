@@ -15,3 +15,4 @@ agent-orchestration/.freebuff-home/
 diagnostics.txt
 *.log
 .DS_Store
+QA_PLAYBOOK.md

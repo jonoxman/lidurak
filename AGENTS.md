@@ -12,7 +12,7 @@
 ## UI & CSS Grid Spatial Rules (Zero-Overlap Lichess Architecture)
 1. **No Overlapping Freeform Positioning:** Never use `position: absolute` or `position: fixed` to place seats, hands, bouts, or sidebars. Use CSS Grid and Flexbox with explicit `gap` spacing and `min-width: 0; box-sizing: border-box;`.
 2. **Lichess 3-Column Desktop Shell (`GamePage`):**
-   - `[data-zone="sidebar-left"]`: How to Play panel & hotseat player-switcher tabs.
+   - `[data-zone="sidebar-left"]`: How to Play panel, QA Scenario / Debug Preset triggers (when applicable), & hotseat player-switcher tabs.
    - `[data-zone="table-arena"]`: 3x3 CSS Grid felt table (`#1e2923`):
      - Row 1: Opponent seats (`data-seat="top-left"`, `data-seat="top-center"`, `data-seat="top-right"`).
      - Row 2: Active bout cards, defender-anchored target outlines (`data-testid="target-outline-<id>"`), and the single-card arrow reflection outline (`data-testid="redirect-outline"`).
@@ -20,10 +20,13 @@
    - `[data-zone="sidebar-right"]`: Large digital `00:XX` turn clock (`00:15` default) & game winner/durak results.
 3. **Zero Table Text Clutter:** Never render text banners like "Waiting for first attack...", "Your turn to defend", or invalid-move error strings on the table or below the hand.
 
+## QA Testability & Scenario Presets (MANDATORY)
+- Whenever a ticket introduces or modifies a state-dependent feature (e.g., endgame victory/Durak elimination when the talon deck is empty, 1-card surrender edge cases, multi-card reflections, or turn-clock timeouts), you MUST ensure the feature is wired end-to-end into the live UI and provide any requested **QA Scenario Preset** (in the Lobby or Left Sidebar) so a human reviewer can jump straight to that exact game state in 1 click without playing a full 36-card match manually.
+
 ## Real-Time Documentation & Launcher Maintenance (MANDATORY)
 The repository root contains three living project files that MUST be kept synchronized with the codebase as features evolve:
 1. **`./README.md` (Installation, Startup & User Interface Guide):**
-   - Must always provide accurate instructions on how to install dependencies, launch the application locally (`./play-local.sh`), run backend/frontend test suites, and use every current UI feature in the browser (Lobby settings, player views, card dragging/snapping, double-clicking, hand sorting, reflection outlines, contextual buttons, and turn clock).
+   - Must always provide accurate instructions on how to install dependencies, launch the application locally (`./play-local.sh`), run backend/frontend test suites, and use every current UI feature and QA Scenario preset in the browser.
 2. **`./ARCHITECTURE.md` (Technical Structure & System Reference):**
    - Must always document the current directory layout, backend Scala 3 engine/state machine (`durak.engine`), server actors & WebSocket/REST protocol (`durak.server`), frontend Preact components, CSS Grid zones, and audio/interaction subsystems.
 3. **`./play-local.sh` (Local Server Launcher):**
