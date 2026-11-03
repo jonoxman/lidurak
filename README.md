@@ -64,14 +64,15 @@ Press `Ctrl+C` to stop both servers cleanly.
 2. If the backend is still starting, the lobby shows a **loading panel** with a continuously spinning ring (`Starting game server, please wait…`) and re-checks `GET /api/health` every second. The Create Game form appears automatically once the server answers, so a click can never land on a proxy `HTTP 500`.
 3. Select the **Number of Players** (`2`, `3`, or `4` players).
 4. Enter custom player names (defaults to `Alice`, `Bob`, `Carol`, `Dave`).
-5. Pick who plays each seat from the **Type** dropdown next to every name — `Human`, `RandomBot` or `BasicBot` (listed in that order). Bots play legal moves on their own after a short random pause; seat choices survive changing the player count, and new seats default to `Human`.
+5. Pick who plays each seat from the **Type** dropdown next to every name — `Human`, `RandomBot` or `BasicBot` (listed in that order). Bots play legal moves on their own — `RandomBot` moves instantly, `BasicBot` pauses a random `500 ms`–`2000 ms` between moves; seat choices survive changing the player count, and new seats default to `Human`.
 6. Configure match variants:
    - **Allow redirects (`Perevod`):** Enables reflecting an unopened attack to the next player using a card of matching rank.
    - **Chaos Mode** *(available for 3 or 4 players)*: Allows the initial attacker to target *any* active player who still holds cards (instead of strictly attacking clockwise), and sends reflections (`Perevod`) to a randomly chosen eligible player.
 7. Click **Create Game** and select any player link (or use the left-sidebar `POV` tabs during local inspection) to view the table from that player's seat.
 
 ### Computer Opponents (`RandomBot` & `BasicBot`)
-- **`RandomBot`** plays one uniformly random legal move each turn.
+- **`RandomBot`** plays one uniformly random legal move each turn, **instantly** (`0 ms` between moves), so an all-`RandomBot` match reaches the game-over banner and the interactive review mode in well under a second. The server yields between moves, so the table's HTTP and WebSocket traffic is never starved while bots play.
+- **`BasicBot`** keeps its human-like pace: a random `500 ms`–`2000 ms` pause before each move.
 - **`BasicBot`** follows a simple heuristic and always obeys the rules:
   - It opens with its **lowest-ranked non-trump** card; only when the hand holds nothing but trumps does it open with a random trump.
   - As defender it always **covers or reflects** when a legal `CoverCard` / `RedirectAttack` exists, and surrenders only when it genuinely cannot answer.

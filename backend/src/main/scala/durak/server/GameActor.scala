@@ -12,8 +12,9 @@ import scala.concurrent.duration.*
  * A live game: its authoritative state, its broadcast topic, its recorded
  * replay history, its seats, its turn clock and its bot driver. The clock wakes
  * up for whichever players the game is waiting on and plays legal moves if they
- * do not; the bot driver does the same, sooner and after a human-like pause, for
- * computer-controlled seats.
+ * do not; the bot driver does the same for computer-controlled seats, instantly
+ * for a [[GameConfig.RandomBotSeat]] and after a human-like pause for a
+ * [[GameConfig.BasicBotSeat]].
  */
 case class GameRoom(
   gameId: String,
@@ -440,19 +441,49 @@ object GameActor:
         promptedBotId(state) match
           case None => awaitStateChange(room, state) *> botLoop(room)
           case Some(botId) =>
-            IO.sleep(randomBotDelay(room)).race(awaitStateChange(room, state)).flatMap {
-              case Right(_) => botLoop(room) // the table moved on: reconsider
-              case Left(_) =>
-                room.stateRef.get.flatMap { current =>
+            botDelayFor(room, state, botId) match
+              // A random bot plays instantly. Yielding first keeps fiber
+              // scheduling fair, so the HTTP and WebSocket handlers of the same
+              // runtime are never starved during an all-RandomBot game.
+              case None =>
+                IO.cede *> room.stateRef.get.flatMap { current =>
                   // Never play for a superseded position, and never after game over.
                   if current != state || current.isGameOver then botLoop(room)
-                  else
-                    chooseBotAction(current, botId) match
-                      case None => awaitStateChange(room, current) *> botLoop(room)
-                      case Some(action) => playBotAction(room, action) *> botLoop(room)
+                  else playBotMove(room, current, botId) *> botLoop(room)
                 }
-            }
+              case Some(delay) =>
+                IO.sleep(delay).race(awaitStateChange(room, state)).flatMap {
+                  case Right(_) => botLoop(room) // the table moved on: reconsider
+                  case Left(_) =>
+                    room.stateRef.get.flatMap { current =>
+                      // Never play for a superseded position, and never after game over.
+                      if current != state || current.isGameOver then botLoop(room)
+                      else playBotMove(room, current, botId) *> botLoop(room)
+                    }
+                }
     }
+
+  /** Plays the bot's move for `state`, or waits when the position no longer has one. */
+  private def playBotMove(room: GameRoom, state: GameState, botId: String): IO[Unit] =
+    chooseBotAction(state, botId) match
+      case None         => awaitStateChange(room, state)
+      case Some(action) => playBotAction(room, action)
+
+  /**
+   * The pause a bot seat takes before it plays. A `"randomBot"` seat returns
+   * `None` and therefore plays with no delay at all; a `"basicBot"` seat keeps
+   * the room's human-like pause, a random value in `minBotDelay..maxBotDelay`
+   * (`500 ms`–`2000 ms` unless the room was constructed with other bounds).
+   */
+  def botDelayFor(room: GameRoom, state: GameState, botId: String): Option[FiniteDuration] =
+    botSeatType(state, botId) match
+      case GameConfig.BasicBotSeat => Some(randomBotDelay(room))
+      case _                       => None
+
+  /** The canonical seat type of the seat played by `botId` (human when unknown). */
+  def botSeatType(state: GameState, botId: String): String =
+    val seatIdx = state.players.indexWhere(_.id == botId)
+    if seatIdx < 0 then GameConfig.HumanSeat else state.config.seatType(seatIdx)
 
   /** Waits until the room's state differs from `previous`. */
   private def awaitStateChange(room: GameRoom, previous: GameState): IO[Unit] =
