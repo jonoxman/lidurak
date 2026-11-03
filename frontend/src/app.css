@@ -542,20 +542,23 @@ html[data-theme='light'] .error-banner {
     inset 0 0 8px rgba(245, 158, 11, 0.14);
 }
 
+/* T-90-3 ITEM-1b: the light theme keeps the same diffused shape but uses much
+   darker borders and a stronger multi-layer halo, so the attacking and
+   defending rows are just as obvious on a white panel as on the dark one. */
 html[data-theme='light'] .status-badge[data-role='attacker'] {
-  border-color: rgba(21, 128, 61, 0.45);
+  border-color: rgba(21, 128, 61, 0.85);
   outline: none;
   box-shadow:
-    0 0 12px 2px rgba(21, 128, 61, 0.26),
-    inset 0 0 8px rgba(21, 128, 61, 0.1);
+    0 0 14px 3px rgba(21, 128, 61, 0.58),
+    inset 0 0 10px rgba(21, 128, 61, 0.24);
 }
 
 html[data-theme='light'] .status-badge[data-role='defender'] {
-  border-color: rgba(180, 83, 9, 0.45);
+  border-color: rgba(180, 83, 9, 0.88);
   outline: none;
   box-shadow:
-    0 0 12px 2px rgba(180, 83, 9, 0.26),
-    inset 0 0 8px rgba(180, 83, 9, 0.1);
+    0 0 14px 3px rgba(180, 83, 9, 0.6),
+    inset 0 0 10px rgba(180, 83, 9, 0.25);
 }
 
 .game-meta {
@@ -1448,4 +1451,166 @@ html[data-theme='light'] .game-page .back-to-lobby:hover {
     background: #cbd5e1;
     border-color: #334155;
   }
+}
+
+/* ==========================================================================
+   T-90-3 ITEM-1b: darker, higher-visibility LIGHT-MODE emphasis glows for the
+   menus, header dropdowns/swatches, left sidebar (POV / QA / Replay), the
+   clock panel and the lobby. Dark mode is untouched: none of these selectors
+   match without `html[data-theme='light']`.
+   ========================================================================== */
+
+/* Top navigation menus (PLAY / PUZZLES / LEARN / WATCH). */
+html[data-theme='light'] .header-menu-trigger:hover,
+html[data-theme='light'] .header-menu-trigger:focus-visible {
+  color: #14532d;
+  background: rgba(21, 128, 61, 0.16);
+  box-shadow: 0 0 10px 1px rgba(21, 128, 61, 0.4), inset 0 0 0 1px rgba(21, 128, 61, 0.4);
+}
+
+html[data-theme='light'] .header-menu-dropdown {
+  box-shadow:
+    0 14px 28px rgba(15, 23, 42, 0.22),
+    0 0 0 1px rgba(21, 128, 61, 0.35);
+}
+
+html[data-theme='light'] .header-menu-dropdown a:hover,
+html[data-theme='light'] .header-menu-dropdown a:focus-visible {
+  color: #14532d;
+  background: rgba(21, 128, 61, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(21, 128, 61, 0.5);
+}
+
+/* Profile / Appearance dropdown rows. */
+html[data-theme='light'] .profile-item:hover,
+html[data-theme='light'] .profile-item.active {
+  color: #14532d;
+  background: rgba(21, 128, 61, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(21, 128, 61, 0.45);
+}
+
+/* Selected Theme / Table / Card Back / Sound options. */
+html[data-theme='light'] .pack-option.active,
+html[data-theme='light'] .theme-option.active,
+html[data-theme='light'] .texture-option.active,
+html[data-theme='light'] .cardback-option.active,
+html[data-theme='light'] .pack-option[aria-pressed='true'],
+html[data-theme='light'] .theme-option[aria-pressed='true'],
+html[data-theme='light'] .texture-option[aria-pressed='true'],
+html[data-theme='light'] .cardback-option[aria-pressed='true'] {
+  border-color: #15803d;
+  background: rgba(21, 128, 61, 0.16);
+  box-shadow: 0 0 10px 2px rgba(21, 128, 61, 0.55);
+  color: #0f172a;
+}
+
+html[data-theme='light'] .pack-option:hover,
+html[data-theme='light'] .theme-option:hover,
+html[data-theme='light'] .texture-option:hover,
+html[data-theme='light'] .cardback-option:hover {
+  box-shadow: 0 0 10px 2px rgba(21, 128, 61, 0.35);
+}
+
+/* The selected felt swatch and card-back preview get a dark emerald ring plus a
+   halo, so the chosen design is obvious inside the light dropdown. */
+html[data-theme='light'] .texture-option.active .texture-swatch,
+html[data-theme='light'] .texture-option[aria-pressed='true'] .texture-swatch,
+html[data-theme='light'] .cardback-option.active .cardback-preview,
+html[data-theme='light'] .cardback-option[aria-pressed='true'] .cardback-preview {
+  outline: 2px solid #15803d;
+  outline-offset: 1px;
+  box-shadow: 0 0 10px 2px rgba(21, 128, 61, 0.6);
+}
+
+/* Left sidebar: active POV tab. */
+html[data-theme='light'] .hotseat-tab:hover {
+  border-color: #15803d;
+  box-shadow: 0 0 8px 1px rgba(21, 128, 61, 0.4);
+  color: #0f172a;
+}
+
+html[data-theme='light'] .hotseat-tab.active {
+  border-color: #15803d;
+  background: rgba(21, 128, 61, 0.14);
+  box-shadow: 0 0 10px 2px rgba(21, 128, 61, 0.5);
+  color: #0f172a;
+}
+
+/* Left sidebar: ⚡ QA Scenarios hover/focus. */
+html[data-theme='light'] .qa-scenario-button:hover:not(:disabled),
+html[data-theme='light'] .qa-scenario-button:focus-visible {
+  border-color: #15803d;
+  box-shadow: 0 0 10px 2px rgba(21, 128, 61, 0.55);
+  color: #0f172a;
+}
+
+/* Left sidebar: Replay navigation hover/focus. */
+html[data-theme='light'] .review-nav-button:hover:not(:disabled),
+html[data-theme='light'] .review-nav-button:focus-visible {
+  border-color: #b45309;
+  box-shadow: 0 0 10px 2px rgba(180, 83, 9, 0.55);
+}
+
+/* Right sidebar: the running clock half and the low-time warning. */
+html[data-theme='light'] .clock-half[data-active='true'] {
+  background: rgba(21, 128, 61, 0.1);
+  box-shadow:
+    inset 0 0 0 1px rgba(21, 128, 61, 0.6),
+    inset 0 0 12px rgba(21, 128, 61, 0.18);
+}
+
+html[data-theme='light'] .clock-half.turn-clock-half[data-active='true'] {
+  background: rgba(180, 83, 9, 0.1);
+  box-shadow:
+    inset 0 0 0 1px rgba(180, 83, 9, 0.62),
+    inset 0 0 12px rgba(180, 83, 9, 0.2);
+}
+
+html[data-theme='light'] .game-clock[data-active='true'] {
+  color: #15803d;
+  text-shadow: 0 0 10px rgba(21, 128, 61, 0.55);
+}
+
+html[data-theme='light'] .turn-clock.active {
+  color: #92400e;
+  text-shadow: 0 0 10px rgba(180, 83, 9, 0.6);
+}
+
+html[data-theme='light'] .turn-clock[data-low-time='true'] {
+  color: #991b1b;
+  text-shadow: 0 0 12px rgba(185, 28, 28, 0.8);
+}
+
+/* Lobby: the player-count / seat selectors and every focused field get a dark
+   emerald focus glow instead of the pale accent outline. */
+html[data-theme='light'] .lobby-form .field select,
+html[data-theme='light'] .lobby-form .field input {
+  border-color: #94a3b8;
+}
+
+html[data-theme='light'] .lobby-form .field select:focus-visible,
+html[data-theme='light'] .lobby-form .field input:focus-visible {
+  outline: 2px solid #15803d;
+  outline-offset: 1px;
+  border-color: #15803d;
+  box-shadow: 0 0 10px 2px rgba(21, 128, 61, 0.55);
+}
+
+/* Lobby: the primary Create Game button. */
+html[data-theme='light'] .lobby-form .action-button.green {
+  box-shadow:
+    0 0 12px 2px rgba(21, 128, 61, 0.6),
+    inset 0 0 8px rgba(21, 128, 61, 0.35);
+}
+
+html[data-theme='light'] .lobby-form .action-button.green:hover:not(:disabled) {
+  box-shadow:
+    0 0 16px 4px rgba(21, 128, 61, 0.75),
+    inset 0 0 8px rgba(21, 128, 61, 0.4);
+}
+
+html[data-theme='light'] .player-tabs a:hover {
+  border-color: #15803d;
+  box-shadow: 0 0 10px 2px rgba(21, 128, 61, 0.5);
+  color: #0f172a;
 }

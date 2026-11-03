@@ -38,6 +38,15 @@ import { DEFAULT_SETTINGS, setSettings } from '../state/settings';
 import type { CardData } from '../components/Card';
 import tableCss from '../styles/table.css?raw';
 
+/** Declarations of the first rule whose selector text contains `selector`. */
+function cssRule(css: string, selector: string): string {
+  const start = css.indexOf(selector);
+  if (start === -1) return '';
+  const open = css.indexOf('{', start);
+  const close = css.indexOf('}', open);
+  return open === -1 || close === -1 ? '' : css.slice(open + 1, close);
+}
+
 const hand: CardData[] = [
   { suit: 'spades', rank: 'six' },
   { suit: 'hearts', rank: 'ace' },
@@ -2649,5 +2658,95 @@ describe('T-90-2 ITEM-PREV-4: defender hand glow before the surrender decision',
     expect(tableCss).toContain("[data-surrendering='true']");
     expect(tableCss).toContain("[data-highlighted='false']");
     expect(tableCss).toMatch(/\[data-surrendering='true'\][\s\S]*?box-shadow:\s*none/);
+  });
+
+  describe('T-90-3 light-mode emphasis glows', () => {
+    it('darkens the attack / throw-in hand prompt only in the light theme', () => {
+      const attack = cssRule(tableCss, ":root[data-theme='light'] .hand-cards.attacker-turn");
+      expect(attack).toContain('border: 1px solid rgba(15, 118, 54, 0.85)');
+      expect(attack).toContain('lightAttackerHandPulse');
+      // Throw-ins share the exact same darker prompt.
+      expect(cssRule(tableCss, ":root[data-theme='light'] .hand-cards.throw-in-turn")).toBe(
+        attack,
+      );
+      // The light pulse peaks at 0.82 alpha with an inset inner glow.
+      expect(tableCss).toMatch(
+        /@keyframes lightAttackerHandPulse\s*{[\s\S]*?50%\s*{[\s\S]*?0 0 14px 3px rgba\(21, 128, 61, 0\.82\)[\s\S]*?inset 0 0 8px rgba\(21, 128, 61, 0\.28\)/,
+      );
+      // Dark mode keeps its original amber attacker pulse untouched.
+      expect(tableCss).toMatch(
+        /@keyframes attackerPulse\s*{[\s\S]*?box-shadow: 0 0 12px 3px var\(--attacker-glow\)/,
+      );
+      expect(tableCss).toMatch(
+        /@keyframes throwInPulse\s*{[\s\S]*?box-shadow: 0 0 12px 3px var\(--attacker-glow\)/,
+      );
+    });
+
+    it('darkens the pre-surrender defender hand glow in the light theme', () => {
+      const defender = cssRule(
+        tableCss,
+        ":root[data-theme='light'] .hand-cards.defender-turn",
+      );
+      expect(defender).toContain('border: 1px solid rgba(185, 28, 28, 0.9)');
+      expect(defender).toContain('lightDefenderHandPulse');
+      expect(tableCss).toMatch(
+        /@keyframes lightDefenderHandPulse\s*{[\s\S]*?0 0 16px 4px rgba\(185, 28, 28, 0\.85\)[\s\S]*?inset 0 0 8px rgba\(185, 28, 28, 0\.3\)/,
+      );
+      // Dark mode keeps its crimson keyframe with the softer spread.
+      expect(tableCss).toMatch(
+        /@keyframes defenderHandPulse\s*{[\s\S]*?box-shadow: 0 0 12px 3px var\(--defender-hand-glow\)/,
+      );
+    });
+
+    it('darkens trump cards and uncovered attacking cards in the light theme', () => {
+      const trump = cssRule(tableCss, ":root[data-theme='light'] .card-slot.trump");
+      expect(trump).toContain('border-color: #b45309');
+      expect(trump).toContain('box-shadow: 0 0 10px 2px rgba(180, 83, 9, 0.48)');
+      // The base (dark) trump glow is still the pale gold one.
+      expect(tableCss).toMatch(
+        /\n\.card-slot\.trump\s*{[^}]*border: 1px solid #d4af37;[^}]*box-shadow: 0 0 10px rgba\(212, 175, 55, 0\.45\)/,
+      );
+
+      const uncovered = cssRule(
+        tableCss,
+        ":root[data-theme='light'] .table-pair.turn-pulse .card-slot",
+      );
+      expect(uncovered).toContain('lightUncoveredPulse');
+      expect(tableCss).toMatch(
+        /@keyframes lightUncoveredPulse\s*{[\s\S]*?0 0 14px 4px rgba\(180, 83, 9, 0\.9\)/,
+      );
+      // The dark uncovered pulse keeps its amber turnPulse keyframe.
+      expect(tableCss).toMatch(
+        /@keyframes turnPulse\s*{[\s\S]*?box-shadow: 0 0 12px 3px rgba\(217, 163, 38, 0\.8\)/,
+      );
+    });
+
+    it('darkens target outlines, the redirect outline and the table buttons', () => {
+      expect(cssRule(tableCss, ":root[data-theme='light'] .target-outline,")).toContain(
+        'border-color: #3f6212',
+      );
+      expect(
+        cssRule(tableCss, ":root[data-theme='light'] .target-outline.snap-active,"),
+      ).toContain('0 0 16px 4px rgba(21, 128, 61, 0.8)');
+      expect(cssRule(tableCss, ":root[data-theme='light'] .redirect-outline,")).toContain(
+        'border-color: #92400e',
+      );
+      expect(
+        cssRule(tableCss, ":root[data-theme='light'] .redirect-outline.snap-active,"),
+      ).toContain('0 0 16px 4px rgba(180, 83, 9, 0.82)');
+
+      // Surrender (red), Pass (green) and amber table buttons glow darker.
+      expect(cssRule(tableCss, ":root[data-theme='light'] .action-button.red")).toContain(
+        'rgba(185, 28, 28, 0.65)',
+      );
+      expect(cssRule(tableCss, ":root[data-theme='light'] .action-button.green")).toContain(
+        'rgba(21, 128, 61, 0.6)',
+      );
+      expect(cssRule(tableCss, ":root[data-theme='light'] .action-button.amber")).toContain(
+        'rgba(180, 83, 9, 0.62)',
+      );
+      // Dark action buttons stay flat (only the hover filter applies).
+      expect(tableCss).not.toMatch(/\n\.action-button\.(red|green|amber)\s*{[^}]*box-shadow/);
+    });
   });
 });

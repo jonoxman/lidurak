@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/preact';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact';
 import { HeaderBar, NAV_MENUS, PROFILE_ITEMS, connectionLevel } from '../components/HeaderBar';
 import { ALL_CARD_BACK_PATTERNS, CardBack } from '../components/CardBack';
 import { soundEngine } from '../audio/SoundEngine';
@@ -12,6 +12,16 @@ import {
   setSettings,
   subscribeSettings,
 } from '../state/settings';
+import appCss from '../app.css?raw';
+
+/** Declarations of the first rule whose selector text contains `selector`. */
+function cssRule(css: string, selector: string): string {
+  const start = css.indexOf(selector);
+  if (start === -1) return '';
+  const open = css.indexOf('{', start);
+  const close = css.indexOf('}', open);
+  return open === -1 || close === -1 ? '' : css.slice(open + 1, close);
+}
 
 const openProfile = () => fireEvent.click(screen.getByRole('button', { name: 'Account menu' }));
 
@@ -432,5 +442,71 @@ describe('HeaderBar', () => {
     unsubscribe();
     setSettings({ cardBack: 'hex-mesh' });
     expect(listener).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('T-90-3 light-mode menu and appearance glows', () => {
+  beforeEach(() => {
+    resetSettings();
+    window.localStorage.clear();
+  });
+
+  it('darkens the active Theme / Table / Card Back / Sound options', () => {
+    render(<HeaderBar />);
+
+    openSubmenu('Theme');
+    expect(screen.getByRole('button', { name: 'Device theme' }).getAttribute('aria-pressed')).toBe(
+      'true',
+    );
+    expect(cssRule(appCss, "html[data-theme='light'] .theme-option.active")).toContain(
+      'box-shadow: 0 0 10px 2px rgba(21, 128, 61, 0.55)',
+    );
+    expect(
+      cssRule(appCss, "html[data-theme='light'] .theme-option[aria-pressed='true']"),
+    ).toContain('border-color: #15803d');
+
+    // Each submenu lives in place of the main list, so start from a clean tree.
+    cleanup();
+    render(<HeaderBar />);
+    openSubmenu('Table');
+    const emerald = screen.getByRole('button', { name: /Emerald Felt/ });
+    expect(emerald.getAttribute('aria-pressed')).toBe('true');
+    expect(emerald.querySelector('.texture-swatch')).not.toBeNull();
+    expect(
+      cssRule(appCss, "html[data-theme='light'] .texture-option.active .texture-swatch"),
+    ).toContain('outline: 2px solid #15803d');
+
+    cleanup();
+    render(<HeaderBar />);
+    openSubmenu('Card Back');
+    const classic = screen.getByRole('button', { name: /Classic Hatch/ });
+    expect(classic.getAttribute('aria-pressed')).toBe('true');
+    expect(classic.querySelector('.cardback-preview')).not.toBeNull();
+    expect(
+      cssRule(appCss, "html[data-theme='light'] .cardback-option.active .cardback-preview"),
+    ).toContain('box-shadow: 0 0 10px 2px rgba(21, 128, 61, 0.6)');
+
+    cleanup();
+    render(<HeaderBar />);
+    openSubmenu('Sound');
+    expect(
+      cssRule(appCss, "html[data-theme='light'] .pack-option.active"),
+    ).toContain('box-shadow: 0 0 10px 2px rgba(21, 128, 61, 0.55)');
+  });
+
+  it('darkens the top navigation and profile menu hover/focus glows', () => {
+    expect(
+      cssRule(appCss, "html[data-theme='light'] .header-menu-trigger:hover"),
+    ).toContain('rgba(21, 128, 61, 0.4)');
+    expect(
+      cssRule(appCss, "html[data-theme='light'] .header-menu-dropdown a:hover"),
+    ).toContain('rgba(21, 128, 61, 0.5)');
+    expect(cssRule(appCss, "html[data-theme='light'] .profile-item.active")).toContain(
+      'rgba(21, 128, 61, 0.45)',
+    );
+
+    // Dark mode keeps the original flat accent-soft selection and no glow.
+    expect(cssRule(appCss, '.theme-option.active')).not.toContain('box-shadow');
+    expect(appCss).not.toMatch(/\n\.header-menu-trigger:hover\s*{[^}]*box-shadow/);
   });
 });
