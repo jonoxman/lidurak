@@ -128,6 +128,28 @@ export const DEFAULT_TABLE_FILTERS: TableFilterSettings = {
   hue: 0,
 };
 
+/**
+ * Default position of the Brightness slider, in percent (`1` = `100%`). The
+ * control keeps its historical `100%` default: theme calibration below moves
+ * the absolute felt brightness underneath it rather than the slider itself.
+ */
+export const DEFAULT_TABLE_BRIGHTNESS = 100;
+
+/** Percent range the brightness control exposes. */
+export const TABLE_BRIGHTNESS_SLIDER_MIN = 50;
+export const TABLE_BRIGHTNESS_SLIDER_MAX = 150;
+
+/**
+ * Absolute per-theme brightness calibration applied on top of the slider value.
+ * The dark felt renders slightly brighter (`1.10`) and the light felt slightly
+ * darker (`0.90`) than a straight `brightness(slider)` would, so both themes
+ * read comfortably while the slider stays at its default `100` position. The
+ * two factors stay far apart, so every preset keeps a dark surface that is
+ * distinctly darker than its light surface.
+ */
+export const DARK_MODE_BRIGHTNESS_FACTOR = 1.1;
+export const LIGHT_MODE_BRIGHTNESS_FACTOR = 0.9;
+
 /** Filter limits that keep the felt readable instead of washing it out. */
 const LIMITS = {
   brightness: { min: 0.2, max: 2 },
@@ -144,9 +166,77 @@ function setting(value: number | undefined, fallback: number, min: number, max: 
   return clamp(value, min, max);
 }
 
-/** CSS `filter` string for the felt: brightness, contrast and hue rotation. */
-export function textureFilter(filters: Partial<TableFilterSettings> = {}): string {
-  const brightness = setting(filters.brightness, DEFAULT_TABLE_FILTERS.brightness, LIMITS.brightness.min, LIMITS.brightness.max);
+/** Rounds a filter factor so the emitted CSS string stays short and stable. */
+function roundFilter(value: number, digits = 3): number {
+  const scale = 10 ** digits;
+  return Math.round(value * scale) / scale;
+}
+
+/** Absolute brightness calibration factor for an already resolved theme. */
+export function tableThemeBrightnessFactor(theme: TableTheme): number {
+  return theme === 'light' ? LIGHT_MODE_BRIGHTNESS_FACTOR : DARK_MODE_BRIGHTNESS_FACTOR;
+}
+
+/** Stored slider multiplier (`1` = `100%`) as the percentage shown by the UI. */
+export function tableBrightnessPercent(
+  brightness: number = DEFAULT_TABLE_FILTERS.brightness,
+): number {
+  const slider = setting(
+    brightness,
+    DEFAULT_TABLE_FILTERS.brightness,
+    LIMITS.brightness.min,
+    LIMITS.brightness.max,
+  );
+  return roundFilter(slider * 100, 1);
+}
+
+/** Percentage from the brightness control (`50`–`150`) back to the multiplier. */
+export function tableBrightnessFromPercent(percent: number): number {
+  const bounded = setting(
+    percent,
+    DEFAULT_TABLE_BRIGHTNESS,
+    TABLE_BRIGHTNESS_SLIDER_MIN,
+    TABLE_BRIGHTNESS_SLIDER_MAX,
+  );
+  return roundFilter(bounded / 100);
+}
+
+/**
+ * Absolute brightness the felt is painted at: the slider value scaled by the
+ * theme calibration. With the default slider (`100%` / `brightness: 1`) the
+ * dark felt renders at `1.10` and the light felt at `0.90`, and both keep
+ * scaling proportionally as the slider moves.
+ */
+export function absoluteTableBrightness(
+  filters: Partial<TableFilterSettings> = {},
+  theme?: TableTheme | 'device',
+): number {
+  const resolved = resolveTableTheme(theme);
+  const slider = setting(
+    filters.brightness,
+    DEFAULT_TABLE_FILTERS.brightness,
+    LIMITS.brightness.min,
+    LIMITS.brightness.max,
+  );
+  return roundFilter(
+    clamp(
+      slider * tableThemeBrightnessFactor(resolved),
+      LIMITS.brightness.min,
+      LIMITS.brightness.max,
+    ),
+  );
+}
+
+/**
+ * CSS `filter` string for the felt: absolute (theme-calibrated) brightness,
+ * contrast and hue rotation. An explicit `theme` wins; `device`/`undefined`
+ * resolve through [[resolveTableTheme]].
+ */
+export function textureFilter(
+  filters: Partial<TableFilterSettings> = {},
+  theme?: TableTheme | 'device',
+): string {
+  const brightness = absoluteTableBrightness(filters, theme);
   const contrast = setting(filters.contrast, DEFAULT_TABLE_FILTERS.contrast, LIMITS.contrast.min, LIMITS.contrast.max);
   const hue = setting(filters.hue, DEFAULT_TABLE_FILTERS.hue, LIMITS.hue.min, LIMITS.hue.max);
   return `brightness(${brightness}) contrast(${contrast}) hue-rotate(${hue}deg)`;
@@ -156,8 +246,11 @@ export function textureFilter(filters: Partial<TableFilterSettings> = {}): strin
  * CSS `filter` for the felt, as consumed by both the arena and the header
  * preview swatches. Alias of [[textureFilter]] kept as the settings-facing name.
  */
-export function getTableFilterCss(filters: Partial<TableFilterSettings> = {}): string {
-  return textureFilter(filters);
+export function getTableFilterCss(
+  filters: Partial<TableFilterSettings> = {},
+  theme?: TableTheme | 'device',
+): string {
+  return textureFilter(filters, theme);
 }
 
 export interface TableAppearanceSettings {
@@ -236,9 +329,10 @@ export function tableTextureStyle(
   const preset = tableTexture(id);
   const resolvedTheme = resolveTableTheme(theme);
   const palette = tableTexturePalette(preset, resolvedTheme);
-  const brightness = setting(filters.brightness, DEFAULT_TABLE_FILTERS.brightness, LIMITS.brightness.min, LIMITS.brightness.max);
+  const sliderBrightness = setting(filters.brightness, DEFAULT_TABLE_FILTERS.brightness, LIMITS.brightness.min, LIMITS.brightness.max);
   const contrast = setting(filters.contrast, DEFAULT_TABLE_FILTERS.contrast, LIMITS.contrast.min, LIMITS.contrast.max);
   const hue = setting(filters.hue, DEFAULT_TABLE_FILTERS.hue, LIMITS.hue.min, LIMITS.hue.max);
+  const themeFactor = tableThemeBrightnessFactor(resolvedTheme);
 
   return {
     backgroundColor: palette.base,
@@ -249,9 +343,13 @@ export function tableTextureStyle(
     '--table-felt-overlay-light': preset.lightOverlay,
     '--table-felt-border-light': preset.lightBorder,
     '--table-theme': resolvedTheme,
-    '--table-brightness': String(brightness),
+    // The `--table-brightness` consumed by CSS is the calibrated absolute
+    // value; the raw slider position and its factor stay inspectable next to it.
+    '--table-brightness': String(absoluteTableBrightness(filters, resolvedTheme)),
+    '--table-slider-brightness': String(roundFilter(sliderBrightness)),
+    '--table-theme-brightness-factor': String(themeFactor),
     '--table-contrast': String(contrast),
     '--table-hue': `${hue}deg`,
-    '--table-filter': textureFilter(filters),
+    '--table-filter': textureFilter(filters, resolvedTheme),
   };
 }

@@ -1,15 +1,24 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  DARK_MODE_BRIGHTNESS_FACTOR,
+  DEFAULT_TABLE_BRIGHTNESS,
   DEFAULT_TABLE_FILTERS,
   DEFAULT_TABLE_TEXTURE_ID,
+  LIGHT_MODE_BRIGHTNESS_FACTOR,
+  TABLE_BRIGHTNESS_SLIDER_MAX,
+  TABLE_BRIGHTNESS_SLIDER_MIN,
   TABLE_TEXTURES,
+  absoluteTableBrightness,
   getTableFilterCss,
   getTableTextureStyle,
   isTableTextureId,
   resolveTableTheme,
+  tableBrightnessFromPercent,
+  tableBrightnessPercent,
   tableTexture,
   tableTexturePalette,
   tableTextureStyle,
+  tableThemeBrightnessFactor,
   textureFilter,
 } from '../styles/tableTextures';
 
@@ -43,6 +52,20 @@ const luminance = (hex: string): number => {
   const channels = [0, 2, 4].map((offset) => parseInt(value.slice(offset, offset + 2), 16) / 255);
   return channels.reduce((sum, channel) => sum + channel, 0) / channels.length;
 };
+
+/** WCAG relative luminance, used to compare rendered surfaces across themes. */
+const relativeLuminance = (hex: string): number => {
+  const value = hex.replace('#', '');
+  const channels = [0, 2, 4].map((offset) => parseInt(value.slice(offset, offset + 2), 16) / 255);
+  const linear = (channel: number) =>
+    channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  return 0.2126 * linear(channels[0]) + 0.7152 * linear(channels[1]) + 0.0722 * linear(channels[2]);
+};
+
+/** Brightness a preset actually renders at once its theme calibration lands. */
+const effectiveLuminance = (preset: (typeof TABLE_TEXTURES)[number], theme: 'dark' | 'light') =>
+  relativeLuminance(theme === 'light' ? preset.lightBase : preset.base) *
+  absoluteTableBrightness({}, theme);
 
 describe('table textures', () => {
   afterEach(() => {
@@ -84,21 +107,24 @@ describe('table textures', () => {
   });
 
   it('builds a brightness/contrast/hue filter string', () => {
-    expect(textureFilter()).toBe('brightness(1) contrast(1) hue-rotate(0deg)');
-    expect(textureFilter({ brightness: 1.1, contrast: 0.9, hue: 25 })).toBe(
-      'brightness(1.1) contrast(0.9) hue-rotate(25deg)',
+    // The default slider (100%) is calibrated per theme: dark 1.10, light 0.90.
+    expect(textureFilter()).toBe('brightness(1.1) contrast(1) hue-rotate(0deg)');
+    expect(textureFilter({}, 'dark')).toBe('brightness(1.1) contrast(1) hue-rotate(0deg)');
+    expect(textureFilter({}, 'light')).toBe('brightness(0.9) contrast(1) hue-rotate(0deg)');
+    expect(textureFilter({ brightness: 1.1, contrast: 0.9, hue: 25 }, 'dark')).toBe(
+      'brightness(1.21) contrast(0.9) hue-rotate(25deg)',
     );
-    expect(textureFilter({ brightness: 1.25, contrast: 1.05, hue: -30 })).toBe(
-      'brightness(1.25) contrast(1.05) hue-rotate(-30deg)',
+    expect(textureFilter({ brightness: 1.25, contrast: 1.05, hue: -30 }, 'light')).toBe(
+      'brightness(1.125) contrast(1.05) hue-rotate(-30deg)',
     );
   });
 
   it('clamps filter settings to readable ranges', () => {
-    expect(textureFilter({ brightness: 9, contrast: -1, hue: 400 })).toBe(
+    expect(textureFilter({ brightness: 9, contrast: -1, hue: 400 }, 'dark')).toBe(
       'brightness(2) contrast(0) hue-rotate(180deg)',
     );
-    expect(textureFilter({ brightness: Number.NaN })).toBe(
-      'brightness(1) contrast(1) hue-rotate(0deg)',
+    expect(textureFilter({ brightness: Number.NaN }, 'dark')).toBe(
+      'brightness(1.1) contrast(1) hue-rotate(0deg)',
     );
   });
 
@@ -112,30 +138,36 @@ describe('table textures', () => {
     expect(style.backgroundColor).toBe('#16203a');
     expect(style.backgroundImage).toContain('repeating-linear-gradient');
     expect(style['--table-felt']).toBe('#16203a');
-    expect(style['--table-brightness']).toBe('1.2');
+    expect(style['--table-brightness']).toBe('1.32');
+    expect(style['--table-slider-brightness']).toBe('1.2');
+    expect(style['--table-theme-brightness-factor']).toBe('1.1');
     expect(style['--table-contrast']).toBe('0.95');
     expect(style['--table-hue']).toBe('-10deg');
-    expect(style['--table-filter']).toBe('brightness(1.2) contrast(0.95) hue-rotate(-10deg)');
+    expect(style['--table-filter']).toBe('brightness(1.32) contrast(0.95) hue-rotate(-10deg)');
   });
 
   it('uses neutral defaults when no filters are supplied', () => {
     const style = tableTextureStyle('forest-moss');
 
-    expect(style['--table-brightness']).toBe(String(DEFAULT_TABLE_FILTERS.brightness));
+    expect(style['--table-slider-brightness']).toBe(String(DEFAULT_TABLE_FILTERS.brightness));
+    expect(style['--table-brightness']).toBe('1.1');
     expect(style['--table-contrast']).toBe(String(DEFAULT_TABLE_FILTERS.contrast));
     expect(style['--table-hue']).toBe(`${DEFAULT_TABLE_FILTERS.hue}deg`);
-    expect(style['--table-filter']).toBe('brightness(1) contrast(1) hue-rotate(0deg)');
+    expect(style['--table-filter']).toBe('brightness(1.1) contrast(1) hue-rotate(0deg)');
   });
 
   it('exposes the same filter string through getTableFilterCss', () => {
-    expect(getTableFilterCss()).toBe('brightness(1) contrast(1) hue-rotate(0deg)');
-    expect(getTableFilterCss({ brightness: 1.2, contrast: 0.9, hue: -15 })).toBe(
-      'brightness(1.2) contrast(0.9) hue-rotate(-15deg)',
+    expect(getTableFilterCss()).toBe('brightness(1.1) contrast(1) hue-rotate(0deg)');
+    expect(getTableFilterCss({ brightness: 1.2, contrast: 0.9, hue: -15 }, 'dark')).toBe(
+      'brightness(1.32) contrast(0.9) hue-rotate(-15deg)',
     );
-    expect(getTableFilterCss({ brightness: 1.2, contrast: 0.9, hue: -15 })).toBe(
-      textureFilter({ brightness: 1.2, contrast: 0.9, hue: -15 }),
+    expect(getTableFilterCss({ brightness: 1.2, contrast: 0.9, hue: -15 }, 'dark')).toBe(
+      textureFilter({ brightness: 1.2, contrast: 0.9, hue: -15 }, 'dark'),
     );
-    expect(getTableFilterCss({ brightness: 5 })).toBe(
+    expect(getTableFilterCss({ brightness: 1.2, contrast: 0.9, hue: -15 }, 'light')).toBe(
+      'brightness(1.08) contrast(0.9) hue-rotate(-15deg)',
+    );
+    expect(getTableFilterCss({ brightness: 5 }, 'dark')).toBe(
       'brightness(2) contrast(1) hue-rotate(0deg)',
     );
   });
@@ -143,15 +175,24 @@ describe('table textures', () => {
   it('builds a felt style straight from a settings snapshot', () => {
     const defaults = getTableTextureStyle();
     expect(defaults.backgroundColor).toBe('#123f2b');
-    expect(defaults['--table-filter']).toBe('brightness(1) contrast(1) hue-rotate(0deg)');
+    expect(defaults['--table-filter']).toBe('brightness(1.1) contrast(1) hue-rotate(0deg)');
 
     const custom = getTableTextureStyle({
       tableTexture: 'vintage-oak',
       tableFilters: { brightness: 1.4, contrast: 1.1, hue: 40 },
     });
     expect(custom.backgroundColor).toBe('#3a2b1c');
-    expect(custom['--table-brightness']).toBe('1.4');
-    expect(custom['--table-filter']).toBe('brightness(1.4) contrast(1.1) hue-rotate(40deg)');
+    expect(custom['--table-slider-brightness']).toBe('1.4');
+    expect(custom['--table-brightness']).toBe('1.54');
+    expect(custom['--table-filter']).toBe('brightness(1.54) contrast(1.1) hue-rotate(40deg)');
+
+    const light = getTableTextureStyle({
+      tableTexture: 'vintage-oak',
+      tableFilters: { brightness: 1.4, contrast: 1.1, hue: 40 },
+      theme: 'light',
+    });
+    expect(light['--table-theme-brightness-factor']).toBe('0.9');
+    expect(light['--table-brightness']).toBe('1.26');
 
     expect(getTableTextureStyle({ tableTexture: 'lava-lamp' }).backgroundColor).toBe('#123f2b');
   });
@@ -195,8 +236,9 @@ describe('table textures', () => {
     // Both palettes ride along, so CSS can switch without a re-render.
     expect(dark['--table-felt-light']).toBe('#b8cce4');
     expect(dark['--table-felt-overlay-light']).toBe(light['--table-felt-overlay']);
-    // Filters are theme independent.
-    expect(light['--table-filter']).toBe('brightness(1) contrast(1) hue-rotate(0deg)');
+    // The filter is theme-calibrated: dark 1.10 vs light 0.90 at slider 100%.
+    expect(light['--table-filter']).toBe('brightness(0.9) contrast(1) hue-rotate(0deg)');
+    expect(dark['--table-filter']).toBe('brightness(1.1) contrast(1) hue-rotate(0deg)');
 
     expect(
       getTableTextureStyle({ tableTexture: 'vintage-oak', theme: 'light' }).backgroundColor,
@@ -252,5 +294,100 @@ describe('table textures', () => {
     expect(resolveTableTheme('device', lightRoot)).toBe('light');
     expect(resolveTableTheme('light', lightRoot)).toBe('light');
     expect(resolveTableTheme('dark', lightRoot)).toBe('dark');
+  });
+});
+
+describe('theme-calibrated absolute table brightness (ITEM-PB-4)', () => {
+  afterEach(() => {
+    document.documentElement.removeAttribute('data-theme');
+  });
+
+  it('keeps the brightness slider at its 100% default position', () => {
+    expect(DEFAULT_TABLE_BRIGHTNESS).toBe(100);
+    // The stored slider multiplier is unchanged: `1` is `100%`.
+    expect(DEFAULT_TABLE_FILTERS.brightness).toBe(1);
+    expect(tableBrightnessPercent()).toBe(100);
+    expect(tableBrightnessPercent(DEFAULT_TABLE_FILTERS.brightness)).toBe(100);
+    expect(tableBrightnessFromPercent(DEFAULT_TABLE_BRIGHTNESS)).toBe(1);
+
+    // Dragging the slider maps percent onto the multiplier one to one and is
+    // bounded to the 50–150 range the control exposes.
+    expect(tableBrightnessFromPercent(TABLE_BRIGHTNESS_SLIDER_MIN)).toBe(0.5);
+    expect(tableBrightnessFromPercent(TABLE_BRIGHTNESS_SLIDER_MAX)).toBe(1.5);
+    expect(tableBrightnessPercent(0.5)).toBe(50);
+    expect(tableBrightnessPercent(1.5)).toBe(150);
+    expect(tableBrightnessFromPercent(10)).toBe(0.5);
+    expect(tableBrightnessFromPercent(900)).toBe(1.5);
+  });
+
+  it('renders dark mode slightly lighter and light mode slightly darker at the default slider', () => {
+    expect(DARK_MODE_BRIGHTNESS_FACTOR).toBeGreaterThan(1);
+    expect(LIGHT_MODE_BRIGHTNESS_FACTOR).toBeLessThan(1);
+    expect(tableThemeBrightnessFactor('dark')).toBe(DARK_MODE_BRIGHTNESS_FACTOR);
+    expect(tableThemeBrightnessFactor('light')).toBe(LIGHT_MODE_BRIGHTNESS_FACTOR);
+
+    // The slider itself never moves: 100% in both themes, only the absolute
+    // brightness underneath it is calibrated.
+    expect(absoluteTableBrightness({}, 'dark')).toBe(1.1);
+    expect(absoluteTableBrightness({}, 'light')).toBe(0.9);
+    expect(
+      absoluteTableBrightness({ brightness: DEFAULT_TABLE_FILTERS.brightness }, 'dark'),
+    ).toBe(1.1);
+    expect(
+      absoluteTableBrightness({ brightness: DEFAULT_TABLE_FILTERS.brightness }, 'light'),
+    ).toBe(0.9);
+
+    // Proportional scaling across the slider's 50–150 range.
+    for (const percent of [50, 75, 100, 125, 150]) {
+      const brightness = tableBrightnessFromPercent(percent);
+      expect(absoluteTableBrightness({ brightness }, 'dark'), `${percent}% dark`).toBeCloseTo(
+        (percent / 100) * DARK_MODE_BRIGHTNESS_FACTOR,
+        5,
+      );
+      expect(absoluteTableBrightness({ brightness }, 'light'), `${percent}% light`).toBeCloseTo(
+        (percent / 100) * LIGHT_MODE_BRIGHTNESS_FACTOR,
+        5,
+      );
+    }
+
+    // The emitted style and filter carry the calibrated value, so the live
+    // arena, the header swatches and the settings store stay in sync.
+    const dark = getTableTextureStyle({ tableTexture: 'emerald-felt', theme: 'dark' });
+    expect(dark['--table-slider-brightness']).toBe('1');
+    expect(dark['--table-brightness']).toBe('1.1');
+    expect(dark['--table-filter']).toBe('brightness(1.1) contrast(1) hue-rotate(0deg)');
+
+    const light = getTableTextureStyle({ tableTexture: 'emerald-felt', theme: 'light' });
+    expect(light['--table-slider-brightness']).toBe('1');
+    expect(light['--table-brightness']).toBe('0.9');
+    expect(light['--table-filter']).toBe('brightness(0.9) contrast(1) hue-rotate(0deg)');
+  });
+
+  it('keeps every preset distinctly darker in dark mode than in light mode', () => {
+    for (const preset of TABLE_TEXTURES) {
+      const darkBase = relativeLuminance(preset.base);
+      const lightBase = relativeLuminance(preset.lightBase);
+      const darkEffective = effectiveLuminance(preset, 'dark');
+      const lightEffective = effectiveLuminance(preset, 'light');
+
+      // The palettes still order light above dark before calibration…
+      expect(lightBase, preset.id).toBeGreaterThan(darkBase);
+      // …dark mode renders slightly lighter than its unadjusted baseline…
+      expect(darkEffective, preset.id).toBeGreaterThan(darkBase);
+      // …light mode renders slightly darker than its unadjusted baseline…
+      expect(lightEffective, preset.id).toBeLessThan(lightBase);
+      // …and the calibrated dark surface is still clearly the darker one.
+      expect(darkEffective, preset.id).toBeLessThan(lightEffective - 0.1);
+
+      // Every preset emits its calibrated filter in both themes.
+      expect(
+        getTableTextureStyle({ tableTexture: preset.id, theme: 'dark' })['--table-filter'],
+        preset.id,
+      ).toContain(`brightness(${DARK_MODE_BRIGHTNESS_FACTOR})`);
+      expect(
+        getTableTextureStyle({ tableTexture: preset.id, theme: 'light' })['--table-filter'],
+        preset.id,
+      ).toContain(`brightness(${LIGHT_MODE_BRIGHTNESS_FACTOR})`);
+    }
   });
 });
