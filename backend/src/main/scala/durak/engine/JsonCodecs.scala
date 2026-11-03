@@ -81,6 +81,7 @@ object JsonCodecs:
       "isDraw" -> view.isDraw.asJson,
       "maxBoutAttacks" -> view.maxBoutAttacks.asJson,
       "myStatus" -> view.myStatus.asJson,
+      "myHasPassed" -> view.myHasPassed.asJson,
       "myFinishRank" -> view.myFinishRank.asJson,
       "winners" -> view.winners.asJson,
       "durak" -> view.durak.asJson,
@@ -123,6 +124,12 @@ object JsonCodecs:
       isDraw <- field[Boolean]("isDraw")
       maxBoutAttacks <- field[Int]("maxBoutAttacks")
       myStatus <- field[String]("myStatus")
+      // Optional additions: an older payload simply omits the viewer's own
+      // pass flag and finishing rank.
+      myHasPassed <- cursor
+        .downField("myHasPassed")
+        .as[Option[Boolean]]
+        .map(_.getOrElse(false))
       myFinishRank <- field[Option[Int]]("myFinishRank")
       winners <- field[List[String]]("winners")
       durak <- field[Option[String]]("durak")
@@ -169,6 +176,7 @@ object JsonCodecs:
       isDraw = isDraw,
       maxBoutAttacks = maxBoutAttacks,
       myStatus = myStatus,
+      myHasPassed = myHasPassed,
       myFinishRank = myFinishRank,
       winners = winners,
       durak = durak,

@@ -37,7 +37,10 @@ case class PlayerGameView(
   isDraw: Boolean,
   maxBoutAttacks: Int,
   myStatus: String,
-  myFinishRank: Option[Int],
+  // The viewer's own pass flag and finishing rank, so the PLAYERS list labels
+  // the active user exactly like it labels the opponents (ITEM-ADD-8a).
+  myHasPassed: Boolean = false,
+  myFinishRank: Option[Int] = None,
   winners: List[String],
   durak: Option[String],
   // Turn clock: absolute epoch-ms deadline (0 when idle) plus a rounded-down view of it.
@@ -110,7 +113,7 @@ object PlayerGameView:
             name = other.name,
             cardCount = other.hand.size,
             hasPassed = other.hasPassed,
-            finishRank = other.finishRank,
+            finishRank = finishRankFor(state, other),
             status = other.status,
             isTurn = prompted.contains(other.id),
             isPresent = state.isPresentSeat(idx)
@@ -129,7 +132,8 @@ object PlayerGameView:
       isDraw = state.isDraw,
       maxBoutAttacks = state.maxBoutAttacks,
       myStatus = viewer.status,
-      myFinishRank = viewer.finishRank,
+      myHasPassed = viewer.hasPassed,
+      myFinishRank = finishRankFor(state, viewer),
       winners = state.winners,
       durak = state.durak,
       turnPlayerId = if gameOver then None else state.turnPlayerId,
@@ -155,6 +159,19 @@ object PlayerGameView:
         else Vector.empty,
       redirectTargetId = redirectTargetIdFor(state)
     )
+
+  /**
+   * A seat's finishing rank, read from `finishOrder`, and only once the seat has
+   * no cards left (ITEM-ADD-8b). Any seat still holding cards is projected as
+   * unfinished, whatever a stale `finishRank` field says, so the WINNER / OUT /
+   * PASSED labels can never contradict the card count shown next to them.
+   */
+  private def finishRankFor(state: GameState, player: PlayerState): Option[Int] =
+    if player.hand.nonEmpty then None
+    else
+      state.finishOrder.indexOf(player.id) match
+        case idx if idx >= 0 => Some(idx + 1)
+        case _               => None
 
   /**
    * The seat the defender's redirect would send the attack to: the single

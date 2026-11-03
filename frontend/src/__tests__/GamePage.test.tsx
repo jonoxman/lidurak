@@ -2017,6 +2017,45 @@ describe('GamePage', () => {
     expect(sendAction).not.toHaveBeenCalled();
   });
 
+  it("labels the active user's own row from their own status fields", async () => {
+    getGameView.mockResolvedValue({
+      ...view,
+      myHand: [],
+      myHasPassed: false,
+      myFinishRank: 2,
+      tablePairs: [],
+      boutPhase: 'defense',
+      legalActions: [],
+      finishOrder: ['p1', 'p0'],
+    });
+    getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
+
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    const list = await screen.findByTestId('players-list');
+    const row = list.querySelector('[data-player-id="p0"]') as HTMLElement;
+    // ITEM-ADD-8a: the viewer's row is labelled exactly like the opponents'.
+    expect(within(row).getByText('OUT')).toBeTruthy();
+    expect(within(row).getByTestId('player-cards-p0').textContent).toBe('0 cards');
+  });
+
+  it("shows PASSED on the active user's row from their own pass flag", async () => {
+    getGameView.mockResolvedValue({
+      ...view,
+      myHasPassed: true,
+      myFinishRank: null,
+      boutPhase: 'surrenderThrowIn',
+      legalActions: ['pass'],
+    });
+    getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
+
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    const list = await screen.findByTestId('players-list');
+    const row = list.querySelector('[data-player-id="p0"]') as HTMLElement;
+    expect(within(row).getByText('PASSED')).toBeTruthy();
+  });
+
   it('opens a QA scenario preset from the left sidebar in one click', async () => {
     getGameView.mockResolvedValue(view);
     getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });

@@ -64,6 +64,13 @@ export interface PlayerGameView {
   /** Epoch-ms timestamps behind the split game/turn clocks. */
   gameStartedAtMs?: number | null;
   gameEndedAtMs?: number | null;
+  /** The viewed player's own pass flag, so their row can show `PASSED` too. */
+  myHasPassed?: boolean;
+  /**
+   * The viewed player's own finishing rank (1 = first out). Only populated once
+   * their hand is empty, so their row shows `WINNER` / `OUT` like the opponents.
+   */
+  myFinishRank?: number | null;
   /** Every winner, in finishing order (the backend's `winners` list). */
   winners?: string[];
   /** The Durak (last place) named by the backend, when there is one. */
@@ -236,6 +243,14 @@ export function parsePlayerGameView(value: unknown): PlayerGameView {
   }
   const winners = raw.winners;
   if (winners !== undefined) parseStringArray(winners, 'winners');
+  const myHasPassed = raw.myHasPassed;
+  if (myHasPassed !== undefined && typeof myHasPassed !== 'boolean') {
+    fail('myHasPassed must be a boolean');
+  }
+  const myFinishRank = raw.myFinishRank;
+  if (myFinishRank !== undefined && myFinishRank !== null && typeof myFinishRank !== 'number') {
+    fail('myFinishRank must be a number or null');
+  }
   const promptedPlayerIds = raw.promptedPlayerIds;
   if (promptedPlayerIds !== undefined) {
     parseStringArray(promptedPlayerIds, 'promptedPlayerIds');
@@ -315,6 +330,10 @@ export function parsePlayerGameView(value: unknown): PlayerGameView {
     gameStartedAtMs: (gameStartedAtMs as number | null | undefined) ?? null,
     gameEndedAtMs: (gameEndedAtMs as number | null | undefined) ?? null,
     winners: (winners as string[] | undefined) ?? [],
+    ...(myHasPassed === undefined ? {} : { myHasPassed: myHasPassed as boolean }),
+    ...(myFinishRank === undefined
+      ? {}
+      : { myFinishRank: myFinishRank as number | null }),
     durak: (durak as string | null | undefined) ?? null,
     promptedPlayerIds: (promptedPlayerIds as string[] | undefined) ?? [],
   };
