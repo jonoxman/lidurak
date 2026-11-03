@@ -2,8 +2,13 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/preact';
 import {
   GameTable,
+  attackTargetIds,
+  cardKey,
   defenderDoubleClickAction,
+  initialAttackDoubleClickAction,
+  nextPlayerWithCards,
   redirectOnlyAction,
+  seatIndexOf,
   DECK_CARD_HEIGHT,
   DECK_CARD_WIDTH,
   DISCARD_FALLBACK_WIDTH,
@@ -1490,7 +1495,7 @@ describe('feedback 7: tight glow, discard pile and reflection alignment', () => 
 
   // --- ITEM-7b: hand overlap geometry so the pile always fits ---
 
-  it('ITEM-7b: draws every discard in one non-wrapping overlapping row', () => {
+  it('ITEM-7b: keeps earlier discards in one stack and overlaps only the face-up row', () => {
     render(
       <TableDeck
         talonCount={6}
@@ -1505,31 +1510,43 @@ describe('feedback 7: tight glow, discard pile and reflection alignment', () => 
     );
 
     const pile = screen.getByTestId('discard-pile');
-    const row = screen.getByTestId('discard-stack');
-    expect(pile.contains(row)).toBe(true);
+    const stack = screen.getByTestId('discard-stack');
+    const facedown = screen.getByTestId('discard-facedown-stack');
+    const row = screen.getByTestId('discard-visible-row');
+    expect(pile.contains(stack)).toBe(true);
+    expect(stack.contains(facedown)).toBe(true);
+    expect(stack.contains(row)).toBe(true);
     expect(pile.getAttribute('aria-label')).toBe('Discard pile');
 
+    // ITEM-PB-7: the seven earlier discards are one stationary stack.
+    const faceDownSlots = Array.from(facedown.querySelectorAll('.discard-slot')) as HTMLElement[];
+    expect(faceDownSlots).toHaveLength(7);
+    expect(facedown.getAttribute('data-count')).toBe('7');
+    for (const slot of faceDownSlots) {
+      expect(slot.getAttribute('data-face')).toBe('down');
+      // No per-card offset and no lift animation on the face-down stack.
+      expect(slot.style.marginLeft).toBe('');
+      expect(slot.style.transform).toBe('');
+    }
+
+    // Only the two visible face-up cards follow the hand geometry, measured on
+    // the width the single stack leaves behind.
+    const visibleAvailable = DISCARD_FALLBACK_WIDTH - DECK_CARD_WIDTH;
+    const layout = handLayout(2, visibleAvailable, 0.5, DECK_CARD_WIDTH);
     const slots = Array.from(row.querySelectorAll('.discard-slot')) as HTMLElement[];
-    expect(slots).toHaveLength(9);
+    expect(slots).toHaveLength(2);
+    expect(row.querySelectorAll('.discard-slot[data-face="up"]')).toHaveLength(2);
+    expect(Number(row.getAttribute('data-overlap'))).toBe(layout.overlap);
+    expect(Number(row.getAttribute('data-hidden-left'))).toBe(layout.hiddenLeft);
+    expect(Number(row.getAttribute('data-hidden-right'))).toBe(layout.hiddenRight);
+    expect(Number(row.getAttribute('data-available-width'))).toBe(visibleAvailable);
+    expect(Number(row.getAttribute('data-card-width'))).toBe(DECK_CARD_WIDTH);
     expect(slots[0].style.marginLeft).toBe('0px');
     for (const slot of slots.slice(1)) {
       expect(parseFloat(slot.style.marginLeft)).toBeLessThan(0);
       expect(slot.style.transform).toBe('');
     }
-
-    // The row uses the hand geometry verbatim, card for card.
-    const layout = handLayout(9, DISCARD_FALLBACK_WIDTH, 0.5, DECK_CARD_WIDTH);
-    expect(Number(row.getAttribute('data-overlap'))).toBe(layout.overlap);
-    expect(Number(row.getAttribute('data-hidden-left'))).toBe(layout.hiddenLeft);
-    expect(Number(row.getAttribute('data-hidden-right'))).toBe(layout.hiddenRight);
-    expect(Number(row.getAttribute('data-available-width'))).toBe(DISCARD_FALLBACK_WIDTH);
-    expect(Number(row.getAttribute('data-card-width'))).toBe(DECK_CARD_WIDTH);
-
-    // The box holds 8 deck-sized cards; the ninth stacks behind at full
-    // overlap and is marked hidden, exactly like an overflowing hand.
-    expect(layout.hiddenLeft + layout.hiddenRight).toBe(1);
-    expect(row.querySelectorAll('.discard-slot[data-hidden="true"]')).toHaveLength(1);
-    expect(rowWidth(layout, DECK_CARD_WIDTH)).toBeLessThanOrEqual(DISCARD_FALLBACK_WIDTH);
+    expect(rowWidth(layout, DECK_CARD_WIDTH)).toBeLessThanOrEqual(visibleAvailable);
 
     const rule = cssRule('.discard-stack');
     expect(rule).toContain('flex-wrap: nowrap');
@@ -1538,10 +1555,6 @@ describe('feedback 7: tight glow, discard pile and reflection alignment', () => 
     expect(rule).toContain('min-width: 0');
     expect(rule).toContain('box-sizing: border-box');
     expect(cssRule('.table-discard')).toContain('overflow: hidden');
-
-    // Earlier bouts face-down, the last bout face-up, all in the same row.
-    expect(row.querySelectorAll('.discard-slot[data-face="down"]')).toHaveLength(7);
-    expect(row.querySelectorAll('.discard-slot[data-face="up"]')).toHaveLength(2);
   });
 
   it('ITEM-7b: never lets the discard row exceed the available pile width', () => {
@@ -1566,7 +1579,7 @@ describe('feedback 7: tight glow, discard pile and reflection alignment', () => 
       />,
     );
 
-    const row = screen.getByTestId('discard-stack');
+    const row = screen.getByTestId('discard-visible-row');
     const hiddenTotal =
       Number(row.getAttribute('data-hidden-left')) + Number(row.getAttribute('data-hidden-right'));
     expect(hiddenTotal).toBeGreaterThan(0);
@@ -1700,5 +1713,473 @@ describe('feedback 7: tight glow, discard pile and reflection alignment', () => 
     );
 
     expect(screen.queryByTestId('redirect-outline')).toBeNull();
+  });
+});
+
+describe('T-90-3: outline lift, discard stack, chaos targets, deflect arrow and bot lock', () => {
+  const cssRule = (selector: string): string => {
+    const start = tableCss.indexOf(`\n${selector} {`);
+    expect(start).toBeGreaterThan(-1);
+    const end = tableCss.indexOf('}', start);
+    return tableCss.slice(start, end);
+  };
+
+  const threeWayOpponents: OpponentSummary[] = [
+    { id: 'p0', name: 'Alice', cardCount: 5, hasPassed: false, finishRank: null },
+    { id: 'p2', name: 'Carol', cardCount: 5, hasPassed: false, finishRank: null },
+  ];
+
+  // --- ITEM-PB-3: all-legal hand outline ---
+
+  it('ITEM-PB-3: reports all-legal only when every hand card can be played', () => {
+    const allLegal = sortableHand.map(cardKey);
+    const { unmount } = renderSortableTable({ awaitingAttack: true, playableKeys: allLegal });
+    expect(screen.getByTestId('hand-turn-highlight').getAttribute('data-all-legal')).toBe('true');
+    unmount();
+
+    renderSortableTable({ awaitingAttack: true, playableKeys: allLegal.slice(0, 3) });
+    expect(screen.getByTestId('hand-turn-highlight').getAttribute('data-all-legal')).toBe('false');
+  });
+
+  it('ITEM-PB-3: stays at the baseline when a card is not legal or the hand is empty', () => {
+    const allLegal = sortableHand.map(cardKey);
+    // The flag tracks legality only; the stylesheet also requires an active
+    // glow before the box moves, so an idle hand stays at the baseline.
+    const { unmount } = renderSortableTable({ playableKeys: allLegal });
+    const idle = screen.getByTestId('hand-turn-highlight');
+    expect(idle.getAttribute('data-all-legal')).toBe('true');
+    expect(idle.getAttribute('data-active')).toBe('false');
+    unmount();
+
+    renderSortableTable({ awaitingAttack: true, playableKeys: allLegal.slice(0, 3) });
+    expect(screen.getByTestId('hand-turn-highlight').getAttribute('data-all-legal')).toBe('false');
+  });
+
+  it('ITEM-PB-3: never reports all-legal for an empty hand', () => {
+    renderSortableTable({ myHand: [], awaitingAttack: true, playableKeys: [] });
+
+    const highlight = screen.getByTestId('hand-turn-highlight');
+    expect(highlight.getAttribute('data-all-legal')).toBe('false');
+    expect(highlight.getAttribute('data-active')).toBe('true');
+  });
+
+  it('ITEM-PB-3: translates the outline box and keeps the slots inside it', () => {
+    const rule = cssRule(".hand-cards[data-all-legal='true'][data-active='true']");
+    expect(rule).toContain('transform: translateY(-8px)');
+
+    const slotRule = cssRule(
+      ".hand-cards[data-all-legal='true'][data-active='true'] .card-slot.legal-playable",
+    );
+    expect(slotRule).toContain('transform: none');
+
+    renderSortableTable({ awaitingAttack: true, playableKeys: sortableHand.map(cardKey) });
+    const highlight = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+    for (const slot of Array.from(highlight.children) as HTMLElement[]) {
+      expect(slot.style.transform).toBe('');
+    }
+  });
+
+  // --- ITEM-PB-7: face-down discard stack ---
+
+  it('ITEM-PB-7: stacks every face-down discard in one inert card footprint', () => {
+    render(
+      <TableDeck talonCount={6} bottomTrumpCard={null} trumpSuit="spades" discardCount={18} />,
+    );
+
+    const stack = screen.getByTestId('discard-facedown-stack') as HTMLElement;
+    expect(screen.queryByTestId('discard-visible-row')).toBeNull();
+    expect(stack.querySelectorAll('.discard-slot')).toHaveLength(18);
+    expect(stack.getAttribute('data-count')).toBe('18');
+
+    // No cursor handler at all, and no per-card offset: a single stationary pile.
+    expect(stack.onmousemove).toBeNull();
+    for (const slot of Array.from(stack.querySelectorAll('.discard-slot')) as HTMLElement[]) {
+      expect(slot.style.marginLeft).toBe('');
+      expect(slot.style.transform).toBe('');
+    }
+
+    const stackRule = cssRule('.discard-facedown-stack');
+    expect(stackRule).toContain('display: grid');
+    expect(stackRule).toContain('pointer-events: none');
+    const cardRule = cssRule('.discard-facedown-stack .discard-slot');
+    expect(cardRule).toContain('grid-area: 1 / 1');
+    expect(cardRule).toContain('transition: none');
+
+    // The cursor never moves anything on hover.
+    const before = stack.innerHTML;
+    fireEvent.mouseMove(stack, { clientX: 120 });
+    fireEvent.mouseOver(stack.querySelector('.discard-slot') as HTMLElement);
+    expect(stack.innerHTML).toBe(before);
+    expect(screen.queryByTestId('discard-visible-row')).toBeNull();
+  });
+
+  // --- ITEM-CHAOS-1: multi-target outlines and double-click safety ---
+
+  it('ITEM-CHAOS-1: resolves targets from the server projection first', () => {
+    expect(
+      attackTargetIds({
+        myId: 'p0',
+        opponents: activeOpponents,
+        defenderId: 'p1',
+        chaosMode: true,
+        eligibleTargetIds: ['p2'],
+      }),
+    ).toEqual(['p2']);
+    expect(
+      attackTargetIds({ myId: 'p0', opponents: activeOpponents, defenderId: 'p1' }),
+    ).toEqual(['p1']);
+    expect(
+      attackTargetIds({
+        myId: 'p0',
+        opponents: [
+          ...activeOpponents,
+          { id: 'p3', name: 'Dave', cardCount: 0, hasPassed: true, finishRank: 2 },
+        ],
+        chaosMode: true,
+      }),
+    ).toEqual(['p1', 'p2']);
+  });
+
+  it('ITEM-CHAOS-1: renders an outline anchored at every eligible target seat', () => {
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={[]}
+        trumpSuit="diamonds"
+        defenderId="p1"
+        chaosMode
+        eligibleTargetIds={['p1', 'p2']}
+        awaitingAttack
+      />,
+    );
+
+    expect(screen.getByTestId('target-outline-p1').getAttribute('data-anchor-seat')).toBe(
+      'top-left',
+    );
+    expect(screen.getByTestId('target-outline-p2').getAttribute('data-anchor-seat')).toBe(
+      'top-right',
+    );
+  });
+
+  it('ITEM-CHAOS-1: only auto-plays via double-click when exactly one target exists', () => {
+    const card: CardData = { suit: 'spades', rank: 'six' };
+
+    expect(initialAttackDoubleClickAction(card, 'p0', ['p1'])).toEqual({
+      type: 'initialAttack',
+      playerId: 'p0',
+      cards: [card],
+      targetPlayerId: 'p1',
+    });
+    expect(initialAttackDoubleClickAction(card, 'p0', ['p1', 'p2'])).toBeNull();
+    expect(initialAttackDoubleClickAction(card, 'p0', [])).toBeNull();
+
+    const onCardDoubleClick = vi.fn();
+    const { unmount } = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={[]}
+        trumpSuit="diamonds"
+        defenderId="p1"
+        chaosMode
+        awaitingAttack
+        onCardDoubleClick={onCardDoubleClick}
+      />,
+    );
+    fireEvent.dblClick(screen.getByLabelText('six of spades'));
+    expect(onCardDoubleClick).not.toHaveBeenCalled();
+    unmount();
+
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={[activeOpponents[0]]}
+        tablePairs={[]}
+        trumpSuit="diamonds"
+        defenderId="p1"
+        chaosMode
+        awaitingAttack
+        onCardDoubleClick={onCardDoubleClick}
+      />,
+    );
+    fireEvent.dblClick(screen.getByLabelText('six of spades'));
+    expect(onCardDoubleClick).toHaveBeenCalledTimes(1);
+  });
+
+  // --- ITEM-ADD-1: 3-player deflect arrow ---
+
+  it('ITEM-ADD-1: points Bob’s deflect arrow at Carol (top-right), never Alice', () => {
+    const bobHand: CardData[] = [
+      { suit: 'hearts', rank: 'six' },
+      { suit: 'hearts', rank: 'nine' },
+      { suit: 'hearts', rank: 'ten' },
+    ];
+    render(
+      <GameTable
+        myId="p1"
+        myHand={bobHand}
+        opponents={threeWayOpponents}
+        tablePairs={uncoveredPair}
+        trumpSuit="spades"
+        attackerId="p0"
+        defenderId="p1"
+        canRedirect
+      />,
+    );
+
+    const outline = screen.getByTestId('redirect-outline');
+    expect(outline.getAttribute('data-target-seat')).toBe('top-right');
+    expect(outline.getAttribute('data-target-player')).toBe('p2');
+    expect(outline.getAttribute('data-direction')).toBe('top-right');
+    expect(outline.getAttribute('data-target-seat')).not.toBe('top-left');
+    expect(outline.getAttribute('data-target-player')).not.toBe('p0');
+  });
+
+  it('ITEM-ADD-1: follows the server’s redirectTargetId and the viewer’s own seat', () => {
+    expect(seatIndexOf('p2')).toBe(2);
+    expect(seatIndexOf('bob')).toBeNull();
+    expect(
+      nextPlayerWithCards('p1', [
+        { id: 'p0', cardCount: 6 },
+        { id: 'p1', cardCount: 6 },
+        { id: 'p2', cardCount: 6 },
+      ]),
+    ).toBe('p2');
+    expect(
+      nextPlayerWithCards('p1', [
+        { id: 'p0', cardCount: 3 },
+        { id: 'p1', cardCount: 6 },
+        { id: 'p2', cardCount: 0, finished: true },
+      ]),
+    ).toBe('p0');
+
+    const wrapped = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={threeWayOpponents}
+        tablePairs={uncoveredPair}
+        trumpSuit="spades"
+        attackerId="p1"
+        defenderId="p1"
+        canRedirect
+      />,
+    );
+    // Without a server hint the viewer's own seat still resolves to `bottom`
+    // for a redirect that comes back around the table.
+    expect(screen.getByTestId('redirect-outline').getAttribute('data-target-player')).toBe('p0');
+    expect(screen.getByTestId('redirect-outline').getAttribute('data-target-seat')).toBe('bottom');
+    wrapped.unmount();
+
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={threeWayOpponents}
+        tablePairs={uncoveredPair}
+        trumpSuit="spades"
+        attackerId="p1"
+        defenderId="p1"
+        canRedirect
+        redirectTargetId="p2"
+      />,
+    );
+    expect(screen.getByTestId('redirect-outline').getAttribute('data-target-player')).toBe('p2');
+    expect(screen.getByTestId('redirect-outline').getAttribute('data-target-seat')).toBe(
+      'top-right',
+    );
+  });
+
+  // --- ITEM-ADD-3: statically centred play area ---
+
+  it('ITEM-ADD-3: never moves or resizes the shaded play area itself', () => {
+    const rule = cssRule('.battlefield-tinted-box');
+    expect(rule).toContain('justify-self: center');
+    expect(rule).toContain('align-self: center');
+    expect(rule).toContain('transform: none');
+    expect(rule).toContain('overflow: visible');
+    expect(rule).toContain('padding: 12px');
+    expect(rule).toContain('width: 88%');
+    expect(rule).toContain('height: var(--battlefield-height');
+
+    // The old "shade follows the defender" rules are gone.
+    expect(tableCss).not.toContain(".bout-area[data-anchor='top-left']");
+    expect(tableCss).not.toContain(".bout-area[data-anchor='top-right']");
+
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={uncoveredPair}
+        trumpSuit="diamonds"
+        defenderId="p1"
+      />,
+    );
+
+    const box = screen.getByTestId('play-area-box');
+    expect(box.style.width).toBe('');
+    expect(box.style.height).toBe('');
+    expect(box.style.transform).toBe('');
+    expect(screen.getByTestId('table-pairs-group').getAttribute('data-anchor-seat')).toBe(
+      'top-left',
+    );
+  });
+
+  it('ITEM-ADD-3: anchors the bout in the bottom-centre when the viewer defends', () => {
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={uncoveredPair}
+        trumpSuit="diamonds"
+        defenderId="p0"
+        defending
+      />,
+    );
+
+    expect(screen.getByTestId('table-pairs-group').getAttribute('data-anchor-seat')).toBe(
+      'bottom',
+    );
+    expect(cssRule(".battlefield-tinted-box > [data-anchor-seat='bottom']")).toContain(
+      'align-self: end',
+    );
+  });
+
+  // --- ITEM-ADD-4: half on / half off surrender ---
+
+  it('ITEM-ADD-4: straddles the shaded edge toward the surrendering seat', () => {
+    // The three top seats share one grouped rule, so search for the selector
+    // itself instead of requiring it to open a rule block.
+    const topSelector = ".table-pairs-group[data-surrendered='true'][data-surrender-target='top-center']";
+    const topStart = tableCss.indexOf(topSelector);
+    expect(topStart).toBeGreaterThan(-1);
+    expect(tableCss.slice(topStart, tableCss.indexOf('}', topStart))).toContain(
+      'transform: translateY(-50%)',
+    );
+    expect(
+      cssRule(".table-pairs-group[data-surrendered='true'][data-surrender-target='bottom']"),
+    ).toContain('transform: translateY(50%)');
+
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={tablePairs}
+        trumpSuit="diamonds"
+        defenderId="p0"
+        boutPhase="SurrenderThrowIn"
+      />,
+    );
+
+    const group = screen.getByTestId('table-pairs-group');
+    expect(group.getAttribute('data-surrendered')).toBe('true');
+    expect(group.getAttribute('data-surrender-target')).toBe('bottom');
+    // The cards stay put while more throw-ins land on the pile.
+    expect(group.querySelectorAll('.table-pair')).toHaveLength(tablePairs.length);
+  });
+
+  // --- ITEM-ADD-6: fixed table rows ---
+
+  it('ITEM-ADD-6: reserves every row independently of the card counts', () => {
+    const arenaRule = cssRule("[data-zone='table-arena']");
+    expect(arenaRule).toContain('grid-template-rows: var(--seat-row-height)');
+    expect(arenaRule).toContain('--hand-row-height');
+    expect(cssRule('.opponent-hand')).toContain('min-height: 44px');
+    expect(cssRule("[data-zone='player-hand']")).toContain('min-height: var(--hand-row-height');
+
+    const empty = render(
+      <GameTable
+        myId="p0"
+        myHand={[]}
+        opponents={[{ id: 'p1', name: 'Bob', cardCount: 0, hasPassed: false, finishRank: null }]}
+        tablePairs={[]}
+        trumpSuit="diamonds"
+      />,
+    );
+    const emptySeat = screen.getByTestId('opponent');
+    const emptySnapshot = {
+      seat: emptySeat.getAttribute('data-seat'),
+      seatHeight: (emptySeat as HTMLElement).style.getPropertyValue('--seat-height'),
+      handZone: Boolean(document.querySelector('[data-zone="player-hand"]')),
+    };
+    empty.unmount();
+
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={[{ id: 'p1', name: 'Bob', cardCount: 6, hasPassed: false, finishRank: null }]}
+        tablePairs={[]}
+        trumpSuit="diamonds"
+      />,
+    );
+    const fullSeat = screen.getByTestId('opponent');
+    expect({
+      seat: fullSeat.getAttribute('data-seat'),
+      seatHeight: (fullSeat as HTMLElement).style.getPropertyValue('--seat-height'),
+      handZone: Boolean(document.querySelector('[data-zone="player-hand"]')),
+    }).toEqual(emptySnapshot);
+  });
+
+  // --- ITEM-ADD-9: bot seat input lock ---
+
+  it('ITEM-ADD-9: locks every move surface for a bot seat', () => {
+    const onAttackDrop = vi.fn();
+    const { container } = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={[]}
+        trumpSuit="diamonds"
+        defenderId="p1"
+        chaosMode
+        awaitingAttack
+        defending
+        canRedirect
+        canThrowIn
+        isBot
+        playableKeys={hand.map(cardKey)}
+        onAttackDrop={onAttackDrop}
+        onCoverDrop={() => {}}
+        onThrowInDrop={() => {}}
+        onRedirectDrop={() => {}}
+      >
+        <ActionBar legalActions={['pass', 'surrender']} onAction={() => {}} />
+      </GameTable>,
+    );
+
+    const arena = container.querySelector('[data-zone="table-arena"]') as HTMLElement;
+    expect(arena.getAttribute('data-bot-locked')).toBe('true');
+    expect(arena.getAttribute('data-review-mode')).toBe('false');
+    expect(screen.queryByTestId('target-outline-p1')).toBeNull();
+    expect(screen.queryByTestId('target-outline-p2')).toBeNull();
+    expect(screen.queryByTestId('redirect-outline')).toBeNull();
+    expect(container.querySelector('[data-drop-zone]')).toBeNull();
+    expect(container.querySelectorAll('[draggable="true"]')).toHaveLength(0);
+    expect(container.querySelector('[data-zone="player-controls"]')).toBeNull();
+    expect(screen.queryByText('Pass')).toBeNull();
+    expect(screen.queryByText('Surrender')).toBeNull();
+
+    const highlight = screen.getByTestId('hand-turn-highlight');
+    expect(highlight.getAttribute('data-active')).toBe('false');
+    expect(highlight.getAttribute('data-all-legal')).toBe('false');
+    expect(container.querySelectorAll('.card-slot[data-playable="true"]')).toHaveLength(0);
+  });
+
+  it('ITEM-ADD-9: hides Surrender and Pass in ActionBar for a bot seat', () => {
+    render(
+      <ActionBar legalActions={['pass', 'surrender']} onAction={() => {}} isBotSeat />,
+    );
+
+    expect(screen.queryByText('Pass')).toBeNull();
+    expect(screen.queryByText('Surrender')).toBeNull();
   });
 });

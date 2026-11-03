@@ -1012,11 +1012,18 @@ describe('GamePage', () => {
     expect(screen.queryByTestId('discard-count')).toBeNull();
     expect(pile.querySelector('.deck-count-badge')).toBeNull();
 
-    // Feedback #7b: one single-row pile holding exactly `discardCount` cards.
-    const slots = Array.from(pile.querySelectorAll('.discard-slot')) as HTMLElement[];
-    expect(slots).toHaveLength(5);
-    expect(slots[0].style.marginLeft).toBe('0px');
-    for (const slot of slots.slice(1)) {
+    // Feedback #7b / T-90-3 ITEM-PB-7: the earlier discards are ONE stationary
+    // face-down stack (no per-card offset); only the visible face-up cards of
+    // the last bout use the responsive overlap row.
+    const stack = screen.getByTestId('discard-facedown-stack');
+    const row = screen.getByTestId('discard-visible-row');
+    const faceDownSlots = Array.from(stack.querySelectorAll('.discard-slot')) as HTMLElement[];
+    const visibleSlots = Array.from(row.querySelectorAll('.discard-slot')) as HTMLElement[];
+    expect(faceDownSlots).toHaveLength(3);
+    expect(visibleSlots).toHaveLength(2);
+    for (const slot of faceDownSlots) expect(slot.style.marginLeft).toBe('');
+    expect(visibleSlots[0].style.marginLeft).toBe('0px');
+    for (const slot of visibleSlots.slice(1)) {
       expect(parseFloat(slot.style.marginLeft)).toBeLessThan(0);
     }
 

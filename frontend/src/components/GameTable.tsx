@@ -6,7 +6,12 @@ import type { SortMode } from './SortBar';
 import { TablePair } from './TablePair';
 import { useSettings } from '../state/settings';
 import { getTableFilterCss } from '../styles/tableTextures';
-import { buildCoverCard, buildRedirectAttack, type GameAction } from '../types';
+import {
+  buildCoverCard,
+  buildInitialAttack,
+  buildRedirectAttack,
+  type GameAction,
+} from '../types';
 import '../styles/table.css';
 
 export interface OpponentSummary {
@@ -46,6 +51,17 @@ export interface GameTableProps {
   defenderId?: string;
   /** Chaos Mode: the attacker may target any active opponent. */
   chaosMode?: boolean;
+  /**
+   * Server-projected seats the attacker may aim at right now. Takes precedence
+   * over the local Chaos/defender fallback when it is non-empty.
+   */
+  eligibleTargetIds?: string[];
+  /** The seat a reflection would reach, so the arrow points at that player. */
+  redirectTargetId?: string | null;
+  /** The viewed seat is computer-controlled: the table accepts no move input. */
+  isBot?: boolean;
+  /** Alias of `isBot` for callers that name the seat instead of the view. */
+  isBotSeat?: boolean;
   /** True while the viewer is the attacker who owes an attack or throw-in. */
   awaitingAttack?: boolean;
   /** True while the viewer is the defender facing uncovered attacks. */
@@ -302,29 +318,29 @@ export function TableDeck({
     };
   }, []);
 
-  // Item 7a: no discard counter any more. Every discard becomes its own card:
-  // the earlier bouts face-down and the last finished bout face-up.
+  // Item 7a: no discard counter any more. Item PB-7: the pile splits into a
+  // single stationary face-down stack (every earlier bout) and the responsive
+  // face-up row (the last finished bout), so the overlap geometry only ever
+  // applies to the visible cards.
   const faceDownCount = Math.max(0, discardCount - lastDiscardCards.length);
-  const discardFaces: Array<CardData | null> = [
-    ...Array.from({ length: faceDownCount }, () => null),
-    ...lastDiscardCards,
-  ];
   const discardAvailable = Math.max(
     deckCardWidth,
     discardWidth > 0 ? discardWidth : DISCARD_FALLBACK_WIDTH,
   );
-  const discardLayoutState = handLayout(
-    discardFaces.length,
-    discardAvailable,
+  // The face-up row may only use the width the single stack leaves behind.
+  const visibleAvailable = Math.max(
+    deckCardWidth,
+    discardAvailable - (faceDownCount > 0 ? deckCardWidth : 0),
+  );
+  const visibleLayout = handLayout(
+    lastDiscardCards.length,
+    visibleAvailable,
     discardCursor,
     deckCardWidth,
   );
-  const discardMarginList = handMargins(
-    discardLayoutState,
-    discardFaces.length,
-    deckCardWidth,
-  );
-  const discardHidden = discardLayoutState.hiddenLeft + discardLayoutState.hiddenRight;
+  const visibleMargins = handMargins(visibleLayout, lastDiscardCards.length, deckCardWidth);
+  const discardHidden = visibleLayout.hiddenLeft + visibleLayout.hiddenRight;
+  const hasDiscard = faceDownCount + lastDiscardCards.length > 0;
 
   return (
     <div class="table-deck" data-zone="table-deck" aria-label="Talon">
@@ -378,53 +394,83 @@ export function TableDeck({
         ref={discardRef}
       >
         <span class="discard-title">Discard</span>
-        {discardFaces.length > 0 ? (
+        {hasDiscard ? (
           <div
             class="discard-stack"
             data-testid="discard-stack"
-            data-overlap={discardLayoutState.overlap}
-            data-hidden-left={discardLayoutState.hiddenLeft}
-            data-hidden-right={discardLayoutState.hiddenRight}
-            data-cursor-fraction={discardCursor}
+            data-facedown-count={faceDownCount}
             data-card-width={deckCardWidth}
             data-available-width={discardAvailable}
-            onMouseMove={
-              discardHidden > 0
-                ? (event) => {
-                    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-                    if (rect.width <= 0) return;
-                    const fraction = (event.clientX - rect.left) / rect.width;
-                    setDiscardCursor(Math.min(1, Math.max(0, fraction)));
-                  }
-                : undefined
-            }
-            onMouseLeave={discardHidden > 0 ? () => setDiscardCursor(0.5) : undefined}
           >
-            {discardFaces.map((card, index) => {
-              const hidden =
-                index < discardLayoutState.hiddenLeft ||
-                index >= discardLayoutState.hiddenLeft + discardLayoutState.visibleCount;
-              return (
-                <span
-                  key={`discard-${index}-${card ? `${card.suit}-${card.rank}` : 'back'}`}
-                  class="discard-slot"
-                  data-face={card ? 'up' : 'down'}
-                  data-hidden={hidden ? 'true' : 'false'}
-                  data-index={index}
-                  style={{ marginLeft: `${discardMarginList[index]}px` }}
-                >
-                  {card ? (
-                    <Card
-                      suit={card.suit}
-                      rank={card.rank}
-                      trump={isTrumpCard(card, trumpSuit)}
-                    />
-                  ) : (
+            {/* ITEM-PB-7: every earlier discard is one stationary stack with
+                100% overlap. It takes no pointer events and follows no cursor,
+                so hovering it never lifts or slides anything. */}
+            {faceDownCount > 0 ? (
+              <div
+                class="discard-facedown-stack"
+                data-testid="discard-facedown-stack"
+                data-count={faceDownCount}
+                aria-hidden="true"
+              >
+                {Array.from({ length: faceDownCount }, (_, index) => (
+                  <span
+                    key={`discard-back-${index}`}
+                    class="discard-slot discard-facedown-card"
+                    data-face="down"
+                    data-index={index}
+                  >
                     <CardBack class="discard-back" />
-                  )}
-                </span>
-              );
-            })}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            {/* ITEM-PB-7: only the visible face-up cards use the hand's
+                single-row overlap, measured against the remaining width. */}
+            {lastDiscardCards.length > 0 ? (
+              <div
+                class="discard-visible-row"
+                data-testid="discard-visible-row"
+                data-overlap={visibleLayout.overlap}
+                data-hidden-left={visibleLayout.hiddenLeft}
+                data-hidden-right={visibleLayout.hiddenRight}
+                data-cursor-fraction={discardCursor}
+                data-card-width={deckCardWidth}
+                data-available-width={visibleAvailable}
+                onMouseMove={
+                  discardHidden > 0
+                    ? (event) => {
+                        const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+                        if (rect.width <= 0) return;
+                        const fraction = (event.clientX - rect.left) / rect.width;
+                        setDiscardCursor(Math.min(1, Math.max(0, fraction)));
+                      }
+                    : undefined
+                }
+                onMouseLeave={discardHidden > 0 ? () => setDiscardCursor(0.5) : undefined}
+              >
+                {lastDiscardCards.map((card, index) => {
+                  const hidden =
+                    index < visibleLayout.hiddenLeft ||
+                    index >= visibleLayout.hiddenLeft + visibleLayout.visibleCount;
+                  return (
+                    <span
+                      key={`discard-${index}-${card.suit}-${card.rank}`}
+                      class="discard-slot"
+                      data-face="up"
+                      data-hidden={hidden ? 'true' : 'false'}
+                      data-index={index}
+                      style={{ marginLeft: `${visibleMargins[index]}px` }}
+                    >
+                      <Card
+                        suit={card.suit}
+                        rank={card.rank}
+                        trump={isTrumpCard(card, trumpSuit)}
+                      />
+                    </span>
+                  );
+                })}
+              </div>
+            ) : null}
           </div>
         ) : (
           <span class="discard-empty" data-testid="discard-empty">
@@ -588,6 +634,90 @@ export function seatForOffset(offset: number, playerCount: number): SeatPosition
   return seats[offset - 1] ?? 'top-right';
 }
 
+/** Numeric seat of a `p<index>` id, or `null` for an unrecognised id. */
+export function seatIndexOf(playerId: string): number | null {
+  const match = /^p(\d+)$/.exec(playerId);
+  return match ? Number(match[1]) : null;
+}
+
+/** A seat reduced to what the reflection target needs to know. */
+export interface SeatedPlayer {
+  id: string;
+  cardCount: number;
+  finished?: boolean;
+}
+
+/**
+ * The next seat clockwise (`p0 -> p1 -> ... -> p0`) after `afterId` that still
+ * holds cards. The reflection arrow must point at the player who will actually
+ * receive the attack, not at the seat that just played it — in a 3-player game
+ * Bob defending Alice's attack reflects onto Carol, never back onto Alice.
+ */
+export function nextPlayerWithCards(
+  afterId: string,
+  players: SeatedPlayer[],
+): string | null {
+  const seatNumber = (id: string): number => seatIndexOf(id) ?? Number.MAX_SAFE_INTEGER;
+  const ordered = [...players].sort((left, right) => seatNumber(left.id) - seatNumber(right.id));
+  const start = ordered.findIndex((player) => player.id === afterId);
+  const isReceiver = (player: SeatedPlayer): boolean =>
+    player.id !== afterId && !player.finished && player.cardCount > 0;
+
+  if (start < 0) return ordered.find(isReceiver)?.id ?? null;
+  for (let step = 1; step <= ordered.length; step += 1) {
+    const candidate = ordered[(start + step) % ordered.length];
+    if (isReceiver(candidate)) return candidate.id;
+  }
+  return null;
+}
+
+export interface AttackTargetContext {
+  myId: string;
+  opponents: OpponentSummary[];
+  defenderId?: string;
+  chaosMode?: boolean;
+  /** Server-projected legal targets; takes precedence when non-empty. */
+  eligibleTargetIds?: string[];
+}
+
+/** Every seat the viewer may aim an opening attack at, in opponent order. */
+export function attackTargetIds(context: AttackTargetContext): string[] {
+  const {
+    myId,
+    opponents,
+    defenderId,
+    chaosMode = false,
+    eligibleTargetIds = [],
+  } = context;
+  if (eligibleTargetIds.length > 0) {
+    return opponents
+      .filter((opponent) => opponent.id !== myId && eligibleTargetIds.includes(opponent.id))
+      .map((opponent) => opponent.id);
+  }
+  if (chaosMode) {
+    return opponents
+      .filter((opponent) => opponent.finishRank == null && opponent.cardCount > 0)
+      .map((opponent) => opponent.id);
+  }
+  return defenderId
+    ? opponents.filter((opponent) => opponent.id === defenderId).map((opponent) => opponent.id)
+    : [];
+}
+
+/**
+ * Resolves a double-clicked hand card during the opening attack. Only a single
+ * eligible target is unambiguous; with several Chaos targets the player drags
+ * the card onto the desired player's outline instead of guessing.
+ */
+export function initialAttackDoubleClickAction(
+  card: CardData,
+  playerId: string,
+  eligibleTargetIds: string[],
+): GameAction | null {
+  if (eligibleTargetIds.length !== 1) return null;
+  return buildInitialAttack(playerId, [card], eligibleTargetIds[0]);
+}
+
 /** True for the backend phases that follow a defender's surrender. */
 export function isSurrenderedPhase(phase: string | undefined): boolean {
   if (!phase) return false;
@@ -708,6 +838,10 @@ export function GameTable({
   attackerId,
   defenderId,
   chaosMode = false,
+  eligibleTargetIds = [],
+  redirectTargetId = null,
+  isBot = false,
+  isBotSeat = false,
   awaitingAttack = false,
   defending = false,
   boutPhase,
@@ -740,6 +874,10 @@ export function GameTable({
 
   const hand = sortHand(myHand, sortMode, trumpSuit);
   const seats = assignSeats(opponents);
+  // ITEM-ADD-9: a bot seat accepts no user input at all, exactly like review
+  // mode. `legalActions` is already empty for a bot on the server; this also
+  // locks the local drag/double-click/drop surfaces.
+  const isBotView = Boolean(isBot || isBotSeat);
 
   // Item 3a: measure the OUTER `[data-zone="player-hand"]` wrapper, never the
   // highlight box itself (it is sized by the very cards it wraps). The box pads
@@ -781,7 +919,15 @@ export function GameTable({
   // Rhythm nudges go only to the client that has to act: uncovered attacks for
   // the defender, the whole hand for the attacker who owes a play. The pulse
   // sits on the cards container so the highlight hugs the cards tightly.
-  const reviewMode = isReviewMode;
+  const reviewMode = isReviewMode || isBotView;
+  // ITEM-PB-3: when every card in hand is legal, the outline travels with the
+  // lifted cards instead of staying at the baseline. `data-all-legal` carries
+  // the state so the stylesheet can translate the whole box.
+  const activePlayableKeys = reviewMode ? [] : playableKeys;
+  const allCardsLegal =
+    !reviewMode &&
+    hand.length > 0 &&
+    hand.every((card) => activePlayableKeys.includes(cardKey(card)));
   const handClasses = ['player-hand'];
   const handCardClasses = ['hand-cards'];
   // Item 3b: the glow belongs to every player who can act — the opening
@@ -812,12 +958,21 @@ export function GameTable({
   const viewerOnClock = turnPlayerId === myId;
 
   // Target outlines appear before the first card of a bout: one in front of the
-  // clockwise defender, or every legal opponent under Chaos Mode.
+  // clockwise defender, or every legal opponent under Chaos Mode. The server's
+  // `eligibleTargetIds` wins when it is present, so the outlines always match
+  // the seats the engine would actually accept.
+  const targetIds = attackTargetIds({
+    myId,
+    opponents,
+    defenderId,
+    chaosMode,
+    eligibleTargetIds,
+  });
   const attackTargets =
     !reviewMode && awaitingAttack && tablePairs.length === 0
-      ? chaosMode
-        ? opponents.filter((opponent) => opponent.finishRank == null && opponent.cardCount > 0)
-        : opponents.filter((opponent) => opponent.id === defenderId)
+      ? targetIds
+          .map((id) => opponents.find((opponent) => opponent.id === id))
+          .filter((opponent): opponent is OpponentSummary => opponent !== undefined)
       : [];
 
   const boutAnchor: BoutAnchor =
@@ -830,21 +985,36 @@ export function GameTable({
   const surrendered = isSurrenderedPhase(boutPhase);
   const surrenderTarget: BoutAnchor = boutAnchor;
 
-  const activeSeats = seats.filter((seat) => seat.opponent.finishRank == null);
-  const redirectDirection: RedirectDirection = chaosMode
-    ? 'shuffle'
-    : defenderId === myId
-      ? (activeSeats[0]?.position ?? 'top-center')
-      : (() => {
-          const defenderSeatIdx = activeSeats.findIndex(
-            (seat) => seat.opponent.id === defenderId,
-          );
-          const next =
-            defenderSeatIdx >= 0
-              ? activeSeats[(defenderSeatIdx + 1) % activeSeats.length]
-              : activeSeats[0];
-          return next?.position ?? 'top-center';
-        })();
+  // ITEM-ADD-1: the reflection lands on the next seat clockwise after the
+  // defender in absolute seat order (`p0 -> p1 -> p2 -> p0`), which is looked up
+  // in THIS viewer's seat mapping. With Alice (p0) attacking Bob (p1), Bob sees
+  // Alice top-left and Carol (p2) top-right, so the arrow points top-right.
+  const seatedPlayers: SeatedPlayer[] = [
+    { id: myId, cardCount: myHand.length },
+    ...opponents.map((opponent) => ({
+      id: opponent.id,
+      cardCount: opponent.cardCount,
+      finished: opponent.finishRank != null,
+    })),
+  ];
+  const redirectTargetPlayerId =
+    redirectTargetId ?? (defenderId ? nextPlayerWithCards(defenderId, seatedPlayers) : null);
+  const seatPositionOf = (playerId: string | null | undefined): BoutAnchor | null => {
+    if (playerId == null) return null;
+    if (playerId === myId) return 'bottom';
+    return seats.find((seat) => seat.opponent.id === playerId)?.position ?? null;
+  };
+  const redirectSeat = seatPositionOf(redirectTargetPlayerId);
+  // In Chaos mode the receiving seat is picked deterministically server-side;
+  // without that hint the outline keeps its shuffle icon instead of inventing a
+  // direction. With a hint (or in a standard game) the arrow points at the
+  // player who actually receives the attack.
+  const redirectHasSeat = redirectSeat != null && (!chaosMode || Boolean(redirectTargetId));
+  const redirectDirection: RedirectDirection = redirectHasSeat
+    ? (redirectSeat as BoutAnchor)
+    : chaosMode
+      ? 'shuffle'
+      : 'top-center';
 
   // Review mode freezes the table: no drags, no drop surfaces, no submission.
   const draggable = !reviewMode && Boolean(onAttackDrop || onCoverDrop || onThrowInDrop || onRedirectDrop);
@@ -919,7 +1089,8 @@ export function GameTable({
       data-zone="table-arena"
       data-my-id={myId}
       data-chaos={chaosMode ? 'true' : 'false'}
-      data-review-mode={reviewMode ? 'true' : 'false'}
+      data-review-mode={isReviewMode ? 'true' : 'false'}
+      data-bot-locked={isBotView ? 'true' : 'false'}
       data-dragging={dragCard ? 'true' : 'false'}
       data-texture={settings.tableTexture}
       style={{ '--table-filter': getTableFilterCss(settings.tableFilters) }}
@@ -1036,6 +1207,7 @@ export function GameTable({
               data-testid={`target-outline-${target.id}`}
               data-drop-zone={zone}
               data-anchor={anchor}
+              data-anchor-seat={anchor}
               aria-label={`Attack ${target.name}`}
               onDragOver={hoverZone(zone)}
               onDragLeave={clearSnap}
@@ -1052,6 +1224,7 @@ export function GameTable({
           class="table-pairs-group"
           data-testid="table-pairs-group"
           data-count={tablePairs.length}
+          data-anchor-seat={boutAnchor}
           data-surrendered={surrendered ? 'true' : 'false'}
           data-surrender-target={surrendered ? surrenderTarget : undefined}
         >
@@ -1090,6 +1263,10 @@ export function GameTable({
               data-testid="redirect-outline"
               data-drop-zone="redirect"
               data-direction={redirectDirection}
+              data-target-seat={redirectDirection}
+              data-target-player={
+                redirectHasSeat ? (redirectTargetPlayerId ?? undefined) : undefined
+              }
               data-align="card"
               aria-label="Reflect the attack"
               onDragOver={hoverZone('redirect')}
@@ -1126,6 +1303,7 @@ export function GameTable({
           data-testid="hand-turn-highlight"
           data-active={handGlow ? 'true' : 'false'}
           data-turn-action={handTurnAction}
+          data-all-legal={allCardsLegal ? 'true' : 'false'}
           data-overlap={handLayoutState.overlap}
           data-hidden-left={handLayoutState.hiddenLeft}
           data-hidden-right={handLayoutState.hiddenRight}
@@ -1160,11 +1338,22 @@ export function GameTable({
                 rank={card.rank}
                 trump={isTrumpCard(card, trumpSuit)}
                 selected={selectedKeys.includes(cardKey(card))}
-                playable={playableKeys.includes(cardKey(card))}
+                playable={activePlayableKeys.includes(cardKey(card))}
                 onClick={onCardClick ? () => onCardClick(card) : undefined}
                 onDoubleClick={
                   !reviewMode && onCardDoubleClick
-                    ? () => onCardDoubleClick(card)
+                    ? () => {
+                        // ITEM-CHAOS-1: several legal targets make a double-click
+                        // ambiguous, so the player drags onto the wanted outline.
+                        if (
+                          awaitingAttack &&
+                          tablePairs.length === 0 &&
+                          targetIds.length > 1
+                        ) {
+                          return;
+                        }
+                        onCardDoubleClick(card);
+                      }
                     : undefined
                 }
                 draggable={draggable}

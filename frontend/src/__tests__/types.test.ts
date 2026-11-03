@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { createPresetGame } from '../api/client';
 import {
   buildCoverCard,
   buildDeclareSurrender,
@@ -324,6 +325,17 @@ describe('GameAction builders', () => {
     });
   });
 
+  it('names a Chaos-mode target with targetPlayerId', () => {
+    expect(buildInitialAttack('p0', [six], 'p2')).toEqual({
+      type: 'initialAttack',
+      playerId: 'p0',
+      cards: [six],
+      targetPlayerId: 'p2',
+    });
+    // A standard attack sends no target field at all.
+    expect(buildInitialAttack('p0', [six])).not.toHaveProperty('targetPlayerId');
+  });
+
   it('builds a cover', () => {
     expect(buildCoverCard('p1', 0, seven)).toEqual({
       type: 'coverCard',
@@ -373,6 +385,102 @@ describe('GameAction builders', () => {
       expect(typeof action.type).toBe('string');
       expect(typeof action.playerId).toBe('string');
     });
+  });
+});
+
+describe('chaos mode and bot projections', () => {
+  it('parses the chaos, bot and redirect fields the table needs', () => {
+    const view = parsePlayerGameView({
+      ...sampleView,
+      isBot: true,
+      playerTypes: ['randomBot', 'human'],
+      allowRedirect: false,
+      chaosMode: true,
+      eligibleTargetIds: ['p1', 'p2'],
+      redirectTargetId: 'p2',
+    });
+
+    expect(view.isBot).toBe(true);
+    expect(view.playerTypes).toEqual(['randomBot', 'human']);
+    expect(view.allowRedirect).toBe(false);
+    expect(view.chaosMode).toBe(true);
+    expect(view.eligibleTargetIds).toEqual(['p1', 'p2']);
+    expect(view.redirectTargetId).toBe('p2');
+  });
+
+  it('defaults every new optional field for older payloads', () => {
+    const view = parsePlayerGameView({ ...sampleView });
+
+    expect(view.isBot).toBe(false);
+    expect(view.playerTypes).toEqual([]);
+    expect(view.allowRedirect).toBe(true);
+    expect(view.chaosMode).toBe(false);
+    expect(view.eligibleTargetIds).toEqual([]);
+    expect(view.redirectTargetId).toBeNull();
+  });
+
+  it('rejects malformed chaos and bot fields', () => {
+    expect(() => parsePlayerGameView({ ...sampleView, isBot: 'yes' })).toThrow(/isBot/);
+    expect(() =>
+      parsePlayerGameView({ ...sampleView, allowRedirect: 'no' }),
+    ).toThrow(/allowRedirect/);
+    expect(() => parsePlayerGameView({ ...sampleView, playerTypes: [1] })).toThrow(
+      /playerTypes/,
+    );
+    expect(() =>
+      parsePlayerGameView({ ...sampleView, eligibleTargetIds: 'p1' }),
+    ).toThrow(/eligibleTargetIds/);
+    expect(() =>
+      parsePlayerGameView({ ...sampleView, redirectTargetId: 3 }),
+    ).toThrow(/redirectTargetId/);
+  });
+});
+
+describe('QA scenario presets', () => {
+  it('starts a scripted position through POST /api/games/preset', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        gameId: 'g1',
+        players: [
+          { id: 'p0', name: 'Alice' },
+          { id: 'p1', name: 'Bob' },
+        ],
+        playerTypes: ['human', 'human'],
+        defaultPlayerId: 'p1',
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const created = await createPresetGame('3p-redirect-bob');
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/games/preset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ preset: '3p-redirect-bob' }),
+    });
+    expect(created).toEqual({
+      gameId: 'g1',
+      players: ['p0', 'p1'],
+      playerTypes: ['human', 'human'],
+      defaultPlayerId: 'p1',
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it('surfaces the server error for an unknown preset', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: async () => ({ error: 'Unknown preset: nope' }),
+      }),
+    );
+
+    await expect(createPresetGame('nope')).rejects.toThrow(/Unknown preset/);
+    vi.unstubAllGlobals();
   });
 });
 

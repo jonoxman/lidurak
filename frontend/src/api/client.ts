@@ -83,6 +83,64 @@ export async function createGame(
   return { gameId, players };
 }
 
+/** Response of `POST /api/games/preset`: a scripted QA room and its opening seat. */
+export interface CreatedPresetGame {
+  gameId: string;
+  players: string[];
+  playerTypes: string[];
+  /** The seat the table should open on for this scenario. */
+  defaultPlayerId: string;
+}
+
+/**
+ * Starts one of the scripted QA positions (`3p-redirect-bob`, `chaos-4p`,
+ * `surrender-half-off`, `discard-and-endgame`) so a reviewer can jump straight
+ * to that exact table state in one click.
+ */
+export async function createPresetGame(preset: string): Promise<CreatedPresetGame> {
+  const response = await fetch('/api/games/preset', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ preset }),
+  });
+  const body = await readJson(response);
+
+  if (!response.ok) {
+    throw new Error(errorMessage(body, `Could not start the preset (HTTP ${response.status})`));
+  }
+  if (typeof body !== 'object' || body === null) {
+    throw new Error('Preset response was not a JSON object');
+  }
+
+  const record = body as Record<string, unknown>;
+  const gameId = record.gameId;
+  if (typeof gameId !== 'string') {
+    throw new Error('Preset response did not include a gameId');
+  }
+
+  const players = Array.isArray(record.players)
+    ? record.players
+        .map((player) => {
+          if (typeof player === 'string') return player;
+          if (typeof player === 'object' && player !== null) {
+            const id = (player as Record<string, unknown>).id;
+            if (typeof id === 'string') return id;
+          }
+          return '';
+        })
+        .filter((id) => id.length > 0)
+    : [];
+  const playerTypes = Array.isArray(record.playerTypes)
+    ? record.playerTypes.filter((type): type is string => typeof type === 'string')
+    : [];
+  const defaultPlayerId =
+    typeof record.defaultPlayerId === 'string' && record.defaultPlayerId.length > 0
+      ? record.defaultPlayerId
+      : (players[0] ?? 'p0');
+
+  return { gameId, players, playerTypes, defaultPlayerId };
+}
+
 export async function getGameView(gameId: string, playerId: string): Promise<PlayerGameView> {
   const response = await fetch(
     `/api/game/${encodeURIComponent(gameId)}/view/${encodeURIComponent(playerId)}`,
