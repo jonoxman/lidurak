@@ -101,11 +101,15 @@ class SurrenderThrowInSuite extends munit.FunSuite:
       defenderInitialHandSize = 1
     )
 
-    // The bout is already at its card limit, so nobody can throw in and the
-    // surrender resolves in the same move, with no pass to wait for.
-    val next = GameEngine
+    // The bout is already at its card limit, so nobody can throw in — but the
+    // cards stay on the table until the delayed auto-pass settles the bout.
+    val surrendered = GameEngine
       .applyAction(gs, GameAction.DeclareSurrender("p1"))
       .getOrElse(fail("expected a valid surrender"))
+    assertEquals(surrendered.boutPhase, BoutPhase.SurrenderThrowIn)
+    assertEquals(GameEngine.playersNeedingAutoPass(surrendered), Vector("p0"))
+
+    val next = GameEngine.autoPassSurrenderThrowers(surrendered)
 
     assertEquals(next.tablePairs, Vector.empty)
     assertEquals(next.discardPile, Vector.empty)
@@ -128,10 +132,12 @@ class SurrenderThrowInSuite extends munit.FunSuite:
       defenderInitialHandSize = 2
     )
 
-    // The bout is at its card limit, so the surrender settles immediately.
-    val next = GameEngine
-      .applyAction(gs, GameAction.DeclareSurrender("p1"))
-      .getOrElse(fail("expected a valid surrender"))
+    // The bout is at its card limit, so only the delayed auto-pass settles it.
+    val next = GameEngine.autoPassSurrenderThrowers(
+      GameEngine
+        .applyAction(gs, GameAction.DeclareSurrender("p1"))
+        .getOrElse(fail("expected a valid surrender"))
+    )
 
     assertEquals(next.tablePairs, Vector.empty)
     assertEquals(next.discardPile, Vector.empty)
@@ -216,7 +222,7 @@ class SurrenderThrowInSuite extends munit.FunSuite:
     assertEquals(next.players(1).hasPassed, false)
   }
 
-  test("surrender auto-passes every non-defender once the bout is full") {
+  test("a full bout keeps every non-defender unpassed until the delayed auto-pass") {
     val attacks = Vector(
       TablePair(card(Rank.Six, Suit.Spades)),
       TablePair(card(Rank.Six, Suit.Hearts))
@@ -232,10 +238,16 @@ class SurrenderThrowInSuite extends munit.FunSuite:
     val result = GameEngine.applyAction(gs, GameAction.DeclareSurrender("p1"))
 
     assert(result.isRight, result)
-    val next = result.getOrElse(fail("expected a valid surrender"))
-    // With no room for another card every thrower is passed at once, so the
-    // surrender resolves inside the same move and the defender takes the table.
+    val surrendered = result.getOrElse(fail("expected a valid surrender"))
+    // With no room for another card every thrower is queued for the delayed
+    // auto-pass; only that pass resolves the surrender and hands the table over.
     assertEquals(gs.maxBoutAttacks, 2)
+    assertEquals(surrendered.boutPhase, BoutPhase.SurrenderThrowIn)
+    assertEquals(surrendered.players(0).hasPassed, false)
+    assertEquals(surrendered.players(2).hasPassed, false)
+    assertEquals(GameEngine.playersNeedingAutoPass(surrendered), Vector("p0", "p2"))
+
+    val next = GameEngine.autoPassSurrenderThrowers(surrendered)
     assertEquals(next.tablePairs, Vector.empty)
     assertEquals(next.discardPile, Vector.empty)
     assertEquals(
@@ -452,7 +464,7 @@ class SurrenderThrowInSuite extends munit.FunSuite:
     assertEquals(next.players(2).hasPassed, false)
   }
 
-  test("a surrender-phase throw-in leaves passed flags untouched") {
+  test("a surrender-phase throw-in reopens the window for every thrower with cards") {
     val thrown = card(Rank.Six, Suit.Clubs)
     val gs = threePlayer(
       attackerHand = List(card(Rank.Ace, Suit.Clubs)),
@@ -470,8 +482,11 @@ class SurrenderThrowInSuite extends munit.FunSuite:
     assert(result.isRight, result)
     val next = result.getOrElse(fail("expected a valid throw-in"))
     assertEquals(next.boutPhase, BoutPhase.SurrenderThrowIn)
-    assertEquals(next.players(0).hasPassed, true)
+    // p0 already passed, but a new throw-in gives every seat holding cards its
+    // throw-in window back; the seat that just threw in keeps its own window.
+    assertEquals(next.players(0).hasPassed, false)
     assertEquals(next.players(2).hasPassed, false)
+    assertEquals(GameEngine.playersNeedingAutoPass(next), Vector("p0"))
   }
 
   // --- The surrendering defender has no legal actions ---

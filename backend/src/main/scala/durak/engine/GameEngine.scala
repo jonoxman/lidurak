@@ -412,14 +412,17 @@ object GameEngine:
 
   /**
    * Defender gives up on the current bout. Throw-ins stay open to every other
-   * active player, and players who cannot add anything are passed immediately.
+   * active player, and nobody is passed inside this same transition.
    *
    * The phase moves to [[BoutPhase.SurrenderThrowIn]], where the surrendering
    * defender has no legal action left (it can neither cover, redirect, throw
-   * in, pass nor surrender again). Non-defenders who hold no cards are passed
-   * right away, since they cannot throw anything in; when that leaves every
-   * non-defender passed, the remaining non-defender's settling pass resolves
-   * the bout.
+   * in, pass nor surrender again). Every other active player keeps
+   * `hasPassed = false`, even when it holds no matching rank at all, so the
+   * table shows the half-off surrender for a moment; the server passes the
+   * seats reported by [[playersNeedingAutoPass]] after its 1-second delay. A
+   * seat with no cards at all can never act again, so it is passed right away,
+   * and when no other active player holds any card the bout resolves in this
+   * same move (there is nobody to wait for).
    */
   private def applyDeclareSurrender(
       state: GameState,
@@ -441,14 +444,15 @@ object GameEngine:
         "Cannot surrender when every attacking card is already covered"
       )
     yield
-      val boutIsFull = state.tablePairs.size >= state.maxBoutAttacks
       val players = state.players.zipWithIndex.map { case (player, idx) =>
         if idx == state.defenderIdx || player.finishRank.nonEmpty then player
-        else player.copy(hasPassed = player.hand.isEmpty || boutIsFull)
+        else player.copy(hasPassed = player.hand.isEmpty)
       }
-      // Anyone who cannot add a matching card is passed right away, and when
-      // that leaves nobody to act the surrender resolves in this same move.
-      autoPassSurrenderThrowers(
+      // A non-defender with cards stays unpassed even without a legal throw-in:
+      // the server passes those seats after its 1-second auto-pass delay. When
+      // every non-defender is already settled (no cards left), this resolves
+      // the surrender in the same move.
+      resolveSurrenderBout(
         state.copy(players = players, boutPhase = BoutPhase.SurrenderThrowIn)
       )
 
@@ -472,10 +476,36 @@ object GameEngine:
       }
 
   /**
-   * Passes every thrower who cannot add anything during a surrender throw-in,
-   * with no delay at all, and resolves the surrender in the same transition once
-   * nobody is left to act. A standard pass or a throw-in goes through the same
-   * helper, so a bout never waits on a seat that has nothing to play.
+   * Seats the server passes on a short delay instead of the engine passing them
+   * inside the transition that caused them: active non-defenders that still
+   * hold cards, have not passed, and have no legal throw-in (no rank on the
+   * table, no room left under `maxBoutAttacks`, or a full bout).
+   *
+   * Only an open throw-in window can produce such a seat — the surrender phase
+   * itself, or a defense phase whose attacking cards are all covered. The
+   * engine never marks these seats passed synchronously, so the surrendered
+   * cards keep straddling the felt border for the length of that delay before
+   * the bout settles.
+   */
+  def playersNeedingAutoPass(state: GameState): Vector[String] =
+    if !state.isThrowInPhase then Vector.empty
+    else
+      state.players.zipWithIndex.collect {
+        case (player, idx)
+            if idx != state.defenderIdx &&
+              player.isActive &&
+              player.hand.nonEmpty &&
+              !player.hasPassed &&
+              !canPlayerThrowIn(state, idx) =>
+          player.id
+      }
+
+  /**
+   * Passes every thrower who cannot add anything during a surrender throw-in
+   * and resolves the surrender once nobody is left to act. This is the delayed
+   * settlement step: [[durak.server.GameActor]] calls it only after its
+   * 1-second `noThrowInAutoPassDelay`, so the engine itself never auto-passes a
+   * player in the same transition that opens — or grows — the throw-in window.
    */
   def autoPassSurrenderThrowers(state: GameState): GameState =
     if state.boutPhase != BoutPhase.SurrenderThrowIn then state
@@ -542,15 +572,25 @@ object GameEngine:
             idx != state.defenderIdx &&
             updated.finishRank.isEmpty
         then updated.copy(hasPassed = false)
+        else if state.boutPhase == BoutPhase.SurrenderThrowIn &&
+            idx != state.defenderIdx &&
+            updated.finishRank.isEmpty
+        // Reopen the throw-in window for everybody still holding cards; a seat
+        // that just spent its last card has nothing left to wait for.
+        then updated.copy(hasPassed = updated.hand.isEmpty)
         else updated
       }
       val next = state.copy(
         players = players,
         tablePairs = state.tablePairs ++ cards.map(card => TablePair(card))
       )
-      // A throw-in that exhausts every matching card settles the surrender at
-      // once instead of waiting for a redundant pass.
-      if state.boutPhase == BoutPhase.SurrenderThrowIn then autoPassSurrenderThrowers(next)
+      // A surrender throw-in reopens the window for every non-defender that
+      // still holds cards: the thrower may add another matching card or pass,
+      // and anybody who cannot throw in is auto-passed by the server after its
+      // 1-second delay instead of being passed inside this transition. Only a
+      // seat left with no cards at all is settled right away, and when that
+      // leaves nobody unpassed the bout resolves here.
+      if state.boutPhase == BoutPhase.SurrenderThrowIn then resolveSurrenderBout(next)
       else next
 
   /**
@@ -589,7 +629,9 @@ object GameEngine:
       yield
         val passed =
           state.copy(players = state.players.updated(playerIdx, passer.copy(hasPassed = true)))
-        if state.boutPhase == BoutPhase.SurrenderThrowIn then autoPassSurrenderThrowers(passed)
+        // A pass only settles the table once every other thrower has passed too;
+        // seats that cannot throw in are left to the server's delayed auto-pass.
+        if state.boutPhase == BoutPhase.SurrenderThrowIn then resolveSurrenderBout(passed)
         else settlePasses(passed)
 
   /** True when every active non-defender has already passed this bout. */

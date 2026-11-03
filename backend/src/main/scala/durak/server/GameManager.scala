@@ -273,14 +273,22 @@ object GameManager:
     )
 
   /**
-   * `surrender-half-off` (ITEM-ADD-4a): Bob (`p1`) is defending against Alice's
-   * (`p0`) `7♠`, with two further pairs already covered so the compact table
-   * clustering is visible too. Bob holds `9♠`, so he has a legal cover and the
-   * Surrender button is offered from the first frame — and because a cover
-   * exists, the 3-second auto-surrender never arms. Alice still holds `7♥`, a
-   * rank that is on the table, so declaring surrender moves the bout into
-   * [[BoutPhase.SurrenderThrowIn]] and keeps it there waiting for her throw-in
-   * or pass, with the table's cards straddling the felt border 50% on / 50% off.
+   * `surrender-half-off` (ITEM-PREV-4a): Bob (`p1`) is defending with three
+   * pairs on the felt — `6♣`/`9♣`, `8♥`/`J♥` and the uncovered `7♠` — at
+   * `trumpSuit = Clubs`.
+   *
+   * Bob's hand holds no spade above the `7♠` and not a single trump (`♣`), so
+   * nothing he has can cover the attack, and the two covered pairs rule out a
+   * reflection: he is `defenderDefenseless`, `legalActions = ["surrender"]`, and
+   * both the 3-second auto-surrender and a manual `Surrender` click are
+   * available from the first frame. (`9♠`, which would have covered the `7♠`, is
+   * swapped with the discard pile's `10♦`, so all 36 cards stay unique.)
+   *
+   * Carol (`p2`) holds no `6`, `7`, `8`, `9` or `J` at all, so she has no legal
+   * throw-in and is auto-passed by the server one second after the surrender,
+   * while Alice (`p0`) keeps `7♥` — a rank on the table — so the bout stays in
+   * [[BoutPhase.SurrenderThrowIn]] on her 15-second clock, with the cards
+   * straddling the felt border 50% on / 50% off.
    */
   private def surrenderHalfOffPreset: PresetGame =
     PresetGame(
@@ -289,43 +297,45 @@ object GameManager:
         hands = Vector(
           Vector(
             card(Rank.Seven, Suit.Hearts),
-            card(Rank.Six, Suit.Clubs),
-            card(Rank.Eight, Suit.Clubs),
-            card(Rank.Nine, Suit.Clubs),
-            card(Rank.Queen, Suit.Clubs),
-            card(Rank.King, Suit.Clubs)
-          ),
-          Vector(
-            card(Rank.Nine, Suit.Spades),
             card(Rank.Six, Suit.Hearts),
-            card(Rank.Eight, Suit.Hearts),
             card(Rank.Nine, Suit.Hearts),
-            card(Rank.Ten, Suit.Hearts),
-            card(Rank.Jack, Suit.Hearts)
-          ),
-          Vector(
+            card(Rank.Ace, Suit.Hearts),
             card(Rank.Six, Suit.Spades),
-            card(Rank.Eight, Suit.Spades),
+            card(Rank.Queen, Suit.Spades)
+          ),
+          // No trump and no spade above the uncovered 7♠: no cover, no redirect.
+          Vector(
+            card(Rank.Ten, Suit.Hearts),
+            card(Rank.Queen, Suit.Hearts),
+            card(Rank.King, Suit.Hearts),
+            card(Rank.Ten, Suit.Diamonds),
+            card(Rank.Queen, Suit.Diamonds),
+            card(Rank.King, Suit.Diamonds)
+          ),
+          // Only 10/Q/K/A: no rank that appears on the table.
+          Vector(
+            card(Rank.Ten, Suit.Clubs),
+            card(Rank.Queen, Suit.Clubs),
+            card(Rank.King, Suit.Clubs),
+            card(Rank.Ace, Suit.Clubs),
             card(Rank.Ten, Suit.Spades),
-            card(Rank.Jack, Suit.Spades),
-            card(Rank.Ace, Suit.Spades),
-            card(Rank.Six, Suit.Diamonds)
+            card(Rank.Ace, Suit.Spades)
           )
         ),
         talon = Vector(
-          card(Rank.Seven, Suit.Clubs),
-          card(Rank.Ace, Suit.Clubs),
-          card(Rank.Queen, Suit.Hearts),
-          card(Rank.King, Suit.Hearts),
-          card(Rank.Ace, Suit.Hearts),
-          card(Rank.Seven, Suit.Diamonds)
+          card(Rank.Eight, Suit.Diamonds),
+          card(Rank.Nine, Suit.Diamonds),
+          card(Rank.Jack, Suit.Diamonds),
+          card(Rank.Ace, Suit.Diamonds),
+          card(Rank.Eight, Suit.Clubs),
+          card(Rank.Seven, Suit.Clubs)
         ),
-        trumpSuit = Suit.Diamonds,
-        bottomTrumpCard = Some(card(Rank.Seven, Suit.Diamonds)),
+        trumpSuit = Suit.Clubs,
+        bottomTrumpCard = Some(card(Rank.Seven, Suit.Clubs)),
         tablePairs = Vector(
           TablePair(card(Rank.Seven, Suit.Spades)),
-          TablePair(card(Rank.Ten, Suit.Clubs), Some(card(Rank.Jack, Suit.Clubs))),
-          TablePair(card(Rank.Queen, Suit.Spades), Some(card(Rank.King, Suit.Spades)))
+          TablePair(card(Rank.Six, Suit.Clubs), Some(card(Rank.Nine, Suit.Clubs))),
+          TablePair(card(Rank.Eight, Suit.Hearts), Some(card(Rank.Jack, Suit.Hearts)))
         ),
         attackerIdx = 0,
         defenderIdx = 1,
@@ -334,17 +344,17 @@ object GameManager:
         // still grow past the three cards already on the table.
         defenderInitialHandSize = 6,
         discardPile = Vector(
-          card(Rank.Ace, Suit.Diamonds),
-          card(Rank.King, Suit.Diamonds),
-          card(Rank.Queen, Suit.Diamonds),
-          card(Rank.Jack, Suit.Diamonds),
-          card(Rank.Ten, Suit.Diamonds),
-          card(Rank.Nine, Suit.Diamonds),
-          card(Rank.Eight, Suit.Diamonds)
+          card(Rank.Six, Suit.Diamonds),
+          card(Rank.Seven, Suit.Diamonds),
+          card(Rank.Eight, Suit.Spades),
+          card(Rank.Nine, Suit.Spades),
+          card(Rank.Jack, Suit.Spades),
+          card(Rank.King, Suit.Spades),
+          card(Rank.Jack, Suit.Clubs)
         ),
         lastDiscardCards = Vector(
-          card(Rank.Nine, Suit.Diamonds),
-          card(Rank.Eight, Suit.Diamonds)
+          card(Rank.King, Suit.Spades),
+          card(Rank.Jack, Suit.Clubs)
         )
       ),
       defaultPlayerId = "p1"
