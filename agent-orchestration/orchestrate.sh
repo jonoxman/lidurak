@@ -137,7 +137,20 @@ try_agy_call() {
 
   rm -f "$OUT_FILE" "$ERR_LOG"
   touch "$OUT_FILE"
-  echo "🤖 Calling Antigravity [Model: ${MODEL}] -> $(basename "$OUT_FILE")..."
+
+  # Guard against Linux MAX_ARG_STRLEN (131072 bytes) overflow on -p "$(cat ...)"
+  local P_BYTES
+  P_BYTES=$(wc -c < "$PROMPT_FILE" 2>/dev/null || echo 0)
+  if [ "$P_BYTES" -gt 115000 ]; then
+    echo "   ⚠️  Prompt $(basename "$PROMPT_FILE") is ${P_BYTES} bytes (>115KB limit); compacting to fit Linux argv limit..."
+    head -c 110000 "$PROMPT_FILE" > "${PROMPT_FILE}.compact"
+    printf "\n\n[... context truncated to fit 115KB CLI limit ...]\n" >> "${PROMPT_FILE}.compact"
+    tail -n 35 "$PROMPT_FILE" >> "${PROMPT_FILE}.compact"
+    mv "${PROMPT_FILE}.compact" "$PROMPT_FILE"
+    P_BYTES=$(wc -c < "$PROMPT_FILE" 2>/dev/null || echo 0)
+  fi
+
+  echo "🤖 Calling Antigravity [Model: ${MODEL}] (Prompt: ${P_BYTES} bytes) -> $(basename "$OUT_FILE")..."
 
   agy -p "$(cat "$PROMPT_FILE")" --model "$MODEL" --dangerously-skip-permissions < /dev/null > "$OUT_FILE" 2>"$ERR_LOG" &
   local AGY_PID=$!
@@ -188,6 +201,12 @@ try_agy_call() {
 
   if [ -s "$OUT_FILE" ] && grep -qE "$EXPECT_PATTERN" "$OUT_FILE"; then
     return 0
+  fi
+
+  if [ -s "$ERR_LOG" ]; then
+    echo "   ⚠️  [${MODEL} stderr]: $(tr '\n' ' ' < "$ERR_LOG" | head -c 300)"
+  elif [ -s "$OUT_FILE" ]; then
+    echo "   ⚠️  [${MODEL} unexpected output]: $(tail -n 5 "$OUT_FILE" | tr '\n' ' ' | head -c 300)"
   fi
 
   if grep -qiE "not logged in|unauthenticated|auth login|Please login|invalid_grant|401 Unauthorized" "$ERR_LOG" "$OUT_FILE" 2>/dev/null; then
@@ -247,7 +266,7 @@ dump_full_codebase_context() {
     echo "===SOURCE_FILE:${f}==="
     cat "$f"
     echo ""
-  done | head -c 150000
+  done | grep -v '^[[:space:]]*$' | head -c 65000
 }
 
 # Serialized FreeBuff admission & prompt submission (handles "This session was released" / "Enter: retry" automatically)
@@ -658,7 +677,7 @@ ${NOTES_BODY}" >/dev/null 2>&1 || true
         ':(exclude).reviews/*' \
         ':(exclude).tickets/*' \
         ':(exclude)agent-orchestration/*' \
-        ':(exclude)FEEDBACK*.md' | head -c 120000 > .reviews/current.diff
+        ':(exclude)FEEDBACK*.md' | head -c 75000 > .reviews/current.diff
     )
 
     local NOTES_CONTENT="No implementer notes provided."
@@ -1038,7 +1057,7 @@ run_holistic_feedback_audit() {
     ':(exclude).reviews/*' \
     ':(exclude).tickets/*' \
     ':(exclude)agent-orchestration/*' \
-    ':(exclude)FEEDBACK*.md' | head -c 90000 > .reviews/holistic_cumulative.diff
+    ':(exclude)FEEDBACK*.md' | head -c 35000 > .reviews/holistic_cumulative.diff
 
   cat << PROMPT_EOF > .reviews/holistic_audit_prompt.txt
 You are a Principal QA & Systems Auditor conducting a final pre-release audit on the integrated 'main' branch.
