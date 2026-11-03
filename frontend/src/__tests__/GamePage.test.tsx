@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/preact';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/preact';
 import type { PlayerGameView } from '../types';
 
 vi.mock('../api/client', () => ({
@@ -88,6 +88,29 @@ const sortableView: PlayerGameView = {
     { suit: 'spades', rank: 'king' },
   ],
 };
+
+/** A frozen projection for replay-frame fixtures of a finished match. */
+const finishedFrameView = (
+  myId: string,
+  overrides: Partial<PlayerGameView> = {},
+): PlayerGameView => ({
+  ...view,
+  myId,
+  myName: myId === 'p0' ? 'Alice' : 'Bob',
+  myHand: [],
+  tablePairs: [],
+  boutPhase: 'GameOver',
+  legalActions: [],
+  finishOrder: ['p1', 'p0'],
+  isDraw: false,
+  opponents:
+    myId === 'p0'
+      ? [{ id: 'p1', name: 'Bob', cardCount: 0, hasPassed: false, finishRank: 1 }]
+      : [{ id: 'p0', name: 'Alice', cardCount: 1, hasPassed: false, finishRank: 2 }],
+  gameStartedAtMs: 0,
+  gameEndedAtMs: 4000,
+  ...overrides,
+});
 
 const getGameView = client.getGameView as unknown as ReturnType<typeof vi.fn>;
 const getGameReplay = client.getGameReplay as unknown as ReturnType<typeof vi.fn>;
@@ -1060,21 +1083,19 @@ describe('GamePage', () => {
     await waitFor(() => expect(screen.getByTestId('pov-menu')).toBeTruthy());
     const select = screen.getByTestId('pov-menu') as HTMLSelectElement;
     expect(select.value).toBe('p0');
-    // Item 13: every seat, including the viewer's own, is labelled with its
-    // real name instead of a "You" placeholder or a raw seat id.
+    // Item 13: every seat is labelled with its real name, and only the active
+    // user carries the trailing " (You)" suffix.
     expect(Array.from(select.options).map((option) => option.textContent)).toEqual([
-      'Alice',
+      'Alice (You)',
       'Bob',
       'Carol',
     ]);
-    expect(select.textContent).not.toContain('You');
-    // The left-sidebar POV switcher uses the same real names.
+    expect(select.textContent).toContain('Alice (You)');
+    // The left-sidebar POV switcher uses the same names and suffix.
     const tabs = screen.getAllByRole('tab');
-    expect(tabs.map((tab) => tab.querySelector('.hotseat-name')?.textContent)).toEqual([
-      'Alice',
-      'Bob',
-      'Carol',
-    ]);
+    expect(
+      tabs.map((tab) => tab.querySelector('.hotseat-name')?.textContent?.trim()),
+    ).toEqual(['Alice (You)', 'Bob', 'Carol']);
     expect(screen.getByRole('tablist').getAttribute('aria-label')).toBe('POV player switcher');
     // The header label and the left-sidebar heading both read POV.
     expect(screen.getAllByText('POV')).toHaveLength(2);
@@ -1307,10 +1328,11 @@ describe('GamePage', () => {
     expect((screen.getByTestId('review-next-button') as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByTestId('review-prev-button') as HTMLButtonElement).disabled).toBe(false);
 
-    // The POV menu still lists real names while reviewing.
+    // The POV menu still lists real names while reviewing, with the active
+    // user's " (You)" suffix.
     const pov = screen.getByTestId('pov-menu') as HTMLSelectElement;
     expect(Array.from(pov.options).map((option) => option.textContent)).toEqual([
-      'Alice',
+      'Alice (You)',
       'Bob',
     ]);
 
@@ -1371,5 +1393,217 @@ describe('GamePage', () => {
     expect((screen.getByTestId('review-next-button') as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByTestId('game-clock').textContent).toBe('00:34');
     expect(container.querySelector('[data-zone="table-arena"]')).not.toBeNull();
+  });
+
+  it('pops the game-over banner up from a live update and keeps it in review mode', async () => {
+    getGameView.mockResolvedValue(view);
+    // The live room is still reachable; the recorded match is empty here so the
+    // test starts on the in-progress table.
+    getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
+
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    await waitFor(() => expect(screen.getByText('Pass')).toBeTruthy());
+    expect(screen.queryByTestId('game-over-banner')).toBeNull();
+
+    // ITEM-9: the moment the authoritative view finishes, the banner appears.
+    act(() => {
+      wsState.onUpdate?.({
+        ...view,
+        myHand: [],
+        tablePairs: [],
+        boutPhase: 'GameOver',
+        legalActions: [],
+        finishOrder: ['p1', 'p0'],
+        isDraw: false,
+      });
+    });
+
+    await waitFor(() => expect(screen.getByTestId('game-over-banner')).toBeTruthy());
+    expect(screen.getByTestId('game-over-banner').textContent).toContain('Game over — Bob wins');
+    // And it stays on screen once review mode opens.
+    await waitFor(() => expect(screen.getByTestId('review-nav')).toBeTruthy());
+    expect(screen.getByTestId('game-over-banner')).toBeTruthy();
+    expect(screen.getByTestId('game-over-banner').textContent).toContain('Durak: you');
+    expect((screen.getByTestId('review-next-button') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('loads a finished game from its replay when the live view cannot be fetched', async () => {
+    getGameView.mockRejectedValue(new Error('game room is gone'));
+    getGameReplay.mockResolvedValue({
+      gameId: 'game-1',
+      moves: [],
+      frames: [
+        {
+          moveIndex: 1,
+          playerId: 'p0',
+          action: { type: 'initialAttack', playerId: 'p0' },
+          elapsedMs: 0,
+          views: {
+            p0: finishedFrameView('p0', {
+              boutPhase: 'defense',
+              myHand: [{ suit: 'hearts', rank: 'six' }],
+              tablePairs: [{ attack: { suit: 'spades', rank: 'seven' }, defense: null }],
+            }),
+            p1: finishedFrameView('p1', { boutPhase: 'defense' }),
+          },
+        },
+        {
+          moveIndex: 2,
+          playerId: 'p0',
+          action: { type: 'passTurn', playerId: 'p0' },
+          elapsedMs: 4000,
+          views: { p0: finishedFrameView('p0'), p1: finishedFrameView('p1') },
+        },
+      ],
+    });
+
+    const { container } = render(
+      <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
+    );
+
+    // ITEM-12: the replay hydrates the finished match, so the page never hangs
+    // on the loading line for a game whose live room is gone.
+    await waitFor(() => expect(screen.queryByText(/Loading game/)).toBeNull());
+    expect(container.querySelector('[data-zone="table-arena"]')).not.toBeNull();
+    expect(screen.getByTestId('game-over-banner').textContent).toContain('Game over — Bob wins');
+    expect(screen.getByTestId('review-nav')).toBeTruthy();
+    expect(screen.getByTestId('review-move-indicator').textContent).toBe('Move 2 / 2');
+    expect((screen.getByTestId('review-next-button') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('appends (You) to the active user in both POV switchers and the PLAYERS list', async () => {
+    getGameView.mockResolvedValue({
+      ...view,
+      myName: 'Alice',
+      opponents: [
+        { id: 'p1', name: 'Bob', cardCount: 6, hasPassed: false, finishRank: null },
+        { id: 'p2', name: 'Carol', cardCount: 4, hasPassed: false, finishRank: null },
+      ],
+    });
+
+    const { rerender } = render(
+      <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('players-list')).toBeTruthy());
+
+    const povNames = (): (string | null)[] =>
+      Array.from((screen.getByTestId('pov-menu') as HTMLSelectElement).options).map(
+        (option) => option.textContent,
+      );
+    const tabNames = (): (string | null | undefined)[] =>
+      Array.from(document.querySelectorAll('.hotseat-name')).map(
+        (node) => node.textContent?.trim(),
+      );
+    const listNames = (): (string | undefined)[] =>
+      Array.from(
+        document.querySelectorAll('[data-testid="players-list"] .status-name'),
+      ).map((node) => node.textContent?.trim());
+
+    // ITEM-13: only the active user (p0) gets the suffix, in all three lists.
+    expect(povNames()).toEqual(['Alice (You)', 'Bob', 'Carol']);
+    expect(tabNames()).toEqual(['Alice (You)', 'Bob', 'Carol']);
+    expect(listNames()).toEqual(['Alice (You)', 'Bob', 'Carol']);
+
+    // Switching POV moves the suffix onto the newly active seat.
+    rerender(<GamePage gameId="game-1" playerId="p1" onSwitchPlayer={() => {}} />);
+    await waitFor(() => expect(screen.getByTestId('players-list')).toBeTruthy());
+
+    expect(povNames()).toEqual(['Alice', 'Bob (You)', 'Carol']);
+    expect(tabNames()).toEqual(['Alice', 'Bob (You)', 'Carol']);
+    expect(listNames()).toEqual(['Alice', 'Bob (You)', 'Carol']);
+  });
+
+  it('steps through replay frames with ArrowLeft and ArrowRight, clamped at the ends', async () => {
+    const frames = [
+      {
+        moveIndex: 1,
+        playerId: 'p0',
+        action: { type: 'initialAttack', playerId: 'p0' },
+        elapsedMs: 0,
+        views: {
+          p0: finishedFrameView('p0', {
+            boutPhase: 'defense',
+            tablePairs: [{ attack: { suit: 'spades', rank: 'seven' }, defense: null }],
+          }),
+          p1: finishedFrameView('p1', { boutPhase: 'defense' }),
+        },
+      },
+      {
+        moveIndex: 2,
+        playerId: 'p1',
+        action: { type: 'coverCard', playerId: 'p1' },
+        elapsedMs: 2000,
+        views: {
+          p0: finishedFrameView('p0', {
+            boutPhase: 'defense',
+            tablePairs: [
+              {
+                attack: { suit: 'spades', rank: 'seven' },
+                defense: { suit: 'hearts', rank: 'eight' },
+              },
+            ],
+          }),
+          p1: finishedFrameView('p1', { boutPhase: 'defense' }),
+        },
+      },
+      {
+        moveIndex: 3,
+        playerId: 'p0',
+        action: { type: 'passTurn', playerId: 'p0' },
+        elapsedMs: 4000,
+        views: { p0: finishedFrameView('p0'), p1: finishedFrameView('p1') },
+      },
+    ];
+
+    getGameView.mockResolvedValue(
+      finishedFrameView('p0', { gameStartedAtMs: 1000, gameEndedAtMs: 5000 }),
+    );
+    getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames });
+
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    const indicator = () => screen.getByTestId('review-move-indicator').textContent;
+
+    await waitFor(() => expect(indicator()).toBe('Move 3 / 3'));
+    // Flush the passive effect that registers the window listener before
+    // dispatching keys (Preact flushes effects on the next frame/timer).
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    });
+
+    // ITEM-FOLLOWUP-1: ArrowLeft steps back, and the game-over banner stays.
+    fireEvent.keyDown(document.body, { key: 'ArrowLeft' });
+    await waitFor(() => expect(indicator()).toBe('Move 2 / 3'));
+    expect(screen.getByTestId('game-over-banner')).toBeTruthy();
+
+    // Clamps at the first frame instead of running past it.
+    fireEvent.keyDown(document.body, { key: 'ArrowLeft' });
+    fireEvent.keyDown(document.body, { key: 'ArrowLeft' });
+    await waitFor(() => expect(indicator()).toBe('Move 1 / 3'));
+    expect(screen.getByTestId('game-over-banner').textContent).toContain('Durak: you');
+
+    // ArrowRight steps forward and clamps at the last frame.
+    fireEvent.keyDown(document.body, { key: 'ArrowRight' });
+    await waitFor(() => expect(indicator()).toBe('Move 2 / 3'));
+    fireEvent.keyDown(document.body, { key: 'ArrowRight' });
+    fireEvent.keyDown(document.body, { key: 'ArrowRight' });
+    await waitFor(() => expect(indicator()).toBe('Move 3 / 3'));
+    expect(screen.getByTestId('game-over-banner').textContent).toContain(
+      'Game over — Bob wins',
+    );
+
+    // Modified keys and text fields never hijack the arrow keys.
+    fireEvent.keyDown(document.body, { key: 'ArrowLeft', ctrlKey: true });
+    fireEvent.keyDown(document.body, { key: 'ArrowLeft', altKey: true });
+    fireEvent.keyDown(document.body, { key: 'ArrowLeft', metaKey: true });
+    fireEvent.keyDown(screen.getByLabelText('Sort hand'), { key: 'ArrowLeft' });
+    expect(indicator()).toBe('Move 3 / 3');
+
+    // The buttons and the arrows share the same clamped index.
+    fireEvent.click(screen.getByTestId('review-prev-button'));
+    await waitFor(() => expect(indicator()).toBe('Move 2 / 3'));
+    expect(screen.getByTestId('game-over-banner')).toBeTruthy();
   });
 });

@@ -19,7 +19,9 @@ type Route = LobbyRoute | GameRoute;
 export function parseRoute(hash: string): Route {
   const raw = hash.startsWith('#') ? hash.slice(1) : hash;
   const [path, query = ''] = raw.split('?');
-  const match = /^\/g\/([^/]+)$/.exec(path);
+  // `#/g/:gameId` and its review alias `#/g/:gameId/replay` open the same table;
+  // a finished game hydrates itself from the recorded match.
+  const match = /^\/g\/([^/]+)(?:\/replay)?$/.exec(path);
   if (match) {
     let gameId: string;
     try {
@@ -33,7 +35,7 @@ export function parseRoute(hash: string): Route {
       return {
         name: 'game',
         gameId,
-        playerId: params.get('player') || 'p0',
+        playerId: params.get('player')?.trim() || 'p0',
       };
     }
   }

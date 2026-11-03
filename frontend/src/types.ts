@@ -54,6 +54,12 @@ export interface PlayerGameView {
   /** Epoch-ms timestamps behind the split game/turn clocks. */
   gameStartedAtMs?: number | null;
   gameEndedAtMs?: number | null;
+  /** Every winner, in finishing order (the backend's `winners` list). */
+  winners?: string[];
+  /** The Durak (last place) named by the backend, when there is one. */
+  durak?: string | null;
+  /** Seats the game is currently waiting on (several during a throw-in). */
+  promptedPlayerIds?: string[];
 }
 
 export interface GameAction {
@@ -160,16 +166,36 @@ export function parsePlayerGameView(value: unknown): PlayerGameView {
     fail('chaosMode must be a boolean');
   }
   const turnDeadlineMs = raw.turnDeadlineMs;
-  if (turnDeadlineMs !== undefined && typeof turnDeadlineMs !== 'number') {
-    fail('turnDeadlineMs must be a number');
+  if (
+    turnDeadlineMs !== undefined &&
+    turnDeadlineMs !== null &&
+    typeof turnDeadlineMs !== 'number'
+  ) {
+    fail('turnDeadlineMs must be a number or null');
   }
   const turnSecondsRemaining = raw.turnSecondsRemaining;
   if (turnSecondsRemaining !== undefined && typeof turnSecondsRemaining !== 'number') {
     fail('turnSecondsRemaining must be a number');
   }
+  // A finished (or otherwise idle) game encodes the prompted seat as JSON
+  // `null`; treating that as "no clock" keeps finished payloads parseable.
   const turnPlayerId = raw.turnPlayerId;
-  if (turnPlayerId !== undefined && typeof turnPlayerId !== 'string') {
-    fail('turnPlayerId must be a string');
+  if (
+    turnPlayerId !== undefined &&
+    turnPlayerId !== null &&
+    typeof turnPlayerId !== 'string'
+  ) {
+    fail('turnPlayerId must be a string or null');
+  }
+  const durak = raw.durak;
+  if (durak !== undefined && durak !== null && typeof durak !== 'string') {
+    fail('durak must be a string or null');
+  }
+  const winners = raw.winners;
+  if (winners !== undefined) parseStringArray(winners, 'winners');
+  const promptedPlayerIds = raw.promptedPlayerIds;
+  if (promptedPlayerIds !== undefined) {
+    parseStringArray(promptedPlayerIds, 'promptedPlayerIds');
   }
   const myName = raw.myName;
   if (myName !== undefined && typeof myName !== 'string') {
@@ -232,14 +258,17 @@ export function parsePlayerGameView(value: unknown): PlayerGameView {
     isDraw,
     maxBoutAttacks,
     chaosMode: (chaosMode as boolean | undefined) ?? false,
-    turnDeadlineMs: (turnDeadlineMs as number | undefined) ?? 0,
+    turnDeadlineMs: (turnDeadlineMs as number | null | undefined) ?? 0,
     turnSecondsRemaining: (turnSecondsRemaining as number | undefined) ?? 15,
-    turnPlayerId: turnPlayerId as string | undefined,
+    turnPlayerId: (turnPlayerId as string | null | undefined) ?? undefined,
     ...(presentPlayers === undefined ? {} : { presentPlayers: presentPlayers as string[] }),
     discardCount: (discardCount as number | undefined) ?? 0,
     lastDiscardCards: parsedLastDiscard,
     gameStartedAtMs: (gameStartedAtMs as number | null | undefined) ?? null,
     gameEndedAtMs: (gameEndedAtMs as number | null | undefined) ?? null,
+    winners: (winners as string[] | undefined) ?? [],
+    durak: (durak as string | null | undefined) ?? null,
+    promptedPlayerIds: (promptedPlayerIds as string[] | undefined) ?? [],
   };
 }
 
