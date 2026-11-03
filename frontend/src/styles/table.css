@@ -755,11 +755,28 @@
   border-radius: var(--app-roundness, 8px);
 }
 
-/* ITEM-NEW-3: every glyph on a card front uses the same classic serif stack
-   as `CARD_SERIF_FONT_FAMILY` in `Card.tsx`. A CSS declaration wins over the
-   SVG `font-family` presentation attribute, so this rule must keep the ornate
-   faces (Cinzel, Playfair Display) that the ticket asks for. */
+/* ITEM-NEW-3 / T-90: the card glyphs default to the classic serif stack in
+   `CARD_SERIF_FONT_FAMILY` (Card.tsx). A CSS declaration wins over the SVG
+   `font-family` presentation attribute, so the two per-class rules below are
+   what actually decide the corner indices and the centre court letter. */
 .playing-card text {
+  font-family: 'Cinzel', 'Playfair Display', Georgia, 'Times New Roman',
+    'Palatino Linotype', 'Book Antiqua', serif;
+}
+
+/* T-90 ITEM-3a: the small rank numbers/letters in the top-left and
+   bottom-right corners are plain sans-serif again (`CARD_CORNER_FONT_FAMILY`
+   in Card.tsx), so they read like the rest of the app shell. This rule is more
+   specific than the shared `.playing-card text` rule above, so it wins for
+   every corner index. */
+.playing-card .card-rank-index {
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    sans-serif;
+}
+
+/* T-90 ITEM-3b: the fancy serif font is reserved for the large `J`, `Q` and
+   `K` letters on the face of the court cards. */
+.playing-card .card-face-letter {
   font-family: 'Cinzel', 'Playfair Display', Georgia, 'Times New Roman',
     'Palatino Linotype', 'Book Antiqua', serif;
 }
