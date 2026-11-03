@@ -24,8 +24,10 @@
   min-width: 0;
   min-height: 620px;
   padding: 20px;
-  /* ITEM-NEW-1b: the felt table border follows the Theme menu Roundness slider. */
-  border-radius: var(--app-roundness, 8px);
+  /* ITEM-NEW-1a / ITEM-NEW-1b: the Theme menu Roundness slider rounds the felt
+     table itself. The 1.5 factor keeps the table's corner just outside the
+     cards' own radius, so the two roundings stay visually nested. */
+  border-radius: calc(var(--app-roundness, 8px) * 1.5);
   box-sizing: border-box;
   position: relative;
   isolation: isolate;
@@ -44,7 +46,7 @@
   grid-column: 1 / -1;
   grid-row: 1 / -1;
   z-index: 0;
-  border-radius: var(--app-roundness, 8px);
+  border-radius: calc(var(--app-roundness, 8px) * 1.5);
   background-color: var(--table-felt, #1e2923);
   background-image: var(--table-felt-overlay, none);
   filter: var(--table-filter);
@@ -81,7 +83,8 @@
   padding: 8px 10px;
   background: var(--durak-panel);
   border: 2px solid transparent;
-  border-radius: 8px;
+  /* ITEM-NEW-1a: the opponent seat boxes follow the roundness slider too. */
+  border-radius: var(--app-roundness, 8px);
   box-sizing: border-box;
   overflow: hidden;
 }
@@ -254,7 +257,7 @@
   /* Small, consistent inner margin between the border and any anchored card. */
   padding: 12px;
   background: rgba(38, 36, 33, 0.55);
-  border-radius: 10px;
+  border-radius: calc(var(--app-roundness, 8px) * 1.5);
   box-sizing: border-box;
   transform: none;
   overflow: visible;
@@ -298,10 +301,13 @@
   --bout-card-height: 114px;
   --bout-card-offset: 15px;
   display: flex;
-  flex-wrap: wrap;
+  /* ITEM-NEW-2a/2b: the cards in play are one single compact row that never
+     wraps; the per-slot `margin-left` written by `boutLayout` carries the
+     spacing (a 4px gap, then an overlap down to the 22px visible-left limit). */
+  flex-wrap: nowrap;
   align-items: flex-start;
   justify-content: center;
-  gap: 22px;
+  gap: 0;
   min-width: 0;
   transition: transform 320ms ease;
 }
@@ -317,11 +323,15 @@
 .table-pairs-group[data-surrendered='true'][data-surrender-target='top-left'],
 .table-pairs-group[data-surrendered='true'][data-surrender-target='top-center'],
 .table-pairs-group[data-surrendered='true'][data-surrender-target='top-right'] {
-  transform: translateY(-50%);
+  /* The 12px inner padding of the play area is compensated, so the top border
+     bisects the cards and the top half sticks out toward the opponent's box. */
+  transform: translateY(calc(-50% - 12px));
 }
 
 .table-pairs-group[data-surrendered='true'][data-surrender-target='bottom'] {
-  transform: translateY(50%);
+  /* The bottom border bisects the cards; the bottom half hangs out below the
+     play area toward the active user's hand. */
+  transform: translateY(calc(50% + 12px));
 }
 
 /* T-90-3 ITEM-ADD-3: the bout area only centres the (fixed-size) shaded area;
@@ -349,7 +359,7 @@
   height: 114px;
   margin-top: 10px;
   border: 2px dashed #629924;
-  border-radius: 8px;
+  border-radius: var(--app-roundness, 8px);
   background: rgba(98, 153, 36, 0.1);
   box-sizing: border-box;
   cursor: copy;
@@ -368,7 +378,7 @@
   height: var(--bout-card-height, 114px);
   margin: 0 0 var(--bout-card-offset, 15px) 0;
   border: 2px dashed #d9a326;
-  border-radius: 8px;
+  border-radius: var(--app-roundness, 8px);
   background: rgba(217, 163, 38, 0.08);
   box-sizing: border-box;
   cursor: copy;
@@ -396,7 +406,7 @@
 .table-pair.snap-active .table-pair-attack .card-slot,
 .table-pair-attack[data-drop-zone] .card-slot {
   box-shadow: 0 0 0 3px var(--durak-accent);
-  border-radius: 6px;
+  border-radius: var(--app-roundness, 8px);
 }
 
 .table-pair {
@@ -409,7 +419,10 @@
   align-content: start;
   flex: 0 0 auto;
   gap: 0;
-  padding: 0 20px var(--bout-card-offset, 15px) 0;
+  /* ITEM-NEW-2b: only the card itself is reserved horizontally; the defence
+     card overhangs to the right, and the compact row spacing comes from the
+     inline `margin-left` on every slot. */
+  padding: 0 0 var(--bout-card-offset, 15px) 0;
   box-sizing: border-box;
 }
 
@@ -427,14 +440,14 @@
 
 /* An uncovered attack that can be clicked to cover it. */
 .table-pair .card-slot.clickable {
-  border-radius: 6px;
+  border-radius: var(--app-roundness, 8px);
   box-shadow: 0 0 0 2px var(--durak-amber);
 }
 
 /* Item 17: the defender's client gets a rhythm nudge on uncovered attacks. */
 .table-pair.turn-pulse .card-slot {
   animation: turnPulse 2.4s infinite ease-in-out;
-  border-radius: 6px;
+  border-radius: var(--app-roundness, 8px);
 }
 
 /* --- Row 3, column 1: talon deck & trump card --- */
@@ -540,7 +553,7 @@
   min-width: 24px;
   background: var(--durak-bg);
   border: 1px solid var(--durak-border);
-  border-radius: 999px;
+  border-radius: var(--app-roundness, 8px);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: 1.4;
@@ -619,13 +632,19 @@
 
 /* ITEM-PB-7: only the visible face-up cards of the last bout use the responsive
    single-row overlap, sized against the width the single stack leaves free. */
+/* ITEM-PREV-7b: the row is laid over the face-down stack by a negative
+   margin, so it never shrinks and always starts at the peek strip. */
+.discard-visible-row[data-overlaps-facedown='true'] {
+  z-index: 2;
+}
+
 .discard-visible-row {
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
   justify-content: flex-start;
   gap: 0;
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   width: fit-content;
   max-width: 100%;
   min-width: 0;
@@ -721,7 +740,8 @@
   /* Item 5: 80x114 base size, scaled by the SVG's 70x100 viewBox. */
   width: 80px;
   height: 114px;
-  border-radius: 6px;
+  /* ITEM-NEW-1a: every card in play or in hand follows the roundness slider. */
+  border-radius: var(--app-roundness, 8px);
   /* The trump border paints inside the card box, so a bordered card is never
      one or two pixels larger than the plain cards it overlaps. */
   box-sizing: border-box;
@@ -732,6 +752,17 @@
   display: block;
   width: 100%;
   height: 100%;
+  border-radius: var(--app-roundness, 8px);
+}
+
+/* ITEM-NEW-1b: every glyph on a card front uses the serif face stack. */
+.playing-card text {
+  font-family: Georgia, 'Times New Roman', 'Nimbus Roman', serif;
+}
+
+/* ITEM-NEW-1a: the face-down card backs round with the slider as well. */
+.playing-card.card-back {
+  border-radius: var(--app-roundness, 8px);
 }
 
 /* Feedback ITEM-NEW-1b: the card front (where the pips are drawn) is
@@ -750,7 +781,7 @@
 
 .playing-card.card-face {
   background-color: var(--card-face-bg);
-  border-radius: 6px;
+  border-radius: var(--app-roundness, 8px);
 }
 
 .card-slot.clickable {
@@ -811,7 +842,8 @@
   gap: 0;
   /* Symmetric, tight padding: exactly 4px of glow room on all four sides. */
   padding: 4px;
-  border-radius: calc(var(--card-radius, 8px) + 4px);
+  /* ITEM-NEW-1a: the hand highlight box rounds just past the cards it wraps. */
+  border-radius: calc(var(--app-roundness, 8px) + 4px);
   box-sizing: border-box;
 }
 
@@ -915,7 +947,7 @@
   background-size: 5px 5px, 5px 5px;
   background-repeat: no-repeat;
   border: 1px solid var(--durak-border);
-  border-radius: 6px;
+  border-radius: var(--app-roundness, 8px);
   color: var(--durak-text);
   font-size: 13px;
   font-weight: 600;
@@ -946,7 +978,7 @@
 .action-button {
   padding: 10px 22px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--app-roundness, 8px);
   background: var(--durak-border);
   color: #f5f1e6;
   font-size: 15px;
@@ -1110,7 +1142,7 @@
     --bout-card-width: 48px;
     --bout-card-height: 68px;
     --bout-card-offset: 10px;
-    gap: 14px;
+    gap: 0;
   }
 
   [data-zone='player-hand'] {
@@ -1189,7 +1221,7 @@
   .table-pair {
     grid-template-columns: 48px;
     grid-template-rows: 68px;
-    padding: 0 14px 10px 0;
+    padding: 0 0 var(--bout-card-offset, 10px) 0;
   }
 
   .bout-area[data-anchor] {

@@ -1342,6 +1342,8 @@ export function GamePage({
           opponents={displayedView.opponents}
           tablePairs={displayedView.tablePairs}
           trumpSuit={displayedView.trumpSuit}
+          boutPhase={displayedView.boutPhase}
+          redirectTargetId={displayedView.redirectTargetId ?? null}
           attackerId={attackerSeatId}
           defenderId={defenderSeatId}
           chaosMode={displayedView.chaosMode ?? false}
