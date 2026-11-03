@@ -250,9 +250,14 @@
 /* Item 11: every card in play lives in one group, so a surrender slides the
    whole bout toward the surrendering seat with a single transform. */
 .table-pairs-group {
+  /* Item 8: the card box and the reserve under each card are shared with the
+     reflection outline, so both always line up on the same card edges. */
+  --bout-card-width: 80px;
+  --bout-card-height: 114px;
+  --bout-card-offset: 15px;
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   gap: 22px;
   min-width: 0;
@@ -315,29 +320,33 @@
 
 /* Item 12: one dashed target outline in front of each legal attack target. */
 /* Item 5: outlines match the card size exactly, so drops never distort a card. */
-.target-outline,
-.redirect-outline {
+.target-outline {
   width: 80px;
   height: 114px;
-  border-radius: 8px;
-  box-sizing: border-box;
-}
-
-.target-outline {
   margin-top: 10px;
   border: 2px dashed #629924;
+  border-radius: 8px;
   background: rgba(98, 153, 36, 0.1);
+  box-sizing: border-box;
   cursor: copy;
 }
 
-/* Item 14: single-card reflection outline to the right of the attacks. */
+/* Item 14 / Item 8: the single-card reflection outline is a sibling of the
+   attack cards in the same flex row. It is exactly one card tall and carries
+   the same bottom reserve as a pair (`--bout-card-offset`), so its top, centre
+   and bottom edges stay perfectly aligned with every card in play. */
 .redirect-outline {
   display: grid;
   place-items: center;
   flex: 0 0 auto;
-  margin-left: 16px;
+  align-self: flex-start;
+  width: var(--bout-card-width, 80px);
+  height: var(--bout-card-height, 114px);
+  margin: 0 0 var(--bout-card-offset, 15px) 0;
   border: 2px dashed #d9a326;
+  border-radius: 8px;
   background: rgba(217, 163, 38, 0.08);
+  box-sizing: border-box;
   cursor: copy;
 }
 
@@ -368,11 +377,16 @@
 
 .table-pair {
   display: grid;
-  grid-template-columns: 80px;
-  grid-template-rows: 114px;
+  grid-template-columns: var(--bout-card-width, 80px);
+  grid-template-rows: var(--bout-card-height, 114px);
+  /* Item 8: cards start flush with the top of the pair box, so the attack cards
+     and the reflection outline share one top edge. The bottom/right reserve is
+     the space the overlapping defence card needs. */
+  align-content: start;
   flex: 0 0 auto;
   gap: 0;
-  padding: 0 20px 15px 0;
+  padding: 0 20px var(--bout-card-offset, 15px) 0;
+  box-sizing: border-box;
 }
 
 .table-pair-attack,
@@ -448,22 +462,29 @@
   min-width: 0;
 }
 
+/* Req 7c: one source of truth for the deck card size. The talon and the
+   discard pile both read it, so a discarded card always matches the deck. */
+[data-zone='table-deck'] {
+  --deck-card-width: 80px;
+  --deck-card-height: 114px;
+}
+
 .talon-stack {
   grid-area: 1 / 1;
   z-index: 2;
   justify-self: start;
   align-self: start;
   display: grid;
-  grid-template-columns: 80px;
-  grid-template-rows: 114px;
+  grid-template-columns: var(--deck-card-width, 80px);
+  grid-template-rows: var(--deck-card-height, 114px);
   flex: 0 0 auto;
 }
 
 .talon-back {
   grid-column: 1;
   grid-row: 1;
-  width: 80px;
-  height: 114px;
+  width: var(--deck-card-width, 80px);
+  height: var(--deck-card-height, 114px);
 }
 
 .talon-back-second {
@@ -502,8 +523,9 @@
   color: #f5f1e6;
 }
 
-/* Req 7: the discard pile shares the DECK box with the talon. Earlier discards
-   stay face-down under a top-left counter oval; only the last bout is revealed. */
+/* Req 7: the discard pile shares the DECK box with the talon. There is no
+   counter any more: every discarded card is drawn, earlier bouts face-down and
+   the last finished bout face-up, in one overlapping row. */
 .table-discard {
   display: flex;
   flex-direction: column;
@@ -511,6 +533,8 @@
   gap: 6px;
   align-self: stretch;
   min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
   padding-top: 8px;
   border-top: 1px solid var(--app-border, var(--durak-border));
   box-sizing: border-box;
@@ -524,46 +548,41 @@
   opacity: 0.7;
 }
 
+/* Req 7b: the discarded cards use exactly the hand's single-row geometry — it
+   never wraps and never overflows the pile box. All overlap comes from the
+   per-card negative `margin-left` computed by `handLayout`/`handMargins`. */
 .discard-stack {
   display: flex;
-  align-items: flex-end;
-  gap: 8px;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0;
+  width: fit-content;
+  max-width: 100%;
   min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  box-sizing: border-box;
 }
 
-/* The face-down stack and the revealed cards sit side by side in normal flow,
-   so nothing is absolutely positioned and no card can overlap the counter. */
-.discard-face-down {
-  display: grid;
-  grid-template-columns: 40px;
-  grid-template-rows: 57px;
-  flex: 0 0 auto;
-}
-
-.discard-back,
-.discard-card .card-slot {
-  width: 40px;
-  height: 57px;
-}
-
-.discard-count {
-  grid-column: 1;
-  grid-row: 1;
-  justify-self: start;
-  align-self: start;
-  margin: -8px 0 0 -8px;
-  padding: 0 7px;
-}
-
-.discard-last {
-  display: flex;
-  gap: 4px;
-  min-width: 0;
-}
-
-.discard-card {
+/* Req 7c: a discarded card is exactly as large as a talon deck card. */
+.discard-slot {
   display: flex;
   flex: 0 0 auto;
+  width: var(--deck-card-width, 80px);
+  height: var(--deck-card-height, 114px);
+  box-sizing: border-box;
+}
+
+.discard-slot[data-hidden='true'] {
+  z-index: 0;
+  pointer-events: none;
+}
+
+.discard-slot .card-slot,
+.discard-back {
+  width: 100%;
+  height: 100%;
 }
 
 .discard-empty {
@@ -634,6 +653,9 @@
   width: 80px;
   height: 114px;
   border-radius: 6px;
+  /* The trump border paints inside the card box, so a bordered card is never
+     one or two pixels larger than the plain cards it overlaps. */
+  box-sizing: border-box;
   transition: transform 120ms ease, box-shadow 120ms ease;
 }
 
@@ -688,15 +710,17 @@
    widths or offsets. Symmetric padding leaves headroom for lifted cards. */
 .hand-cards {
   display: inline-flex;
+  flex: 0 0 auto;
   flex-wrap: nowrap;
-  align-items: flex-end;
-  justify-content: flex-start;
+  align-items: center;
+  justify-content: center;
   width: fit-content;
   max-width: 100%;
   min-width: 0;
   gap: 0;
-  padding: 14px 8px 8px;
-  border-radius: 8px;
+  /* Symmetric, tight padding: exactly 4px of glow room on all four sides. */
+  padding: 4px;
+  border-radius: calc(var(--card-radius, 8px) + 4px);
   box-sizing: border-box;
 }
 
@@ -708,7 +732,11 @@
   flex: 0 0 auto;
   width: var(--hand-card-width, 80px);
   height: var(--hand-card-height, 114px);
-  margin-right: 0;
+  /* No wrapper padding or margins: all spacing is the inline `margin-left`. */
+  margin: 0;
+  padding: 0;
+  border: 0;
+  box-sizing: border-box;
   z-index: 1;
 }
 
@@ -731,6 +759,12 @@
 
 .hand-cards.defender-turn {
   animation: defenderPulse 2.4s infinite ease-in-out;
+}
+
+/* Item 3b: a thrower who may add cards to the bout glows exactly like the
+   opening attacker, so the seat that owes a throw-in is never missed. */
+.hand-cards.throw-in-turn {
+  animation: throwInPulse 2.4s infinite ease-in-out;
 }
 
 /* Item 17/22: the pulse lives on the tight card container, not the column. */
@@ -897,6 +931,17 @@
   }
 }
 
+/* Item 3b: the thrower's hand glows amber, matching the attacking role. */
+@keyframes throwInPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 2px var(--attacker-glow-soft);
+  }
+  50% {
+    box-shadow: 0 0 12px 3px var(--attacker-glow);
+  }
+}
+
 /* Item 21: the attacker's hand glows amber, matching their seat highlight. */
 @keyframes attackerPulse {
   0%,
@@ -968,6 +1013,9 @@
   }
 
   .table-pairs-group {
+    --bout-card-width: 48px;
+    --bout-card-height: 68px;
+    --bout-card-offset: 10px;
     gap: 14px;
   }
 
@@ -1004,17 +1052,22 @@
   }
 
   .hand-cards {
-    padding: 10px 4px 4px;
+    padding: 4px;
+  }
+
+  [data-zone='table-deck'] {
+    --deck-card-width: 48px;
+    --deck-card-height: 68px;
   }
 
   .talon-stack {
-    grid-template-columns: 48px;
-    grid-template-rows: 68px;
+    grid-template-columns: var(--deck-card-width, 48px);
+    grid-template-rows: var(--deck-card-height, 68px);
   }
 
   .talon-back {
-    width: 48px;
-    height: 68px;
+    width: var(--deck-card-width, 48px);
+    height: var(--deck-card-height, 68px);
   }
 
   .talon-deck {
@@ -1055,7 +1108,7 @@
   }
 
   .redirect-outline {
-    margin-left: 12px;
+    margin: 0 0 var(--bout-card-offset, 10px) 0;
   }
 
   .table-pair-defense {

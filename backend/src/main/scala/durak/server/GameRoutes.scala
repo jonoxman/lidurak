@@ -10,7 +10,7 @@ import io.circe.syntax.*
 import org.http4s.*
 import org.http4s.circe.CirceEntityDecoder.*
 import org.http4s.circe.CirceEntityEncoder.*
-import org.http4s.dsl.impl.QueryParamDecoderMatcher
+import org.http4s.dsl.impl.OptionalQueryParamDecoderMatcher
 import org.http4s.dsl.io.*
 import org.http4s.server.websocket.WebSocketBuilder2
 import org.http4s.websocket.WebSocketFrame
@@ -57,6 +57,9 @@ object GameRoutes:
   /** How often a keepalive `Ping` is pushed down an open WebSocket. */
   val KeepAliveInterval: FiniteDuration = 20.seconds
 
+  /** Seat a view request is projected for when no player is named. */
+  val DefaultViewerId: String = "p0"
+
   /** The full app: REST endpoints plus the live-game WebSocket. */
   def routes(manager: GameManager)(using webSockets: WebSocketBuilder2[IO]): HttpRoutes[IO] =
     restRoutes(manager) <+> webSocketRoutes(manager, webSockets)
@@ -74,8 +77,8 @@ object GameRoutes:
     case req @ POST -> Root / "api" / "game" / "create" =>
       createRoom(manager, req)
 
-    case GET -> Root / "api" / "games" / gameId / "view" :? PlayerQueryParam(playerId) =>
-      viewOf(manager, gameId, playerId)
+    case GET -> Root / "api" / "games" / gameId / "view" :? PlayerQueryParam(requestedViewer) =>
+      viewOf(manager, gameId, requestedViewer)
 
     case GET -> Root / "api" / "games" / gameId / "replay" =>
       replayOf(manager, gameId)
@@ -84,7 +87,7 @@ object GameRoutes:
       replayOf(manager, gameId)
 
     case GET -> Root / "api" / "game" / gameId / "view" / playerId =>
-      viewOf(manager, gameId, playerId)
+      viewOf(manager, gameId, Some(playerId))
 
     case req @ POST -> Root / "api" / "games" / gameId / "action" =>
       submitAction(manager, gameId, req)
@@ -130,18 +133,27 @@ object GameRoutes:
       )
     )
 
+  /**
+   * The projection for one seat. An omitted or blank `?player=` falls back to
+   * `p0`, so a finished table stays readable from a bare game URL; only a
+   * non-blank id that names no seat is a 404.
+   */
   private def viewOf(
       manager: GameManager,
       gameId: String,
-      playerId: String
+      requestedViewer: Option[String]
   ): IO[Response[IO]] =
     withRoom(manager, gameId) { room =>
       room.stateRef.get.flatMap { state =>
-        if state.players.exists(_.id == playerId) then
-          Ok(PlayerGameView.forViewer(state, playerId).asJson)
-        else NotFound(errorBody(s"Unknown player: $playerId"))
+        requestedViewer.map(_.trim).filter(_.nonEmpty) match
+          case None =>
+            Ok(PlayerGameView.forViewer(state, DefaultViewerId).asJson)
+          case Some(playerId) =>
+            if state.players.exists(_.id == playerId) then
+              Ok(PlayerGameView.forViewer(state, playerId).asJson)
+            else NotFound(errorBody(s"Unknown player: $playerId"))
       }
-    }
+    }.handleErrorWith(errorResponse)
 
   private def submitAction(      manager: GameManager,
       gameId: String,
@@ -201,7 +213,7 @@ object GameRoutes:
   private def replayOf(manager: GameManager, gameId: String): IO[Response[IO]] =
     withRoom(manager, gameId) { room =>
       room.replay.get.flatMap(replay => Ok(replay.asJson))
-    }
+    }.handleErrorWith(errorResponse)
 
   // --- WebSocket ---
 
@@ -305,8 +317,11 @@ object GameRoutes:
 
   // --- Shared helpers ---
 
-  /** Matches `?player=:playerId` on the documented `GET /api/games/...` route. */
-  private object PlayerQueryParam extends QueryParamDecoderMatcher[String]("player")
+  /**
+   * Matches the optional `?player=:playerId` on the documented
+   * `GET /api/games/.../view` route; a missing or blank value means `p0`.
+   */
+  private object PlayerQueryParam extends OptionalQueryParamDecoderMatcher[String]("player")
 
   private def withRoom(manager: GameManager, gameId: String)(
       handle: GameRoom => IO[Response[IO]]

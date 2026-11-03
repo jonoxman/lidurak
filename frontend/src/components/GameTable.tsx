@@ -136,6 +136,14 @@ export const HAND_CARD_WIDTH = 80;
 export const HAND_MIN_OVERLAP = 8;
 /** Used until the hand has been measured (jsdom reports zero widths). */
 export const HAND_FALLBACK_WIDTH = 720;
+/** Symmetric padding of the turn-highlight box around the rendered hand row. */
+export const HAND_BOX_PADDING = 4;
+/** Width of one talon deck card; the discard pile reuses the exact same size. */
+export const DECK_CARD_WIDTH = 80;
+/** Height of one talon deck card; the discard pile reuses the exact same size. */
+export const DECK_CARD_HEIGHT = 114;
+/** Inner width of the sidebar DECK box, used until the pile has been measured. */
+export const DISCARD_FALLBACK_WIDTH = 236;
 /** Width of one opponent card back inside a seat box. */
 export const OPPONENT_CARD_WIDTH = 22;
 /** Usable width of the fixed opponent card row. */
@@ -220,6 +228,17 @@ export function handMargins(
   );
 }
 
+/**
+ * Rendered width of a single overlap row: from the first card's left edge to the
+ * last visible card's right edge. Exported so the discard pile can prove that
+ * its row never exceeds the pile box's available inner width.
+ */
+export function rowWidth(layout: HandLayout, cardWidth = HAND_CARD_WIDTH): number {
+  if (layout.visibleCount <= 0) return 0;
+  const step = cardWidth - layout.overlap;
+  return (layout.visibleCount - 1) * step + cardWidth;
+}
+
 /** Overlap for a fixed-width opponent card row; never reacts to the cursor. */
 export function opponentOverlap(
   count: number,
@@ -253,6 +272,60 @@ export function TableDeck({
   discardCount = 0,
   lastDiscardCards = [],
 }: TableDeckProps) {
+  const discardRef = useRef<HTMLDivElement>(null);
+  const deckRef = useRef<HTMLDivElement>(null);
+  const [discardWidth, setDiscardWidth] = useState(0);
+  const [deckCardWidth, setDeckCardWidth] = useState(DECK_CARD_WIDTH);
+  const [discardCursor, setDiscardCursor] = useState(0.5);
+
+  // Item 7b/7c: the pile follows the hand's single-row geometry, measured on
+  // the pile box itself, and reuses the talon deck's real card width.
+  useEffect(() => {
+    const measure = () => {
+      const box = discardRef.current;
+      if (box && box.clientWidth > 0) setDiscardWidth(box.clientWidth);
+      const deckCard = deckRef.current?.querySelector('.talon-back') as HTMLElement | null;
+      const measured = deckCard?.offsetWidth ?? 0;
+      if (measured > 0) setDeckCardWidth(measured);
+    };
+    measure();
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(measure);
+      if (discardRef.current) observer.observe(discardRef.current);
+      if (deckRef.current) observer.observe(deckRef.current);
+    }
+    if (typeof window !== 'undefined') window.addEventListener('resize', measure);
+    return () => {
+      if (observer) observer.disconnect();
+      if (typeof window !== 'undefined') window.removeEventListener('resize', measure);
+    };
+  }, []);
+
+  // Item 7a: no discard counter any more. Every discard becomes its own card:
+  // the earlier bouts face-down and the last finished bout face-up.
+  const faceDownCount = Math.max(0, discardCount - lastDiscardCards.length);
+  const discardFaces: Array<CardData | null> = [
+    ...Array.from({ length: faceDownCount }, () => null),
+    ...lastDiscardCards,
+  ];
+  const discardAvailable = Math.max(
+    deckCardWidth,
+    discardWidth > 0 ? discardWidth : DISCARD_FALLBACK_WIDTH,
+  );
+  const discardLayoutState = handLayout(
+    discardFaces.length,
+    discardAvailable,
+    discardCursor,
+    deckCardWidth,
+  );
+  const discardMarginList = handMargins(
+    discardLayoutState,
+    discardFaces.length,
+    deckCardWidth,
+  );
+  const discardHidden = discardLayoutState.hiddenLeft + discardLayoutState.hiddenRight;
+
   return (
     <div class="table-deck" data-zone="table-deck" aria-label="Talon">
       <h2 class="deck-title">Deck</h2>
@@ -260,7 +333,12 @@ export function TableDeck({
           sticking out to its right and the badge underneath keep their
           relative positions. */}
       <div class="deck-assembly" data-testid="deck-assembly" data-align="center">
-        <div class="talon-deck" data-testid="talon-deck" data-layout="horizontal-trump">
+        <div
+          class="talon-deck"
+          data-testid="talon-deck"
+          data-layout="horizontal-trump"
+          ref={deckRef}
+        >
           <div class="talon-stack">
             <CardBack class="talon-back talon-back-second" />
             <CardBack class="talon-back" />
@@ -290,41 +368,69 @@ export function TableDeck({
         </div>
       </div>
 
-      {/* Req 7: the discard pile shares the DECK box. Every earlier discard is
-          face-down; only the last finished bout is revealed on top. */}
-      <div class="table-discard" data-testid="discard-pile" aria-label="Discard pile">
+      {/* Req 7: the discard pile shares the DECK box. There is no counter any
+          more: every discarded card is drawn in one overlapping row, earlier
+          bouts face-down and the last finished bout face-up. */}
+      <div
+        class="table-discard"
+        data-testid="discard-pile"
+        aria-label="Discard pile"
+        ref={discardRef}
+      >
         <span class="discard-title">Discard</span>
-        <div class="discard-stack">
-          {discardCount > 0 ? (
-            <div class="discard-face-down" data-testid="discard-face-down">
-              <CardBack class="discard-back" />
-              <span
-                class="discard-count deck-count-badge"
-                data-testid="discard-count"
-                data-position="top-left"
-              >
-                {discardCount}
-              </span>
-            </div>
-          ) : (
-            <span class="discard-empty" data-testid="discard-empty">
-              Empty
-            </span>
-          )}
-          {lastDiscardCards.length > 0 ? (
-            <div class="discard-last" data-testid="discard-last">
-              {lastDiscardCards.map((card, index) => (
-                <span key={`${card.suit}-${card.rank}-${index}`} class="discard-card">
-                  <Card
-                    suit={card.suit}
-                    rank={card.rank}
-                    trump={isTrumpCard(card, trumpSuit)}
-                  />
+        {discardFaces.length > 0 ? (
+          <div
+            class="discard-stack"
+            data-testid="discard-stack"
+            data-overlap={discardLayoutState.overlap}
+            data-hidden-left={discardLayoutState.hiddenLeft}
+            data-hidden-right={discardLayoutState.hiddenRight}
+            data-cursor-fraction={discardCursor}
+            data-card-width={deckCardWidth}
+            data-available-width={discardAvailable}
+            onMouseMove={
+              discardHidden > 0
+                ? (event) => {
+                    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+                    if (rect.width <= 0) return;
+                    const fraction = (event.clientX - rect.left) / rect.width;
+                    setDiscardCursor(Math.min(1, Math.max(0, fraction)));
+                  }
+                : undefined
+            }
+            onMouseLeave={discardHidden > 0 ? () => setDiscardCursor(0.5) : undefined}
+          >
+            {discardFaces.map((card, index) => {
+              const hidden =
+                index < discardLayoutState.hiddenLeft ||
+                index >= discardLayoutState.hiddenLeft + discardLayoutState.visibleCount;
+              return (
+                <span
+                  key={`discard-${index}-${card ? `${card.suit}-${card.rank}` : 'back'}`}
+                  class="discard-slot"
+                  data-face={card ? 'up' : 'down'}
+                  data-hidden={hidden ? 'true' : 'false'}
+                  data-index={index}
+                  style={{ marginLeft: `${discardMarginList[index]}px` }}
+                >
+                  {card ? (
+                    <Card
+                      suit={card.suit}
+                      rank={card.rank}
+                      trump={isTrumpCard(card, trumpSuit)}
+                    />
+                  ) : (
+                    <CardBack class="discard-back" />
+                  )}
                 </span>
-              ))}
-            </div>
-          ) : null}
-        </div>
+              );
+            })}
+          </div>
+        ) : (
+          <span class="discard-empty" data-testid="discard-empty">
+            Empty
+          </span>
+        )}
       </div>
     </div>
   );
@@ -629,26 +735,31 @@ export function GameTable({
   const [cursorFraction, setCursorFraction] = useState(0.5);
   const arenaRef = useRef<HTMLDivElement>(null);
   const handRef = useRef<HTMLDivElement>(null);
+  const handZoneRef = useRef<HTMLElement>(null);
   const settings = useSettings();
 
   const hand = sortHand(myHand, sortMode, trumpSuit);
   const seats = assignSeats(opponents);
 
-  // Measure the hand column so the overlap follows the real available space.
+  // Item 3a: measure the OUTER `[data-zone="player-hand"]` wrapper, never the
+  // highlight box itself (it is sized by the very cards it wraps). The box pads
+  // the row symmetrically, so the row may use the wrapper width minus padding.
   useEffect(() => {
     const measure = () => {
       const node = handRef.current;
       if (!node) return;
-      const available = node.parentElement?.clientWidth ?? node.clientWidth;
-      setHandWidth(available);
+      const zone = handZoneRef.current ?? node.parentElement;
+      const available = zone?.clientWidth ?? node.clientWidth;
+      setHandWidth(available > 0 ? Math.max(0, available - HAND_BOX_PADDING * 2) : available);
       const card = node.querySelector('.card-slot') as HTMLElement | null;
       const measured = card?.offsetWidth ?? 0;
       if (measured > 0) setCardWidth(measured);
     };
     measure();
-    if (typeof ResizeObserver !== 'undefined' && handRef.current?.parentElement) {
+    const zone = handZoneRef.current ?? handRef.current?.parentElement ?? null;
+    if (typeof ResizeObserver !== 'undefined' && zone) {
       const observer = new ResizeObserver(measure);
-      observer.observe(handRef.current.parentElement);
+      observer.observe(zone);
       return () => observer.disconnect();
     }
     if (typeof window !== 'undefined') {
@@ -673,11 +784,30 @@ export function GameTable({
   const reviewMode = isReviewMode;
   const handClasses = ['player-hand'];
   const handCardClasses = ['hand-cards'];
+  // Item 3b: the glow belongs to every player who can act — the opening
+  // attacker AND any player holding a legal throw-in after the first card of
+  // the bout has been played. It is never suppressed because cards are already
+  // on the table or because some of them are covered.
+  const throwInTurn = !reviewMode && canThrowIn;
+  const handGlow = !reviewMode && (awaitingAttack || defending || canThrowIn);
   if (!reviewMode && awaitingAttack) {
     handClasses.push('turn-pulse');
     handCardClasses.push('attacker-turn');
   }
+  if (throwInTurn && !awaitingAttack) {
+    handClasses.push('turn-pulse');
+    handCardClasses.push('throw-in-turn');
+  }
   if (!reviewMode && defending) handCardClasses.push('defender-turn');
+  const handTurnAction = reviewMode
+    ? 'none'
+    : awaitingAttack
+      ? 'attack'
+      : defending
+        ? 'defend'
+        : throwInTurn
+          ? 'throw-in'
+          : 'none';
   const activeSeconds = Math.max(0, Math.min(15, turnSecondsRemaining));
   const viewerOnClock = turnPlayerId === myId;
 
@@ -950,14 +1080,17 @@ export function GameTable({
               />
             );
           })}
-        </div>
 
+          {/* Item 8: the dashed reflection outline is a sibling of the attack
+              cards in the same single row, so its top, centre and bottom edges
+              always line up with every card in play at any table width. */}
           {!reviewMode && canRedirect && tablePairs.length > 0 ? (
             <div
               class={`redirect-outline${snapZone === 'redirect' ? ' snap-active' : ''}`}
               data-testid="redirect-outline"
               data-drop-zone="redirect"
               data-direction={redirectDirection}
+              data-align="card"
               aria-label="Reflect the attack"
               onDragOver={hoverZone('redirect')}
               onDragLeave={clearSnap}
@@ -969,9 +1102,16 @@ export function GameTable({
             </div>
           ) : null}
         </div>
+        </div>
       </section>
 
-      <section class={handClasses.join(' ')} data-zone="player-hand" aria-label="Your hand">
+      <section
+        class={handClasses.join(' ')}
+        data-zone="player-hand"
+        aria-label="Your hand"
+        data-turn-action={handTurnAction}
+        ref={handZoneRef}
+      >
         <span
           class={`hand-clock${viewerOnClock ? ' active' : ''}`}
           data-testid="hand-clock"
@@ -984,7 +1124,8 @@ export function GameTable({
         <div
           class={handCardClasses.join(' ')}
           data-testid="hand-turn-highlight"
-          data-active={!reviewMode && (awaitingAttack || defending) ? 'true' : 'false'}
+          data-active={handGlow ? 'true' : 'false'}
+          data-turn-action={handTurnAction}
           data-overlap={handLayoutState.overlap}
           data-hidden-left={handLayoutState.hiddenLeft}
           data-hidden-right={handLayoutState.hiddenRight}

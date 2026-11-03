@@ -79,6 +79,9 @@ object PlayerGameView:
       throw new IllegalArgumentException(s"Unknown player: $viewerId")
     val viewer = state.players(viewerIdx)
     val prompted = state.promptedPlayerIds
+    // A finished game has no turn: its clock and its prompts are always idle,
+    // whatever the caller's state was last stamped with.
+    val gameOver = state.boutPhase == BoutPhase.GameOver
 
     PlayerGameView(
       myId = viewer.id,
@@ -113,9 +116,9 @@ object PlayerGameView:
       myFinishRank = viewer.finishRank,
       winners = state.winners,
       durak = state.durak,
-      turnPlayerId = state.turnPlayerId,
-      turnDeadlineMs = state.turnDeadlineMs,
-      turnSecondsRemaining = secondsRemaining(state, nowMs),
+      turnPlayerId = if gameOver then None else state.turnPlayerId,
+      turnDeadlineMs = if gameOver then 0L else state.turnDeadlineMs,
+      turnSecondsRemaining = if gameOver then 0 else secondsRemaining(state, nowMs),
       defenderDefenseless = state.defenderIsDefenseless,
       presentPlayers = state.presentPlayerIds,
       discardCount = state.discardPile.size,

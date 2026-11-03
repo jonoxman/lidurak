@@ -988,7 +988,7 @@ describe('GamePage', () => {
     expect(screen.getByTestId('presence-dot-p1').classList.contains('present')).toBe(true);
   });
 
-  it('renders the discard pile inside the DECK box, face-down with the last bout revealed', async () => {
+  it('renders every discarded card in one overlapping row without a counter', async () => {
     getGameView.mockResolvedValue({
       ...view,
       discardCount: 5,
@@ -1005,15 +1005,24 @@ describe('GamePage', () => {
     await waitFor(() => expect(screen.getByTestId('discard-pile')).toBeTruthy());
 
     const deckBox = container.querySelector('[data-zone="table-deck"]') as HTMLElement;
-    expect(deckBox.contains(screen.getByTestId('discard-pile'))).toBe(true);
-    expect(screen.getByTestId('discard-count').textContent).toBe('5');
-    expect(screen.getByTestId('discard-count').getAttribute('data-position')).toBe('top-left');
+    const pile = screen.getByTestId('discard-pile');
+    expect(deckBox.contains(pile)).toBe(true);
 
-    // The general pile is face-down; only the last discard is face-up.
-    expect(screen.getByTestId('discard-face-down').querySelector('svg')).not.toBeNull();
-    const revealed = screen.getByTestId('discard-last');
-    expect(revealed.querySelectorAll('.card-slot')).toHaveLength(2);
-    expect(revealed.textContent).not.toMatch(/\d+ cards?/i);
+    // Feedback #7a: the number-of-discards counter is gone.
+    expect(screen.queryByTestId('discard-count')).toBeNull();
+    expect(pile.querySelector('.deck-count-badge')).toBeNull();
+
+    // Feedback #7b: one single-row pile holding exactly `discardCount` cards.
+    const slots = Array.from(pile.querySelectorAll('.discard-slot')) as HTMLElement[];
+    expect(slots).toHaveLength(5);
+    expect(slots[0].style.marginLeft).toBe('0px');
+    for (const slot of slots.slice(1)) {
+      expect(parseFloat(slot.style.marginLeft)).toBeLessThan(0);
+    }
+
+    // The earlier discards are face-down; only the last bout is face-up.
+    expect(pile.querySelectorAll('.discard-slot[data-face="down"]')).toHaveLength(3);
+    expect(pile.querySelectorAll('.discard-slot[data-face="up"] .card-slot')).toHaveLength(2);
   });
 
   it('shows an empty discard pile before the first bout resolves', async () => {
@@ -1023,8 +1032,8 @@ describe('GamePage', () => {
 
     await waitFor(() => expect(screen.getByTestId('discard-pile')).toBeTruthy());
     expect(screen.getByTestId('discard-empty').textContent).toBe('Empty');
+    expect(screen.queryByTestId('discard-stack')).toBeNull();
     expect(screen.queryByTestId('discard-count')).toBeNull();
-    expect(screen.queryByTestId('discard-last')).toBeNull();
   });
 
   it('shows the overall game clock separately from the turn clock', async () => {

@@ -330,3 +330,89 @@ class GameReplaySuite extends munit.FunSuite:
 
     assert(GameReplay.verifyReplay(gapped).isLeft, "a gap in the indices must not verify")
   }
+
+  // --- Finished games in the recorded history (feedback items 9 / 12) ---
+
+  test("the final frame of a finished game freezes a GameOver view for every seat") {
+    val room = newRoom()
+    val attack = card(Rank.Six, Suit.Spades)
+    val cover = card(Rank.Seven, Suit.Spades)
+    val finalBout = GameEngine
+      .createGame(GameConfig(playerCount = 2, seed = 7L), Vector("P0", "P1"))
+      .copy(
+        // Both hands are empty: the covered bout is the last of the match.
+        players = Vector(player("p0", Nil), player("p1", Nil)),
+        talon = Vector.empty,
+        bottomTrumpCard = None,
+        tablePairs = Vector(TablePair(attack, Some(cover))),
+        attackerIdx = 0,
+        defenderIdx = 1,
+        boutPhase = BoutPhase.Defense,
+        defenderInitialHandSize = 1,
+        turnDeadlineMs = 0L
+      )
+    room.stateRef.set(finalBout).unsafeRunSync()
+
+    val finished = applyAction(room, GameAction.PassTurn("p0"))
+    GameActor.stopClock(room).unsafeRunSync()
+    assertEquals(finished.boutPhase, BoutPhase.GameOver)
+
+    val replay = replayOf(room)
+    val last = replay.frames.last
+    assertEquals(last.state.boutPhase, BoutPhase.GameOver)
+    assertEquals(last.views.keySet, Set("p0", "p1"))
+    last.views.foreach { case (seat, view) =>
+      assertEquals(seat, view.myId)
+      assertEquals(view.boutPhase, BoutPhase.GameOver)
+      assertEquals(view.legalActions, List.empty)
+      assertEquals(view.promptedPlayerIds, Vector.empty)
+      assertEquals(view.turnPlayerId, None)
+      assertEquals(view.turnDeadlineMs, 0L)
+      assertEquals(view.turnSecondsRemaining, 0)
+      assertEquals(view.gameEndedAtMs, Some(last.elapsedMs))
+    }
+    // `verifyReplay` re-derives the history from the deal frame, so it only
+    // applies to games played out from the deal; this one starts from a
+    // scripted final position. The recorded finish must still round-trip.
+
+    val decoded = parser
+      .decode[SerializedGame](replay.asJson.noSpaces)
+      .fold(error => fail(error.getMessage), identity)
+    assertEquals(decoded.frames.last.state.boutPhase, BoutPhase.GameOver)
+    assertEquals(decoded.frames.last.views("p0").boutPhase, BoutPhase.GameOver)
+  }
+
+  test("a four-seat finished game projects every seat and every frozen view") {
+    val finished = GameEngine
+      .createGame(GameConfig(playerCount = 4, seed = 21L), Vector("P0", "P1", "P2", "P3"))
+      .copy(
+        players = Vector.tabulate(4)(idx => player(s"p$idx", Nil).copy(finishRank = Some(idx + 1))),
+        talon = Vector.empty,
+        bottomTrumpCard = None,
+        tablePairs = Vector.empty,
+        boutPhase = BoutPhase.GameOver,
+        defenderInitialHandSize = 0,
+        defenderIdx = 0,
+        attackerIdx = 1,
+        finishOrder = Vector("p0", "p1", "p2", "p3"),
+        isDraw = true,
+        turnDeadlineMs = 5_000L,
+        gameEndedAtMs = Some(4_200L)
+      )
+
+    finished.players.foreach { seat =>
+      val view = PlayerGameView.forViewer(finished, seat.id)
+      assertEquals(view.boutPhase, BoutPhase.GameOver)
+      assertEquals(view.legalActions, List.empty)
+      assertEquals(view.turnDeadlineMs, 0L)
+      assertEquals(view.gameEndedAtMs, Some(4_200L))
+    }
+
+    val views = GameReplay.frozenViews(finished, 1_234L)
+    assertEquals(views.keySet, Set("p0", "p1", "p2", "p3"))
+    views.values.foreach { view =>
+      assertEquals(view.boutPhase, BoutPhase.GameOver)
+      assertEquals(view.legalActions, List.empty)
+      assertEquals(view.turnDeadlineMs, 0L)
+    }
+  }
