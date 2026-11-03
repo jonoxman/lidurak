@@ -135,9 +135,6 @@ const RANK_ORDER: Record<string, number> = {
   ace: 14,
 };
 
-/** The viewer always occupies relative seat 0; opponents follow clockwise. */
-const VIEWER_SEAT = 0;
-
 /** Snap radius for magnetic drag-and-drop. */
 export const SNAP_DISTANCE_PX = 48;
 
@@ -160,6 +157,53 @@ export const DECK_CARD_WIDTH = 80;
 export const DECK_CARD_HEIGHT = 114;
 /** Inner width of the sidebar DECK box, used until the pile has been measured. */
 export const DISCARD_FALLBACK_WIDTH = 236;
+/**
+ * ITEM-PREV-7b: the face-up discard row may cover the face-down stack, but the
+ * stack always keeps this much of its left edge (the peek strip) visible.
+ */
+export const MIN_VISIBLE_STRIP_PX = 22;
+
+/** Size of one card in play; mirrors `--bout-card-width/height` in table.css. */
+export const BOUT_CARD_WIDTH = 80;
+export const BOUT_CARD_HEIGHT = 114;
+/**
+ * ITEM-NEW-2b: however many cards are in play, the left strip of every card —
+ * where the rank and suit index are drawn — stays visible.
+ */
+export const BOUT_MIN_VISIBLE_LEFT = 22;
+/** Comfortable gap between two cards in play while they still fit. */
+export const BOUT_MIN_GAP = 4;
+/** The defence card overhangs its attack card by this fraction of a card. */
+export const BOUT_DEFENSE_OVERHANG_RATIO = 0.25;
+/** Used until the defender's play area has been measured (jsdom reports zero). */
+export const BOUT_FALLBACK_WIDTH = 420;
+
+export interface BoutRowLayout {
+  /** Distance between the left edges of two neighbouring cards in play. */
+  step: number;
+  /** Positive when the cards overlap; `0` or negative when they are spaced. */
+  overlap: number;
+}
+
+/**
+ * ITEM-NEW-2a/2b single-row play-area geometry. Cards sit a small gap apart
+ * while the whole bout fits in the defender's area, then tighten into a
+ * negative `margin-left` overlap as pairs are added. The step never drops below
+ * [[BOUT_MIN_VISIBLE_LEFT]], so the left rank/suit strip of every card stays
+ * readable even with six pairs plus the reflection outline on the table.
+ */
+export function boutLayout(
+  slotCount: number,
+  availableWidth = BOUT_FALLBACK_WIDTH,
+  cardWidth = BOUT_CARD_WIDTH,
+): BoutRowLayout {
+  if (slotCount <= 1) return { step: 0, overlap: 0 };
+  const overhang = Math.round(cardWidth * BOUT_DEFENSE_OVERHANG_RATIO);
+  const comfortable = cardWidth + overhang + BOUT_MIN_GAP;
+  const needed = (availableWidth - cardWidth) / (slotCount - 1);
+  const step = Math.min(comfortable, Math.max(BOUT_MIN_VISIBLE_LEFT, needed));
+  return { step, overlap: cardWidth - step };
+}
 /** Width of one opponent card back inside a seat box. */
 export const OPPONENT_CARD_WIDTH = 22;
 /** Usable width of the fixed opponent card row. */
@@ -327,10 +371,19 @@ export function TableDeck({
     deckCardWidth,
     discardWidth > 0 ? discardWidth : DISCARD_FALLBACK_WIDTH,
   );
-  // The face-up row may only use the width the single stack leaves behind.
+  // ITEM-PREV-7b: the revealed face-up row overlaps the stationary face-down
+  // stack by the maximum allowed margin — the leftmost revealed card is pulled
+  // left by `cardWidth - MIN_VISIBLE_STRIP_PX`, which leaves exactly the peek
+  // strip of the face-down stack visible on the left.
+  const overlapsFaceDown = faceDownCount > 0 && lastDiscardCards.length > 0;
+  const faceDownOverlap = overlapsFaceDown
+    ? Math.max(0, deckCardWidth - MIN_VISIBLE_STRIP_PX)
+    : 0;
+  // ITEM-PREV-7a: the revealed cards spread over the pile width that remains
+  // right of the peek strip, so a larger pile gives them more room.
   const visibleAvailable = Math.max(
     deckCardWidth,
-    discardAvailable - (faceDownCount > 0 ? deckCardWidth : 0),
+    overlapsFaceDown ? discardAvailable - MIN_VISIBLE_STRIP_PX : discardAvailable,
   );
   const visibleLayout = handLayout(
     lastDiscardCards.length,
@@ -340,6 +393,9 @@ export function TableDeck({
   );
   const visibleMargins = handMargins(visibleLayout, lastDiscardCards.length, deckCardWidth);
   const discardHidden = visibleLayout.hiddenLeft + visibleLayout.hiddenRight;
+  // ITEM-PREV-7c: only a row that does not fit even at maximum overlap becomes
+  // cursor-slidable; otherwise the mouse animation never runs.
+  const discardInteractive = discardHidden > 0;
   const hasDiscard = faceDownCount + lastDiscardCards.length > 0;
 
   return (
@@ -436,8 +492,14 @@ export function TableDeck({
                 data-cursor-fraction={discardCursor}
                 data-card-width={deckCardWidth}
                 data-available-width={visibleAvailable}
+                data-overlaps-facedown={overlapsFaceDown ? 'true' : 'false'}
+                data-facedown-overlap-px={faceDownOverlap}
+                data-interactive-overflow={discardInteractive ? 'true' : 'false'}
+                style={{
+                  marginLeft: faceDownOverlap > 0 ? `-${faceDownOverlap}px` : undefined,
+                }}
                 onMouseMove={
-                  discardHidden > 0
+                  discardInteractive
                     ? (event) => {
                         const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
                         if (rect.width <= 0) return;
@@ -446,7 +508,7 @@ export function TableDeck({
                       }
                     : undefined
                 }
-                onMouseLeave={discardHidden > 0 ? () => setDiscardCursor(0.5) : undefined}
+                onMouseLeave={discardInteractive ? () => setDiscardCursor(0.5) : undefined}
               >
                 {lastDiscardCards.map((card, index) => {
                   const hidden =
@@ -729,12 +791,45 @@ export function isSurrenderedPhase(phase: string | undefined): boolean {
   );
 }
 
-/** Assigns every opponent a deterministic seat relative to the viewer. */
-export function assignSeats(opponents: OpponentSummary[]): SeatAssignment[] {
+/**
+ * ITEM-ADD-1a: canonical seat order `p0, p1, ..., p(N-1)` for the whole match,
+ * the viewer included. Seats are ordered by their numeric id; an id that does
+ * not look like `p<index>` keeps its arrival order after the numbered seats.
+ */
+export function canonicalSeatOrder(
+  opponents: OpponentSummary[],
+  myId = 'p0',
+): string[] {
+  const seatNumber = (id: string): number => seatIndexOf(id) ?? Number.MAX_SAFE_INTEGER;
+  return [myId, ...opponents.map((opponent) => opponent.id)]
+    .map((id, index) => ({ id, index, seat: seatNumber(id) }))
+    .sort((left, right) => left.seat - right.seat || left.index - right.index)
+    .map((entry) => entry.id);
+}
+
+/**
+ * ITEM-ADD-1b: assigns every opponent the felt seat that is the same number of
+ * clockwise steps away from the active user, whatever the seat numbering is, so
+ * rotating the point of view rotates the whole opponent row consistently.
+ */
+export function assignSeats(
+  opponents: OpponentSummary[],
+  myId = 'p0',
+): SeatAssignment[] {
   const playerCount = opponents.length + 1;
+  const order = canonicalSeatOrder(opponents, myId);
+  const myIndex = Math.max(0, order.indexOf(myId));
   return opponents.map((opponent, index) => {
-    const offset = clockwiseOffset(index + 1, VIEWER_SEAT, playerCount);
-    return { opponent, offset, position: seatForOffset(offset, playerCount) };
+    const opponentIndex = order.indexOf(opponent.id);
+    const clockwise =
+      opponentIndex < 0
+        ? index + 1
+        : (opponentIndex - myIndex + playerCount) % playerCount || playerCount;
+    return {
+      opponent,
+      offset: clockwise,
+      position: seatForOffset(clockwise, playerCount),
+    };
   });
 }
 
@@ -754,6 +849,27 @@ function RedirectIcon({
   chaosMode: boolean;
   direction: RedirectDirection;
 }) {
+  // ITEM-NEW-1a: the SVG plate inside the reflection outline follows the same
+  // roundness slider as the CSS border around it, so the two can never disagree.
+  const settings = useSettings();
+  const plateRadius = Math.max(
+    0,
+    Math.min(34, Math.round(settings.roundness * (70 / HAND_CARD_WIDTH))),
+  );
+  const plate = (
+    <rect
+      class="redirect-plate"
+      data-radius={plateRadius}
+      x="1"
+      y="1"
+      width="70"
+      height="102"
+      rx={plateRadius}
+      ry={plateRadius}
+      fill="rgba(217, 163, 38, 0.06)"
+    />
+  );
+
   if (chaosMode) {
     return (
       <svg
@@ -763,6 +879,7 @@ function RedirectIcon({
         role="img"
         aria-label="Random redirect"
       >
+        {plate}
         <path
           d="M18 38 L54 50 M54 50 L41 49 M54 50 L45 41"
           fill="none"
@@ -801,6 +918,7 @@ function RedirectIcon({
       role="img"
       aria-label="Redirect to the next player"
     >
+      {plate}
       <g transform={`rotate(${rotation} 36 46)`}>
         <path d="M36 16 L47 32 L41 32 L41 58 L31 58 L31 32 L25 32 Z" fill="#d9a326" />
         <path
@@ -867,13 +985,18 @@ export function GameTable({
   const [handWidth, setHandWidth] = useState(0);
   const [cardWidth, setCardWidth] = useState(HAND_CARD_WIDTH);
   const [cursorFraction, setCursorFraction] = useState(0.5);
+  const [boutWidth, setBoutWidth] = useState(0);
+  const [boutCardWidth, setBoutCardWidth] = useState(BOUT_CARD_WIDTH);
   const arenaRef = useRef<HTMLDivElement>(null);
   const handRef = useRef<HTMLDivElement>(null);
   const handZoneRef = useRef<HTMLElement>(null);
+  const battlefieldRef = useRef<HTMLDivElement>(null);
   const settings = useSettings();
 
   const hand = sortHand(myHand, sortMode, trumpSuit);
-  const seats = assignSeats(opponents);
+  // ITEM-ADD-1: seats are resolved from the viewer's own canonical index, so
+  // the opponent row stays realistic from any player's point of view.
+  const seats = assignSeats(opponents, myId);
   // ITEM-ADD-9: a bot seat accepts no user input at all, exactly like review
   // mode. `legalActions` is already empty for a bot on the server; this also
   // locks the local drag/double-click/drop surfaces.
@@ -898,6 +1021,38 @@ export function GameTable({
     if (typeof ResizeObserver !== 'undefined' && zone) {
       const observer = new ResizeObserver(measure);
       observer.observe(zone);
+      return () => observer.disconnect();
+    }
+    if (typeof window !== 'undefined') {
+      window.addEventListener('resize', measure);
+      return () => window.removeEventListener('resize', measure);
+    }
+    return undefined;
+  }, []);
+
+  // ITEM-NEW-2a: measure the defender-anchored play area (inside its padding)
+  // and the real card size in play, so the single row tightens on narrow tables.
+  useEffect(() => {
+    const measure = () => {
+      const box = battlefieldRef.current;
+      if (!box) return;
+      const styles =
+        typeof window !== 'undefined' && typeof window.getComputedStyle === 'function'
+          ? window.getComputedStyle(box)
+          : null;
+      const padding = styles
+        ? (parseFloat(styles.paddingLeft || '0') || 0) +
+          (parseFloat(styles.paddingRight || '0') || 0)
+        : 0;
+      if (box.clientWidth > 0) setBoutWidth(Math.max(0, box.clientWidth - padding));
+      const card = box.querySelector('.table-pair .card-slot') as HTMLElement | null;
+      const measured = card?.offsetWidth ?? 0;
+      if (measured > 0) setBoutCardWidth(measured);
+    };
+    measure();
+    if (typeof ResizeObserver !== 'undefined' && battlefieldRef.current) {
+      const observer = new ResizeObserver(measure);
+      observer.observe(battlefieldRef.current);
       return () => observer.disconnect();
     }
     if (typeof window !== 'undefined') {
@@ -1081,6 +1236,19 @@ export function GameTable({
     if (nearest) setSnapZone(nearest);
   };
 
+  // ITEM-NEW-2b: the reflection outline occupies one card slot in the same row,
+  // and every slot after the first is pulled left by the shared step: a small
+  // gap while the bout fits, then an overlap that never covers the left
+  // rank/suit strip of the previous card, so the cards never wrap.
+  const redirectSlot = !reviewMode && canRedirect && tablePairs.length > 0 ? 1 : 0;
+  const boutGeometry = boutLayout(
+    tablePairs.length + redirectSlot,
+    boutWidth > 0 ? boutWidth : BOUT_FALLBACK_WIDTH,
+    boutCardWidth,
+  );
+  const boutSlotMargin = (index: number): string | undefined =>
+    index === 0 ? undefined : `${boutGeometry.step - boutCardWidth}px`;
+
   const boutClasses = ['bout-area'];
 
   return (
@@ -1099,7 +1267,7 @@ export function GameTable({
       onDragEnd={draggable ? clearSnap : undefined}
     >
       {seats.map(({ opponent, offset, position }) => {
-        const classes = ['seat', `seat-${position}`];
+        const classes = ['seat', 'opponent-seat', `seat-${position}`];
         if (opponent.id === attackerId) classes.push('active-attacker');
         if (opponent.id === defenderId) classes.push('active-defender');
         if (opponent.finishRank != null) classes.push('finished');
@@ -1191,6 +1359,7 @@ export function GameTable({
           data-testid="play-area-box"
           data-fixed-size="true"
           data-surrendered={surrendered ? 'true' : 'false'}
+          ref={battlefieldRef}
         >
           {/* Row 2 anchors the drop targets in front of each legal defender, so
               every seat box keeps identical dimensions. */}
@@ -1225,6 +1394,10 @@ export function GameTable({
           data-testid="table-pairs-group"
           data-count={tablePairs.length}
           data-anchor-seat={boutAnchor}
+          data-single-row="true"
+          data-min-visible-left={BOUT_MIN_VISIBLE_LEFT}
+          data-step={boutGeometry.step}
+          data-overlap={boutGeometry.overlap}
           data-surrendered={surrendered ? 'true' : 'false'}
           data-surrender-target={surrendered ? surrenderTarget : undefined}
         >
@@ -1237,6 +1410,7 @@ export function GameTable({
                 attack={pair.attack}
                 defense={pair.defense}
                 trumpSuit={trumpSuit}
+                marginLeft={boutSlotMargin(index)}
                 pulse={defending && !pair.defense}
                 snap={snapZone === zone}
                 dropZone={coverable ? zone : undefined}
@@ -1261,6 +1435,7 @@ export function GameTable({
             <div
               class={`redirect-outline${snapZone === 'redirect' ? ' snap-active' : ''}`}
               data-testid="redirect-outline"
+              style={{ marginLeft: boutSlotMargin(tablePairs.length) }}
               data-drop-zone="redirect"
               data-direction={redirectDirection}
               data-target-seat={redirectDirection}
