@@ -444,6 +444,15 @@ html[data-theme='light'] .error-banner {
   border-color: var(--app-accent);
 }
 
+/* ITEM-ADD-8a: the status pill wrapper keeps the right slot tidy for both the
+   active user's row and every opponent row. */
+.status-tag-slot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
 .status-player {
   display: flex;
   align-items: center;
@@ -507,56 +516,46 @@ html[data-theme='light'] .error-banner {
   opacity: 0.85;
 }
 
-/* ITEM-ADD-2: outline the seat currently attacking (green) and the seat being
-   attacked (amber) in the PLAYERS list. */
-.status-badge[data-role='attacker'] {
-  border-color: #2dc653;
-  outline: 2px solid #2dc653;
-  outline-offset: -2px;
-  box-shadow: 0 0 8px rgba(45, 198, 83, 0.35);
+/* ITEM-ADD-2a: the player's name is never outlined, bordered or shadowed inside
+   its row box. */
+.status-badge .status-name {
+  border: none;
+  outline: none;
+  box-shadow: none;
 }
 
-.status-badge[data-role='attacker'] .status-name {
-  border-radius: 4px;
-  outline: 2px solid #2dc653;
-  outline-offset: 2px;
-  color: #2dc653;
+/* ITEM-ADD-2b: the attacking (green) and defending (amber) seats wear a soft,
+   diffused glow instead of the old sharp outline. */
+.status-badge[data-role='attacker'] {
+  border: 1px solid rgba(45, 198, 83, 0.55);
+  outline: none;
+  box-shadow:
+    0 0 12px 2px rgba(45, 198, 83, 0.38),
+    inset 0 0 8px rgba(45, 198, 83, 0.14);
 }
 
 .status-badge[data-role='defender'] {
-  border-color: #f59e0b;
-  outline: 2px solid #f59e0b;
-  outline-offset: -2px;
-  box-shadow: 0 0 8px rgba(245, 158, 11, 0.35);
-}
-
-.status-badge[data-role='defender'] .status-name {
-  border-radius: 4px;
-  outline: 2px solid #f59e0b;
-  outline-offset: 2px;
-  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.55);
+  outline: none;
+  box-shadow:
+    0 0 12px 2px rgba(245, 158, 11, 0.38),
+    inset 0 0 8px rgba(245, 158, 11, 0.14);
 }
 
 html[data-theme='light'] .status-badge[data-role='attacker'] {
-  border-color: #15803d;
-  outline-color: #15803d;
-  box-shadow: 0 0 8px rgba(21, 128, 61, 0.25);
-}
-
-html[data-theme='light'] .status-badge[data-role='attacker'] .status-name {
-  outline-color: #15803d;
-  color: #15803d;
+  border-color: rgba(21, 128, 61, 0.45);
+  outline: none;
+  box-shadow:
+    0 0 12px 2px rgba(21, 128, 61, 0.26),
+    inset 0 0 8px rgba(21, 128, 61, 0.1);
 }
 
 html[data-theme='light'] .status-badge[data-role='defender'] {
-  border-color: #b45309;
-  outline-color: #b45309;
-  box-shadow: 0 0 8px rgba(180, 83, 9, 0.25);
-}
-
-html[data-theme='light'] .status-badge[data-role='defender'] .status-name {
-  outline-color: #b45309;
-  color: #b45309;
+  border-color: rgba(180, 83, 9, 0.45);
+  outline: none;
+  box-shadow:
+    0 0 12px 2px rgba(180, 83, 9, 0.26),
+    inset 0 0 8px rgba(180, 83, 9, 0.1);
 }
 
 .game-meta {

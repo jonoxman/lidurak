@@ -1539,7 +1539,8 @@
   cursor: pointer;
 }
 
-/* Item 18: the 3-second auto-surrender countdown rides on the button. */
+/* The turn-clock countdown badge (Pass, and the optional `surrenderSeconds` API)
+   rides on the button. The client never auto-surrenders (ITEM-ADD-4a). */
 .surrender-countdown {
   display: inline-grid;
   place-items: center;

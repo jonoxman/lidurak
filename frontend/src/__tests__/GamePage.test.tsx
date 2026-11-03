@@ -803,7 +803,7 @@ describe('GamePage', () => {
     expect(lifted[0].getAttribute('data-rank')).toBe('ace');
   });
 
-  it('auto-surrenders after the grace period when the defender cannot answer', async () => {
+  it('renders the Surrender button on a defense state without auto-dispatching it', async () => {
     const hopelessView: PlayerGameView = {
       ...view,
       myHand: [{ suit: 'clubs', rank: 'two' }],
@@ -814,31 +814,22 @@ describe('GamePage', () => {
       legalActions: ['surrender'],
     };
     getGameView.mockResolvedValue(hopelessView);
-    sendAction.mockResolvedValue({
-      ...hopelessView,
-      boutPhase: 'surrenderThrowIn',
-      legalActions: [],
-    });
+    getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
 
-    render(
-      <GamePage
-        gameId="game-1"
-        playerId="p0"
-        onSwitchPlayer={() => {}}
-        autoSurrenderMs={40}
-      />,
-    );
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
 
-    await waitFor(() =>
-      expect(sendAction).toHaveBeenCalledWith(
-        'game-1',
-        expect.objectContaining({ type: 'declareSurrender', playerId: 'p0' }),
-      ),
-    );
+    // ITEM-ADD-4a: the Surrender button is on screen and clickable as soon as a
+    // defense state with `surrender` in legalActions loads.
+    await waitFor(() => expect(screen.getByText('Surrender')).toBeTruthy());
+    expect(screen.getByRole('button', { name: 'Surrender' })).toBeTruthy();
+    // ...and the client never arms a surrender timer that would remove it.
+    expect(screen.queryByTestId('surrender-countdown')).toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    expect(sendAction).not.toHaveBeenCalled();
   });
 
-  it('shows the 3-second countdown on the Surrender button', async () => {
-    getGameView.mockResolvedValue({
+  it('sends exactly one surrender when the defender clicks the button', async () => {
+    const hopelessView: PlayerGameView = {
       ...view,
       myHand: [{ suit: 'clubs', rank: 'two' }],
       tablePairs: [{ attack: { suit: 'spades', rank: 'six' }, defense: null }],
@@ -846,72 +837,22 @@ describe('GamePage', () => {
       defenderIdx: 0,
       boutPhase: 'defense',
       legalActions: ['surrender'],
+    };
+    getGameView.mockResolvedValue(hopelessView);
+    getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
+    sendAction.mockResolvedValue({
+      ...hopelessView,
+      boutPhase: 'surrenderThrowIn',
+      legalActions: [],
     });
 
     render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
 
-    await waitFor(() => expect(screen.getByTestId('surrender-countdown')).toBeTruthy());
-    expect(screen.getByTestId('surrender-countdown').textContent).toBe('3');
-    expect(screen.queryByTestId('auto-surrender-sent')).toBeNull();
-  });
-
-  it('does not auto-surrender while a legal cover exists', async () => {
-    getGameView.mockResolvedValue({
-      ...view,
-      myHand: [{ suit: 'spades', rank: 'ace' }],
-      tablePairs: [{ attack: { suit: 'spades', rank: 'six' }, defense: null }],
-      attackerIdx: 1,
-      defenderIdx: 0,
-      boutPhase: 'defense',
-      legalActions: ['cover', 'surrender'],
-    });
-
-    render(
-      <GamePage
-        gameId="game-1"
-        playerId="p0"
-        onSwitchPlayer={() => {}}
-        autoSurrenderMs={60}
-      />,
-    );
-
     await waitFor(() => expect(screen.getByText('Surrender')).toBeTruthy());
-    expect(screen.queryByTestId('surrender-countdown')).toBeNull();
-
-    await new Promise((resolve) => setTimeout(resolve, 160));
-    expect(sendAction).not.toHaveBeenCalled();
-  });
-
-  it('lets the defender surrender manually before the countdown ends', async () => {
-    const hopelessView: PlayerGameView = {
-      ...view,
-      myHand: [{ suit: 'clubs', rank: 'two' }],
-      tablePairs: [{ attack: { suit: 'spades', rank: 'six' }, defense: null }],
-      attackerIdx: 1,
-      defenderIdx: 0,
-      boutPhase: 'defense',
-      legalActions: ['surrender'],
-    };
-    getGameView.mockResolvedValue(hopelessView);
-    sendAction.mockResolvedValue({
-      ...hopelessView,
-      boutPhase: 'surrenderThrowIn',
-      legalActions: [],
-    });
-
-    render(
-      <GamePage
-        gameId="game-1"
-        playerId="p0"
-        onSwitchPlayer={() => {}}
-        autoSurrenderMs={300}
-      />,
-    );
-
-    await waitFor(() => expect(screen.getByText('Surrender')).toBeTruthy());
-    fireEvent.click(screen.getByRole('button', { name: /^Surrender(\s+\d+)?$/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Surrender' }));
 
     await waitFor(() => expect(sendAction).toHaveBeenCalledTimes(1));
+    // No cloud of duplicate surrenders arrives after the click.
     await new Promise((resolve) => setTimeout(resolve, 320));
     expect(sendAction).toHaveBeenCalledTimes(1);
     expect(sendAction).toHaveBeenCalledWith(
@@ -1892,7 +1833,7 @@ describe('GamePage', () => {
     expect((screen.getByTestId('review-prev-button') as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it('centres the card count and outlines the attacking and defending seats', async () => {
+  it('glows the attacking and defending rows softly and never outlines the names', async () => {
     getGameView.mockResolvedValue({
       ...view,
       opponents: [
@@ -1919,11 +1860,42 @@ describe('GamePage', () => {
       'attacker',
       'defender',
     ]);
-    expect(rows.map((row) => row.querySelector('.status-name')?.getAttribute('data-role'))).toEqual([
-      'none',
-      'attacker',
-      'defender',
-    ]);
+    // ITEM-ADD-2a: the name inside the box is never given role styling, and no
+    // rule outlines it by role any more.
+    expect(
+      rows.every((row) => row.querySelector('.status-name')?.getAttribute('data-role') === null),
+    ).toBe(true);
+    expect(appCss).toMatch(/\.status-badge \.status-name\s*{[^}]*border:\s*none/);
+    expect(appCss).toMatch(/\.status-badge \.status-name\s*{[^}]*outline:\s*none/);
+    expect(appCss).toMatch(/\.status-badge \.status-name\s*{[^}]*box-shadow:\s*none/);
+    expect(appCss).not.toMatch(/\.status-badge\[data-role='(attacker|defender)'\] \.status-name\s*{/);
+
+    // ITEM-ADD-2b: the role rows carry a soft, diffused glow instead of the old
+    // sharp 2px outline.
+    expect(appCss).toMatch(/\.status-badge\[data-role='attacker'\]\s*{[^}]*outline:\s*none/);
+    expect(appCss).toMatch(
+      /\.status-badge\[data-role='attacker'\]\s*{[^}]*box-shadow:[^}]*rgba\(45, 198, 83, 0\.38\)/,
+    );
+    expect(appCss).toMatch(
+      /\.status-badge\[data-role='attacker'\]\s*{[^}]*inset 0 0 8px rgba\(45, 198, 83, 0\.14\)/,
+    );
+    expect(appCss).toMatch(/\.status-badge\[data-role='defender'\]\s*{[^}]*outline:\s*none/);
+    expect(appCss).toMatch(
+      /\.status-badge\[data-role='defender'\]\s*{[^}]*box-shadow:[^}]*rgba\(245, 158, 11, 0\.38\)/,
+    );
+    expect(appCss).toMatch(
+      /\.status-badge\[data-role='defender'\]\s*{[^}]*inset 0 0 8px rgba\(245, 158, 11, 0\.14\)/,
+    );
+    expect(appCss).not.toMatch(/outline:\s*2px solid #2dc653/);
+    expect(appCss).not.toMatch(/outline:\s*2px solid #f59e0b/);
+    expect(appCss).not.toMatch(/\.status-badge[^{]*{[^}]*outline:\s*2px solid/);
+    // The light theme keeps the softer glow with darker, dimmer tones.
+    expect(appCss).toMatch(
+      /html\[data-theme='light'\] \.status-badge\[data-role='attacker'\]\s*{[^}]*rgba\(21, 128, 61, 0\.26\)/,
+    );
+    expect(appCss).toMatch(
+      /html\[data-theme='light'\] \.status-badge\[data-role='defender'\]\s*{[^}]*rgba\(180, 83, 9, 0\.26\)/,
+    );
 
     // ITEM-ADD-8a: every row has a name track, a centred count track and a
     // dedicated status track, so a tag never moves the count.
@@ -1937,12 +1909,6 @@ describe('GamePage', () => {
       /\.status-badge\s*{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) auto minmax\(0, 1fr\)/,
     );
     expect(appCss).toMatch(/\.status-cards\s*{[^}]*justify-self:\s*center/);
-    expect(appCss).toMatch(
-      /\.status-badge\[data-role='attacker'\]\s*{[^}]*outline:\s*2px solid #2dc653/,
-    );
-    expect(appCss).toMatch(
-      /\.status-badge\[data-role='defender'\]\s*{[^}]*outline:\s*2px solid #f59e0b/,
-    );
   });
 
   it('labels the last player out as DURAK once the match is over', async () => {
@@ -2037,6 +2003,7 @@ describe('GamePage', () => {
     // ITEM-ADD-8a: the viewer's row is labelled exactly like the opponents'.
     expect(within(row).getByText('OUT')).toBeTruthy();
     expect(within(row).getByTestId('player-cards-p0').textContent).toBe('0 cards');
+    expect(within(row).getByTestId('player-status-tag-p0').textContent).toBe('OUT');
   });
 
   it("shows PASSED on the active user's row from their own pass flag", async () => {
@@ -2054,6 +2021,90 @@ describe('GamePage', () => {
     const list = await screen.findByTestId('players-list');
     const row = list.querySelector('[data-player-id="p0"]') as HTMLElement;
     expect(within(row).getByText('PASSED')).toBeTruthy();
+    expect(within(row).getByTestId('player-status-tag-p0').getAttribute('data-status')).toBe(
+      'PASSED',
+    );
+  });
+
+  it('shows WINNER on the active user row when they finished first', async () => {
+    getGameView.mockResolvedValue({
+      ...view,
+      myHand: [],
+      myHasPassed: false,
+      myFinishRank: 1,
+      tablePairs: [],
+      boutPhase: 'defense',
+      legalActions: [],
+      finishOrder: ['p0'],
+      winners: ['p0'],
+      opponents: [{ id: 'p1', name: 'Bob', cardCount: 4, hasPassed: false, finishRank: null }],
+    });
+    getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
+
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    const tag = await screen.findByTestId('player-status-tag-p0');
+    expect(tag.textContent).toBe('WINNER');
+    expect(tag.getAttribute('data-status')).toBe('WINNER');
+    // Bob still holds 4 cards, so his row carries no finished label at all.
+    expect(screen.queryByTestId('player-status-tag-p1')).toBeNull();
+  });
+
+  it("falls back to the winners list when the active user's rank is missing", async () => {
+    getGameView.mockResolvedValue({
+      ...view,
+      myHand: [],
+      myHasPassed: false,
+      myFinishRank: undefined,
+      tablePairs: [],
+      boutPhase: 'defense',
+      legalActions: [],
+      finishOrder: ['p1', 'p0'],
+      winners: ['p1', 'p0'],
+      opponents: [{ id: 'p1', name: 'Bob', cardCount: 0, hasPassed: false, finishRank: 1 }],
+    });
+    getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
+
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    const tag = await screen.findByTestId('player-status-tag-p0');
+    expect(tag.textContent).toBe('OUT');
+    // The opponent keeps their own WINNER label from `finishRank`.
+    expect(screen.getByTestId('player-status-tag-p1').textContent).toBe('WINNER');
+  });
+
+  it('never labels a seat that still holds cards as WINNER or OUT', async () => {
+    getGameView.mockResolvedValue({
+      ...view,
+      myHand: [{ suit: 'clubs', rank: 'two' }],
+      myHasPassed: false,
+      myFinishRank: 2,
+      tablePairs: [],
+      boutPhase: 'defense',
+      legalActions: [],
+      finishOrder: ['p2', 'p0'],
+      winners: ['p2', 'p0'],
+      opponents: [
+        { id: 'p1', name: 'Bob', cardCount: 3, hasPassed: false, finishRank: 2 },
+        { id: 'p2', name: 'Carol', cardCount: 0, hasPassed: false, finishRank: 1 },
+      ],
+    });
+    getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
+
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    const list = await screen.findByTestId('players-list');
+    // ITEM-ADD-8b: Bob's stale rank 2 is ignored because he still holds 3 cards.
+    const bobRow = list.querySelector('[data-player-id="p1"]') as HTMLElement;
+    expect(bobRow.textContent).toContain('3 cards');
+    expect(bobRow.textContent).not.toMatch(/WINNER|OUT/);
+    expect(screen.queryByTestId('player-status-tag-p1')).toBeNull();
+    // The viewer holds a card too, so their own stale rank cannot mark them OUT.
+    const ownRow = list.querySelector('[data-player-id="p0"]') as HTMLElement;
+    expect(ownRow.textContent).not.toMatch(/WINNER|OUT/);
+    expect(screen.queryByTestId('player-status-tag-p0')).toBeNull();
+    // Carol is genuinely finished: 0 cards and rank 1.
+    expect(screen.getByTestId('player-status-tag-p2').textContent).toBe('WINNER');
   });
 
   it('opens a QA scenario preset from the left sidebar in one click', async () => {
