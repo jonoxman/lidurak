@@ -2378,6 +2378,99 @@ describe('GamePage', () => {
     await waitFor(() => expect(createPresetGameMock).toHaveBeenCalledWith('3p-redirect-bob'));
     await waitFor(() => expect(onNavigateGame).toHaveBeenCalledWith('preset-1', 'p1'));
   });
+
+  it('T-90 ITEM-PREV-4a: the Defenseless Auto-Surrender preset shows one tight hand outline', async () => {
+    const bobDefense: PlayerGameView = {
+      ...view,
+      myId: 'p1',
+      myName: 'Bob',
+      myHand: [
+        { suit: 'hearts', rank: 'six' },
+        { suit: 'diamonds', rank: 'nine' },
+      ],
+      opponents: [
+        { id: 'p0', name: 'Alice', cardCount: 6, hasPassed: false, finishRank: null },
+        { id: 'p2', name: 'Carol', cardCount: 4, hasPassed: true, finishRank: null },
+      ],
+      tablePairs: [
+        { attack: { suit: 'clubs', rank: 'six' }, defense: { suit: 'clubs', rank: 'nine' } },
+        { attack: { suit: 'spades', rank: 'jack' }, defense: null },
+      ],
+      trumpSuit: 'clubs',
+      boutPhase: 'Defense',
+      attackerIdx: 0,
+      defenderIdx: 1,
+      legalActions: ['surrender'],
+      defenderDefenseless: true,
+    };
+    getGameView.mockResolvedValue(bobDefense);
+    getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
+    createPresetGameMock.mockResolvedValue({
+      gameId: 'preset-2',
+      players: ['p0', 'p1', 'p2'],
+      playerTypes: ['human', 'human', 'human'],
+      defaultPlayerId: 'p1',
+    });
+    const onNavigateGame = vi.fn();
+
+    render(
+      <GamePage
+        gameId="game-1"
+        playerId="p1"
+        onSwitchPlayer={() => {}}
+        onNavigateGame={onNavigateGame}
+      />,
+    );
+
+    // One click on the left-sidebar preset jumps straight to Bob's hand.
+    const panel = await screen.findByTestId('qa-scenarios');
+    fireEvent.click(within(panel).getByRole('button', { name: 'Defenseless Auto-Surrender' }));
+    await waitFor(() => expect(createPresetGameMock).toHaveBeenCalledWith('defenseless-surrender'));
+    await waitFor(() => expect(onNavigateGame).toHaveBeenCalledWith('preset-2', 'p1'));
+
+    const zone = document.querySelector('[data-zone="player-hand"]') as HTMLElement;
+    const box = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+    // The preset lands on Bob's countdown: the tight box glows crimson...
+    expect(box.classList.contains('hand-cards')).toBe(true);
+    expect(box.parentElement).toBe(zone);
+    expect(box.getAttribute('data-highlighted')).toBe('true');
+    expect(box.getAttribute('data-highlight-variant')).toBe('defender');
+    expect(box.classList.contains('defender-turn')).toBe(true);
+    expect(zone.getAttribute('data-defenseless')).toBe('true');
+
+    // ...and it is the ONLY highlight container: no second, wider wrapper outline.
+    // The wrapper's own `turn-pulse` / `defender-turn` state classes are inert
+    // because every glow rule also requires `.hand-cards`.
+    expect(zone.classList.contains('hand-cards')).toBe(false);
+    expect(zone.querySelectorAll('.hand-cards')).toHaveLength(1);
+    const glowing = Array.from(
+      zone.querySelectorAll('.hand-cards, .attacker-turn, .defender-turn, .throw-in-turn'),
+    );
+    expect(glowing).toHaveLength(1);
+    expect(glowing[0]).toBe(box);
+
+    // The stylesheet pins the outer column neutral in both themes and scopes
+    // every visual glow to `.hand-cards`.
+    const outerReset = cssRule(tableCss, "[data-zone='player-hand'],");
+    for (const declaration of [
+      'border: none',
+      'outline: none',
+      'box-shadow: none',
+      'background: transparent',
+      'animation: none',
+    ]) {
+      expect(outerReset).toContain(declaration);
+    }
+    expect(
+      cssRule(tableCss, ":root[data-theme='light'] [data-zone='player-hand'],"),
+    ).toContain('box-shadow: none');
+    expect(
+      cssRule(
+        tableCss,
+        ".hand-cards[data-highlighted='true'][data-highlight-variant='defender']",
+      ),
+    ).toContain('defenderHandPulse');
+  });
 });
 
 /**
