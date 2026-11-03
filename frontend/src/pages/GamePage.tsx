@@ -2,7 +2,13 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { ActionBar } from '../components/ActionBar';
 import { GameTable, TableDeck, cardKey, defenderDoubleClickAction } from '../components/GameTable';
 import { SortBar, type SortMode } from '../components/SortBar';
-import { getGameReplay, getGameView, sendAction as sendActionRest } from '../api/client';
+import {
+  createGame,
+  createPresetGame,
+  getGameReplay,
+  getGameView,
+  sendAction as sendActionRest,
+} from '../api/client';
 import { GameWebSocket } from '../api/websocket';
 import { soundEngine } from '../audio/SoundEngine';
 import {
@@ -20,6 +26,7 @@ import {
   type GameAction,
   type GameReplay,
   type PlayerGameView,
+  type PlayerType,
   type ReplayFrame,
 } from '../types';
 
@@ -133,6 +140,139 @@ export function replayFrameView(
   return frame.views[playerId] ?? Object.values(frame.views)[0] ?? null;
 }
 
+/** Any seat's projection from a frame; public fields are identical for all. */
+const anyFrameView = (frame: ReplayFrame | null | undefined): PlayerGameView | null =>
+  frame ? (Object.values(frame.views)[0] ?? null) : null;
+
+/**
+ * ITEM-PB-12c: everything a reviewer can actually see on the table. Two frames
+ * share a signature when the bout, the discard pile, the talon and the phase are
+ * unchanged, so a non-resolving `PassTurn` produces no visible step.
+ */
+function replayTableSignature(frame: ReplayFrame | null | undefined): string | null {
+  const frameView = anyFrameView(frame);
+  if (!frameView) return null;
+  return JSON.stringify([
+    frameView.tablePairs.map((pair) => [
+      pair.attack.suit.toLowerCase(),
+      pair.attack.rank.toLowerCase(),
+      pair.defense?.suit.toLowerCase() ?? null,
+      pair.defense?.rank.toLowerCase() ?? null,
+    ]),
+    frameView.discardCount ?? 0,
+    frameView.talonCount,
+    normalizeToken(frameView.boutPhase),
+  ]);
+}
+
+/** True when `frame` is a pass that changed nothing on the table. */
+export function isNonMoveFrame(
+  previous: ReplayFrame | null | undefined,
+  frame: ReplayFrame | null | undefined,
+): boolean {
+  if (!previous || !frame) return false;
+  if (normalizeToken(frame.action?.type ?? '') !== 'passturn') return false;
+  const before = replayTableSignature(previous);
+  const after = replayTableSignature(frame);
+  if (before == null || after == null) return false;
+  return before === after;
+}
+
+/**
+ * ITEM-PB-12c: the frames a reviewer may step through, with non-moves removed
+ * so every step in `Move X / Y` is a visible change on the table.
+ */
+export function visibleReplayFrames(replay: GameReplay | null | undefined): ReplayFrame[] {
+  const frames = replay?.frames ?? [];
+  return frames.filter((frame, index) => !isNonMoveFrame(frames[index - 1], frame));
+}
+
+/** One sound effect to fire while stepping through a replay. */
+export interface ReplayStepSound {
+  event: 'cardPlay' | 'cardCover' | 'redirect' | 'surrender' | 'cardDraw' | 'gameOver';
+  count: number;
+}
+
+/**
+ * ITEM-PB-12b: the sound a frame should make, derived from its recorded action
+ * and the position it lands on (never from local clicks).
+ */
+export function replayFrameSound(
+  frames: ReplayFrame[],
+  targetIdx: number,
+): ReplayStepSound | null {
+  if (frames.length === 0) return null;
+  const index = Math.min(Math.max(targetIdx, 0), frames.length - 1);
+  const frameView = anyFrameView(frames[index]);
+  if (!frameView) return null;
+  if (isGameOverPhase(frameView.boutPhase)) return { event: 'gameOver', count: 1 };
+  const previous = index > 0 ? anyFrameView(frames[index - 1]) : null;
+  switch (normalizeToken(frames[index].action?.type ?? '')) {
+    case 'initialattack':
+    case 'throwincards': {
+      const added = Math.max(1, frameView.tablePairs.length - (previous?.tablePairs.length ?? 0));
+      // A reflection moves the attacker, which is the visible cue for the arrow.
+      if (previous != null && frameView.attackerIdx !== previous.attackerIdx) {
+        return { event: 'redirect', count: 1 };
+      }
+      return { event: 'cardPlay', count: added };
+    }
+    case 'covercard':
+      return { event: 'cardCover', count: 1 };
+    case 'redirectattack':
+      return { event: 'redirect', count: 1 };
+    case 'declaresurrender': {
+      const tableCards = (previous ?? frameView).tablePairs.reduce(
+        (total, pair) => total + 1 + (pair.defense ? 1 : 0),
+        0,
+      );
+      return { event: 'surrender', count: Math.max(1, tableCards) };
+    }
+    case 'passturn': {
+      // Ending a bout draws from the talon; otherwise the cards just moved.
+      const drawn = previous ? Math.max(0, previous.talonCount - frameView.talonCount) : 0;
+      return drawn > 0
+        ? { event: 'cardDraw', count: drawn }
+        : { event: 'cardPlay', count: 1 };
+    }
+    default:
+      return { event: 'cardPlay', count: 1 };
+  }
+}
+
+/** Plays the sound of one replay frame on the shared sound engine. */
+export function playReplayFrameSound(frames: ReplayFrame[], targetIdx: number): void {
+  const sound = replayFrameSound(frames, targetIdx);
+  if (!sound) return;
+  switch (sound.event) {
+    case 'cardCover':
+      soundEngine.playDefendCard();
+      return;
+    case 'redirect':
+      soundEngine.playRedirect();
+      return;
+    case 'surrender':
+      soundEngine.playSurrender(sound.count);
+      return;
+    case 'cardDraw':
+      soundEngine.playTalonDraw(sound.count);
+      return;
+    case 'gameOver':
+      soundEngine.playGameOver();
+      return;
+    default:
+      soundEngine.playAttackCard(sound.count);
+  }
+}
+
+/** One-click scripted positions offered in the lobby and the game sidebar. */
+export const QA_SCENARIOS: { id: string; label: string }[] = [
+  { id: '3p-redirect-bob', label: '3P Redirect (Bob POV)' },
+  { id: 'chaos-4p', label: '4P Chaos Targets' },
+  { id: 'surrender-half-off', label: 'Surrender Half-Off' },
+  { id: 'discard-and-endgame', label: 'Discard & Endgame Durak' },
+];
+
 /**
  * ITEM-9 / ITEM-12: a match is finished when the authoritative view, the frame
  * on screen, or the last recorded frame says so — so a finished game opened
@@ -206,6 +346,8 @@ export interface GamePageProps {
   gameId: string;
   playerId: string;
   onSwitchPlayer: (playerId: string) => void;
+  /** Opens another match (rematch or QA preset); the router owns the URL. */
+  onNavigateGame?: (gameId: string, playerId?: string) => void;
   /** Leaves the table; defaults to the root URL when the router owns it. */
   onLeaveGame?: () => void;
   /** Grace period before a defenceless defender surrenders automatically. */
@@ -216,6 +358,7 @@ export function GamePage({
   gameId,
   playerId,
   onSwitchPlayer,
+  onNavigateGame,
   onLeaveGame,
   autoSurrenderMs = AUTO_SURRENDER_MS,
 }: GamePageProps) {
@@ -242,23 +385,44 @@ export function GamePage({
   // Item 12: the recorded match and the frame the review controls are showing.
   const [replay, setReplay] = useState<GameReplay | null>(null);
   const [replayFrameIdx, setReplayFrameIdx] = useState(0);
+  // ITEM-PB-9: rematch / QA preset progress and the failure line, if any.
+  const [rematchPending, setRematchPending] = useState(false);
+  const [presetPending, setPresetPending] = useState(false);
+  const [presetError, setPresetError] = useState<string | null>(null);
   // Item 13: names remembered from every live view and replay frame.
   const knownNamesRef = useRef<Record<string, string>>({});
   // Game id whose replay was already fetched on mount, so the finished-game
   // effect does not refetch and jump a reviewer back to the final frame.
   const replayLoadedGameRef = useRef<string | null>(null);
   const lastActivityRef = useRef(Date.now());
+  // The match whose view is mounted, so a POV switch is never mistaken for a
+  // new game (ITEM-PB-12a).
+  const viewGameRef = useRef<string | null>(null);
+  // Latest inspected seat, read by the once-per-match replay fetch.
+  const playerIdRef = useRef(playerId);
+  playerIdRef.current = playerId;
+  // Latest loaded replay, for the REST-view fallback of a finished match.
+  const replayRef = useRef<GameReplay | null>(null);
+  const setLoadedReplay = (loaded: GameReplay | null) => {
+    replayRef.current = loaded;
+    setReplay(loaded);
+  };
 
   useEffect(() => {
     let active = true;
-    let replayView: PlayerGameView | null = null;
-    setView(null);
-    setLive(false);
-    setSelection(null);
-    setReplay(null);
-    setReplayFrameIdx(0);
-    replayLoadedGameRef.current = null;
+    // ITEM-PB-12a: only a new match resets the table and the review position —
+    // switching the inspected seat keeps the frame the reviewer is on.
+    if (viewGameRef.current !== gameId) {
+      viewGameRef.current = gameId;
+      setView(null);
+      setSelection(null);
+      setLoadedReplay(null);
+      setReplayFrameIdx(0);
+      replayLoadedGameRef.current = null;
+    }
+    // A different seat is a different projection: never diff sounds across it.
     previousViewRef.current = null;
+    setLive(false);
 
     const socket = new GameWebSocket(gameId, playerId, (next) => {
       if (!active) return;
@@ -267,38 +431,6 @@ export function GamePage({
     });
     socketRef.current = socket;
     socket.connect();
-
-    // ITEM-12: the recorded match is the only source for a finished game whose
-    // live room is gone. Fetch it alongside the live view so opening a finished
-    // game's URL can hydrate the table and the review controls immediately
-    // instead of hanging on "Loading game".
-    try {
-      const replayRequest = getGameReplay(gameId);
-      if (replayRequest != null && typeof replayRequest.then === 'function') {
-        replayRequest
-          .then((loaded) => {
-            if (!active || loaded.frames.length === 0) return;
-            const finalView = replayFrameView(
-              loaded.frames[loaded.frames.length - 1],
-              playerId,
-            );
-            if (finalView == null) return;
-            replayView = finalView;
-            if (!isGameOverPhase(finalView.boutPhase)) return;
-            // The finished match is authoritative: show its final frame and
-            // open review mode on the last move.
-            setView((current) => current ?? finalView);
-            setReplay(loaded);
-            setReplayFrameIdx(loaded.frames.length - 1);
-            replayLoadedGameRef.current = gameId;
-          })
-          .catch((reason: unknown) => {
-            console.warn('Could not load the game replay', reason);
-          });
-      }
-    } catch (reason: unknown) {
-      console.warn('Could not load the game replay', reason);
-    }
 
     // The socket sends the current state on connect; this REST read covers the
     // window before it opens and keeps the table usable if WebSockets are down.
@@ -310,7 +442,9 @@ export function GamePage({
         console.warn('Could not load the game view', reason);
         // A finished game survives only in its replay, so fall back to it
         // rather than leaving the page stuck on the loading state.
-        if (active && replayView != null) setView((current) => current ?? replayView);
+        const loadedFrames = replayRef.current?.frames ?? [];
+        const fallback = replayFrameView(loadedFrames[loadedFrames.length - 1], playerId);
+        if (active && fallback != null) setView((current) => current ?? fallback);
       });
 
     return () => {
@@ -319,6 +453,36 @@ export function GamePage({
       if (socketRef.current === socket) socketRef.current = null;
     };
   }, [gameId, playerId]);
+
+  // ITEM-PB-12a: the recorded match belongs to the game, never to the inspected
+  // seat, so it is fetched once per match. Opening a finished game's URL (or a
+  // live room that is gone) still hydrates the table and the review controls.
+  useEffect(() => {
+    let active = true;
+    const loadReplay = async () => {
+      try {
+        const loaded = await getGameReplay(gameId);
+        if (!active || loaded.frames.length === 0) return;
+        const finalView = replayFrameView(
+          loaded.frames[loaded.frames.length - 1],
+          playerIdRef.current,
+        );
+        // A running match keeps its live view; review mode only ever needs a
+        // finished recording.
+        if (finalView == null || !isGameOverPhase(finalView.boutPhase)) return;
+        setLoadedReplay(loaded);
+        setView((current) => current ?? finalView);
+        setReplayFrameIdx(Math.max(0, visibleReplayFrames(loaded).length - 1));
+        replayLoadedGameRef.current = gameId;
+      } catch (reason: unknown) {
+        if (active) console.warn('Could not load the game replay', reason);
+      }
+    };
+    void loadReplay();
+    return () => {
+      active = false;
+    };
+  }, [gameId]);
 
   // Browsers only unlock audio from a user gesture; do it once per page.
   useEffect(() => {
@@ -412,7 +576,7 @@ export function GamePage({
   // place instead of breaking the page.
   useEffect(() => {
     if (!gameOverPhase) {
-      setReplay(null);
+      setLoadedReplay(null);
       setReplayFrameIdx(0);
       return;
     }
@@ -427,8 +591,8 @@ export function GamePage({
       request
         .then((loaded) => {
           if (!active) return;
-          setReplay(loaded);
-          setReplayFrameIdx(Math.max(0, loaded.frames.length - 1));
+          setLoadedReplay(loaded);
+          setReplayFrameIdx(Math.max(0, visibleReplayFrames(loaded).length - 1));
           replayLoadedGameRef.current = gameId;
         })
         .catch((reason: unknown) => {
@@ -503,6 +667,15 @@ export function GamePage({
     soundEngine.playClockTick(seconds);
   }, [seconds, deadlineMs, timedPlayerId, view]);
 
+  // ITEM-ADD-9: a bot seat accepts no user input, even from a human inspecting
+  // it through the POV menu.
+  const isBotViewer = Boolean(
+    view != null &&
+      (view.isBot ||
+        (view.playerTypes?.[viewerSeatIndex(view)] != null &&
+          view.playerTypes[viewerSeatIndex(view)] !== 'human')),
+  );
+
   // Item 18: a defender who cannot answer surrenders after a short grace
   // period, leaving enough time to click Surrender first.
   const defenseless = view ? isDefenselessDefender(view) : false;
@@ -511,7 +684,7 @@ export function GamePage({
     : 0;
 
   useEffect(() => {
-    if (!defenseless) {
+    if (!defenseless || isBotViewer) {
       setAutoSurrenderRemaining(null);
       return;
     }
@@ -529,11 +702,13 @@ export function GamePage({
       clearTimeout(surrenderAt);
       clearInterval(ticker);
     };
-  }, [defenseless, uncoveredCount, autoSurrenderMs, playerId]);
+  }, [defenseless, uncoveredCount, autoSurrenderMs, playerId, isBotViewer]);
 
   // ITEM-9: the match is finished when the live view, the frame on screen or
   // the last recorded frame says so.
-  const replayFrames = replay?.frames ?? [];
+  // ITEM-PB-12c: the defensive filter guarantees every step in `Move X / Y` is
+  // a visible change on the table, whatever the recording contains.
+  const replayFrames = visibleReplayFrames(replay);
   const activeFrame =
     replayFrames.length > 0
       ? replayFrames[Math.min(Math.max(replayFrameIdx, 0), replayFrames.length - 1)]
@@ -543,11 +718,20 @@ export function GamePage({
     view != null && isFinishedMatch(view, activeFrameView, replay, playerId);
   const reviewMode = gameOver;
 
+  // ITEM-PB-12b: stepping to another frame replays that move's sound, so a
+  // reviewer hears the match as it happened.
+  const stepReplay = (delta: number) => {
+    const last = Math.max(0, replayFrames.length - 1);
+    const next = Math.min(Math.max(replayFrameIdx + delta, 0), last);
+    if (next === replayFrameIdx) return;
+    playReplayFrameSound(replayFrames, next);
+    setReplayFrameIdx(next);
+  };
+
   // ITEM-FOLLOWUP-1: while reviewing, the left/right arrows step through the
   // recorded frames, clamped to the first and last move.
   useEffect(() => {
-    if (!reviewMode || replay == null || replay.frames.length === 0) return;
-    const frameCount = replay.frames.length;
+    if (!reviewMode || replayFrames.length === 0) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.ctrlKey || event.altKey || event.metaKey) return;
       const target = event.target as HTMLElement | null;
@@ -562,15 +746,15 @@ export function GamePage({
       }
       if (event.key === 'ArrowLeft') {
         event.preventDefault();
-        setReplayFrameIdx((index) => Math.max(0, index - 1));
+        stepReplay(-1);
       } else if (event.key === 'ArrowRight') {
         event.preventDefault();
-        setReplayFrameIdx((index) => Math.min(frameCount - 1, index + 1));
+        stepReplay(1);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [reviewMode, replay]);
+  }, [reviewMode, replay, replayFrameIdx]);
 
   if (!view) {
     return (
@@ -649,6 +833,11 @@ export function GamePage({
   })();
 
   const dispatch = (action: GameAction) => {
+    // ITEM-ADD-9: never play a card, surrender or pass on a bot's behalf.
+    if (isBotViewer) {
+      console.warn('Ignored action: the inspected seat is a bot');
+      return;
+    }
     const socket = socketRef.current;
     if (socket != null && socket.isOpen()) {
       socket.sendAction(action);
@@ -845,6 +1034,7 @@ export function GamePage({
       name: nameFor(id),
       cardCount: mine ? displayedView.myHand.length : opponent?.cardCount ?? 0,
       finishRank: opponent?.finishRank ?? null,
+      hasPassed: mine ? false : opponent?.hasPassed ?? false,
       mine,
     };
   });
@@ -854,9 +1044,33 @@ export function GamePage({
   // `finishOrder`, so binding these to `displayedView` would erase the winner
   // or label the only finished player as both winner and Durak.
   const winnerId = resultView.finishOrder[0];
-  const durakId =
-    resultView.durak ?? resultView.finishOrder[resultView.finishOrder.length - 1] ?? null;
+  // ITEM-ADD-8b: the last player out always earns the DURAK label, even when
+  // the backend names it only through `finishOrder`/`winners`.
+  const winnersList = resultView.winners ?? [];
+  // The sole seat that never made it into `winners` is the Durak; a lone
+  // `finishOrder` entry is only a winner, so it never names the last place.
+  const durakFromWinners =
+    gameOver && winnersList.length > 0
+      ? (playersInSeatOrder.find((player) => !winnersList.includes(player.id))?.id ?? null)
+      : null;
+  const durakFromFinishOrder =
+    resultView.finishOrder.length >= 2
+      ? resultView.finishOrder[resultView.finishOrder.length - 1]
+      : null;
+  const durakId = resultView.isDraw
+    ? null
+    : (resultView.durak ?? durakFromWinners ?? durakFromFinishOrder ?? null);
   const gameIsDraw = resultView.isDraw;
+  // ITEM-ADD-2: the attacking and defending seats are outlined in the PLAYERS
+  // list until the match is over.
+  const attackerSeatId = seatIdFor(displayedView, displayedView.attackerIdx);
+  const defenderSeatId = seatIdFor(displayedView, displayedView.defenderIdx);
+  const roleForSeat = (id: string): 'attacker' | 'defender' | 'none' => {
+    if (isGameOverPhase(displayedView.boutPhase)) return 'none';
+    if (id === attackerSeatId) return 'attacker';
+    if (id === defenderSeatId) return 'defender';
+    return 'none';
+  };
 
   // The replay clock is frozen at the frame's elapsed time (`00:00` on the
   // opening move); live play uses the recorded start/end timestamps.
@@ -880,6 +1094,71 @@ export function GamePage({
       return;
     }
     window.location.assign('/');
+  };
+
+  // The router owns the URL when it hands us `onNavigateGame`; otherwise the
+  // hash route is enough (the app listens for `hashchange`).
+  const navigateToGame = (nextGameId: string, nextPlayerId?: string) => {
+    if (onNavigateGame) {
+      onNavigateGame(nextGameId, nextPlayerId);
+      return;
+    }
+    const seat = nextPlayerId ?? playerId;
+    window.location.hash = `#/g/${nextGameId}?player=${encodeURIComponent(seat)}`;
+  };
+
+  // ITEM-PB-9: Rematch restarts the same table — same seats, same names, same
+  // rules and the same human/bot split as the match on screen.
+  const rematch = () => {
+    if (rematchPending) return;
+    const playerTypes = playersInSeatOrder.map((player): PlayerType => {
+      const seatType = displayedView.playerTypes?.[seatNumber(player.id)];
+      if (seatType && seatType.length > 0) return seatType as PlayerType;
+      if (player.id === displayedView.myId && displayedView.isBot) return 'randomBot';
+      return 'human';
+    });
+    setRematchPending(true);
+    createGame(
+      playersInSeatOrder.length,
+      playersInSeatOrder.map((player) => player.name),
+      displayedView.allowRedirect ?? true,
+      displayedView.chaosMode ?? false,
+      playerTypes,
+    )
+      .then((created) => {
+        // Reset the finished match and its review state so the new match opens
+        // on a fresh table instead of the old replay.
+        setLoadedReplay(null);
+        setReplayFrameIdx(0);
+        replayLoadedGameRef.current = null;
+        viewGameRef.current = null;
+        setSelection(null);
+        setView(null);
+        const target = created.players.includes(playerId)
+          ? playerId
+          : (created.players[0] ?? playerId);
+        navigateToGame(created.gameId, target);
+      })
+      .catch((reason: unknown) => {
+        console.warn('Could not start the rematch', reason);
+      })
+      .finally(() => setRematchPending(false));
+  };
+
+  // QA presets: one click drops the reviewer into a scripted position.
+  const startPreset = (presetId: string) => {
+    if (presetPending) return;
+    setPresetPending(true);
+    setPresetError(null);
+    createPresetGame(presetId)
+      .then((created) => {
+        navigateToGame(created.gameId, created.defaultPlayerId);
+      })
+      .catch((reason: unknown) => {
+        console.warn('Could not start the QA preset', reason);
+        setPresetError(reason instanceof Error ? reason.message : String(reason));
+      })
+      .finally(() => setPresetPending(false));
   };
   // Req 14: the Pass button counts down while the viewer's throw-in clock runs.
   const passCountdownSeconds =
@@ -934,7 +1213,16 @@ export function GamePage({
               {durakId === view.myId ? 'Durak: you' : `Durak: ${nameFor(durakId)}`}
             </span>
           ) : null}
-          {/* Item 9: the banner itself offers the way back to the lobby. */}
+          {/* Item 9 / ITEM-PB-9: play again with the same seats, or leave. */}
+          <button
+            type="button"
+            class="action-button green banner-rematch-button"
+            data-testid="banner-rematch-button"
+            disabled={rematchPending}
+            onClick={rematch}
+          >
+            {rematchPending ? 'Starting…' : 'Rematch'}
+          </button>
           <button
             type="button"
             class="action-button banner-lobby-button"
@@ -969,6 +1257,34 @@ export function GamePage({
             </div>
           </section>
 
+          {/* QA presets: jump straight into a scripted position in one click. */}
+          <section
+            class="panel qa-scenarios-panel"
+            data-testid="qa-scenarios"
+            aria-label="QA Scenarios"
+          >
+            <h2>⚡ QA Scenarios</h2>
+            <div class="qa-scenario-buttons">
+              {QA_SCENARIOS.map((scenario) => (
+                <button
+                  key={scenario.id}
+                  type="button"
+                  class="qa-scenario-button"
+                  data-preset={scenario.id}
+                  disabled={presetPending}
+                  onClick={() => startPreset(scenario.id)}
+                >
+                  {scenario.label}
+                </button>
+              ))}
+            </div>
+            {presetError ? (
+              <p class="qa-scenario-error" role="alert">
+                {presetError}
+              </p>
+            ) : null}
+          </section>
+
           <section class="panel" aria-label="How to Play">
             <h2>How to Play</h2>
             <ul class="how-to-play">
@@ -993,7 +1309,7 @@ export function GamePage({
                   data-testid="review-prev-button"
                   aria-label="Previous move"
                   disabled={!activeFrame || replayFrameIdx <= 0}
-                  onClick={() => setReplayFrameIdx((index) => Math.max(0, index - 1))}
+                  onClick={() => stepReplay(-1)}
                 >
                   ‹
                 </button>
@@ -1010,9 +1326,7 @@ export function GamePage({
                   data-testid="review-next-button"
                   aria-label="Next move"
                   disabled={!activeFrame || replayFrameIdx >= replayFrames.length - 1}
-                  onClick={() =>
-                    setReplayFrameIdx((index) => Math.min(replayFrames.length - 1, index + 1))
-                  }
+                  onClick={() => stepReplay(1)}
                 >
                   ›
                 </button>
@@ -1021,14 +1335,15 @@ export function GamePage({
           ) : null}
         </aside>
 
+        <div class="table-column">
         <GameTable
           myId={displayedView.myId}
           myHand={displayedView.myHand}
           opponents={displayedView.opponents}
           tablePairs={displayedView.tablePairs}
           trumpSuit={displayedView.trumpSuit}
-          attackerId={seatIdFor(displayedView, displayedView.attackerIdx)}
-          defenderId={seatIdFor(displayedView, displayedView.defenderIdx)}
+          attackerId={attackerSeatId}
+          defenderId={defenderSeatId}
           chaosMode={displayedView.chaosMode ?? false}
           awaitingAttack={
             !reviewMode &&
@@ -1043,6 +1358,7 @@ export function GamePage({
           canRedirect={!reviewMode && hasLegalAction(displayedView.legalActions, 'redirect')}
           canThrowIn={!reviewMode && hasLegalAction(displayedView.legalActions, 'throwIn')}
           isReviewMode={reviewMode}
+          isBot={isBotViewer}
           turnPlayerId={turnPlayerIdFor(displayedView)}
           turnSecondsRemaining={clockSeconds(displayedView, now)}
           sortMode={sortMode}
@@ -1058,7 +1374,7 @@ export function GamePage({
           onThrowInDrop={reviewMode ? undefined : playThrowInDrop}
           onRedirectDrop={reviewMode ? undefined : playRedirectDrop}
         >
-          {gameOver ? null : (
+          {gameOver || isBotViewer ? null : (
             <div class="game-buttons">
               {isAttackerTurn ? (
                 <button
@@ -1085,10 +1401,24 @@ export function GamePage({
                 onAction={handleActionBar}
                 surrenderSeconds={autoSurrenderRemaining}
                 passCountdownSeconds={passCountdownSeconds}
+                isBotSeat={isBotViewer}
               />
             </div>
           )}
         </GameTable>
+
+          {/* ITEM-ADD-7: HAND SORTING moved out of the crowded right column to
+              sit directly below the felt table. */}
+          <section
+            class="panel sidebar-box sidebar-sort-box hand-sort-box"
+            data-zone="hand-sort-box"
+            data-testid="hand-sort-box"
+            aria-label="Hand sorting"
+          >
+            <h2>HAND SORTING</h2>
+            <SortBar mode={sortMode} onModeChange={setSortMode} />
+          </section>
+        </div>
 
         <aside class="game-sidebar sidebar-right" data-zone="sidebar-right">
           {/* Item 10: one clock panel split into a Game half and a Turn half. */}
@@ -1130,11 +1460,14 @@ export function GamePage({
                       ? displayedView.presentPlayers.includes(player.id)
                       : (displayedView.opponents.find((opponent) => opponent.id === player.id)
                           ?.isPresent ?? false);
+                const role = roleForSeat(player.id);
+                const isDurak = gameOver && durakId === player.id;
                 return (
                 <li
                   key={player.id}
                   class={`status-badge${player.mine ? ' mine' : ''}`}
                   data-player-id={player.id}
+                  data-role={role}
                 >
                   <span class="status-player">
                     <span
@@ -1144,16 +1477,31 @@ export function GamePage({
                       role="img"
                       aria-label={present ? 'Present' : 'Away'}
                     />
-                    <span class="status-name">
+                    <span class="status-name" data-role={role}>
                       {formatPlayerDisplayName(player.id, player.name, playerId)}
                     </span>
                   </span>
-                  <span class="status-count">{player.cardCount} cards</span>
-                  {player.finishRank != null ? (
-                    <span class="status-rank">
-                      {player.finishRank === 1 ? 'WINNER' : 'OUT'}
-                    </span>
-                  ) : null}
+                  {/* ITEM-ADD-8a: the card count owns the centre track, so it
+                      never shifts when a status tag appears or disappears. */}
+                  <span class="status-cards" data-testid={`player-cards-${player.id}`}>
+                    {player.cardCount} cards
+                  </span>
+                  <span class="status-state-slot">
+                    {isDurak ? (
+                      <span
+                        class="status-tag durak-tag"
+                        data-testid={`player-durak-tag-${player.id}`}
+                      >
+                        DURAK
+                      </span>
+                    ) : player.finishRank != null ? (
+                      <span class="status-rank">
+                        {player.finishRank === 1 ? 'WINNER' : 'OUT'}
+                      </span>
+                    ) : player.hasPassed ? (
+                      <span class="status-tag passed-tag">PASSED</span>
+                    ) : null}
+                  </span>
                 </li>
                 );
               })}
@@ -1167,16 +1515,6 @@ export function GamePage({
             discardCount={displayedView.discardCount ?? 0}
             lastDiscardCards={displayedView.lastDiscardCards ?? []}
           />
-
-          <section
-            class="panel sidebar-box sidebar-sort-box"
-            data-zone="hand-sort-box"
-            data-testid="hand-sort-box"
-            aria-label="Hand sorting"
-          >
-            <h2>Sort</h2>
-            <SortBar mode={sortMode} onModeChange={setSortMode} />
-          </section>
 
           {gameOver ? (
             <section class="panel game-result" aria-label="Game over">

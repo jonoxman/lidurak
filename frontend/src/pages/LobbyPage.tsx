@@ -1,9 +1,22 @@
 import { useEffect, useState } from 'preact/hooks';
-import { checkServerHealth, createGame, type CreatedGame } from '../api/client';
+import {
+  checkServerHealth,
+  createGame,
+  createPresetGame,
+  type CreatedGame,
+} from '../api/client';
 import type { PlayerType } from '../types';
 import '../styles/table.css';
 
 const DEFAULT_NAMES = ['Alice', 'Bob', 'Carol', 'Dave'];
+
+/** One-click scripted positions, mirrored in the game's left sidebar. */
+const QA_SCENARIOS: { id: string; label: string }[] = [
+  { id: '3p-redirect-bob', label: '3P Redirect (Bob POV)' },
+  { id: 'chaos-4p', label: '4P Chaos Targets' },
+  { id: 'surrender-half-off', label: 'Surrender Half-Off' },
+  { id: 'discard-and-endgame', label: 'Discard & Endgame Durak' },
+];
 
 /** Seat choices offered per player row; values match the backend's `playerTypes`. */
 const SEAT_TYPES = [
@@ -49,6 +62,8 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
   const [creating, setCreating] = useState(false);
   const [created, setCreated] = useState<CreatedRoom | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [presetPending, setPresetPending] = useState(false);
+  const [presetError, setPresetError] = useState<string | null>(null);
 
   // Probe `GET /api/health` until the backend answers, then unlock the form so a
   // click can never land on a proxy 500 while the server is still booting.
@@ -132,6 +147,24 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
       .finally(() => setCreating(false));
   };
 
+  // QA presets open a scripted position on the seat that makes it readable.
+  const startPreset = (presetId: string) => {
+    if (presetPending) return;
+    setPresetPending(true);
+    setPresetError(null);
+    createPresetGame(presetId)
+      .then((preset) => {
+        window.location.hash = `#/g/${preset.gameId}?player=${encodeURIComponent(
+          preset.defaultPlayerId,
+        )}`;
+      })
+      .catch((reason: unknown) => {
+        console.warn('Could not start the QA preset', reason);
+        setPresetError(reason instanceof Error ? reason.message : String(reason));
+      })
+      .finally(() => setPresetPending(false));
+  };
+
   return (
     <section class="page lobby-page" aria-label="Lobby">
       {serverReady ? (
@@ -213,6 +246,33 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
               {creating ? 'Creating…' : 'Create Game'}
             </button>
           </form>
+
+          <section
+            class="panel qa-scenarios-panel"
+            data-testid="qa-scenarios"
+            aria-label="QA Scenarios"
+          >
+            <h2>⚡ QA Scenarios</h2>
+            <div class="qa-scenario-buttons">
+              {QA_SCENARIOS.map((scenario) => (
+                <button
+                  key={scenario.id}
+                  type="button"
+                  class="qa-scenario-button"
+                  data-preset={scenario.id}
+                  disabled={presetPending}
+                  onClick={() => startPreset(scenario.id)}
+                >
+                  {scenario.label}
+                </button>
+              ))}
+            </div>
+            {presetError ? (
+              <p class="qa-scenario-error" role="alert">
+                {presetError}
+              </p>
+            ) : null}
+          </section>
         </>
       ) : (
         <div class="server-loading-page" data-testid="server-loading" role="status">
