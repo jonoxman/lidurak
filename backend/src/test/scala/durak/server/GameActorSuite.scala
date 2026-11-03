@@ -211,10 +211,19 @@ class GameActorSuite extends munit.FunSuite:
     assert(desperate.defenderIsDefenseless)
     room.stateRef.set(desperate).unsafeRunSync()
 
+    val defenderId = desperate.players(desperate.defenderIdx).id
     val after = (IO.sleep(1000.millis) *> room.stateRef.get).unsafeRunSync()
     GameActor.stopClock(room).unsafeRunSync()
 
-    assertEquals(after.boutPhase, BoutPhase.SurrenderThrowIn)
+    // Nobody else held a matching rank, so the auto-surrender settled the bout in
+    // the same move: the defender picked the attack up and the table cleared.
+    assertEquals(after.tablePairs, Vector.empty)
+    assert(
+      after.players.exists(seat =>
+        seat.id == defenderId && seat.hand.contains(Card(Suit.Clubs, Rank.King))
+      ),
+      s"the auto-surrendered defender did not pick the attack up: ${after.players}"
+    )
     assert(
       after.turnDeadlineMs > desperate.turnDeadlineMs,
       s"the auto-surrender did not restart the clock: ${after.turnDeadlineMs}"
@@ -436,7 +445,7 @@ class GameActorSuite extends munit.FunSuite:
       case None => fail("seed 5 attacker holds only trumps")
       case Some(card) =>
         GameActor.chooseBotAction(gs, attackerId) match
-          case Some(GameAction.InitialAttack(_, List(played))) =>
+          case Some(GameAction.InitialAttack(_, List(played), _)) =>
             assertEquals(played.rank.value, card.rank.value)
             assert(played.suit != gs.trumpSuit, s"BasicBot opened with a trump: $played")
           case other => fail(s"expected a single opening attack, got $other")

@@ -93,7 +93,13 @@ object JsonCodecs:
       "lastDiscardCards" -> view.lastDiscardCards.asJson,
       "gameStartedAtMs" -> view.gameStartedAtMs.asJson,
       "gameEndedAtMs" -> view.gameEndedAtMs.asJson,
-      "promptedPlayerIds" -> view.promptedPlayerIds.asJson
+      "promptedPlayerIds" -> view.promptedPlayerIds.asJson,
+      "isBot" -> view.isBot.asJson,
+      "playerTypes" -> view.playerTypes.asJson,
+      "allowRedirect" -> view.allowRedirect.asJson,
+      "chaosMode" -> view.chaosMode.asJson,
+      "eligibleTargetIds" -> view.eligibleTargetIds.asJson,
+      "redirectTargetId" -> view.redirectTargetId.asJson
     )
   }
 
@@ -130,6 +136,22 @@ object JsonCodecs:
       gameStartedAtMs <- field[Option[Long]]("gameStartedAtMs")
       gameEndedAtMs <- field[Option[Long]]("gameEndedAtMs")
       promptedPlayerIds <- field[Vector[String]]("promptedPlayerIds")
+      // Optional additions: older fixtures and clients simply omit them.
+      isBot <- cursor.downField("isBot").as[Option[Boolean]].map(_.getOrElse(false))
+      playerTypes <- cursor
+        .downField("playerTypes")
+        .as[Option[Vector[String]]]
+        .map(_.getOrElse(Vector.empty))
+      allowRedirect <- cursor
+        .downField("allowRedirect")
+        .as[Option[Boolean]]
+        .map(_.getOrElse(true))
+      chaosMode <- cursor.downField("chaosMode").as[Option[Boolean]].map(_.getOrElse(false))
+      eligibleTargetIds <- cursor
+        .downField("eligibleTargetIds")
+        .as[Option[Vector[String]]]
+        .map(_.getOrElse(Vector.empty))
+      redirectTargetId <- cursor.downField("redirectTargetId").as[Option[String]]
     yield PlayerGameView(
       myId = myId,
       myName = myName,
@@ -159,19 +181,28 @@ object JsonCodecs:
       lastDiscardCards = lastDiscardCards,
       gameStartedAtMs = gameStartedAtMs,
       gameEndedAtMs = gameEndedAtMs,
-      promptedPlayerIds = promptedPlayerIds
+      promptedPlayerIds = promptedPlayerIds,
+      isBot = isBot,
+      playerTypes = playerTypes,
+      allowRedirect = allowRedirect,
+      chaosMode = chaosMode,
+      eligibleTargetIds = eligibleTargetIds,
+      redirectTargetId = redirectTargetId
     )
   }
 
   // --- WebSocket commands ---
 
   given Encoder[GameAction] = Encoder.instance {
-    case GameAction.InitialAttack(playerId, cards) =>
-      Json.obj(
+    case GameAction.InitialAttack(playerId, cards, targetPlayerId) =>
+      val base = Json.obj(
         "type" -> Json.fromString("initialAttack"),
         "playerId" -> playerId.asJson,
         "cards" -> cards.asJson
       )
+      // A standard opening attack names no target, so the field stays out of
+      // the payload unless the move actually carries one.
+      targetPlayerId.fold(base)(targetId => base.deepMerge(Json.obj("targetPlayerId" -> targetId.asJson)))
     case GameAction.CoverCard(playerId, attackIndex, defenseCard) =>
       Json.obj(
         "type" -> Json.fromString("coverCard"),
@@ -210,7 +241,13 @@ object JsonCodecs:
           for
             playerId <- cursor.downField("playerId").as[String]
             cards <- cursor.downField("cards").as[List[Card]]
-          yield GameAction.InitialAttack(playerId, cards)
+            // "targetPlayerId" may be present, null or absent; all mean the
+            // same for a standard attack.
+            targetPlayerId <- cursor
+              .downField("targetPlayerId")
+              .as[Option[String]]
+              .map(_.map(_.trim).filter(_.nonEmpty))
+          yield GameAction.InitialAttack(playerId, cards, targetPlayerId)
         case "covercard" =>
           for
             playerId <- cursor.downField("playerId").as[String]
@@ -245,7 +282,23 @@ object JsonCodecs:
   // --- Engine state & replay history ---
 
   given Encoder[GameConfig] = deriveEncoder[GameConfig]
-  given Decoder[GameConfig] = deriveDecoder[GameConfig]
+
+  /** Decodes a config, defaulting every optional setting a legacy payload omits. */
+  given Decoder[GameConfig] = Decoder.instance { cursor =>
+    for
+      playerCount <- cursor.downField("playerCount").as[Int]
+      allowRedirect <- cursor
+        .downField("allowRedirect")
+        .as[Option[Boolean]]
+        .map(_.getOrElse(true))
+      seed <- cursor.downField("seed").as[Option[Long]].map(_.getOrElse(0L))
+      playerTypes <- cursor
+        .downField("playerTypes")
+        .as[Option[Vector[String]]]
+        .map(_.getOrElse(Vector.empty))
+      chaosMode <- cursor.downField("chaosMode").as[Option[Boolean]].map(_.getOrElse(false))
+    yield GameConfig(playerCount, allowRedirect, seed, playerTypes, chaosMode)
+  }
 
   given Encoder[PlayerState] = deriveEncoder[PlayerState]
   given Decoder[PlayerState] = deriveDecoder[PlayerState]
@@ -260,4 +313,18 @@ object JsonCodecs:
   given Decoder[ReplayFrame] = deriveDecoder[ReplayFrame]
 
   given Encoder[SerializedGame] = deriveEncoder[SerializedGame]
-  given Decoder[SerializedGame] = deriveDecoder[SerializedGame]
+
+  /** `skippedMoves` is optional, so older stored replays still decode. */
+  given Decoder[SerializedGame] = Decoder.instance { cursor =>
+    for
+      gameId <- cursor.downField("gameId").as[String]
+      config <- cursor.downField("config").as[GameConfig]
+      initialState <- cursor.downField("initialState").as[GameState]
+      moves <- cursor.downField("moves").as[Vector[RecordedMove]]
+      frames <- cursor.downField("frames").as[Vector[ReplayFrame]]
+      skippedMoves <- cursor
+        .downField("skippedMoves")
+        .as[Option[Vector[RecordedMove]]]
+        .map(_.getOrElse(Vector.empty))
+    yield SerializedGame(gameId, config, initialState, moves, frames, skippedMoves)
+  }

@@ -301,8 +301,9 @@ class EndgameSuite extends munit.FunSuite:
       afterFirstBout,
       GameAction.InitialAttack("p1", List(card(Rank.Nine, Suit.Clubs)))
     )
-    val secondSurrender = applyOrFail(secondAttack, GameAction.DeclareSurrender("p2"))
-    val finished = applyOrFail(secondSurrender, GameAction.PassTurn("p1"))
+    // The attacked seat has no matching card, so the surrender settles in the
+    // same move and there is no passing step left to play.
+    val finished = applyOrFail(secondAttack, GameAction.DeclareSurrender("p2"))
 
     assertEquals(finished.boutPhase, BoutPhase.GameOver)
     assertEquals(finished.finishOrder, Vector("p0", "p1", "p2"))
@@ -384,8 +385,8 @@ class EndgameSuite extends munit.FunSuite:
       afterFirstBout,
       GameAction.InitialAttack("p1", List(card(Rank.King, Suit.Hearts)))
     )
-    val surrendered = applyOrFail(attacked, GameAction.DeclareSurrender("p2"))
-    val afterSecondBout = applyOrFail(surrendered, GameAction.PassTurn("p0"))
+    // p0 holds no matching rank, so the surrender auto-passes it and settles.
+    val afterSecondBout = applyOrFail(attacked, GameAction.DeclareSurrender("p2"))
 
     assertEquals(afterSecondBout.players(1).finishRank, Some(1))
     assertEquals(afterSecondBout.finishOrder, Vector("p1"))
@@ -398,8 +399,8 @@ class EndgameSuite extends munit.FunSuite:
       afterSecondBout,
       GameAction.InitialAttack("p0", List(card(Rank.Ace, Suit.Clubs)))
     )
-    val surrenderedAgain = applyOrFail(attackedAgain, GameAction.DeclareSurrender("p2"))
-    val finished = applyOrFail(surrenderedAgain, GameAction.PassTurn("p0"))
+    // The surrender auto-passes p0 (no matching rank) and resolves at once.
+    val finished = applyOrFail(attackedAgain, GameAction.DeclareSurrender("p2"))
 
     assertEquals(finished.finishOrder, Vector("p1", "p0", "p2"))
     assertEquals(finished.players(1).finishRank, Some(1))
@@ -432,13 +433,13 @@ class EndgameSuite extends munit.FunSuite:
     assertEquals(afterFirstBout.boutPhase, BoutPhase.InitialAttack)
 
     // Bout 2: p1 plays its last card, p2 surrenders, so p1 finishes second and
-    // the game carries on with p2 and p3.
+    // the game carries on with p2 and p3. The surrender settles on its own: p3
+    // cannot throw in, so it is auto-passed inside the same move.
     val attacked = applyOrFail(
       afterFirstBout,
       GameAction.InitialAttack("p1", List(card(Rank.King, Suit.Hearts)))
     )
-    val surrendered = applyOrFail(attacked, GameAction.DeclareSurrender("p2"))
-    val afterSecondBout = applyOrFail(surrendered, GameAction.PassTurn("p3"))
+    val afterSecondBout = applyOrFail(attacked, GameAction.DeclareSurrender("p2"))
 
     assertEquals(afterSecondBout.finishOrder, Vector("p0", "p1"))
     assertEquals(afterSecondBout.players(1).finishRank, Some(2))

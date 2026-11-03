@@ -183,9 +183,25 @@ class ThrowInClockSuite extends munit.FunSuite:
     // The surrendering defender picked up the attack card after the passes.
     assert(settled.players(1).hand.size >= 3, settled.players(1).hand.toString)
 
-    val recorded = room.replay.get.unsafeRunSync().moves.map(_.action)
-    assert(recorded.contains(GameAction.PassTurn("p0")), recorded.toString)
-    assert(recorded.contains(GameAction.PassTurn("p2")), recorded.toString)
+    val replay = room.replay.get.unsafeRunSync()
+    // Both waiters were passed, but only the pass that cleared the table is a
+    // visible replay step; the redundant one is kept as bookkeeping only.
+    val applied = (replay.moves ++ replay.skippedMoves).map(_.action)
+    assert(applied.contains(GameAction.PassTurn("p0")), applied.toString)
+    assert(applied.contains(GameAction.PassTurn("p2")), applied.toString)
+    assert(
+      !replay.moves.map(_.action).contains(GameAction.PassTurn("p0")),
+      replay.moves.map(_.action).toString
+    )
+    assert(
+      replay.frames.forall(frame =>
+        frame.action.forall {
+          case GameAction.PassTurn(_) => frame.state.tablePairs.isEmpty
+          case _                      => true
+        }
+      ),
+      replay.frames.map(_.action).toString
+    )
   }
 
   test("the clock settles a bout whose throwers were already auto-passed by the surrender") {

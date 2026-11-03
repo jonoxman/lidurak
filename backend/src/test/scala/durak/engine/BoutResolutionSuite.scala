@@ -126,7 +126,8 @@ class BoutResolutionSuite extends munit.FunSuite:
     val gs = threePlayer(
       attackerHand = List.fill(5)(card(Rank.Ace, Suit.Clubs)),
       defenderHand = List.fill(5)(card(Rank.King, Suit.Hearts)),
-      thirdHand = List.fill(5)(card(Rank.Queen, Suit.Diamonds)),
+      // p2 still holds a matching six, so the bout stays open after p0 passes.
+      thirdHand = List(card(Rank.Six, Suit.Diamonds), card(Rank.Queen, Suit.Diamonds)),
       tablePairs = uncoveredTable,
       boutPhase = BoutPhase.SurrenderThrowIn
     )
@@ -134,6 +135,7 @@ class BoutResolutionSuite extends munit.FunSuite:
     val next = pass(gs, "p0")
 
     assertEquals(next.players(0).hasPassed, true)
+    assertEquals(next.players(2).hasPassed, false)
     assertEquals(next.boutPhase, BoutPhase.SurrenderThrowIn)
   }
 
@@ -337,11 +339,10 @@ class BoutResolutionSuite extends munit.FunSuite:
       defenderHand = List.fill(4)(card(Rank.King, Suit.Hearts)),
       tablePairs = uncoveredTable
     )
-    val surrendered = GameEngine
+    // p0 cannot throw in, so the surrender settles in the same move.
+    val next = GameEngine
       .applyAction(gs, GameAction.DeclareSurrender("p1"))
       .getOrElse(fail("expected a valid surrender"))
-
-    val next = pass(surrendered, "p0")
 
     assertEquals(next.tablePairs, Vector.empty)
     assertEquals(next.players(1).hand.size, 5)
@@ -365,11 +366,11 @@ class BoutResolutionSuite extends munit.FunSuite:
       talon = Vector(first, second, bottom),
       bottomTrumpCard = Some(bottom)
     )
-    val surrendered = GameEngine
+    // Neither non-defender holds a matching rank, so the surrender is settled
+    // together with its auto-passes and the draws happen right away.
+    val next = GameEngine
       .applyAction(gs, GameAction.DeclareSurrender("p1"))
       .getOrElse(fail("expected a valid surrender"))
-
-    val next = pass(pass(surrendered, "p0"), "p2")
 
     assertEquals(next.players(0).hand.last, first)
     assertEquals(next.players(0).hand.size, 6)
@@ -389,11 +390,10 @@ class BoutResolutionSuite extends munit.FunSuite:
       thirdHand = List.fill(5)(card(Rank.Queen, Suit.Diamonds)),
       tablePairs = uncoveredTable
     )
-    val surrendered = GameEngine
+    // Nobody can throw in, so the surrender resolves without any further pass.
+    val next = GameEngine
       .applyAction(gs, GameAction.DeclareSurrender("p1"))
       .getOrElse(fail("expected a valid surrender"))
-
-    val next = pass(pass(surrendered, "p0"), "p2")
 
     assertEquals(next.players(next.attackerIdx).id, "p2")
     assertEquals(next.players(next.defenderIdx).id, "p0")

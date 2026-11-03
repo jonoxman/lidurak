@@ -56,6 +56,59 @@ object GameEngine:
     )
 
   /**
+   * Seats an opening attack may be aimed at. Nothing once the bout has left the
+   * [[BoutPhase.InitialAttack]] phase, only the clockwise defender in a standard
+   * game, and every other seat that still holds cards in Chaos mode — in
+   * clockwise order starting from the attacker.
+   */
+  def eligibleInitialTargets(state: GameState): Vector[Int] =
+    if state.boutPhase != BoutPhase.InitialAttack then Vector.empty
+    else if !state.config.chaosMode then Vector(state.defenderIdx)
+    else
+      val n = state.players.size
+      (1 until n)
+        .map(offset => (state.attackerIdx + offset) % n)
+        .filter(idx => idx != state.attackerIdx && state.players(idx).hand.nonEmpty)
+        .toVector
+
+  /**
+   * Seats that could take over a redirect: every other active seat holding
+   * enough cards to answer the combined attack. A standard game can only ever
+   * move the attack to the next clockwise player; Chaos mode lets any seat take
+   * it, which is what the reflected-arrow outline in the UI shows.
+   */
+  def eligibleRedirectTargets(state: GameState): Vector[Int] =
+    val required = state.tablePairs.size + 1
+    def canTake(idx: Int): Boolean =
+      idx != state.defenderIdx &&
+        state.players.lift(idx).exists(seat => seat.isActive && seat.hand.size >= required)
+
+    if state.config.chaosMode then state.players.indices.filter(canTake).toVector
+    else
+      val next = state.nextActivePlayerIdx(state.defenderIdx)
+      if canTake(next) then Vector(next) else Vector.empty
+
+  /**
+   * The seat a Chaos-mode redirect lands on. The pick is derived from the seed,
+   * the talon and discard sizes and the current table, so [[applyAction]] stays
+   * pure: the same state always redirects to the same seat and a replay
+   * reproduces every frame exactly. `extraCards` is the number of cards being
+   * reflected, so the chosen seat can always answer the combined attack.
+   */
+  def deterministicRedirectTarget(state: GameState, extraCards: Int = 1): Option[Int] =
+    val required = state.tablePairs.size + extraCards
+    val candidates = eligibleRedirectTargets(state)
+      .filter(idx => state.players(idx).hand.size >= required)
+    if candidates.isEmpty then None
+    else
+      val seed = state.config.seed * 31L +
+        state.talon.size.toLong * 17L +
+        state.discardPile.size.toLong * 7L +
+        state.tablePairs.hashCode.toLong
+      val random = new Random(seed)
+      Some(candidates(random.nextInt(candidates.size)))
+
+  /**
    * Applies a player action to the game state.
    *
    * Returns `Left(error)` when the move is illegal, leaving the caller's state
@@ -63,8 +116,8 @@ object GameEngine:
    */
   def applyAction(state: GameState, action: GameAction): Either[String, GameState] =
     action match
-      case GameAction.InitialAttack(playerId, cards) =>
-        applyInitialAttack(state, playerId, cards)
+      case GameAction.InitialAttack(playerId, cards, targetPlayerId) =>
+        applyInitialAttack(state, playerId, cards, targetPlayerId)
       case GameAction.CoverCard(playerId, attackIndex, defenseCard) =>
         applyCoverCard(state, playerId, attackIndex, defenseCard)
       case GameAction.RedirectAttack(playerId, cards) =>
@@ -93,7 +146,7 @@ object GameEngine:
   /** The seat that issued `action`. */
   def actorId(action: GameAction): String =
     action match
-      case GameAction.InitialAttack(playerId, _)  => playerId
+      case GameAction.InitialAttack(playerId, _, _) => playerId
       case GameAction.CoverCard(playerId, _, _)   => playerId
       case GameAction.RedirectAttack(playerId, _) => playerId
       case GameAction.ThrowInCards(playerId, _)   => playerId
@@ -130,7 +183,18 @@ object GameEngine:
       else
         state.boutPhase match
           case BoutPhase.InitialAttack if playerIdx == state.attackerIdx =>
-            player.hand.toList.map(card => GameAction.InitialAttack(playerId, List(card)))
+            if state.config.chaosMode then
+              val targets = eligibleInitialTargets(state)
+              player.hand.toList.flatMap(card =>
+                targets.map(targetIdx =>
+                  GameAction.InitialAttack(
+                    playerId,
+                    List(card),
+                    Some(state.players(targetIdx).id)
+                  )
+                )
+              )
+            else player.hand.toList.map(card => GameAction.InitialAttack(playerId, List(card)))
           case BoutPhase.Defense if playerIdx == state.defenderIdx =>
             val covers = for
               (pair, index) <- state.tablePairs.zipWithIndex.toList
@@ -156,11 +220,26 @@ object GameEngine:
             GameAction.PassTurn(playerId) :: throwIns
           case _ => Nil
 
+  /**
+   * Opens a bout. In a standard game the attack always aims at the clockwise
+   * defender; a target naming any other seat is rejected. In Chaos mode the
+   * attacker may name any seat [[eligibleInitialTargets]] allows, and an empty
+   * target falls back to the seat that is already the defender.
+   */
   private def applyInitialAttack(
       state: GameState,
       playerId: String,
-      cards: List[Card]
+      cards: List[Card],
+      targetPlayerId: Option[String] = None
   ): Either[String, GameState] =
+    val targetIdx = targetPlayerId.map(_.trim).filter(_.nonEmpty)
+      .map(targetId => state.players.indexWhere(_.id == targetId))
+    val chaosTargets = eligibleInitialTargets(state)
+
+    val resolvedDefenderIdx = targetIdx match
+      case None         => state.defenderIdx
+      case Some(target) => target
+
     for
       _ <- check(
         state.boutPhase == BoutPhase.InitialAttack,
@@ -179,12 +258,40 @@ object GameEngine:
         cards.size <= state.maxBoutAttacks,
         s"An initial attack may contain at most ${state.maxBoutAttacks} cards"
       )
+      _ <- targetIdx match
+        case None => check(true, "")
+        case Some(target) if target < 0 =>
+          Left(s"Unknown attack target: ${targetPlayerId.getOrElse("")}")
+        case Some(target) =>
+          if state.config.chaosMode then
+            check(
+              chaosTargets.contains(target),
+              s"${state.players.lift(target).map(_.name).getOrElse("That player")} is not a valid attack target"
+            )
+          else
+            check(
+              target == state.defenderIdx &&
+                state.players(target).id == state.players(state.defenderIdx).id,
+              s"${state.players.lift(target).map(_.name).getOrElse("That player")} is not the defender"
+            )
+      _ <- check(
+        resolvedDefenderIdx != state.attackerIdx,
+        "The attacker cannot defend its own attack"
+      )
     yield
-      state.copy(
+      val attacked = state.copy(
         players = state.players.updated(state.attackerIdx, attacker.copy(hand = remainingHand)),
         tablePairs = state.tablePairs ++ cards.map(card => TablePair(card)),
         boutPhase = BoutPhase.Defense
       )
+      if resolvedDefenderIdx == state.defenderIdx then attacked
+      else
+        // A Chaos-mode attack names a new defender: the bout capacity follows
+        // that seat's hand, exactly as a redirect's would.
+        attacked.copy(
+          defenderIdx = resolvedDefenderIdx,
+          defenderInitialHandSize = attacked.players(resolvedDefenderIdx).hand.size
+        )
 
   private def applyCoverCard(
       state: GameState,
@@ -267,7 +374,13 @@ object GameEngine:
         state.tablePairs.size + cards.size <= 6,
         "A redirect may not grow the attack beyond 6 cards"
       )
-      nextDefIdx = state.nextActivePlayerIdx(state.defenderIdx)
+      // Chaos mode reflects onto any eligible seat, chosen deterministically so
+      // the engine stays pure; a standard game always moves on clockwise.
+      nextDefIdx <-
+        if state.config.chaosMode then
+          deterministicRedirectTarget(state, cards.size)
+            .toRight("No player can take the redirected attack")
+        else Right(state.nextActivePlayerIdx(state.defenderIdx))
       // A redirect always moves the attack to somebody else: the redirecting
       // seat can never become the defender of the cards it just threw in.
       _ <- check(
@@ -333,7 +446,54 @@ object GameEngine:
         if idx == state.defenderIdx || player.finishRank.nonEmpty then player
         else player.copy(hasPassed = player.hand.isEmpty || boutIsFull)
       }
-      state.copy(players = players, boutPhase = BoutPhase.SurrenderThrowIn)
+      // Anyone who cannot add a matching card is passed right away, and when
+      // that leaves nobody to act the surrender resolves in this same move.
+      autoPassSurrenderThrowers(
+        state.copy(players = players, boutPhase = BoutPhase.SurrenderThrowIn)
+      )
+
+  /**
+   * True when `seatIdx` still has a legitimate throw-in: it is an active
+   * non-defender holding a card whose rank is on the table, the bout still has
+   * room for another attacking card, and — while the defender is still
+   * answering — the defender could cover it.
+   */
+  def canPlayerThrowIn(state: GameState, seatIdx: Int): Boolean =
+    if seatIdx == state.defenderIdx then false
+    else
+      state.players.lift(seatIdx).exists { player =>
+        val surrendered = state.boutPhase == BoutPhase.SurrenderThrowIn
+        val defenderHand = state.players.lift(state.defenderIdx).map(_.hand.size).getOrElse(0)
+        player.isActive &&
+          player.hand.nonEmpty &&
+          state.tablePairs.size < state.maxBoutAttacks &&
+          (surrendered || state.uncoveredCount < defenderHand) &&
+          player.hand.exists(card => state.tableRanks.contains(card.rank))
+      }
+
+  /**
+   * Passes every thrower who cannot add anything during a surrender throw-in,
+   * with no delay at all, and resolves the surrender in the same transition once
+   * nobody is left to act. A standard pass or a throw-in goes through the same
+   * helper, so a bout never waits on a seat that has nothing to play.
+   */
+  def autoPassSurrenderThrowers(state: GameState): GameState =
+    if state.boutPhase != BoutPhase.SurrenderThrowIn then state
+    else
+      val updated = state.copy(
+        players = state.players.zipWithIndex.map { case (player, idx) =>
+          val cannotThrowIn =
+            idx != state.defenderIdx && player.isActive && !canPlayerThrowIn(state, idx)
+          if cannotThrowIn && !player.hasPassed then player.copy(hasPassed = true) else player
+        }
+      )
+      resolveSurrenderBout(updated)
+
+  /** Resolves a surrendered bout once every thrower has been settled. */
+  private def resolveSurrenderBout(state: GameState): GameState =
+    if state.boutPhase == BoutPhase.SurrenderThrowIn && boutIsComplete(state) then
+      resolveBout(state)
+    else state
 
   /**
    * Any active non-defending player adds cards matching a rank already on the
@@ -361,9 +521,7 @@ object GameEngine:
       _ <- check(cards.nonEmpty, "A throw-in must contain at least one card")
       remainingHand <- removeCards(thrower.hand, cards)
         .toRight("Throw-in contains cards that are not in the player's hand")
-      tableRanks = state.tablePairs
-        .flatMap(pair => pair.attack.rank :: pair.defense.map(_.rank).toList)
-        .toSet
+      tableRanks = state.tableRanks
       _ <- check(
         cards.forall(card => tableRanks.contains(card.rank)),
         "Every thrown-in card must match the rank of a card on the table"
@@ -386,10 +544,14 @@ object GameEngine:
         then updated.copy(hasPassed = false)
         else updated
       }
-      state.copy(
+      val next = state.copy(
         players = players,
         tablePairs = state.tablePairs ++ cards.map(card => TablePair(card))
       )
+      // A throw-in that exhausts every matching card settles the surrender at
+      // once instead of waiting for a redundant pass.
+      if state.boutPhase == BoutPhase.SurrenderThrowIn then autoPassSurrenderThrowers(next)
+      else next
 
   /**
    * A non-defending player declares they have nothing more to add this bout.
@@ -425,9 +587,10 @@ object GameEngine:
           "Cannot pass while attacking cards are still uncovered"
         )
       yield
-        settlePasses(
+        val passed =
           state.copy(players = state.players.updated(playerIdx, passer.copy(hasPassed = true)))
-        )
+        if state.boutPhase == BoutPhase.SurrenderThrowIn then autoPassSurrenderThrowers(passed)
+        else settlePasses(passed)
 
   /** True when every active non-defender has already passed this bout. */
   private def boutIsComplete(state: GameState): Boolean =

@@ -172,11 +172,8 @@ class DiscardPileSuite extends munit.FunSuite:
       defenderInitialHandSize = 4
     )
 
-    val surrendered = apply(gs, GameAction.DeclareSurrender("p1"))
-    assertEquals(surrendered.lastDiscardCards, previous)
-    assertEquals(surrendered.discardPile, previous)
-
-    val settled = apply(surrendered, GameAction.PassTurn("p0"))
+    // The attacker holds no matching rank, so the surrender settles at once.
+    val settled = apply(gs, GameAction.DeclareSurrender("p1"))
 
     assertEquals(settled.tablePairs, Vector.empty)
     assertEquals(settled.discardPile, previous)
@@ -194,8 +191,8 @@ class DiscardPileSuite extends munit.FunSuite:
       defenderInitialHandSize = 2
     )
 
-    val surrendered = apply(gs, GameAction.DeclareSurrender("p1"))
-    val settled = apply(surrendered, GameAction.PassTurn("p0"))
+    // p0 cannot throw in, so the surrender resolves in the same move.
+    val settled = apply(gs, GameAction.DeclareSurrender("p1"))
 
     assertEquals(settled.discardPile, Vector.empty)
     assertEquals(settled.lastDiscardCards, Vector.empty)

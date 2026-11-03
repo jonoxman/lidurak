@@ -42,8 +42,9 @@ object RandomBot:
    * Plausible moves for the seat's role and phase. Legality is checked by the
    * caller, so this may include throws that the engine rejects.
    *
-   * Opening attacks carry no target: `GameAction.InitialAttack` has no target
-   * field, so every opening attack aims at the seat's clockwise defender.
+   * In a standard game every opening attack aims at the seat's clockwise
+   * defender; in Chaos mode the bot enumerates one opening attack per card and
+   * per seat the engine says is a legal target right now.
    */
   private def candidateActions(state: GameState, playerId: String): Vector[GameAction] =
     val playerIdx = state.players.indexWhere(_.id == playerId)
@@ -60,7 +61,18 @@ object RandomBot:
 
         val initialAttacks =
           if state.boutPhase == BoutPhase.InitialAttack && isAttacker then
-            player.hand.map(card => GameAction.InitialAttack(playerId, List(card)))
+            if state.config.chaosMode then
+              val targets = GameEngine.eligibleInitialTargets(state)
+              player.hand.flatMap(card =>
+                targets.map(targetIdx =>
+                  GameAction.InitialAttack(
+                    playerId,
+                    List(card),
+                    Some(state.players(targetIdx).id)
+                  )
+                )
+              )
+            else player.hand.map(card => GameAction.InitialAttack(playerId, List(card)))
           else Vector.empty
 
         val covers =

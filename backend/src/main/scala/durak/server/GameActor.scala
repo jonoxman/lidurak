@@ -27,7 +27,9 @@ case class GameRoom(
   turnSeconds: Int,
   clockStop: Deferred[IO, Unit],
   botDelayMin: FiniteDuration = GameActor.DefaultBotDelayMin,
-  botDelayMax: FiniteDuration = GameActor.DefaultBotDelayMax
+  botDelayMax: FiniteDuration = GameActor.DefaultBotDelayMax,
+  // Seat a QA preset opens on; empty for an ordinary game.
+  defaultPlayerId: Option[String] = None
 )
 
 object GameActor:
@@ -79,33 +81,65 @@ object GameActor:
       botDelayMax: FiniteDuration = DefaultBotDelayMax
   ): IO[GameRoom] =
     IO.delay(GameEngine.createGame(config, playerNames)).flatMap { initialState =>
-      nowMs.flatMap { now =>
-        val gameId = GameManager.generateGameId()
-        for
-          stateRef <- Ref.of[IO, GameState](
-            initialState.copy(turnDeadlineMs = now + turnSeconds.toLong * 1000L)
-          )
-          topic <- Topic[IO, GameState]
-          // The replay starts from the pristine deal, before any move or clock.
-          replay <- Ref.of[IO, SerializedGame](GameReplay.initial(gameId, initialState))
-          lock <- Semaphore[IO](1)
-          clockStop <- Deferred[IO, Unit]
-          room = GameRoom(
-            gameId = gameId,
-            stateRef = stateRef,
-            topic = topic,
-            replay = replay,
-            lock = lock,
-            playerIds = initialState.players.map(_.id),
-            turnSeconds = turnSeconds,
-            clockStop = clockStop,
-            botDelayMin = botDelayMin,
-            botDelayMax = botDelayMax
-          )
-          _ <- startClock(room)
-          _ <- startBots(room)
-        yield room
-      }
+      createFrom(initialState, turnSeconds, botDelayMin, botDelayMax)
+    }
+
+  /**
+   * Creates a room from an already-built state (a QA preset, or a dealt game),
+   * with a fresh id, and starts its turn clock and bot driver.
+   */
+  def createFrom(
+      initialState: GameState,
+      turnSeconds: Int = DefaultTurnSeconds,
+      botDelayMin: FiniteDuration = DefaultBotDelayMin,
+      botDelayMax: FiniteDuration = DefaultBotDelayMax,
+      defaultPlayerId: Option[String] = None
+  ): IO[GameRoom] =
+    nowMs.flatMap { now =>
+      val gameId = GameManager.generateGameId()
+      for
+        stateRef <- Ref.of[IO, GameState](
+          initialState.copy(turnDeadlineMs = now + turnSeconds.toLong * 1000L)
+        )
+        topic <- Topic[IO, GameState]
+        // The replay starts from the pristine deal, before any move or clock.
+        replay <- Ref.of[IO, SerializedGame](GameReplay.initial(gameId, initialState))
+        lock <- Semaphore[IO](1)
+        clockStop <- Deferred[IO, Unit]
+        room = GameRoom(
+          gameId = gameId,
+          stateRef = stateRef,
+          topic = topic,
+          replay = replay,
+          lock = lock,
+          playerIds = initialState.players.map(_.id),
+          turnSeconds = turnSeconds,
+          clockStop = clockStop,
+          botDelayMin = botDelayMin,
+          botDelayMax = botDelayMax,
+          defaultPlayerId = defaultPlayerId
+        )
+        _ <- startClock(room)
+        _ <- startBots(room)
+      yield room
+    }
+
+  /** Error returned when a client tries to move a computer-controlled seat. */
+  val BotSeatInputError: String = "Cannot submit user input for a bot player"
+
+  /**
+   * Entry point for every action that arrives from a client (REST and
+   * WebSocket). A bot seat is driven by the room's own bot driver, so client
+   * input for it is rejected before it can reach the engine.
+   */
+  def submitClientAction(room: GameRoom, action: GameAction): IO[Either[String, GameState]] =
+    room.stateRef.get.flatMap { state =>
+      val seatIdx = state.players.indexWhere(_.id == actorId(action))
+      if seatIdx >= 0 && state.config.isBotSeat(seatIdx) then
+        logRejected(
+          s"Rejected client input for bot seat ${actorId(action)} in game ${room.gameId}"
+        ).as(Left(BotSeatInputError): Either[String, GameState])
+      else applyAction(room, action)
     }
 
   /**
@@ -181,19 +215,23 @@ object GameActor:
           case Right(next) =>
             val timed = withGameTimers(current, next, now)
             val clocked = withTurnClock(room, timed, now)
-            (clocked, Right(clocked): Either[String, GameState])
+            (clocked, (Right(clocked): Either[String, GameState], Some(current)))
           case Left(error) =>
-            (current, Left(error): Either[String, GameState])
+            (current, (Left(error): Either[String, GameState], None))
       }
-      .flatMap {
-        case Right(next) =>
-          room.replay
-            .update(replay => GameReplay.appendMove(replay, action, next, now)) *>
-            room.topic.publish1(next).void.as(Right(next): Either[String, GameState])
-        case rejected @ Left(error) =>
-          logRejected(
-            s"Invalid action ${actionType(action)} from player ${actorId(action)}: $error"
-          ).as(rejected)
+      .flatMap { case (result, previous) =>
+        result match
+          case Right(next) =>
+            // A pass that leaves the table untouched is a non-move: the state
+            // moves on, but the replay shows no step for it.
+            val visible = previous.forall(prev => GameReplay.isVisibleMove(prev, action, next))
+            room.replay
+              .update(replay => GameReplay.appendMove(replay, action, next, now, visible)) *>
+              room.topic.publish1(next).void.as(Right(next): Either[String, GameState])
+          case rejected @ Left(error) =>
+            logRejected(
+              s"Invalid action ${actionType(action)} from player ${actorId(action)}: $error"
+            ).as(rejected)
       }
 
   /** The seat that issued `action`. */
