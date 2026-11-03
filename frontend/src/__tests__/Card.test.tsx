@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/preact';
-import { Card, cardFrontPalette, resolveCardFrontTheme } from '../components/Card';
+import { act, fireEvent, render, screen } from '@testing-library/preact';
+import {
+  CARD_SERIF_FONT_FAMILY,
+  Card,
+  cardFrontPalette,
+  resolveCardFrontTheme,
+} from '../components/Card';
 import {
   CARD_BACK_PATTERNS,
   COLORFUL_CARD_BACK_PATTERNS,
@@ -8,6 +13,7 @@ import {
   DARK_CARD_BACK_PALETTE,
   LIGHT_CARD_BACK_PALETTE,
   resolveCardBackTheme,
+  svgCornerRadius,
 } from '../components/CardBack';
 import { resetSettings, setSettings } from '../state/settings';
 
@@ -455,6 +461,168 @@ describe('card face geometry and theme', () => {
     // Without an applied theme it follows the OS preference.
     expect(resolveCardFrontTheme('device', false, document.createElement('div'))).toBe('light');
     expect(resolveCardFrontTheme('device', true, document.createElement('div'))).toBe('dark');
+  });
+});
+
+describe('card sprite serif typography and Roundness (T-90-2)', () => {
+  afterEach(() => {
+    resetSettings();
+  });
+
+  it('exposes the classic serif font stack for card rank numbers and letters', () => {
+    expect(CARD_SERIF_FONT_FAMILY).toContain('Cinzel');
+    expect(CARD_SERIF_FONT_FAMILY).toContain('Playfair Display');
+    expect(CARD_SERIF_FONT_FAMILY).toContain('Georgia');
+    expect(CARD_SERIF_FONT_FAMILY).toContain('Times New Roman');
+    expect(CARD_SERIF_FONT_FAMILY.trim().endsWith('serif')).toBe(true);
+  });
+
+  it('draws every rank index and court letter in the serif font', () => {
+    const ranks: Array<[string, string]> = [
+      ['two', '2'],
+      ['three', '3'],
+      ['four', '4'],
+      ['five', '5'],
+      ['six', '6'],
+      ['seven', '7'],
+      ['eight', '8'],
+      ['nine', '9'],
+      ['ten', '10'],
+      ['jack', 'J'],
+      ['queen', 'Q'],
+      ['king', 'K'],
+      ['ace', 'A'],
+    ];
+
+    for (const [rank, label] of ranks) {
+      const { container, unmount } = render(<Card suit="hearts" rank={rank} />);
+
+      for (const index of ['top-rank', 'bottom-rank']) {
+        const node = container.querySelector(`[data-index="${index}"]`)!;
+        const family = node.getAttribute('font-family') ?? '';
+        expect(node.textContent, `${rank} ${index}`).toBe(label);
+        expect(node.classList.contains('card-rank-index'), `${rank} ${index}`).toBe(true);
+        expect(node.getAttribute('data-font-style'), `${rank} ${index}`).toBe('serif');
+        expect(family, `${rank} ${index}`).toBe(CARD_SERIF_FONT_FAMILY);
+        expect(family, `${rank} ${index}`).toMatch(/Georgia|Playfair Display|Times New Roman/);
+        expect(family, `${rank} ${index}`).toContain('serif');
+        expect(node.getAttribute('font-weight'), `${rank} ${index}`).toBe('700');
+      }
+
+      const court = ['jack', 'queen', 'king'].includes(rank);
+      const letter = container.querySelector('[data-pip="face"]');
+      if (court) {
+        const family = letter!.getAttribute('font-family') ?? '';
+        expect(letter!.textContent, rank).toBe(label);
+        expect(letter!.classList.contains('card-face-letter'), rank).toBe(true);
+        expect(letter!.getAttribute('data-font-style'), rank).toBe('serif');
+        expect(family, rank).toBe(CARD_SERIF_FONT_FAMILY);
+        expect(family, rank).toMatch(/Georgia|Playfair Display|Times New Roman/);
+        expect(letter!.getAttribute('font-weight'), rank).toBe('700');
+      } else {
+        expect(letter, rank).toBeNull();
+      }
+
+      unmount();
+    }
+  });
+
+  it('keeps the rank band and pip layout untouched by the serif typography', () => {
+    const { container } = render(<Card suit="spades" rank="ten" />);
+
+    const topRank = container.querySelector('[data-index="top-rank"]')!;
+    const topSuit = container.querySelector('[data-index="top-suit"]')!;
+    expect(topRank.getAttribute('x')).toBe('5');
+    expect(topRank.getAttribute('y')).toBe('21');
+    expect(topSuit.getAttribute('y')).toBe('34');
+    expect(container.querySelector('[data-pip="rank"]')!.getAttribute('y')).toBe('33');
+  });
+
+  it('scales face-up card SVG frame corners and wrapper radii with Roundness', () => {
+    const { container } = render(<Card suit="diamonds" rank="eight" />);
+    const slot = container.querySelector('.card-slot')!;
+    const svg = container.querySelector('svg.card-face')!;
+    const frame = container.querySelector('svg.card-face > rect')!;
+
+    const expectRadii = (roundness: number) => {
+      const expected = svgCornerRadius(roundness);
+      expect(svgCornerRadius(0)).toBe(0);
+      expect(svgCornerRadius(8)).toBe(6);
+      expect(svgCornerRadius(16)).toBe(12);
+      expect(frame.getAttribute('rx'), `roundness ${roundness}`).toBe(String(expected));
+      expect(frame.getAttribute('ry'), `roundness ${roundness}`).toBe(String(expected));
+      expect(slot.getAttribute('data-roundness'), `roundness ${roundness}`).toBe(
+        String(roundness),
+      );
+      expect(svg.getAttribute('data-roundness'), `roundness ${roundness}`).toBe(
+        String(roundness),
+      );
+    };
+
+    expectRadii(8);
+
+    act(() => {
+      setSettings({ roundness: 0 });
+    });
+    expectRadii(0);
+    expect(frame.getAttribute('rx')).toBe('0');
+
+    act(() => {
+      setSettings({ roundness: 16 });
+    });
+    expectRadii(16);
+    expect(frame.getAttribute('rx')).toBe('12');
+  });
+
+  it('scales face-down card backs and decorative borders with Roundness', () => {
+    const back = render(<CardBack />);
+    const faceDown = render(<Card suit="spades" rank="six" faceUp={false} />);
+
+    const rectsOf = (container: Element): Element[] => {
+      const svg = container.querySelector('svg.card-back')!;
+      return Array.from(svg.children).filter(
+        (child) => child.tagName.toLowerCase() === 'rect',
+      );
+    };
+
+    const expectBackRadii = (roundness: number) => {
+      const outer = svgCornerRadius(roundness);
+      const inner = Math.max(0, outer - 1.5);
+
+      for (const container of [back.container, faceDown.container]) {
+        const [frame, border] = rectsOf(container);
+        expect(frame.getAttribute('rx'), `roundness ${roundness}`).toBe(String(outer));
+        expect(frame.getAttribute('ry'), `roundness ${roundness}`).toBe(String(outer));
+        expect(border.getAttribute('rx'), `roundness ${roundness}`).toBe(String(inner));
+        expect(border.getAttribute('ry'), `roundness ${roundness}`).toBe(String(inner));
+      }
+
+      expect(back.container.querySelector('svg.card-back')!.getAttribute('data-roundness')).toBe(
+        String(roundness),
+      );
+      // The face-down wrapper follows the same slider value.
+      expect(
+        faceDown.container.querySelector('.card-slot')!.getAttribute('data-roundness'),
+      ).toBe(String(roundness));
+    };
+
+    expectBackRadii(8);
+    expect(rectsOf(back.container)[0].getAttribute('rx')).toBe('6');
+    expect(rectsOf(back.container)[1].getAttribute('rx')).toBe('4.5');
+
+    act(() => {
+      setSettings({ roundness: 0 });
+    });
+    expectBackRadii(0);
+    // The inner border never inverts into a negative radius.
+    expect(rectsOf(back.container)[1].getAttribute('rx')).toBe('0');
+
+    act(() => {
+      setSettings({ roundness: 16 });
+    });
+    expectBackRadii(16);
+    expect(rectsOf(back.container)[0].getAttribute('rx')).toBe('12');
+    expect(rectsOf(back.container)[1].getAttribute('rx')).toBe('10.5');
   });
 });
 
