@@ -15,6 +15,7 @@ const QA_SCENARIOS: { id: string; label: string }[] = [
   { id: '3p-redirect-bob', label: '3P Redirect (Bob POV)' },
   { id: 'chaos-4p', label: '4P Chaos Targets' },
   { id: 'surrender-half-off', label: 'Surrender Half-Off' },
+  { id: 'defenseless-surrender', label: 'Defenseless Auto-Surrender' },
   { id: 'discard-and-endgame', label: 'Discard & Endgame Durak' },
 ];
 

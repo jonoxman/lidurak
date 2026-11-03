@@ -38,6 +38,8 @@ export interface PlayerGameView {
   finishOrder: string[];
   isDraw: boolean;
   maxBoutAttacks: number;
+  /** True when the viewed defender has no legal cover and no legal redirect. */
+  defenderDefenseless?: boolean;
   /** Chaos Mode variant: the attacker may choose any active defender. */
   chaosMode?: boolean;
   /** True when the viewed seat is computer-controlled, so it accepts no input. */
@@ -247,6 +249,10 @@ export function parsePlayerGameView(value: unknown): PlayerGameView {
   if (myHasPassed !== undefined && typeof myHasPassed !== 'boolean') {
     fail('myHasPassed must be a boolean');
   }
+  const defenderDefenseless = raw.defenderDefenseless;
+  if (defenderDefenseless !== undefined && typeof defenderDefenseless !== 'boolean') {
+    fail('defenderDefenseless must be a boolean');
+  }
   const myFinishRank = raw.myFinishRank;
   if (myFinishRank !== undefined && myFinishRank !== null && typeof myFinishRank !== 'number') {
     fail('myFinishRank must be a number or null');
@@ -330,6 +336,7 @@ export function parsePlayerGameView(value: unknown): PlayerGameView {
     gameStartedAtMs: (gameStartedAtMs as number | null | undefined) ?? null,
     gameEndedAtMs: (gameEndedAtMs as number | null | undefined) ?? null,
     winners: (winners as string[] | undefined) ?? [],
+    defenderDefenseless: (defenderDefenseless as boolean | undefined) ?? false,
     ...(myHasPassed === undefined ? {} : { myHasPassed: myHasPassed as boolean }),
     ...(myFinishRank === undefined
       ? {}

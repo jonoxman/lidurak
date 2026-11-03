@@ -55,12 +55,20 @@ const RANK_LABELS: Record<string, string> = {
 const FACE_RANKS = new Set(['jack', 'queen', 'king']);
 
 /**
- * ITEM-NEW-3: classic, ornate serif for every rank number and letter drawn on
- * a card sprite. The stack degrades through the serif faces that ship with
- * Windows, macOS and Linux before falling back to the generic serif family.
+ * T-90 ITEM-3b: classic, ornate serif kept ONLY for the large centre court
+ * letters (`J`, `Q`, `K`) on the face of the cards. The stack degrades through
+ * the serif faces that ship with Windows, macOS and Linux before falling back
+ * to the generic serif family.
  */
 export const CARD_SERIF_FONT_FAMILY =
   "'Cinzel', 'Playfair Display', 'Georgia', 'Times New Roman', 'Palatino Linotype', 'Book Antiqua', serif";
+
+/**
+ * T-90 ITEM-3a: clean sans-serif for the small rank numbers and letters in the
+ * top-left / bottom-right corners of every card, matching the app shell.
+ */
+export const CARD_CORNER_FONT_FAMILY =
+  "Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
 
 /** The inline card wrappers follow the global Roundness setting. */
 export const CARD_BORDER_RADIUS = 'var(--app-roundness, 8px)';
@@ -402,11 +410,12 @@ export function Card({
         <text
           class="card-rank-index"
           data-index="top-rank"
-          data-font-style="serif"
+          data-testid="card-rank-top"
+          data-font-style="sans-serif"
           x={CARD_INDEX.topRank.x}
           y={CARD_INDEX.topRank.y}
           font-size={CARD_INDEX.topRank.fontSize}
-          font-family={CARD_SERIF_FONT_FAMILY}
+          font-family={CARD_CORNER_FONT_FAMILY}
           font-weight={700}
           fill={color}
         >
@@ -482,6 +491,7 @@ export function Card({
             <text
               class="card-face-letter"
               data-pip="face"
+              data-testid="card-face-letter"
               data-font-style="serif"
               x="35"
               y="50"
@@ -519,11 +529,12 @@ export function Card({
         <text
           class="card-rank-index"
           data-index="bottom-rank"
-          data-font-style="serif"
+          data-testid="card-rank-bottom"
+          data-font-style="sans-serif"
           x={CARD_INDEX.bottomRank.x}
           y={CARD_INDEX.bottomRank.y}
           font-size={CARD_INDEX.bottomRank.fontSize}
-          font-family={CARD_SERIF_FONT_FAMILY}
+          font-family={CARD_CORNER_FONT_FAMILY}
           font-weight={700}
           text-anchor="end"
           fill={color}

@@ -269,6 +269,7 @@ describe('LobbyPage', () => {
       '3P Redirect (Bob POV)',
       '4P Chaos Targets',
       'Surrender Half-Off',
+      'Defenseless Auto-Surrender',
       'Discard & Endgame Durak',
     ]) {
       expect(within(panel).getByRole('button', { name: label })).toBeTruthy();
