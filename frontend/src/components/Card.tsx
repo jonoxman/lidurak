@@ -585,7 +585,12 @@ export function Card({
           <g class="trump-marker" data-testid="trump-marker">
             {/* A compact 12-14px badge tucked into the top-right corner, clear
                 of the corner index and every center pip. */}
-            <circle cx={TRUMP_BADGE.cx} cy={TRUMP_BADGE.cy} r={TRUMP_BADGE.r} fill="#d4af37" />
+            <circle
+              cx={TRUMP_BADGE.cx}
+              cy={TRUMP_BADGE.cy}
+              r={TRUMP_BADGE.r}
+              fill="var(--trump-accent, #f59e0b)"
+            />
             <text
               x={TRUMP_BADGE.cx}
               y={TRUMP_BADGE.cy}
