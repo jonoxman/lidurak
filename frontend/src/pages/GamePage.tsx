@@ -301,9 +301,6 @@ export function clockSeconds(view: PlayerGameView, nowMs: number): number {
   return Math.max(0, Math.min(15, view.turnSecondsRemaining ?? 15));
 }
 
-/** Default grace period before a defenceless defender surrenders. */
-export const AUTO_SURRENDER_MS = 3000;
-
 /** A seat counts as present while focused and active within this window. */
 export const PRESENCE_IDLE_MS = 30_000;
 
@@ -350,8 +347,6 @@ export interface GamePageProps {
   onNavigateGame?: (gameId: string, playerId?: string) => void;
   /** Leaves the table; defaults to the root URL when the router owns it. */
   onLeaveGame?: () => void;
-  /** Grace period before a defenceless defender surrenders automatically. */
-  autoSurrenderMs?: number;
 }
 
 export function GamePage({
@@ -360,7 +355,6 @@ export function GamePage({
   onSwitchPlayer,
   onNavigateGame,
   onLeaveGame,
-  autoSurrenderMs = AUTO_SURRENDER_MS,
 }: GamePageProps) {
   const [view, setView] = useState<PlayerGameView | null>(null);
   // Hand indices are kept together with the view they were picked against, so
@@ -375,9 +369,6 @@ export function GamePage({
   const socketRef = useRef<GameWebSocket | null>(null);
   const previousViewRef = useRef<PlayerGameView | null>(null);
   const tickedSecondRef = useRef(0);
-  // Latest dispatch function, so timers can send without re-subscribing.
-  const dispatchRef = useRef<(action: GameAction) => void>(() => {});
-  const [autoSurrenderRemaining, setAutoSurrenderRemaining] = useState<number | null>(null);
   const [selfPresent, setSelfPresent] = useState(true);
   // Hand order is display-only state shared between the sidebar dropdown and
   // the table's hand.
@@ -676,33 +667,10 @@ export function GamePage({
           view.playerTypes[viewerSeatIndex(view)] !== 'human')),
   );
 
-  // Item 18: a defender who cannot answer surrenders after a short grace
-  // period, leaving enough time to click Surrender first.
-  const defenseless = view ? isDefenselessDefender(view) : false;
-  const uncoveredCount = view
-    ? view.tablePairs.filter((pair) => !pair.defense).length
-    : 0;
-
-  useEffect(() => {
-    if (!defenseless || isBotViewer) {
-      setAutoSurrenderRemaining(null);
-      return;
-    }
-    const gracePeriod = Math.max(1, autoSurrenderMs);
-    setAutoSurrenderRemaining(Math.max(1, Math.ceil(gracePeriod / 1000)));
-    const surrenderAt = setTimeout(() => {
-      dispatchRef.current(buildDeclareSurrender(playerId));
-    }, gracePeriod);
-    const ticker = setInterval(() => {
-      setAutoSurrenderRemaining((remaining) =>
-        remaining == null ? null : Math.max(0, remaining - 1),
-      );
-    }, 1000);
-    return () => {
-      clearTimeout(surrenderAt);
-      clearInterval(ticker);
-    };
-  }, [defenseless, uncoveredCount, autoSurrenderMs, playerId, isBotViewer]);
+  // ITEM-ADD-4a: the client never surrenders on the defender's behalf. No timer
+  // or effect dispatches `DeclareSurrender` here — the `Surrender` button stays
+  // visible and clickable until the human clicks it, and only the server's
+  // 15-second turn clock may take over.
 
   // ITEM-9: the match is finished when the live view, the frame on screen or
   // the last recorded frame says so.
@@ -858,9 +826,6 @@ export function GamePage({
         console.warn('Action failed', reason);
       });
   };
-
-  // Timers must always send through the dispatch of the latest render.
-  dispatchRef.current = dispatch;
 
   const toggleCard = (card: GameCard) => {
     // Durak cards are unique, so suit + rank identifies the selected hand card.
@@ -1029,16 +994,27 @@ export function GamePage({
   const playersInSeatOrder = playerOptions.map((id) => {
     const opponent = displayedView.opponents.find((candidate) => candidate.id === id);
     const mine = id === displayedView.myId;
+    const cardCount = mine ? displayedView.myHand.length : opponent?.cardCount ?? 0;
+    // ITEM-ADD-8a: the active user's own row is labelled from their own status
+    // fields, exactly like every opponent row, so WINNER, OUT and PASSED show
+    // up for the viewer too. An empty hand falls back to the seat's position in
+    // `winners` when the payload omits `myFinishRank`.
+    const winnerIdx = displayedView.winners?.indexOf(id) ?? -1;
+    const projectedRank = mine
+      ? (displayedView.myFinishRank ?? (winnerIdx >= 0 ? winnerIdx + 1 : null))
+      : (opponent?.finishRank ?? null);
     return {
       id,
       name: nameFor(id),
-      cardCount: mine ? displayedView.myHand.length : opponent?.cardCount ?? 0,
-      // ITEM-ADD-8a / ITEM-ADD-8b: the active user's own row is labelled from
-      // their own status fields, exactly like every opponent row, so WINNER,
-      // OUT and PASSED show up for the viewer too.
-      finishRank: mine
-        ? displayedView.myFinishRank ?? null
-        : opponent?.finishRank ?? null,
+      cardCount,
+      // ITEM-ADD-8b: a seat that still holds cards has not finished, whatever
+      // stale rank the projection carries.
+      finishRank:
+        !mine && cardCount > 0
+          ? null
+          : mine && displayedView.myHand.length > 0
+            ? null
+            : projectedRank,
       hasPassed: mine
         ? displayedView.myHasPassed ?? false
         : opponent?.hasPassed ?? false,
@@ -1408,7 +1384,6 @@ export function GamePage({
               <ActionBar
                 legalActions={view.legalActions}
                 onAction={handleActionBar}
-                surrenderSeconds={autoSurrenderRemaining}
                 passCountdownSeconds={passCountdownSeconds}
                 isBotSeat={isBotViewer}
               />
@@ -1471,6 +1446,17 @@ export function GamePage({
                           ?.isPresent ?? false);
                 const role = roleForSeat(player.id);
                 const isDurak = gameOver && durakId === player.id;
+                // ITEM-ADD-8b: WINNER / OUT only ever label a seat with an empty
+                // hand. A seat still holding cards shows PASSED (or nothing).
+                const statusTag: 'DURAK' | 'WINNER' | 'OUT' | 'PASSED' | null = isDurak
+                  ? 'DURAK'
+                  : player.cardCount === 0 && player.finishRank != null
+                    ? player.finishRank === 1
+                      ? 'WINNER'
+                      : 'OUT'
+                    : player.hasPassed
+                      ? 'PASSED'
+                      : null;
                 return (
                 <li
                   key={player.id}
@@ -1486,7 +1472,7 @@ export function GamePage({
                       role="img"
                       aria-label={present ? 'Present' : 'Away'}
                     />
-                    <span class="status-name" data-role={role}>
+                    <span class="status-name">
                       {formatPlayerDisplayName(player.id, player.name, playerId)}
                     </span>
                   </span>
@@ -1496,19 +1482,25 @@ export function GamePage({
                     {player.cardCount} cards
                   </span>
                   <span class="status-state-slot">
-                    {isDurak ? (
+                    {statusTag ? (
                       <span
-                        class="status-tag durak-tag"
-                        data-testid={`player-durak-tag-${player.id}`}
+                        class="status-tag-slot"
+                        data-testid={`player-status-tag-${player.id}`}
+                        data-status={statusTag}
                       >
-                        DURAK
+                        {statusTag === 'DURAK' ? (
+                          <span
+                            class="status-tag durak-tag"
+                            data-testid={`player-durak-tag-${player.id}`}
+                          >
+                            DURAK
+                          </span>
+                        ) : statusTag === 'PASSED' ? (
+                          <span class="status-tag passed-tag">PASSED</span>
+                        ) : (
+                          <span class="status-rank">{statusTag}</span>
+                        )}
                       </span>
-                    ) : player.finishRank != null ? (
-                      <span class="status-rank">
-                        {player.finishRank === 1 ? 'WINNER' : 'OUT'}
-                      </span>
-                    ) : player.hasPassed ? (
-                      <span class="status-tag passed-tag">PASSED</span>
                     ) : null}
                   </span>
                 </li>
