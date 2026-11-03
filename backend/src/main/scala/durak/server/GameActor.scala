@@ -29,7 +29,11 @@ case class GameRoom(
   botDelayMin: FiniteDuration = GameActor.DefaultBotDelayMin,
   botDelayMax: FiniteDuration = GameActor.DefaultBotDelayMax,
   // Seat a QA preset opens on; empty for an ordinary game.
-  defaultPlayerId: Option[String] = None
+  defaultPlayerId: Option[String] = None,
+  // Delay before a player who cannot throw in is passed for them. The engine
+  // never passes such a seat inside the same transition, so the surrendered
+  // cards stay half-off the felt for exactly this long.
+  noThrowInAutoPassDelay: FiniteDuration = GameActor.DefaultNoThrowInAutoPassDelay
 )
 
 object GameActor:
@@ -45,6 +49,13 @@ object GameActor:
 
   /** Longest pause a bot takes before it plays. */
   val DefaultBotDelayMax: FiniteDuration = 2000.millis
+
+  /**
+   * How long the server waits before auto-passing players who hold no legal
+   * throw-in card, so a surrender (and every throw-in after it) stays visible
+   * on the table for a moment instead of settling instantly.
+   */
+  val DefaultNoThrowInAutoPassDelay: FiniteDuration = 1.second
 
   /** How often the clock re-reads the room state while a turn is running. */
   private val ClockPollMillis: Long = 250L
@@ -78,10 +89,17 @@ object GameActor:
       playerNames: Vector[String],
       turnSeconds: Int = DefaultTurnSeconds,
       botDelayMin: FiniteDuration = DefaultBotDelayMin,
-      botDelayMax: FiniteDuration = DefaultBotDelayMax
+      botDelayMax: FiniteDuration = DefaultBotDelayMax,
+      noThrowInAutoPassDelay: FiniteDuration = DefaultNoThrowInAutoPassDelay
   ): IO[GameRoom] =
     IO.delay(GameEngine.createGame(config, playerNames)).flatMap { initialState =>
-      createFrom(initialState, turnSeconds, botDelayMin, botDelayMax)
+      createFrom(
+        initialState,
+        turnSeconds,
+        botDelayMin,
+        botDelayMax,
+        noThrowInAutoPassDelay = noThrowInAutoPassDelay
+      )
     }
 
   /**
@@ -93,7 +111,8 @@ object GameActor:
       turnSeconds: Int = DefaultTurnSeconds,
       botDelayMin: FiniteDuration = DefaultBotDelayMin,
       botDelayMax: FiniteDuration = DefaultBotDelayMax,
-      defaultPlayerId: Option[String] = None
+      defaultPlayerId: Option[String] = None,
+      noThrowInAutoPassDelay: FiniteDuration = DefaultNoThrowInAutoPassDelay
   ): IO[GameRoom] =
     nowMs.flatMap { now =>
       val gameId = GameManager.generateGameId()
@@ -117,10 +136,12 @@ object GameActor:
           clockStop = clockStop,
           botDelayMin = botDelayMin,
           botDelayMax = botDelayMax,
-          defaultPlayerId = defaultPlayerId
+          defaultPlayerId = defaultPlayerId,
+          noThrowInAutoPassDelay = noThrowInAutoPassDelay
         )
         _ <- startClock(room)
         _ <- startBots(room)
+        _ <- startAutoPass(room)
       yield room
     }
 
@@ -396,6 +417,71 @@ object GameActor:
         .filter(action => GameEngine.applyAction(state, playerId, action).isRight)
 
     surrender.orElse(GameEngine.randomLegalAction(state, playerId, new scala.util.Random()))
+
+  // --- Delayed auto-pass for players with no legal throw-in ---
+
+  /** Starts the room's delayed auto-pass driver in the background. */
+  def startAutoPass(room: GameRoom): IO[Unit] = autoPassLoop(room).start.void
+
+  /**
+   * Passes every player the engine reports in
+   * [[GameEngine.playersNeedingAutoPass]] — active non-defenders who still hold
+   * cards but have no legal throw-in — once, after
+   * `room.noThrowInAutoPassDelay` (`1.second` by default).
+   *
+   * The wait races the room's state: a surrender, a throw-in, a manual pass or
+   * any other move restarts it against the fresh position, and a seat that is
+   * no longer waiting (it passed, threw in, or the bout already settled) is
+   * never passed late. Each pass goes through the ordinary action pipeline, so
+   * the turn deadline is restarted, a pass that settles the bout becomes a
+   * visible replay frame, and the new state is published to the room's topic.
+   */
+  private def autoPassLoop(room: GameRoom): IO[Unit] =
+    room.stateRef.get.flatMap { state =>
+      if state.isGameOver then IO.unit
+      else
+        val waiting = GameEngine.playersNeedingAutoPass(state)
+        if waiting.isEmpty then awaitStateChange(room, state) *> autoPassLoop(room)
+        else
+          IO.sleep(room.noThrowInAutoPassDelay).race(awaitStateChange(room, state)).flatMap {
+            case Right(_) => autoPassLoop(room) // the table moved on: reconsider
+            case Left(_) =>
+              room.stateRef.get.flatMap { current =>
+                if current != state then autoPassLoop(room)
+                else
+                  applyAutoPasses(room, GameEngine.playersNeedingAutoPass(current)) *>
+                    autoPassLoop(room)
+              }
+          }
+    }
+
+  /**
+   * Applies `PassTurn` for every id in `playerIds` that is still waiting, one
+   * atomic move at a time so each pass is recorded and broadcast. Stops as soon
+   * as the position moves on (a pass that ends the bout makes the rest moot).
+   */
+  def applyAutoPasses(room: GameRoom, playerIds: Vector[String]): IO[Unit] =
+    def loop(remaining: List[String]): IO[Unit] =
+      remaining match
+        case Nil => IO.unit
+        case playerId :: tail =>
+          room.stateRef.get.flatMap { current =>
+            if current.isGameOver then IO.unit
+            else if !GameEngine.playersNeedingAutoPass(current).contains(playerId) then
+              loop(tail)
+            else
+              IO.delay(
+                logger.info(
+                  s"Auto-passing $playerId in game ${room.gameId} after " +
+                    s"${room.noThrowInAutoPassDelay.toMillis}ms without a legal throw-in"
+                )
+              ).void *> applyAction(room, GameAction.PassTurn(playerId)).flatMap {
+                case Right(_) => loop(tail)
+                case Left(_)  => IO.unit
+              }
+          }
+
+    loop(playerIds.toList)
 
   // --- Bots ---
 

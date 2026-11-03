@@ -172,8 +172,11 @@ class DiscardPileSuite extends munit.FunSuite:
       defenderInitialHandSize = 4
     )
 
-    // The attacker holds no matching rank, so the surrender settles at once.
-    val settled = apply(gs, GameAction.DeclareSurrender("p1"))
+    // The attacker holds no matching rank, so only the delayed auto-pass can
+    // settle the surrender — and it must still leave the discard untouched.
+    val surrendered = apply(gs, GameAction.DeclareSurrender("p1"))
+    assertEquals(surrendered.boutPhase, BoutPhase.SurrenderThrowIn)
+    val settled = GameEngine.autoPassSurrenderThrowers(surrendered)
 
     assertEquals(settled.tablePairs, Vector.empty)
     assertEquals(settled.discardPile, previous)
@@ -191,8 +194,10 @@ class DiscardPileSuite extends munit.FunSuite:
       defenderInitialHandSize = 2
     )
 
-    // p0 cannot throw in, so the surrender resolves in the same move.
-    val settled = apply(gs, GameAction.DeclareSurrender("p1"))
+    // p0 cannot throw in, so the delayed auto-pass resolves the surrender.
+    val settled = GameEngine.autoPassSurrenderThrowers(
+      apply(gs, GameAction.DeclareSurrender("p1"))
+    )
 
     assertEquals(settled.discardPile, Vector.empty)
     assertEquals(settled.lastDiscardCards, Vector.empty)

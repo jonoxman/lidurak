@@ -11,6 +11,8 @@ import org.http4s.circe.CirceEntityDecoder.*
 import org.http4s.circe.CirceEntityEncoder.*
 import org.http4s.headers.`Content-Type`
 
+import scala.concurrent.duration.*
+
 class PresetSuite extends munit.FunSuite:
 
   private def newManager: GameManager = GameManager.create.unsafeRunSync()
@@ -41,6 +43,21 @@ class PresetSuite extends munit.FunSuite:
     )
     assertEquals(status, Status.Ok)
     json.as[PlayerGameView].getOrElse(fail(s"invalid view body: ${json.noSpaces}"))
+
+  /** Polls a room until `predicate` holds, failing once `timeout` elapses. */
+  private def awaitRoomState(room: GameRoom, timeout: FiniteDuration)(
+      predicate: GameState => Boolean
+  ): GameState =
+    val deadline = System.currentTimeMillis() + timeout.toMillis
+    var current = room.stateRef.get.unsafeRunSync()
+    while !predicate(current) && System.currentTimeMillis() < deadline do
+      IO.sleep(25.millis).unsafeRunSync()
+      current = room.stateRef.get.unsafeRunSync()
+    assert(
+      predicate(current),
+      s"state did not arrive within $timeout (phase ${current.boutPhase})"
+    )
+    current
 
   private def startPreset(manager: GameManager, presetId: String): (String, Json) =
     val (status, json) = post(
@@ -117,11 +134,11 @@ class PresetSuite extends munit.FunSuite:
     assertEquals(view(manager, gameId, "p3").defenderIdx, 3)
   }
 
-  test("POST /api/games/preset starts the half-off surrender scenario on Bob's defense") {
+  test("POST /api/games/preset starts the half-off surrender scenario on a defenseless Bob") {
     val manager = newManager
     val (gameId, json) = startPreset(manager, "surrender-half-off")
 
-    // ITEM-ADD-4a: the scenario opens on the defender, not on the thrower.
+    // ITEM-PREV-4a: the scenario opens on the defender, not on the thrower.
     assertEquals(json.hcursor.get[String]("defaultPlayerId").toOption, Some("p1"))
 
     val bob = view(manager, gameId, "p1")
@@ -129,49 +146,48 @@ class PresetSuite extends munit.FunSuite:
     assertEquals(bob.boutPhase, BoutPhase.Defense)
     assertEquals(bob.myHand.size, 6)
     assertEquals(bob.myFinishRank, None)
+    assertEquals(bob.trumpSuit, Suit.Clubs)
     // Two covered pairs plus the uncovered attack keep the cluster on the felt.
     assertEquals(bob.tablePairs.size, 3)
     assertEquals(bob.tablePairs.count(_.defense.isEmpty), 1)
     assertEquals(
-      bob.tablePairs.map(_.attack),
+      bob.tablePairs.map(pair => (pair.attack, pair.defense)),
       Vector(
-        Card(Suit.Spades, Rank.Seven),
-        Card(Suit.Clubs, Rank.Ten),
-        Card(Suit.Spades, Rank.Queen)
+        (Card(Suit.Spades, Rank.Seven), None),
+        (Card(Suit.Clubs, Rank.Six), Some(Card(Suit.Clubs, Rank.Nine))),
+        (Card(Suit.Hearts, Rank.Eight), Some(Card(Suit.Hearts, Rank.Jack)))
       )
     )
     assert(bob.tablePairs.size < bob.maxBoutAttacks, bob.maxBoutAttacks.toString)
-    // A legal cover exists, so Surrender is on screen and nothing auto-surrenders.
-    assert(bob.myHand.contains(Card(Suit.Spades, Rank.Nine)), bob.myHand.toString)
-    assert(bob.legalActions.contains("cover"), bob.legalActions.toString)
-    assert(bob.legalActions.contains("surrender"), bob.legalActions.toString)
-    assertEquals(bob.defenderDefenseless, false)
+    // ITEM-PREV-4a: no legal cover and no redirect, so surrender is the only
+    // action — the 3-second auto-surrender and a manual click both work.
+    assertEquals(bob.defenderDefenseless, true)
+    assertEquals(bob.legalActions, List("surrender"))
+    // The 9♠ that could have covered the 7♠ is swapped with the discard's 10♦.
+    assert(!bob.myHand.contains(Card(Suit.Spades, Rank.Nine)), bob.myHand.toString)
+    assert(bob.myHand.contains(Card(Suit.Diamonds, Rank.Ten)), bob.myHand.toString)
 
     val room = manager.getRoom(gameId).unsafeRunSync().getOrElse(fail("room is missing"))
     val state = room.stateRef.get.unsafeRunSync()
-    // 36-card conservation across hands + table + talon + discard pile.
+    // 36-card conservation across hands + table + talon + discard pile, with
+    // every card distinct.
     val tableCards = state.tablePairs.flatMap(pair => pair.attack :: pair.defense.toList)
+    val allCards =
+      state.players.flatMap(_.hand) ++ tableCards ++ state.talon ++ state.discardPile
     assertEquals(
       state.players.map(_.hand.size).sum + tableCards.size + state.talon.size + state.discardPile.size,
       36
     )
+    assertEquals(allCards.size, 36)
+    assertEquals(allCards.distinct.size, 36)
     assertEquals(state.talon.size, 6)
     assertEquals(state.discardPile.size, 7)
-    // Alice, the attacker, still holds a rank that is on the table.
-    assert(GameEngine.canPlayerThrowIn(state, 0))
-    assert(
-      state.players(0).hand.exists(handCard => state.tableRanks.contains(handCard.rank)),
-      state.players(0).hand.toString
-    )
-
-    // ITEM-ADD-4a: the surrender lands in the throw-in phase and stays there.
-    val afterSurrender = GameEngine
-      .applyAction(state, "p1", GameAction.DeclareSurrender("p1"))
-      .getOrElse(fail("the surrender was rejected"))
-    assertEquals(afterSurrender.boutPhase, BoutPhase.SurrenderThrowIn)
-    assertEquals(afterSurrender.durak, None)
-    assertEquals(afterSurrender.tablePairs.size, 3)
-    assert(GameEngine.canPlayerThrowIn(afterSurrender, 0))
+    assertEquals(state.bottomTrumpCard, Some(Card(Suit.Clubs, Rank.Seven)))
+    // Carol holds no rank on the table, so she never has a legal throw-in.
+    assertEquals(GameEngine.canPlayerThrowIn(state, 2), false)
+    // Alice, the attacker, still holds 7♥ — a rank that is on the table.
+    assertEquals(state.players(0).hand.contains(Card(Suit.Hearts, Rank.Seven)), true)
+    assertEquals(GameEngine.canPlayerThrowIn(state, 0), true)
 
     val (status, actionJson) = post(
       manager,
@@ -180,12 +196,28 @@ class PresetSuite extends munit.FunSuite:
     )
     assertEquals(status, Status.Ok, actionJson.noSpaces)
 
-    // Alice is asked to throw in or pass; the surrendered defender cannot act.
+    // ITEM-PREV-4b: nothing is auto-passed at 0 ms — the cards stay straddling
+    // the felt border and only Carol is queued for the delayed auto-pass.
+    val surrendered = room.stateRef.get.unsafeRunSync()
+    assertEquals(surrendered.boutPhase, BoutPhase.SurrenderThrowIn)
+    assertEquals(surrendered.durak, None)
+    assertEquals(surrendered.tablePairs.size, 3)
+    assertEquals(surrendered.players(2).hasPassed, false)
+    assertEquals(GameEngine.playersNeedingAutoPass(surrendered), Vector("p2"))
+
+    // One second later Carol is PASSED while Alice keeps the throw-in window.
+    val afterDelay = awaitRoomState(room, 5.seconds)(_.players(2).hasPassed)
+    assertEquals(afterDelay.boutPhase, BoutPhase.SurrenderThrowIn)
+    assertEquals(afterDelay.tablePairs.size, 3)
+    assert(GameEngine.canPlayerThrowIn(afterDelay, 0), afterDelay.players.toString)
+
     val alice = view(manager, gameId, "p0")
     assertEquals(alice.boutPhase, BoutPhase.SurrenderThrowIn)
     assert(alice.legalActions.contains("throwIn"), alice.legalActions.toString)
     assert(alice.legalActions.contains("pass"), alice.legalActions.toString)
-    assert(alice.promptedPlayerIds.contains("p0"), alice.promptedPlayerIds.toString)
+    assertEquals(alice.promptedPlayerIds, Vector("p0"))
+    assertEquals(view(manager, gameId, "p2").myHasPassed, true)
+    // The surrendered defender cannot act any more.
     assertEquals(view(manager, gameId, "p1").legalActions, List.empty)
   }
 

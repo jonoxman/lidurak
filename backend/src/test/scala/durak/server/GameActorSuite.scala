@@ -212,11 +212,20 @@ class GameActorSuite extends munit.FunSuite:
     room.stateRef.set(desperate).unsafeRunSync()
 
     val defenderId = desperate.players(desperate.defenderIdx).id
-    val after = (IO.sleep(1000.millis) *> room.stateRef.get).unsafeRunSync()
+    val attackerId = desperate.players.zipWithIndex
+      .collectFirst { case (seat, idx) if idx != desperate.defenderIdx => seat.id }
+      .getOrElse(fail("the position needs a non-defending seat"))
+    // The auto-surrender enters the throw-in phase and leaves the attacking card
+    // on the felt; only the 1-second delayed auto-pass of the cardless attacker
+    // (it holds an ace against a king, so no legal throw-in) clears the table.
+    val surrendered = awaitState(room, 5.seconds)(_.boutPhase == BoutPhase.SurrenderThrowIn)
+    assertEquals(surrendered.tablePairs, desperate.tablePairs)
+    assertEquals(GameEngine.playersNeedingAutoPass(surrendered), Vector(attackerId))
+
+    val after = awaitState(room, 5.seconds)(_.tablePairs.isEmpty)
     GameActor.stopClock(room).unsafeRunSync()
 
-    // Nobody else held a matching rank, so the auto-surrender settled the bout in
-    // the same move: the defender picked the attack up and the table cleared.
+    // The delayed auto-pass settled the bout: the defender picked the attack up.
     assertEquals(after.tablePairs, Vector.empty)
     assert(
       after.players.exists(seat =>
@@ -228,6 +237,48 @@ class GameActorSuite extends munit.FunSuite:
       after.turnDeadlineMs > desperate.turnDeadlineMs,
       s"the auto-surrender did not restart the clock: ${after.turnDeadlineMs}"
     )
+  }
+
+  test("the delayed auto-pass of a seat without a legal throw-in is broadcast") {
+    val room = GameActor
+      .create(GameConfig(playerCount = 3, seed = 9L), Vector("Alice", "Bob", "Carol"), 15)
+      .unsafeRunSync()
+    val now = System.currentTimeMillis()
+    val six = Card(Suit.Spades, Rank.Six)
+    val waiting = room.stateRef.get.unsafeRunSync().copy(
+      players = Vector(
+        PlayerState("p0", "Alice", Vector(Card(Suit.Hearts, Rank.Six))),
+        PlayerState("p1", "Bob", Vector(Card(Suit.Spades, Rank.Seven))),
+        // No rank on the table: the auto-pass is Carol's only continuation.
+        PlayerState("p2", "Carol", Vector(Card(Suit.Diamonds, Rank.King)))
+      ),
+      tablePairs = Vector(TablePair(six)),
+      attackerIdx = 0,
+      defenderIdx = 1,
+      boutPhase = BoutPhase.SurrenderThrowIn,
+      defenderInitialHandSize = 6,
+      turnDeadlineMs = now + 15_000L
+    )
+    room.stateRef.set(waiting).unsafeRunSync()
+
+    // Subscribe first and then run the very auto-pass step the driver runs, so
+    // the broadcast is observed deterministically.
+    val published = room.topic
+      .subscribe(16)
+      .take(1)
+      .concurrently(
+        Stream.eval(IO.sleep(100.millis) *> GameActor.applyAutoPasses(room, Vector("p2")))
+      )
+      .compile
+      .last
+      .unsafeRunSync()
+    GameActor.stopClock(room).unsafeRunSync()
+
+    assert(published.exists(_.players(2).hasPassed), s"no auto-pass was published: $published")
+    assertEquals(published.map(_.boutPhase), Some(BoutPhase.SurrenderThrowIn))
+    val replay = room.replay.get.unsafeRunSync()
+    val recorded = (replay.moves ++ replay.skippedMoves).map(_.action)
+    assert(recorded.contains(GameAction.PassTurn("p2")), recorded.toString)
   }
 
   /** Polls the room until `predicate` holds, failing once `timeout` elapses. */

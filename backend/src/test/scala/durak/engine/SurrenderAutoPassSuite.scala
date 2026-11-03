@@ -106,9 +106,9 @@ class SurrenderAutoPassSuite extends munit.FunSuite:
     assertEquals(GameEngine.canPlayerThrowIn(gs, 0), false)
   }
 
-  // --- Instant settlement ---
+  // --- Delayed settlement (ITEM-PREV-4b: 1-second auto-pass) ---
 
-  test("a surrender settles in the same move when nobody holds a matching rank") {
+  test("a surrender keeps the cards on the table when nobody holds a matching rank") {
     val gs = threePlayer(
       attackerHand = List(card(Rank.Ace, Suit.Clubs)),
       defenderHand = List(card(Rank.Seven, Suit.Hearts), card(Rank.Eight, Suit.Hearts)),
@@ -119,7 +119,17 @@ class SurrenderAutoPassSuite extends munit.FunSuite:
     val result = GameEngine.applyAction(gs, GameAction.DeclareSurrender("p1"))
 
     assert(result.isRight, result)
-    val next = result.getOrElse(fail("expected a valid surrender"))
+    val surrendered = result.getOrElse(fail("expected a valid surrender"))
+    // Nobody can throw in, yet nobody is passed at 0 ms: the half-off cards
+    // stay on the felt until the server's 1-second auto-pass delay elapses.
+    assertEquals(surrendered.boutPhase, BoutPhase.SurrenderThrowIn)
+    assertEquals(surrendered.tablePairs, gs.tablePairs)
+    assertEquals(GameEngine.playersNeedingAutoPass(surrendered), Vector("p0", "p2"))
+    assert(surrendered.players.forall(!_.hasPassed), surrendered.players.map(_.hasPassed))
+    assertEquals(surrendered.promptedPlayerIds, Set("p0", "p2"))
+
+    // The delayed auto-pass is what settles the bout.
+    val next = GameEngine.autoPassSurrenderThrowers(surrendered)
     assertEquals(next.boutPhase, BoutPhase.InitialAttack)
     assertEquals(next.tablePairs, Vector.empty)
     assertEquals(next.discardPile, Vector.empty)
@@ -142,12 +152,21 @@ class SurrenderAutoPassSuite extends munit.FunSuite:
     val next = result.getOrElse(fail("expected a valid surrender"))
     assertEquals(next.boutPhase, BoutPhase.SurrenderThrowIn)
     assertEquals(next.players(0).hasPassed, false)
-    // The cardless-of-the-rank seat is passed at once.
-    assertEquals(next.players(2).hasPassed, true)
-    assertEquals(next.promptedPlayerIds, Set("p0"))
+    // The seat without a matching rank is NOT passed inside the surrender.
+    assertEquals(next.players(2).hasPassed, false)
+    assertEquals(next.promptedPlayerIds, Set("p0", "p2"))
+    assertEquals(GameEngine.playersNeedingAutoPass(next), Vector("p2"))
+
+    // One second later the server passes it, while Alice keeps her throw-in.
+    val afterDelay = GameEngine.autoPassSurrenderThrowers(next)
+    assertEquals(afterDelay.boutPhase, BoutPhase.SurrenderThrowIn)
+    assertEquals(afterDelay.players(0).hasPassed, false)
+    assertEquals(afterDelay.players(2).hasPassed, true)
+    assertEquals(afterDelay.promptedPlayerIds, Set("p0"))
+    assertEquals(GameEngine.playersNeedingAutoPass(afterDelay), Vector.empty)
   }
 
-  test("a throw-in that exhausts the matching cards settles the surrender at once") {
+  test("a throw-in that exhausts the matching cards settles after the delayed auto-pass") {
     val gs = threePlayer(
       attackerHand = List(sixHearts, card(Rank.Ace, Suit.Clubs)),
       defenderHand = List(card(Rank.Seven, Suit.Hearts)),
@@ -160,15 +179,21 @@ class SurrenderAutoPassSuite extends munit.FunSuite:
     val result = GameEngine.applyAction(gs, GameAction.ThrowInCards("p0", List(sixHearts)))
 
     assert(result.isRight, result)
-    val next = result.getOrElse(fail("expected a valid throw-in"))
-    // p0 has no second six and p2 cannot throw in either, so p0's throw-in is
-    // the last action of the bout and the defender takes the whole table.
+    val thrown = result.getOrElse(fail("expected a valid throw-in"))
+    // p0 has no second six and p2 cannot throw in either, but both keep their
+    // pass window: the throw-in does not settle the bout at 0 ms.
+    assertEquals(thrown.boutPhase, BoutPhase.SurrenderThrowIn)
+    assertEquals(thrown.tablePairs.size, 2)
+    assertEquals(GameEngine.playersNeedingAutoPass(thrown), Vector("p0", "p2"))
+
+    // The delayed auto-pass is the action that ends the bout.
+    val next = GameEngine.autoPassSurrenderThrowers(thrown)
     assertEquals(next.boutPhase, BoutPhase.InitialAttack)
     assertEquals(next.tablePairs, Vector.empty)
     assertEquals(next.players(1).hand.toSet, Set(card(Rank.Seven, Suit.Hearts), sixSpades, sixHearts))
   }
 
-  test("the settling pass resolves the surrendered bout immediately") {
+  test("the delayed auto-pass resolves the throw-in that ended the matching cards") {
     val gs = threePlayer(
       attackerHand = List(sixHearts, card(Rank.Ace, Suit.Clubs)),
       defenderHand = List(card(Rank.Seven, Suit.Hearts)),
@@ -180,12 +205,16 @@ class SurrenderAutoPassSuite extends munit.FunSuite:
     val afterThrowIn = GameEngine
       .applyAction(gs, GameAction.ThrowInCards("p0", List(sixHearts)))
       .getOrElse(fail("expected the throw-in to be legal"))
-    // p0 is out of matching cards, so it was passed and the bout closed already.
-    assertEquals(afterThrowIn.boutPhase, BoutPhase.InitialAttack)
-    assertEquals(afterThrowIn.players(1).hand.toSet, Set(card(Rank.Seven, Suit.Hearts), sixSpades, sixHearts))
+    // p0 is out of matching cards, but the bout still waits on the auto-pass.
+    assertEquals(afterThrowIn.boutPhase, BoutPhase.SurrenderThrowIn)
+    assertEquals(afterThrowIn.tablePairs.size, 2)
+
+    val settled = GameEngine.autoPassSurrenderThrowers(afterThrowIn)
+    assertEquals(settled.boutPhase, BoutPhase.InitialAttack)
+    assertEquals(settled.players(1).hand.toSet, Set(card(Rank.Seven, Suit.Hearts), sixSpades, sixHearts))
   }
 
-  test("a player with no matching rank is never prompted during a surrender") {
+  test("a player with no matching rank is passed only after the 1-second delay") {
     val gs = threePlayer(
       attackerHand = List(card(Rank.Ace, Suit.Clubs)),
       defenderHand = List(card(Rank.Seven, Suit.Hearts)),
@@ -197,11 +226,17 @@ class SurrenderAutoPassSuite extends munit.FunSuite:
       .applyAction(gs, GameAction.DeclareSurrender("p1"))
       .getOrElse(fail("expected a valid surrender"))
 
-    // Nobody could throw in, so the bout settled inside the surrender and no
-    // seat was ever left waiting on a clock with no legal move.
-    assertEquals(surrendered.boutPhase, BoutPhase.InitialAttack)
-    assertEquals(surrendered.tablePairs, Vector.empty)
-    assert(surrendered.players(1).hand.nonEmpty, surrendered.players.toString)
+    // Nobody can throw in, so every non-defender is queued for the delayed
+    // auto-pass instead of being passed inside the surrender.
+    assertEquals(surrendered.boutPhase, BoutPhase.SurrenderThrowIn)
+    assertEquals(surrendered.tablePairs, gs.tablePairs)
+    assertEquals(surrendered.players(2).hasPassed, false)
+    assertEquals(GameEngine.playersNeedingAutoPass(surrendered), Vector("p0", "p2"))
+
+    val settled = GameEngine.autoPassSurrenderThrowers(surrendered)
+    assertEquals(settled.boutPhase, BoutPhase.InitialAttack)
+    assertEquals(settled.tablePairs, Vector.empty)
+    assert(settled.players(1).hand.nonEmpty, settled.players.toString)
   }
 
   // --- Durak labelling ---

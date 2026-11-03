@@ -248,14 +248,17 @@ class GameStateSuite extends munit.FunSuite:
     val covered = keepTotal(thrownIn, GameAction.CoverCard("p2", 0, seven), expected)
     val coveredAgain = keepTotal(covered, GameAction.CoverCard("p2", 1, eight), expected)
 
-    // The table is full and no other seat holds a matching rank, so the
-    // surrender settles inside the same move: the defender picks up all five
-    // table cards on top of the one still held.
-    val settled = keepTotal(
+    // The table is full and no other seat holds a matching rank, so nobody is
+    // passed inside the surrender: the delayed auto-pass settles it and the
+    // defender picks up all five table cards on top of the one still held.
+    val surrendered = keepTotal(
       coveredAgain,
       GameAction.DeclareSurrender("p2"),
       expected
     )
+    assertEquals(surrendered.boutPhase, BoutPhase.SurrenderThrowIn)
+    val settled = GameEngine.autoPassSurrenderThrowers(surrendered)
+    assertEquals(totalCards(settled), expected)
     assertEquals(settled.tablePairs, Vector.empty)
     assertEquals(settled.discardPile, Vector.empty)
     assertEquals(settled.players(2).hand.size, 6)

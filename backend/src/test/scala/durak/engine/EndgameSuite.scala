@@ -385,8 +385,10 @@ class EndgameSuite extends munit.FunSuite:
       afterFirstBout,
       GameAction.InitialAttack("p1", List(card(Rank.King, Suit.Hearts)))
     )
-    // p0 holds no matching rank, so the surrender auto-passes it and settles.
-    val afterSecondBout = applyOrFail(attacked, GameAction.DeclareSurrender("p2"))
+    // p0 holds no matching rank, so the 1-second delayed auto-pass settles it.
+    val afterSecondBout = GameEngine.autoPassSurrenderThrowers(
+      applyOrFail(attacked, GameAction.DeclareSurrender("p2"))
+    )
 
     assertEquals(afterSecondBout.players(1).finishRank, Some(1))
     assertEquals(afterSecondBout.finishOrder, Vector("p1"))
@@ -399,8 +401,10 @@ class EndgameSuite extends munit.FunSuite:
       afterSecondBout,
       GameAction.InitialAttack("p0", List(card(Rank.Ace, Suit.Clubs)))
     )
-    // The surrender auto-passes p0 (no matching rank) and resolves at once.
-    val finished = applyOrFail(attackedAgain, GameAction.DeclareSurrender("p2"))
+    // The surrender auto-passes p0 (no matching rank) after the delay.
+    val finished = GameEngine.autoPassSurrenderThrowers(
+      applyOrFail(attackedAgain, GameAction.DeclareSurrender("p2"))
+    )
 
     assertEquals(finished.finishOrder, Vector("p1", "p0", "p2"))
     assertEquals(finished.players(1).finishRank, Some(1))
@@ -433,13 +437,15 @@ class EndgameSuite extends munit.FunSuite:
     assertEquals(afterFirstBout.boutPhase, BoutPhase.InitialAttack)
 
     // Bout 2: p1 plays its last card, p2 surrenders, so p1 finishes second and
-    // the game carries on with p2 and p3. The surrender settles on its own: p3
-    // cannot throw in, so it is auto-passed inside the same move.
+    // the game carries on with p2 and p3. The surrender settles once p3 — the
+    // only non-defender left holding cards — is auto-passed after the delay.
     val attacked = applyOrFail(
       afterFirstBout,
       GameAction.InitialAttack("p1", List(card(Rank.King, Suit.Hearts)))
     )
-    val afterSecondBout = applyOrFail(attacked, GameAction.DeclareSurrender("p2"))
+    val afterSecondBout = GameEngine.autoPassSurrenderThrowers(
+      applyOrFail(attacked, GameAction.DeclareSurrender("p2"))
+    )
 
     assertEquals(afterSecondBout.finishOrder, Vector("p0", "p1"))
     assertEquals(afterSecondBout.players(1).finishRank, Some(2))

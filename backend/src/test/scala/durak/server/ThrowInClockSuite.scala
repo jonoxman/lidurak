@@ -157,6 +157,112 @@ class ThrowInClockSuite extends munit.FunSuite:
     )
   }
 
+  // --- Delayed auto-pass (ITEM-PREV-4b) ---
+
+  test("a seat with no legal throw-in is auto-passed only after the 1-second delay") {
+    val room = GameActor
+      .create(GameConfig(playerCount = 3, seed = 9L), Vector("Alice", "Bob", "Carol"), 15)
+      .unsafeRunSync()
+    val now = System.currentTimeMillis()
+    // Bob surrendered. Alice still holds a six (a rank on the table), while
+    // Carol holds only a king and a queen, so she has no throw-in at all.
+    val surrendered = state(
+      Vector(
+        player("p0", List(card(Rank.Six, Suit.Hearts), card(Rank.Seven, Suit.Hearts))),
+        player("p1", List(card(Rank.Seven, Suit.Spades), card(Rank.Eight, Suit.Spades))),
+        player("p2", List(card(Rank.King, Suit.Diamonds), card(Rank.Queen, Suit.Diamonds)))
+      ),
+      tablePairs = Vector(TablePair(six)),
+      boutPhase = BoutPhase.SurrenderThrowIn,
+      defenderInitialHandSize = 6,
+      turnDeadlineMs = now + 15_000L
+    )
+    assertEquals(GameEngine.playersNeedingAutoPass(surrendered), Vector("p2"))
+    room.stateRef.set(surrendered).unsafeRunSync()
+    val startedAt = System.currentTimeMillis()
+
+    // 0 ms: nobody was passed inside the surrender transition.
+    val immediate = room.stateRef.get.unsafeRunSync()
+    assertEquals(immediate.players(2).hasPassed, false)
+    assertEquals(immediate.tablePairs, surrendered.tablePairs)
+
+    val afterDelay = awaitState(room, 5.seconds)(_.players(2).hasPassed)
+    val elapsedMs = System.currentTimeMillis() - startedAt
+    GameActor.stopClock(room).unsafeRunSync()
+
+    // The pass waited for the full 1-second `noThrowInAutoPassDelay`.
+    assert(elapsedMs >= 900L, s"the auto-pass did not wait for the delay: ${elapsedMs}ms")
+    // The bout stays in the throw-in phase, still waiting on Alice's throw-in.
+    assertEquals(afterDelay.boutPhase, BoutPhase.SurrenderThrowIn)
+    assertEquals(afterDelay.tablePairs, surrendered.tablePairs)
+    assertEquals(afterDelay.players(0).hasPassed, false)
+    assertEquals(afterDelay.promptedPlayerIds, Set("p0"))
+    assertEquals(PlayerGameView.forViewer(afterDelay, "p0").promptedPlayerIds, Vector("p0"))
+
+    // The auto-pass is recorded like any other move.
+    val replay = room.replay.get.unsafeRunSync()
+    val recorded = (replay.moves ++ replay.skippedMoves).map(_.action)
+    assert(recorded.contains(GameAction.PassTurn("p2")), recorded.toString)
+  }
+
+  test("a surrendered bout resolves one second after its last thrower is auto-passed") {
+    val room = newRoom(players = 2, turnSeconds = 15)
+    val now = System.currentTimeMillis()
+    // p0 holds nothing matching the six, so the whole bout waits on its pass.
+    val waiting = state(
+      Vector(
+        player("p0", List(card(Rank.Ace, Suit.Clubs), card(Rank.King, Suit.Clubs))),
+        player("p1", List(card(Rank.Seven, Suit.Spades), card(Rank.Eight, Suit.Spades)))
+      ),
+      tablePairs = Vector(TablePair(six)),
+      boutPhase = BoutPhase.SurrenderThrowIn,
+      defenderInitialHandSize = 6,
+      turnDeadlineMs = now + 15_000L
+    )
+    room.stateRef.set(waiting).unsafeRunSync()
+
+    // The straddling cards stay on the table for the delay.
+    assertEquals(room.stateRef.get.unsafeRunSync().tablePairs, Vector(TablePair(six)))
+
+    val settled = awaitState(room, 5.seconds)(_.tablePairs.isEmpty)
+    GameActor.stopClock(room).unsafeRunSync()
+
+    assertEquals(settled.boutPhase, BoutPhase.InitialAttack)
+    assert(settled.players(1).hand.contains(six), settled.players(1).hand.toString)
+  }
+
+  test("the delayed auto-pass honours the room's configured noThrowInAutoPassDelay") {
+    val room = GameActor
+      .create(
+        GameConfig(playerCount = 2, seed = 9L),
+        Vector("Alice", "Bob"),
+        turnSeconds = 15,
+        noThrowInAutoPassDelay = 100.millis
+      )
+      .unsafeRunSync()
+    val now = System.currentTimeMillis()
+    val waiting = state(
+      Vector(
+        player("p0", List(card(Rank.Ace, Suit.Clubs))),
+        player("p1", List(card(Rank.Seven, Suit.Spades)))
+      ),
+      tablePairs = Vector(TablePair(six)),
+      boutPhase = BoutPhase.SurrenderThrowIn,
+      defenderInitialHandSize = 6,
+      turnDeadlineMs = now + 15_000L
+    )
+    assertEquals(room.noThrowInAutoPassDelay, 100.millis)
+    room.stateRef.set(waiting).unsafeRunSync()
+    val startedAt = System.currentTimeMillis()
+
+    val settled = awaitState(room, 5.seconds)(_.tablePairs.isEmpty)
+    val elapsedMs = System.currentTimeMillis() - startedAt
+    GameActor.stopClock(room).unsafeRunSync()
+
+    assert(elapsedMs < 900L, s"the configured auto-pass delay was ignored: ${elapsedMs}ms")
+    assertEquals(settled.boutPhase, BoutPhase.InitialAttack)
+  }
+
   // --- Expiry ---
 
   test("the clock auto-passes every waiting thrower when the throw-in clock expires") {
@@ -204,7 +310,7 @@ class ThrowInClockSuite extends munit.FunSuite:
     )
   }
 
-  test("the clock settles a bout whose throwers were already auto-passed by the surrender") {
+  test("the clock still settles a bout whose throwers were all passed already") {
     val room = newRoom(players = 2)
     val now = System.currentTimeMillis()
     val waiting = state(
