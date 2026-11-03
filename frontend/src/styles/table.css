@@ -14,7 +14,12 @@
 [data-zone='table-arena'] {
   display: grid;
   grid-template-columns: 1fr 2fr 1fr;
-  grid-template-rows: auto minmax(220px, 1fr) auto;
+  /* T-90-3 ITEM-ADD-6: every row is a fixed or viewport-clamped track. A seat
+     that runs out of cards or a hand that empties never resizes the table. */
+  --seat-row-height: 150px;
+  --battlefield-height: clamp(200px, 26vh, 280px);
+  --hand-row-height: calc(var(--hand-card-height, 114px) + 38px);
+  grid-template-rows: var(--seat-row-height) var(--battlefield-height) var(--hand-row-height);
   gap: 16px;
   min-width: 0;
   min-height: 620px;
@@ -171,6 +176,8 @@
   align-items: center;
   gap: 0;
   min-width: 0;
+  /* ITEM-ADD-6: an empty hand keeps the exact height a full hand has. */
+  min-height: 44px;
 }
 
 /* Feedback #9: a fixed-size opponent row whose cards overlap more as the hand
@@ -229,22 +236,56 @@
   box-sizing: border-box;
 }
 
-/* Item 7: the tinted play area is one fixed box sized relative to the table
-   (the whole of row 2), so its dimensions never depend on the card count. */
+/* T-90-3 ITEM-ADD-3 / ITEM-ADD-6: the shaded play area is STATICALLY CENTERED
+   in row 2 and keeps a viewport-clamped size. It never shifts with the active
+   player and never grows or shrinks with the cards on the table.
+   ITEM-ADD-4: `overflow: visible` lets surrendered cards hang half outside. */
 .battlefield-tinted-box {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: 22px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  justify-self: center;
+  align-self: center;
   width: 88%;
-  height: 100%;
+  height: var(--battlefield-height, clamp(200px, 26vh, 280px));
   min-height: 150px;
-  padding: 16px;
+  max-height: var(--battlefield-height, clamp(200px, 26vh, 280px));
+  /* Small, consistent inner margin between the border and any anchored card. */
+  padding: 12px;
   background: rgba(38, 36, 33, 0.55);
   border-radius: 10px;
   box-sizing: border-box;
-  overflow: hidden;
+  transform: none;
+  overflow: visible;
+}
+
+/* ITEM-ADD-3: the bout cards, the target outlines and the reflection outline all
+   share the one grid cell and only differ in which edge/corner they hug, so a
+   card can never overlap another anchored element. */
+.battlefield-tinted-box > .table-pairs-group,
+.battlefield-tinted-box > .target-outline {
+  grid-area: 1 / 1;
+  max-width: 100%;
+}
+
+.battlefield-tinted-box > [data-anchor-seat='top-left'] {
+  justify-self: start;
+  align-self: start;
+}
+
+.battlefield-tinted-box > [data-anchor-seat='top-center'] {
+  justify-self: center;
+  align-self: start;
+}
+
+.battlefield-tinted-box > [data-anchor-seat='top-right'] {
+  justify-self: end;
+  align-self: start;
+}
+
+.battlefield-tinted-box > [data-anchor-seat='bottom'] {
+  justify-self: center;
+  align-self: end;
 }
 
 /* Item 11: every card in play lives in one group, so a surrender slides the
@@ -268,53 +309,35 @@
   filter: saturate(0.85);
 }
 
-.table-pairs-group[data-surrendered='true'][data-surrender-target='top-left'] {
-  transform: translate(-40px, -22px);
-}
-
-.table-pairs-group[data-surrendered='true'][data-surrender-target='top-center'] {
-  transform: translate(0, -26px);
-}
-
+/* T-90-3 ITEM-ADD-4: while a surrender waits for the other players' throw-ins,
+   the cards straddle the edge of the shaded area in the direction of the
+   surrendering player's box — 50% on, 50% off — and stay there until the bout
+   resolves. The tinted box itself never moves. */
+.table-pairs-group[data-surrendered='true'][data-surrender-target='top-left'],
+.table-pairs-group[data-surrendered='true'][data-surrender-target='top-center'],
 .table-pairs-group[data-surrendered='true'][data-surrender-target='top-right'] {
-  transform: translate(40px, -22px);
+  transform: translateY(-50%);
 }
 
 .table-pairs-group[data-surrendered='true'][data-surrender-target='bottom'] {
-  transform: translate(0, 26px);
+  transform: translateY(50%);
 }
 
-/* Item 12: the bout sits directly in front of the defending player. The box
-   keeps its fixed size; only its position and card alignment move. */
-.bout-area[data-anchor='top-left'] {
-  justify-content: flex-start;
-}
-
-.bout-area[data-anchor='top-center'] {
+/* T-90-3 ITEM-ADD-3: the bout area only centres the (fixed-size) shaded area;
+   no rule ever shifts the box with the active player any more. */
+.bout-area {
   justify-content: center;
-}
-
-.bout-area[data-anchor='top-right'] {
-  justify-content: flex-end;
-}
-
-.bout-area[data-anchor='bottom'] {
-  justify-content: center;
-}
-
-.bout-area[data-anchor='top-left'] .battlefield-tinted-box,
-.bout-area[data-anchor='top-center'] .battlefield-tinted-box,
-.bout-area[data-anchor='top-right'] .battlefield-tinted-box {
-  align-items: flex-start;
-}
-
-.bout-area[data-anchor='bottom'] .battlefield-tinted-box {
-  align-items: flex-end;
 }
 
 /* Target outlines live in the bout row, facing the defender's seat. */
 .bout-target {
   flex: 0 0 auto;
+  margin: 0;
+}
+
+/* ITEM-ADD-3: the anchored outline keeps a small gap from the border, so it
+   never touches the edge of the shaded area. */
+.target-outline[data-anchor-seat] {
   margin: 0;
 }
 
@@ -565,6 +588,51 @@
   box-sizing: border-box;
 }
 
+/* T-90-3 ITEM-PB-7: every earlier discard is ONE stationary stack — all cards
+   share a single card footprint at 100% overlap. It takes no pointer events
+   and has no hover transform or transition, so mousing over it never lifts or
+   slides anything the way hand cards do. */
+.discard-facedown-stack {
+  display: grid;
+  grid-template-columns: var(--deck-card-width, 80px);
+  grid-template-rows: var(--deck-card-height, 114px);
+  flex: 0 0 auto;
+  min-width: 0;
+  pointer-events: none;
+  cursor: default;
+}
+
+.discard-facedown-stack .discard-slot {
+  grid-area: 1 / 1;
+  pointer-events: none;
+  cursor: default;
+  transition: none;
+}
+
+.discard-facedown-stack .discard-slot:hover,
+.discard-facedown-stack .card-slot:hover,
+.discard-facedown-stack .discard-back:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+/* ITEM-PB-7: only the visible face-up cards of the last bout use the responsive
+   single-row overlap, sized against the width the single stack leaves free. */
+.discard-visible-row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0;
+  flex: 0 1 auto;
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  box-sizing: border-box;
+}
+
 /* Req 7c: a discarded card is exactly as large as a talon deck card. */
 .discard-slot {
   display: flex;
@@ -719,6 +787,9 @@
   justify-content: flex-end;
   gap: 4px;
   min-width: 0;
+  /* ITEM-ADD-6: a full card height (plus the clock) is always reserved, even
+     when the viewer has run out of cards, so the felt never resizes. */
+  min-height: var(--hand-row-height, calc(var(--hand-card-height, 114px) + 38px));
   padding: 2px 0 8px;
 }
 
@@ -988,7 +1059,10 @@
 @media (max-width: 900px) {
   [data-zone='table-arena'] {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto auto auto auto;
+    /* Five tracks (seats, bout, spare, hand, controls). Each keeps its height
+       whether or not a player still holds cards (ITEM-ADD-6). */
+    grid-template-rows: minmax(120px, auto) var(--battlefield-height) 0
+      var(--hand-row-height) auto;
     gap: 12px;
     min-height: 0;
     padding: 12px;
@@ -1057,6 +1131,8 @@
   .seat {
     width: 100%;
     height: auto;
+    /* ITEM-ADD-6: the empty seat box stays exactly as tall as a full one. */
+    min-height: 120px;
   }
 
   .seat-clock,
@@ -1391,6 +1467,24 @@
 
 .hand-cards .card-slot.legal-playable:hover {
   transform: translateY(-10px);
+}
+
+/* T-90-3 ITEM-PB-3: when EVERY card in hand is legal (for example the opening
+   attack), the whole turn-highlight outline travels up with the lifted cards.
+   The slots stay at zero offset inside the shifted outline, so the glow wraps
+   the row symmetrically on all four sides. As soon as one card is not legal,
+   `data-all-legal` is `false` and the outline stays at its baseline while only
+   the individual legal cards lift. */
+.hand-cards[data-all-legal='true'][data-active='true'] {
+  transform: translateY(-8px);
+}
+
+.hand-cards[data-all-legal='true'][data-active='true'] .card-slot.legal-playable {
+  transform: none;
+}
+
+.hand-cards[data-all-legal='true'][data-active='true'] .card-slot.legal-playable:hover {
+  transform: translateY(-2px);
 }
 
 /* Item 19: the whole gesture keeps the pointer finger, never the slashed

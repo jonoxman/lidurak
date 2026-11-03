@@ -5,6 +5,11 @@ export interface ActionBarProps {
   surrenderSeconds?: number | null;
   /** Seconds left before the automatic pass, shown on the Pass button. */
   passCountdownSeconds?: number | null;
+  /**
+   * The viewed seat is played by a bot: a human inspecting it may never send a
+   * command on its behalf, so no contextual button is rendered at all.
+   */
+  isBotSeat?: boolean;
 }
 
 interface ActionButton {
@@ -29,7 +34,11 @@ export function ActionBar({
   onAction,
   surrenderSeconds = null,
   passCountdownSeconds = null,
+  isBotSeat = false,
 }: ActionBarProps) {
+  // A bot seat takes no user input, so neither `Surrender` nor `Pass` appears.
+  if (isBotSeat) return null;
+
   const buttons = BUTTONS.filter((button) => legalActions.includes(button.action));
   const passCountdownActive = passCountdownSeconds != null && passCountdownSeconds > 0;
 

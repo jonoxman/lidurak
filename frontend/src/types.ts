@@ -40,6 +40,16 @@ export interface PlayerGameView {
   maxBoutAttacks: number;
   /** Chaos Mode variant: the attacker may choose any active defender. */
   chaosMode?: boolean;
+  /** True when the viewed seat is computer-controlled, so it accepts no input. */
+  isBot?: boolean;
+  /** Canonical seat types in seat order (`human`, `randomBot`, `basicBot`). */
+  playerTypes?: string[];
+  /** Perevod switch: reflections are legal while true. */
+  allowRedirect?: boolean;
+  /** Seats the current attacker may aim at during the opening attack. */
+  eligibleTargetIds?: string[];
+  /** The seat a reflection would reach, so the arrow can point the right way. */
+  redirectTargetId?: string | null;
   /** Absolute epoch-ms deadline of the 15-second turn clock (0 = idle). */
   turnDeadlineMs?: number;
   turnSecondsRemaining?: number;
@@ -66,6 +76,17 @@ export interface GameAction {
   type: string;
   playerId: string;
   [key: string]: unknown;
+}
+
+/**
+ * Opening attack. `targetPlayerId` names the seat being attacked; it is only
+ * meaningful in Chaos mode, where any other active seat holding cards may be
+ * chosen. A standard game ignores the field and attacks the clockwise defender.
+ */
+export interface InitialAttackAction extends GameAction {
+  type: 'initialAttack';
+  cards: Card[];
+  targetPlayerId?: string;
 }
 
 /** One replayable step: its index, actor, action and every POV at that moment. */
@@ -165,6 +186,28 @@ export function parsePlayerGameView(value: unknown): PlayerGameView {
   if (chaosMode !== undefined && typeof chaosMode !== 'boolean') {
     fail('chaosMode must be a boolean');
   }
+  const isBot = raw.isBot;
+  if (isBot !== undefined && typeof isBot !== 'boolean') {
+    fail('isBot must be a boolean');
+  }
+  const allowRedirect = raw.allowRedirect;
+  if (allowRedirect !== undefined && typeof allowRedirect !== 'boolean') {
+    fail('allowRedirect must be a boolean');
+  }
+  const playerTypes = raw.playerTypes;
+  if (playerTypes !== undefined) parseStringArray(playerTypes, 'playerTypes');
+  const eligibleTargetIds = raw.eligibleTargetIds;
+  if (eligibleTargetIds !== undefined) {
+    parseStringArray(eligibleTargetIds, 'eligibleTargetIds');
+  }
+  const redirectTargetId = raw.redirectTargetId;
+  if (
+    redirectTargetId !== undefined &&
+    redirectTargetId !== null &&
+    typeof redirectTargetId !== 'string'
+  ) {
+    fail('redirectTargetId must be a string or null');
+  }
   const turnDeadlineMs = raw.turnDeadlineMs;
   if (
     turnDeadlineMs !== undefined &&
@@ -258,6 +301,11 @@ export function parsePlayerGameView(value: unknown): PlayerGameView {
     isDraw,
     maxBoutAttacks,
     chaosMode: (chaosMode as boolean | undefined) ?? false,
+    isBot: (isBot as boolean | undefined) ?? false,
+    playerTypes: (playerTypes as string[] | undefined) ?? [],
+    allowRedirect: (allowRedirect as boolean | undefined) ?? true,
+    eligibleTargetIds: (eligibleTargetIds as string[] | undefined) ?? [],
+    redirectTargetId: (redirectTargetId as string | null | undefined) ?? null,
     turnDeadlineMs: (turnDeadlineMs as number | null | undefined) ?? 0,
     turnSecondsRemaining: (turnSecondsRemaining as number | undefined) ?? 15,
     turnPlayerId: (turnPlayerId as string | null | undefined) ?? undefined,
@@ -366,16 +414,21 @@ export function hasLegalAction(legalActions: string[], action: string): boolean 
 
 // --- GameAction builders: one per backend action variant ---
 
+/**
+ * Opens a bout. `targetPlayerId` is the Chaos-mode seat being aimed at; in a
+ * standard game the clock-wise defender receives the attack and the field is
+ * omitted, which is exactly what the backend decoder expects.
+ */
 export function buildInitialAttack(
   playerId: string,
   cards: Card[],
-  targetDefender?: string,
-): GameAction {
+  targetPlayerId?: string,
+): InitialAttackAction {
   return {
     type: 'initialAttack',
     playerId,
     cards,
-    ...(targetDefender ? { targetDefender } : {}),
+    ...(targetPlayerId ? { targetPlayerId } : {}),
   };
 }
 
