@@ -36,10 +36,13 @@ export function TablePair({
   if (pulse) classes.push('turn-pulse');
   if (snap) classes.push('snap-active');
 
+  // Item 8: an attack card sits flush with the top of an exact card-sized box,
+  // so the reflection outline can share the same top and bottom edges.
   return (
-    <div class={classes.join(' ')}>
+    <div class={classes.join(' ')} data-card-align="top">
       <div
         class="table-pair-attack"
+        data-card-align="top"
         data-drop-zone={dropZone}
         onDragOver={onDragOverCard}
         onDragLeave={onDragLeaveCard}
@@ -53,7 +56,7 @@ export function TablePair({
         />
       </div>
       {defense ? (
-        <div class="table-pair-defense">
+        <div class="table-pair-defense" data-card-align="overlap">
           <Card suit={defense.suit} rank={defense.rank} trump={isTrump(defense)} />
         </div>
       ) : null}
