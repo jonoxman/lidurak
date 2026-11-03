@@ -983,12 +983,13 @@ describe('seat boxes, clocks and the deck stack', () => {
       />,
     );
 
-    // T-90 ITEM-PREV-4: the defender is prompted by the uncovered cards on the
-    // felt and by their legal cards lifting, never by a red box around the hand.
+    // T-90-2 ITEM-PREV-4: a defender who still has to decide keeps the crimson
+    // hand glow, alongside the uncovered cards pulsing on the felt.
     const cards = container.querySelector('.hand-cards') as HTMLElement;
-    expect(cards.classList.contains('defender-turn')).toBe(false);
+    expect(cards.classList.contains('defender-turn')).toBe(true);
     expect(cards.classList.contains('attacker-turn')).toBe(false);
-    expect(cards.getAttribute('data-highlighted')).toBe('false');
+    expect(cards.getAttribute('data-highlighted')).toBe('true');
+    expect(cards.getAttribute('data-highlight-variant')).toBe('defender');
 
     const attackerSeat = screen
       .getByTestId('seat-clock-p1')
@@ -2455,7 +2456,7 @@ describe('T-90-3 ITEM-NEW: compact single-row play area and roundness', () => {
   });
 });
 
-describe('T-90 ITEM-PREV-4: no hand highlight for a surrendering defender', () => {
+describe('T-90-2 ITEM-PREV-4: defender hand glow before the surrender decision', () => {
   const handZoneOf = (container: Element): HTMLElement =>
     container.querySelector('[data-zone="player-hand"]') as HTMLElement;
 
@@ -2489,12 +2490,15 @@ describe('T-90 ITEM-PREV-4: no hand highlight for a surrendering defender', () =
     expect(handBox.getAttribute('data-active')).toBe('false');
     // The felt stops prompting a defender who already gave up the bout.
     expect(container.querySelectorAll('.table-pair.turn-pulse')).toHaveLength(0);
-    // No crimson hand-glow rule is left in the stylesheet at all.
-    expect(tableCss).not.toContain('.hand-cards.defender-turn');
-    expect(tableCss).not.toContain('defenderPulse');
+    // The crimson rules exist, but this surrendered hand never matches them.
+    expect(tableCss).toContain('.hand-cards.defender-turn');
+    expect(tableCss).toContain('defenderHandPulse');
+    for (const node of [zone, handBox]) {
+      expect(node.getAttribute('data-highlight-variant')).toBe('none');
+    }
   });
 
-  it('leaves a defenceless defender hand unhighlighted while the surrender countdown runs', () => {
+  it('keeps the red glow on a defenceless defender while the surrender countdown runs', () => {
     const { container } = render(
       <GameTable
         myId="p0"
@@ -2515,10 +2519,18 @@ describe('T-90 ITEM-PREV-4: no hand highlight for a surrendering defender', () =
     const handBox = screen.getByTestId('hand-turn-highlight') as HTMLElement;
     expect(zone.getAttribute('data-defenseless')).toBe('true');
     expect(handBox.getAttribute('data-defenseless')).toBe('true');
-    expect(handBox.getAttribute('data-highlighted')).toBe('false');
-    expect(handBox.getAttribute('data-active')).toBe('false');
-    expect(handBox.className).not.toMatch(/attacker-turn|throw-in-turn|defender-turn/);
-    expect(container.querySelectorAll('.table-pair.turn-pulse')).toHaveLength(0);
+    // The decision to surrender has not been executed yet, so the hand glows.
+    for (const node of [zone, handBox]) {
+      expect(node.getAttribute('data-highlighted')).toBe('true');
+      expect(node.getAttribute('data-highlight-variant')).toBe('defender');
+      expect(node.getAttribute('data-surrendering')).toBe('false');
+      expect(node.classList.contains('defender-turn')).toBe(true);
+      expect(node.classList.contains('attacker-turn')).toBe(false);
+      expect(node.classList.contains('throw-in-turn')).toBe(false);
+    }
+    expect(handBox.getAttribute('data-active')).toBe('true');
+    // The felt keeps prompting the seat that still owes a decision.
+    expect(container.querySelectorAll('.table-pair.turn-pulse')).toHaveLength(1);
   });
 
   it('keeps the felt prompt and the card lift for a defender who can still answer', () => {
@@ -2540,11 +2552,12 @@ describe('T-90 ITEM-PREV-4: no hand highlight for a surrendering defender', () =
 
     expect(container.querySelectorAll('.table-pair.turn-pulse')).toHaveLength(1);
     expect(container.querySelector('.card-slot.legal-playable')).not.toBeNull();
-    // The prompt is on the felt and the cards, not around the hand container.
-    expect(handZoneOf(container).getAttribute('data-highlighted')).toBe('false');
+    // The prompt is on the felt, the legal cards lift, and the hand glows red.
+    expect(handZoneOf(container).getAttribute('data-highlighted')).toBe('true');
+    expect(handZoneOf(container).getAttribute('data-highlight-variant')).toBe('defender');
     expect(
-      screen.getByTestId('hand-turn-highlight').getAttribute('data-highlighted'),
-    ).toBe('false');
+      screen.getByTestId('hand-turn-highlight').getAttribute('data-highlight-variant'),
+    ).toBe('defender');
   });
 
   it('still highlights an opening attacker and an eligible thrower', () => {
@@ -2563,6 +2576,7 @@ describe('T-90 ITEM-PREV-4: no hand highlight for a surrendering defender', () =
 
     let handBox = screen.getByTestId('hand-turn-highlight') as HTMLElement;
     expect(handBox.getAttribute('data-highlighted')).toBe('true');
+    expect(handBox.getAttribute('data-highlight-variant')).toBe('attacker');
     expect(handBox.getAttribute('data-active')).toBe('true');
     expect(handBox.classList.contains('attacker-turn')).toBe(true);
     expect(
@@ -2586,6 +2600,7 @@ describe('T-90 ITEM-PREV-4: no hand highlight for a surrendering defender', () =
 
     handBox = screen.getByTestId('hand-turn-highlight') as HTMLElement;
     expect(handBox.getAttribute('data-highlighted')).toBe('true');
+    expect(handBox.getAttribute('data-highlight-variant')).toBe('throw-in');
     expect(handBox.classList.contains('throw-in-turn')).toBe(true);
     expect(
       second.container
@@ -2593,5 +2608,46 @@ describe('T-90 ITEM-PREV-4: no hand highlight for a surrendering defender', () =
         .getAttribute('data-surrendering'),
     ).toBe('false');
     second.unmount();
+  });
+
+  it('T-90-2: drops the red glow the moment Surrender is pressed', () => {
+    const { container } = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={uncoveredPair}
+        trumpSuit="clubs"
+        attackerId="p1"
+        defenderId="p0"
+        boutPhase="Defense"
+        defending
+        defenderDefenseless
+        surrenderTriggered
+        turnPlayerId="p0"
+      />,
+    );
+
+    const zone = handZoneOf(container);
+    const handBox = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+    for (const node of [zone, handBox]) {
+      expect(node.getAttribute('data-highlighted')).toBe('false');
+      expect(node.getAttribute('data-highlight-variant')).toBe('none');
+      expect(node.getAttribute('data-surrendering')).toBe('true');
+      expect(node.classList.contains('defender-turn')).toBe(false);
+      expect(node.classList.contains('turn-pulse')).toBe(false);
+    }
+    expect(handBox.getAttribute('data-active')).toBe('false');
+    // The surrender is already in flight, so the felt stops prompting too.
+    expect(container.querySelectorAll('.table-pair.turn-pulse')).toHaveLength(0);
+  });
+
+  it('T-90-2: defines the crimson defender glow and clears it after the surrender', () => {
+    expect(tableCss).toContain('.hand-cards.defender-turn');
+    expect(tableCss).toContain('@keyframes defenderHandPulse');
+    expect(tableCss).toContain("[data-highlight-variant='defender']");
+    expect(tableCss).toContain("[data-surrendering='true']");
+    expect(tableCss).toContain("[data-highlighted='false']");
+    expect(tableCss).toMatch(/\[data-surrendering='true'\][\s\S]*?box-shadow:\s*none/);
   });
 });

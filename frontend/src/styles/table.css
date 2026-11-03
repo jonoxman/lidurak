@@ -899,14 +899,32 @@
   animation: attackerPulse 2.4s infinite ease-in-out;
 }
 
-/* T-90 ITEM-PREV-4: the defender never gets a hand highlight. A defender who
-   can still cover or redirect is prompted by the uncovered cards in play and by
-   their legal cards lifting, so no red box/border/shadow is ever drawn around
-   the hand — including while the 3-second auto-surrender countdown runs. */
+/* T-90-2 ITEM-PREV-4: while the defender still has to decide, the hand carries
+   a pulsing crimson glow — including a defenceless defender whose only legal
+   action is `surrender` and whose `3 → 2 → 1` countdown is running. The glow is
+   removed the moment `Surrender` is pressed or fires by itself. */
+.hand-cards.defender-turn,
+.hand-cards[data-highlighted='true'][data-highlight-variant='defender'],
+[data-zone='player-hand'][data-highlighted='true'][data-highlight-variant='defender'] {
+  animation: defenderHandPulse 2.4s infinite ease-in-out;
+}
+
 /* Item 3b: a thrower who may add cards to the bout glows exactly like the
    opening attacker, so the seat that owes a throw-in is never missed. */
 .hand-cards.throw-in-turn {
   animation: throwInPulse 2.4s infinite ease-in-out;
+}
+
+/* T-90-2 ITEM-PREV-4: once the surrender is made — pressed manually or fired by
+   the countdown — neither the wrapper nor the tight hand box draws any glow. */
+[data-zone='player-hand'][data-surrendering='true'],
+.hand-cards[data-surrendering='true'],
+[data-zone='player-hand'][data-highlighted='false'],
+.hand-cards[data-highlighted='false'] {
+  animation: none;
+  box-shadow: none;
+  border-color: transparent;
+  outline: none;
 }
 
 /* Item 17/22: the pulse lives on the tight card container, not the column. */
@@ -1058,6 +1076,8 @@
   --attacker-glow: rgba(217, 163, 38, 0.8);
   --attacker-glow-soft: rgba(217, 163, 38, 0.35);
   --defender-accent: #c33;
+  --defender-hand-glow: rgba(195, 51, 51, 0.85);
+  --defender-hand-glow-soft: rgba(195, 51, 51, 0.4);
 }
 
 /* Item 17: gentle 2.4s rhythmic glow. */
@@ -1090,6 +1110,18 @@
   }
   50% {
     box-shadow: 0 0 12px 3px var(--attacker-glow);
+  }
+}
+
+/* T-90-2 ITEM-PREV-4: the defender's pre-surrender hand glow is crimson, so it
+   can never be mistaken for the amber attacker / throw-in prompt. */
+@keyframes defenderHandPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 2px var(--defender-hand-glow-soft);
+  }
+  50% {
+    box-shadow: 0 0 12px 3px var(--defender-hand-glow);
   }
 }
 

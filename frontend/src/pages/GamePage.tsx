@@ -424,6 +424,10 @@ export function GamePage({
   // T-90 ITEM-PREV-4a: seconds left on the client-side auto-surrender badge
   // (`3 -> 2 -> 1`), or null while no defenseless defense is armed.
   const [surrenderSeconds, setSurrenderSeconds] = useState<number | null>(null);
+  // T-90-2 ITEM-PREV-4: position key of the defense whose `Surrender` was pressed
+  // (manually or by the 3-second countdown). The red defender hand glow drops on
+  // that same render, without waiting for the server projection.
+  const [surrenderTriggeredKey, setSurrenderTriggeredKey] = useState<string | null>(null);
   // T-90 ITEM-PREV-4b: true while the 1-second client auto-pass is armed.
   const [autoPassPending, setAutoPassPending] = useState(false);
   const autoSurrenderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -743,6 +747,21 @@ export function GamePage({
       .map((pair) => `${cardKey(pair.attack)}/${pair.defense ? cardKey(pair.defense) : '-'}`)
       .join(',');
 
+  // T-90-2 ITEM-PREV-4: the exact defensive position the surrender latch belongs
+  // to. Any change of phase, seats, table or hand makes the latch stale, so a new
+  // bout can never inherit a previous surrender.
+  const livePositionKey =
+    view == null
+      ? null
+      : [
+          view.myId,
+          normalizeToken(view.boutPhase),
+          view.attackerIdx,
+          view.defenderIdx,
+          tableKey(view.tablePairs),
+          view.myHand.map(cardKey).join(','),
+        ].join('|');
+
   const autoSurrenderKey =
     view != null && !isBotViewer && !reviewMode && isClientAutoSurrenderState(view)
       ? [
@@ -784,6 +803,8 @@ export function GamePage({
     const timer = setTimeout(() => {
       autoSurrenderFiredKeyRef.current = autoSurrenderKey;
       setSurrenderSeconds(null);
+      // T-90-2 ITEM-PREV-4: "presses itself" — drop the red defender glow now.
+      setSurrenderTriggeredKey(autoSurrenderKey);
       dispatchRef.current(buildDeclareSurrender(playerId));
     }, CLIENT_AUTO_SURRENDER_DELAY_MS);
     autoSurrenderTickRef.current = tick;
@@ -795,6 +816,13 @@ export function GamePage({
       autoSurrenderTimerRef.current = null;
     };
   }, [autoSurrenderKey, playerId]);
+
+  // T-90-2 ITEM-PREV-4: clear the latch as soon as the bout leaves `Defense`
+  // (the surrender throw-in, or the next bout), so a fresh defense glows again.
+  useEffect(() => {
+    if (view == null) return;
+    if (normalizeToken(view.boutPhase) !== 'defense') setSurrenderTriggeredKey(null);
+  }, [view]);
 
   // T-90 ITEM-PREV-4b: wait a full second before passing for a thrower who has
   // no legal throw-in card, so the Pass button stays readable and clickable.
@@ -1072,6 +1100,8 @@ export function GamePage({
         break;
       case 'declareSurrender':
         cancelAutoSurrender();
+        // T-90-2 ITEM-PREV-4: the manual press removes the red hand glow at once.
+        setSurrenderTriggeredKey(livePositionKey);
         dispatch(buildDeclareSurrender(playerId));
         break;
       case 'redirect':
@@ -1121,16 +1151,22 @@ export function GamePage({
   // Item 12: a finished game is reviewed read-only against the selected replay
   // frame; a live match always renders the authoritative view.
   const displayedView = reviewMode && activeFrame ? activeFrameView ?? view : view;
-  // T-90 ITEM-PREV-4: the surrendering / defenceless defender never gets a glow
-  // around their hand — the highlight prompts a card move, and this seat has
-  // none. The state comes from the projection (the surrender phase, the
-  // server's `defenderDefenseless` flag or a `surrender`-only legal-action set),
-  // so it also covers the 3-second client auto-surrender countdown.
+  // T-90-2 ITEM-PREV-4: the surrendered defender never gets a glow around their
+  // hand — the highlight prompts a card move, and this seat has none. During
+  // `Defense` the decision has not been made yet (not even when the only legal
+  // action is `surrender` and the 3-second countdown runs), so the hand keeps its
+  // red defender glow; it drops the instant the Surrender button is clicked or
+  // the countdown presses it by itself.
   const viewerIsDefender = displayedView.defenderIdx === viewerSeatIndex(displayedView);
+  const surrenderLatchActive =
+    !reviewMode &&
+    surrenderTriggeredKey != null &&
+    livePositionKey != null &&
+    surrenderTriggeredKey === livePositionKey;
   const surrenderingDefender =
     !reviewMode &&
     viewerIsDefender &&
-    (isSurrenderPhase(displayedView.boutPhase) || isClientAutoSurrenderState(displayedView));
+    (isSurrenderPhase(displayedView.boutPhase) || surrenderLatchActive);
   const defenderDefenseless =
     !reviewMode &&
     viewerIsDefender &&
@@ -1527,6 +1563,7 @@ export function GamePage({
             displayedView.tablePairs.some((pair) => !pair.defense)
           }
           isSurrenderingDefender={surrenderingDefender}
+          surrenderTriggered={surrenderLatchActive}
           defenderDefenseless={defenderDefenseless}
           canRedirect={!reviewMode && hasLegalAction(displayedView.legalActions, 'redirect')}
           canThrowIn={!reviewMode && hasLegalAction(displayedView.legalActions, 'throwIn')}
