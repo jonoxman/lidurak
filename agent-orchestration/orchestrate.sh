@@ -89,9 +89,9 @@ trap cleanup_on_interrupt INT TERM
 ./agent-orchestration/start-workspace.sh "$INITIAL_WORKERS"
 
 # === THREE-POOL ANTIGRAVITY MODEL ROUTING ===
-ARCHITECT_CHAIN=("claude-opus-5-5-high" "gemini-4-argon-high" "claude-sonnet-5-5-high" "gemini-3.8-flash-high")
+ARCHITECT_CHAIN=("gemini-4-argon-high" "claude-opus-5-5-high" "claude-sonnet-5-5-high" "gemini-3.8-flash-high")
 REVIEWER_R1_CHAIN=("gemini-4-argon-high" "claude-sonnet-5-5-high" "gemini-4-argon-medium" "gemini-3.8-flash-high")
-REVIEWER_ESCALATED_CHAIN=("claude-opus-5-5-high" "gemini-4-argon-high" "claude-sonnet-5-5-high" "gemini-3.8-flash-high")
+REVIEWER_ESCALATED_CHAIN=("gemini-4-argon-high" "claude-opus-5-5-high" "claude-sonnet-5-5-high" "gemini-3.8-flash-high")
 
 AGY_TIMEOUT_SEC=600
 SESSION_TIMEOUT_SEC=3300
@@ -123,6 +123,7 @@ fi
 
 kill_agy_tree() {
   local PID=$1
+  disown "$PID" 2>/dev/null || true
   pkill -9 -P "$PID" 2>/dev/null || true
   kill -9 "$PID" 2>/dev/null || true
 }
@@ -909,6 +910,19 @@ RESET_EOF
   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
   git rev-parse HEAD > .reviews/feedback_base_commit
   echo "0" > .reviews/feedback_audit_passes
+
+  # Preserve the PREVIOUS round's feedback before overwriting FEEDBACK.backup.md!
+  if [ -f FEEDBACK.backup.md ]; then
+    cp FEEDBACK.backup.md .reviews/previous_round_feedback.md
+  else
+    echo "No previous feedback round recorded." > .reviews/previous_round_feedback.md
+  fi
+  if [ -f .reviews/QA_PLAYBOOK.md ]; then
+    cp .reviews/QA_PLAYBOOK.md .reviews/previous_round_qa_playbook.md
+  else
+    echo "No previous QA_PLAYBOOK.md recorded." > .reviews/previous_round_qa_playbook.md
+  fi
+
   cp FEEDBACK.md FEEDBACK.backup.md
   cp FEEDBACK.md ".reviews/feedback_archive/FEEDBACK_${TIMESTAMP}.md"
   cp FEEDBACK.md FEEDBACK.in_progress.md
@@ -926,6 +940,14 @@ CRITICAL: DO NOT use any tools, DO NOT run bash commands, and DO NOT read extern
 Carefully inspect each numbered item in <human_feedback> against <current_codebase>.
 - If an item is clear, or only requires standard engineering judgment (including building a QA Scenario Preset to test it), do NOT ask a question about it.
 - ONLY ask a question if a numbered item is genuinely ambiguous, contradicts an existing rule, or has 2+ distinct gameplay/UI interpretations where guessing wrong would frustrate the user.
+
+<previous_round_human_feedback>
+$(cat .reviews/previous_round_feedback.md 2>/dev/null || echo "None")
+</previous_round_human_feedback>
+
+<previous_round_qa_playbook>
+$(cat .reviews/previous_round_qa_playbook.md 2>/dev/null || echo "None")
+</previous_round_qa_playbook>
 
 <human_feedback>
 $(cat FEEDBACK.md)
@@ -982,7 +1004,16 @@ CRITICAL ANTI-OMISSION, TESTABILITY & TRACEABILITY RULES:
 $(cat AGENTS.md)
 </agents_rules>
 
+<previous_round_human_feedback>
+$(cat .reviews/previous_round_feedback.md 2>/dev/null || echo "None")
+</previous_round_human_feedback>
+
+<previous_round_qa_playbook>
+$(cat .reviews/previous_round_qa_playbook.md 2>/dev/null || echo "None")
+</previous_round_qa_playbook>
+
 <resolved_human_feedback>
+(Note: If the human references an "Item #X" or playbook step from the previous round without redefining it, resolve the reference using <previous_round_human_feedback> and <previous_round_qa_playbook> above!)
 $(cat .reviews/active_feedback_resolved.md)
 </resolved_human_feedback>
 
@@ -1065,7 +1096,16 @@ CRITICAL: DO NOT use any tools, DO NOT run bash commands, and DO NOT read extern
 
 Compare EVERY single non-deferred numbered item, sub-bullet, UI detail, and QA Scenario Preset in <resolved_human_feedback> against <cumulative_git_diff_on_main> and the FULL source files in <current_main_source_files>.
 
+<previous_round_human_feedback>
+$(cat .reviews/previous_round_feedback.md 2>/dev/null || echo "None")
+</previous_round_human_feedback>
+
+<previous_round_qa_playbook>
+$(cat .reviews/previous_round_qa_playbook.md 2>/dev/null || echo "None")
+</previous_round_qa_playbook>
+
 <resolved_human_feedback>
+(Note: If the human references an "Item #X" or playbook step from the previous round without redefining it, resolve the reference using <previous_round_human_feedback> and <previous_round_qa_playbook> above!)
 $(cat .reviews/active_feedback_resolved.md)
 </resolved_human_feedback>
 
