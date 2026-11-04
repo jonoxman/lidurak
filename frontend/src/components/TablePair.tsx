@@ -62,7 +62,7 @@ export function TablePair({
       style={marginLeft ? { marginLeft } : undefined}
     >
       <div
-        class="table-pair-attack table-card-attack"
+        class="table-pair-attack table-card-attack table-card-base"
         data-card-align="top"
         data-uncovered-highlighted={uncoveredHighlighted ? 'true' : 'false'}
         data-drop-zone={dropZone}
@@ -78,7 +78,7 @@ export function TablePair({
         />
       </div>
       {defense ? (
-        <div class="table-pair-defense" data-card-align="overlap">
+        <div class="table-pair-defense table-card-cover" data-card-align="overlap">
           <Card suit={defense.suit} rank={defense.rank} trump={isTrump(defense)} />
         </div>
       ) : null}

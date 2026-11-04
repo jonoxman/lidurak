@@ -156,7 +156,8 @@ describe('GamePage', () => {
     render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
 
     await waitFor(() => expect(screen.getByText('Pass')).toBeTruthy());
-    expect(getGameView).toHaveBeenCalledWith('game-1', 'p0');
+    // ITEM-14b: the opening seat is always sent as the requester too.
+    expect(getGameView).toHaveBeenCalledWith('game-1', 'p0', 'p0');
 
     fireEvent.click(screen.getByText('Pass'));
 
@@ -184,12 +185,16 @@ describe('GamePage', () => {
     expect(arena).not.toBeNull();
     expect(right).not.toBeNull();
 
-    // How to Play lives in the left sidebar, not above the table.
+    // How to Play lives in the left sidebar, not above the table. ITEM-14a: the
+    // PLAYERS panel is the very first block of that column.
     expect(within(left as HTMLElement).getByText('How to Play')).toBeTruthy();
-    expect(within(left as HTMLElement).getByRole('tablist')).toBeTruthy();
+    expect(within(left as HTMLElement).getByTestId('players-panel')).toBeTruthy();
+    expect((left as HTMLElement).firstElementChild?.getAttribute('data-testid')).toBe(
+      'players-panel',
+    );
     expect(screen.getByTestId('turn-clock').textContent?.trim()).toBe('00:15');
-    // The deck, trump and TRUMP badge sit in the right sidebar under the clock
-    // and PLAYERS list, never on the felt.
+    // The deck, trump and TRUMP badge sit in the right sidebar under the clock,
+    // never on the felt.
     expect(
       (right as HTMLElement).querySelector('[data-zone="table-deck"]'),
     ).not.toBeNull();
@@ -270,7 +275,8 @@ describe('GamePage', () => {
       'Pairs',
       'Rank',
     ]);
-    expect(select.value).toBe('suit');
+    // ITEM-5: new users open on Rank, not Suit.
+    expect(select.value).toBe('rank');
   });
 
   it('reorders the active player\'s hand when the sidebar sort mode changes', async () => {
@@ -331,7 +337,7 @@ describe('GamePage', () => {
     ).not.toMatch(/cards/i);
   });
 
-  it('switches the hotseat player from the left sidebar tabs', async () => {
+  it('ITEM-14a/14b: switches the POV by clicking a PLAYERS row', async () => {
     getGameView.mockResolvedValue(view);
     const onSwitchPlayer = vi.fn();
 
@@ -339,11 +345,14 @@ describe('GamePage', () => {
       <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={onSwitchPlayer} />,
     );
 
-    await waitFor(() => expect(screen.getByRole('tablist')).toBeTruthy());
-    const tabs = screen.getAllByRole('tab');
-    expect(tabs).toHaveLength(2);
+    await waitFor(() => expect(screen.getByTestId('players-panel')).toBeTruthy());
+    // The standalone POV switchers (tabs or header menu) are gone.
+    expect(document.querySelector('.hotseat-tabs, .pov-tab')).toBeNull();
+    expect(screen.queryByTestId('pov-menu')).toBeNull();
 
-    fireEvent.click(screen.getByRole('tab', { name: /Bob/ }));
+    const bob = screen.getByTestId('player-row-p1');
+    expect(bob.getAttribute('data-pov-clickable')).toBe('true');
+    fireEvent.click(bob);
     expect(onSwitchPlayer).toHaveBeenCalledWith('p1');
   });
 
@@ -829,7 +838,7 @@ describe('GamePage', () => {
     }
   });
 
-  it('keeps hotseat tabs and the players list in fixed seat order', async () => {
+  it('keeps the players list in fixed seat order', async () => {
     const threePlayerView: PlayerGameView = {
       ...view,
       opponents: [
@@ -843,19 +852,14 @@ describe('GamePage', () => {
       <GamePage gameId="game-1" playerId="p1" onSwitchPlayer={() => {}} />,
     );
 
-    await waitFor(() => expect(screen.getByRole('tablist')).toBeTruthy());
-    const tabs = screen.getAllByRole('tab');
-    expect(tabs.map((tab) => tab.querySelector('.hotseat-id')?.textContent)).toEqual([
-      'p0',
-      'p1',
-      'p2',
-    ]);
-    // The active player stays in its seat slot instead of jumping to the top.
-    expect(tabs[1].getAttribute('aria-selected')).toBe('true');
+    await waitFor(() => expect(screen.getByTestId('players-list')).toBeTruthy());
 
     const badges = Array.from(
       container.querySelectorAll('.status-badge'),
     ) as HTMLElement[];
+    // The active player (the viewed seat p0) stays in its seat slot instead of
+    // jumping to the top of the list.
+    expect(badges[0].classList.contains('mine')).toBe(true);
     expect(badges.map((badge) => badge.getAttribute('data-player-id'))).toEqual([
       'p0',
       'p1',
@@ -1201,7 +1205,7 @@ describe('GamePage', () => {
     expect(screen.getByTestId('game-clock').getAttribute('data-active')).toBe('false');
   });
 
-  it('switches the point of view from the header POV menu', async () => {
+  it('ITEM-14a: switches the point of view from the PLAYERS list', async () => {
     getGameView.mockResolvedValue({
       ...view,
       myName: 'Alice',
@@ -1214,27 +1218,18 @@ describe('GamePage', () => {
 
     render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={onSwitchPlayer} />);
 
-    await waitFor(() => expect(screen.getByTestId('pov-menu')).toBeTruthy());
-    const select = screen.getByTestId('pov-menu') as HTMLSelectElement;
-    expect(select.value).toBe('p0');
+    await waitFor(() => expect(screen.getByTestId('players-panel')).toBeTruthy());
     // Item 13: every seat is labelled with its real name, and only the active
     // user carries the trailing " (You)" suffix.
-    expect(Array.from(select.options).map((option) => option.textContent)).toEqual([
-      'Alice (You)',
-      'Bob',
-      'Carol',
-    ]);
-    expect(select.textContent).toContain('Alice (You)');
-    // The left-sidebar POV switcher uses the same names and suffix.
-    const tabs = screen.getAllByRole('tab');
+    const rows = screen.getAllByTestId(/^player-row-/);
     expect(
-      tabs.map((tab) => tab.querySelector('.hotseat-name')?.textContent?.trim()),
+      rows.map((row) => row.querySelector('.status-name')?.textContent?.trim()),
     ).toEqual(['Alice (You)', 'Bob', 'Carol']);
-    expect(screen.getByRole('tablist').getAttribute('aria-label')).toBe('POV player switcher');
-    // The header label and the left-sidebar heading both read POV.
-    expect(screen.getAllByText('POV')).toHaveLength(2);
+    // There is no separate POV element in the header or the left column.
+    expect(screen.queryByTestId('pov-menu')).toBeNull();
+    expect(document.querySelector('.hotseat-tabs, .pov-tab')).toBeNull();
 
-    fireEvent.change(select, { target: { value: 'p2' } });
+    fireEvent.click(screen.getByTestId('player-row-p2'));
     expect(onSwitchPlayer).toHaveBeenCalledWith('p2');
   });
 
@@ -1464,13 +1459,12 @@ describe('GamePage', () => {
     expect((screen.getByTestId('review-next-button') as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByTestId('review-prev-button') as HTMLButtonElement).disabled).toBe(false);
 
-    // The POV menu still lists real names while reviewing, with the active
+    // The PLAYERS list keeps the real names while reviewing, with the active
     // user's " (You)" suffix.
-    const pov = screen.getByTestId('pov-menu') as HTMLSelectElement;
-    expect(Array.from(pov.options).map((option) => option.textContent)).toEqual([
-      'Alice (You)',
-      'Bob',
-    ]);
+    const rows = screen.getAllByTestId(/^player-row-/);
+    expect(
+      rows.map((row) => row.querySelector('.status-name')?.textContent?.trim()),
+    ).toEqual(['Alice (You)', 'Bob']);
 
     // Step one move back: the board, the counter and the clock all follow.
     fireEvent.click(screen.getByTestId('review-prev-button'));
@@ -1608,7 +1602,7 @@ describe('GamePage', () => {
     expect((screen.getByTestId('review-next-button') as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it('appends (You) to the active user in both POV switchers and the PLAYERS list', async () => {
+  it('appends (You) to the active user in the PLAYERS list', async () => {
     getGameView.mockResolvedValue({
       ...view,
       myName: 'Alice',
@@ -1624,30 +1618,18 @@ describe('GamePage', () => {
 
     await waitFor(() => expect(screen.getByTestId('players-list')).toBeTruthy());
 
-    const povNames = (): (string | null)[] =>
-      Array.from((screen.getByTestId('pov-menu') as HTMLSelectElement).options).map(
-        (option) => option.textContent,
-      );
-    const tabNames = (): (string | null | undefined)[] =>
-      Array.from(document.querySelectorAll('.hotseat-name')).map(
-        (node) => node.textContent?.trim(),
-      );
     const listNames = (): (string | undefined)[] =>
       Array.from(
         document.querySelectorAll('[data-testid="players-list"] .status-name'),
       ).map((node) => node.textContent?.trim());
 
-    // ITEM-13: only the active user (p0) gets the suffix, in all three lists.
-    expect(povNames()).toEqual(['Alice (You)', 'Bob', 'Carol']);
-    expect(tabNames()).toEqual(['Alice (You)', 'Bob', 'Carol']);
+    // ITEM-13: only the active user (p0) gets the suffix.
     expect(listNames()).toEqual(['Alice (You)', 'Bob', 'Carol']);
 
     // Switching POV moves the suffix onto the newly active seat.
     rerender(<GamePage gameId="game-1" playerId="p1" onSwitchPlayer={() => {}} />);
     await waitFor(() => expect(screen.getByTestId('players-list')).toBeTruthy());
 
-    expect(povNames()).toEqual(['Alice', 'Bob (You)', 'Carol']);
-    expect(tabNames()).toEqual(['Alice', 'Bob (You)', 'Carol']);
     expect(listNames()).toEqual(['Alice', 'Bob (You)', 'Carol']);
   });
 
@@ -1749,6 +1731,8 @@ describe('GamePage', () => {
       playerTypes: ['human', 'basicBot'],
       allowRedirect: false,
       chaosMode: false,
+      transparentMode: true,
+      devMode: false,
       durak: 'p0',
     });
     getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
@@ -1777,6 +1761,8 @@ describe('GamePage', () => {
         false,
         false,
         ['human', 'basicBot'],
+        true,
+        false,
       ),
     );
     // The new match opens on the same seat the viewer was inspecting.
@@ -1850,7 +1836,8 @@ describe('GamePage', () => {
 
     // ITEM-PB-12a: switching POV must not jump back to the final move.
     rerender(<GamePage gameId="game-1" playerId="p1" onSwitchPlayer={() => {}} />);
-    await waitFor(() => expect(getGameView).toHaveBeenCalledWith('game-1', 'p1'));
+    // ITEM-14b: the fetch carries the original seat as the authorised requester.
+    await waitFor(() => expect(getGameView).toHaveBeenCalledWith('game-1', 'p1', 'p0'));
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 60));
     });
@@ -2131,9 +2118,10 @@ describe('GamePage', () => {
       cssRule(tableCss, "[data-theme='light'] .presence-dot.present"),
     ).toContain('rgba(21, 128, 61, 0.7)');
 
-    // Left sidebar: active POV tab, QA buttons and replay controls all blue.
-    expect(cssRule(appCss, "html[data-theme='light'] .hotseat-tab.active")).toContain(
-      'box-shadow: 0 0 12px 2px var(--ui-select-glow)',
+    // Left sidebar: QA buttons and replay controls stay blue; the PLAYERS
+    // rows use the new high-contrast status tag palette instead of a POV tab.
+    expect(cssRule(appCss, ":root[data-theme='light'] .status-tag.passed-tag")).toContain(
+      'background: #dbeafe',
     );
     expect(
       cssRule(appCss, "html[data-theme='light'] .qa-scenario-button:hover"),
@@ -2150,8 +2138,11 @@ describe('GamePage', () => {
       'var(--ui-select-glow)',
     );
 
-    // Dark mode uses the same blue chrome and emerald attacker family.
-    expect(cssRule(appCss, ".hotseat-tab.active")).toContain('var(--ui-select-accent)');
+    // Dark mode uses the same blue chrome and emerald attacker family, and the
+    // active user's row never gets a green outline (ITEM-2).
+    expect(cssRule(appCss, '.status-badge.mine')).toContain(
+      'border-color: var(--app-border)',
+    );
     expect(cssRule(appCss, ".status-badge[data-role='attacker']")).toContain(
       'var(--role-attacker-glow)',
     );
@@ -2881,12 +2872,14 @@ describe('GamePage client auto-surrender and auto-pass delays', () => {
 
     await waitFor(() => expect(screen.getByTestId('clock-panel')).toBeTruthy());
 
-    // POV player switcher: every tab is a `.pov-tab`, and the viewed seat is active.
-    const tabs = Array.from(container.querySelectorAll('.pov-tab')) as HTMLElement[];
-    expect(tabs.length).toBeGreaterThan(0);
-    const activeTab = container.querySelector('.pov-tab.active') as HTMLElement;
-    expect(activeTab).not.toBeNull();
-    expect(activeTab.getAttribute('aria-selected')).toBe('true');
+    // ITEM-14: the PLAYERS rows are the only POV switcher, and the viewed seat
+    // is the one carrying the ` (You)` suffix.
+    const rows = Array.from(container.querySelectorAll('.status-badge')) as HTMLElement[];
+    expect(rows.length).toBeGreaterThan(0);
+    const activeRow = container.querySelector('.status-badge.mine') as HTMLElement;
+    expect(activeRow).not.toBeNull();
+    expect(activeRow.textContent).toContain('(You)');
+    expect(activeRow.getAttribute('data-pov-clickable')).toBe('true');
 
     // Both clock halves expose the ticket's `.split-clock-half` hook.
     expect(container.querySelectorAll('.split-clock-half')).toHaveLength(2);
@@ -2899,7 +2892,9 @@ describe('GamePage client auto-surrender and auto-pass delays', () => {
     expect(sort.getAttribute('data-sort-mode')).toMatch(/^(suit|pairs|rank)$/);
 
     // Cobalt chrome, cyan clock, emerald attacker, crimson defender.
-    expect(cssRule(appCss, '.pov-tab.active')).toContain('var(--ui-select-accent)');
+    expect(cssRule(appCss, ".status-badge[data-pov-clickable='true']")).toContain(
+      'cursor: pointer',
+    );
     expect(cssRule(appCss, ".split-clock-half[data-active='true']")).toContain(
       'background: transparent',
     );
@@ -3025,5 +3020,121 @@ describe('T-90-feedback-4 Light theme QA preset', () => {
     expect(document.documentElement.getAttribute('data-theme')).toBe('light');
     expect(getSettings().theme).toBe('light');
     expect(createPresetGameMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('T-90-4: Transparent Mode, POV gating and custom hand order', () => {
+  it('ITEM-10b: starts the Transparent Mode QA preset in one click', async () => {
+    getGameView.mockResolvedValue(view);
+    getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
+    createPresetGameMock.mockResolvedValue({
+      gameId: 'game-2',
+      players: ['p0', 'p1', 'p2'],
+      playerTypes: ['human', 'human', 'human'],
+      defaultPlayerId: 'p0',
+    });
+    const onNavigateGame = vi.fn();
+
+    render(
+      <GamePage
+        gameId="game-1"
+        playerId="p0"
+        onSwitchPlayer={() => {}}
+        onNavigateGame={onNavigateGame}
+      />,
+    );
+
+    const button = await screen.findByTestId('qa-preset-transparent-mode');
+    expect(button.getAttribute('data-preset')).toBe('transparent-mode');
+    expect(button.textContent).toBe('Transparent Mode');
+
+    fireEvent.click(button);
+    await waitFor(() => expect(createPresetGameMock).toHaveBeenCalledWith('transparent-mode'));
+    await waitFor(() => expect(onNavigateGame).toHaveBeenCalledWith('game-2', 'p0'));
+  });
+
+  it('ITEM-14b: locks POV rows without Dev Mode, then unlocks them after game over', async () => {
+    getGameView.mockResolvedValue({ ...view, devMode: false });
+    getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
+    const onSwitchPlayer = vi.fn();
+
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={onSwitchPlayer} />);
+
+    await waitFor(() => expect(screen.getByTestId('player-row-p1')).toBeTruthy());
+    const lockedRow = screen.getByTestId('player-row-p1');
+    expect(lockedRow.getAttribute('data-pov-clickable')).toBe('false');
+    expect(lockedRow.getAttribute('aria-disabled')).toBe('true');
+    fireEvent.click(lockedRow);
+    expect(onSwitchPlayer).not.toHaveBeenCalled();
+
+    // A finished game unlocks the rows for review even with Dev Mode off.
+    act(() => wsState.onUpdate?.(finishedFrameView('p0', { devMode: false })));
+    await waitFor(() => expect(screen.getByTestId('game-over-banner')).toBeTruthy());
+    const reviewRow = screen.getByTestId('player-row-p1');
+    expect(reviewRow.getAttribute('data-pov-clickable')).toBe('true');
+    fireEvent.click(reviewRow);
+    expect(onSwitchPlayer).toHaveBeenCalledWith('p1');
+  });
+
+  it('ITEM-5/6: drag reordering switches HAND SORTING to Custom and preserves the order', async () => {
+    getGameView.mockResolvedValue(sortableView);
+    getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
+
+    const { container } = render(
+      <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('sort-rank')).toBeTruthy());
+    // ITEM-5: the default schema is Rank for a new user.
+    expect(screen.getByTestId('sort-rank').getAttribute('aria-pressed')).toBe('true');
+
+    const handOrder = (): string[] =>
+      Array.from(
+        (container.querySelector('[data-zone="player-hand"]') as HTMLElement).querySelectorAll(
+          '.card-slot',
+        ),
+      ).map((slot) => `${slot.getAttribute('data-suit')}:${slot.getAttribute('data-rank')}`);
+    expect(handOrder()).toEqual(['hearts:six', 'clubs:ace', 'spades:king']);
+
+    const handBox = screen.getByTestId('hand-turn-highlight');
+    vi.spyOn(handBox, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 300,
+      bottom: 140,
+      width: 300,
+      height: 140,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+
+    fireEvent.dragStart(screen.getByLabelText('six of hearts'), {
+      dataTransfer: { setData: vi.fn() },
+    });
+    fireEvent(
+      handBox,
+      new MouseEvent('dragover', { bubbles: true, cancelable: true, clientX: 300 }),
+    );
+    fireEvent(handBox, new MouseEvent('drop', { bubbles: true, cancelable: true, clientX: 300 }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('sort-custom').getAttribute('aria-pressed')).toBe('true'),
+    );
+    expect(handOrder()).toEqual(['clubs:ace', 'spades:king', 'hearts:six']);
+
+    // A later projection keeps the custom order, drops played cards and appends
+    // every newly drawn card at the end.
+    act(() =>
+      wsState.onUpdate?.({
+        ...sortableView,
+        myHand: [
+          { suit: 'clubs', rank: 'ace' },
+          { suit: 'hearts', rank: 'six' },
+          { suit: 'diamonds', rank: 'two' },
+        ],
+      }),
+    );
+    await waitFor(() => expect(handOrder()).toEqual(['clubs:ace', 'hearts:six', 'diamonds:two']));
   });
 });

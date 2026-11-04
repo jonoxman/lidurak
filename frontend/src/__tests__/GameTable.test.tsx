@@ -13,6 +13,7 @@ import {
   DECK_CARD_WIDTH,
   DISCARD_FALLBACK_WIDTH,
   HAND_BOX_PADDING,
+  HAND_CARD_HEIGHT,
   HAND_CARD_WIDTH,
   HAND_MIN_OVERLAP,
   OPPONENT_MIN_OVERLAP,
@@ -26,9 +27,13 @@ import {
   rowWidth,
   seatForOffset,
   canonicalSeatOrder,
+  MIN_VISIBLE_CARD_LEFT_PX,
   MIN_VISIBLE_STRIP_PX,
+  BOUT_CARD_HEIGHT,
   BOUT_CARD_WIDTH,
   BOUT_MIN_VISIBLE_LEFT,
+  CARD_HEIGHT,
+  CARD_WIDTH,
   sortHand,
   type OpponentSummary,
   type TablePairData,
@@ -1794,22 +1799,22 @@ describe('feedback 7: tight glow, discard pile and reflection alignment', () => 
     const groupRule = cssRule('.table-pairs-group');
     expect(groupRule).toContain('flex-wrap: nowrap');
     expect(groupRule).toContain('align-items: flex-start');
-    expect(groupRule).toContain('--bout-card-width: 80px');
-    expect(groupRule).toContain('--bout-card-height: 114px');
-    expect(groupRule).toContain('--bout-card-offset: 15px');
+    expect(groupRule).toContain('--bout-card-width: 100px');
+    expect(groupRule).toContain('--bout-card-height: 140px');
+    expect(groupRule).toContain('--bout-card-offset: 18px');
 
     const pairRule = cssRule('.table-pair');
-    expect(pairRule).toContain('grid-template-rows: var(--bout-card-height, 114px)');
+    expect(pairRule).toContain('grid-template-rows: var(--bout-card-height, 140px)');
     expect(pairRule).toContain('align-content: start');
-    expect(pairRule).toContain('padding: 0 0 var(--bout-card-offset, 15px) 0');
+    expect(pairRule).toContain('padding: 0 0 var(--bout-card-offset, 18px) 0');
     expect(pairRule).toContain('box-sizing: border-box');
 
     const outlineRule = cssRule('.redirect-outline');
-    expect(outlineRule).toContain('height: var(--bout-card-height, 114px)');
-    expect(outlineRule).toContain('width: var(--bout-card-width, 80px)');
+    expect(outlineRule).toContain('height: var(--bout-card-height, 140px)');
+    expect(outlineRule).toContain('width: var(--bout-card-width, 100px)');
     expect(outlineRule).toContain('align-self: flex-start');
     expect(outlineRule).toContain('box-sizing: border-box');
-    expect(outlineRule).toContain('margin: 0 0 var(--bout-card-offset, 15px) 0');
+    expect(outlineRule).toContain('margin: 0 0 var(--bout-card-offset, 18px) 0');
     expect(outlineRule).not.toContain('margin-left');
 
     // Every pair opts into the same top-aligned, exact card-sized box.
@@ -2460,7 +2465,8 @@ describe('T-90-3 ITEM-NEW: compact single-row play area and roundness', () => {
 
     const plate = screen.getByTestId('redirect-outline').querySelector('rect');
     expect(plate).not.toBeNull();
-    expect(Number(plate!.getAttribute('rx'))).toBe(14);
+    // ITEM-13: the plate radius scales with the 100px-wide card.
+    expect(Number(plate!.getAttribute('rx'))).toBe(11);
     unmount();
     setSettings({ roundness: DEFAULT_SETTINGS.roundness });
   });
@@ -2839,12 +2845,12 @@ describe('T-90-2 ITEM-PREV-4: defender hand glow before the surrender decision',
     });
 
     it('darkens trump cards and uncovered attacking cards in the light theme', () => {
+      // ITEM-12a: trump cards keep their gold badge/border but no glowing aura.
       const trump = cssRule(tableCss, ":root[data-theme='light'] .card-slot.trump");
       expect(trump).toContain('border-color: var(--trump-accent)');
-      expect(trump).toContain('box-shadow: 0 0 10px 2px var(--trump-glow)');
-      // The base (dark) trump glow uses the same gold family.
+      expect(trump).toContain('box-shadow: none');
       expect(tableCss).toMatch(
-        /\n\.card-slot\.trump\s*{[^}]*border: 1px solid var\(--trump-accent\);[^}]*box-shadow: 0 0 10px var\(--trump-glow\)/,
+        /\n\.card-slot\.trump\s*{[^}]*border: 1px solid var\(--trump-accent\);[^}]*box-shadow: none/,
       );
 
       const uncovered = cssRule(
@@ -3364,5 +3370,258 @@ describe('T-90 ITEM-1c: distinct gameplay feature colours', () => {
     expect(dark).toContain('--trump-glow: rgba(245, 158, 11, 0.42)');
     expect(dark).toContain('--clock-active-glow: rgba(6, 182, 212, 0.38)');
     expect(light).toContain('--redirect-border: rgba(163, 117, 230, 0.62)');
+  });
+});
+
+describe('T-90-4: larger cards, aura containment, throw-in slot, hand reorder and Transparent Mode', () => {
+  const fourPlayerOpponents: OpponentSummary[] = [
+    { id: 'p1', name: 'Bob', cardCount: 2, hasPassed: false, finishRank: null },
+    { id: 'p2', name: 'Carol', cardCount: 4, hasPassed: false, finishRank: null },
+    { id: 'p3', name: 'Dave', cardCount: 6, hasPassed: false, finishRank: null },
+  ];
+
+  it('ITEM-13: uses 100x140 cards in the hand and in the play area', () => {
+    expect(CARD_WIDTH).toBe(100);
+    expect(CARD_HEIGHT).toBe(140);
+    expect(HAND_CARD_WIDTH).toBe(CARD_WIDTH);
+    expect(HAND_CARD_HEIGHT).toBe(CARD_HEIGHT);
+    expect(BOUT_CARD_WIDTH).toBe(CARD_WIDTH);
+    expect(BOUT_CARD_HEIGHT).toBe(CARD_HEIGHT);
+    expect(cssRule(tableCss, '.hand-slot')).toContain('var(--hand-card-width, 100px)');
+    expect(cssRule(tableCss, '.hand-slot')).toContain('var(--hand-card-height, 140px)');
+    expect(tableCss).toMatch(
+      /\.hand-card-wrapper\s*{[^}]*width: var\(--hand-card-width, 100px\);[^}]*height: var\(--hand-card-height, 140px\);/,
+    );
+    expect(MIN_VISIBLE_CARD_LEFT_PX).toBe(22);
+    expect(tableCss).toMatch(/\.target-outline\s*{[^}]*width: 100px;[^}]*height: 140px;/);
+    expect(tableCss).toMatch(
+      /\.table-card-base,\s*\.table-card-cover,\s*\.drag-ghost\s*{[^}]*width: var\(--bout-card-width, 100px\);[^}]*height: var\(--bout-card-height, 140px\);/,
+    );
+  });
+
+  it('ITEM-13: marks the attack and cover cards as base/cover card boxes', () => {
+    const { container } = renderTable();
+    expect(
+      container.querySelector('.table-pair-attack')?.classList.contains('table-card-base'),
+    ).toBe(true);
+    expect(
+      container.querySelector('.table-pair-defense')?.classList.contains('table-card-cover'),
+    ).toBe(true);
+  });
+
+  it('ITEM-1: keeps the full aura inside the felt in 4-player mode', () => {
+    const { container } = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={fourPlayerOpponents}
+        tablePairs={[]}
+        trumpSuit="diamonds"
+        attackerId="p0"
+        defenderId="p1"
+      />,
+    );
+
+    const arena = container.querySelector('[data-zone="table-arena"]') as HTMLElement;
+    expect(arena.getAttribute('data-aura-contained')).toBe('true');
+    expect(container.querySelectorAll('.opponent-seat')).toHaveLength(3);
+
+    const arenaRule = cssRule(tableCss, "[data-zone='table-arena']");
+    expect(arenaRule).toContain('padding: 24px 28px 28px 28px');
+    expect(cssRule(tableCss, '.battlefield-tinted-box')).toContain('clamp(240px, 30vh, 320px)');
+    expect(
+      cssRule(tableCss, "[data-zone='table-arena'][data-aura-contained='true'] .opponent-seat"),
+    ).toContain('margin-inline: 4px');
+  });
+
+  it('ITEM-8: renders the dedicated throw-in outline as the only throw-in drop zone', () => {
+    const onThrowInDrop = vi.fn();
+    const { container } = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={[fourPlayerOpponents[0]]}
+        tablePairs={[{ attack: { suit: 'spades', rank: 'six' }, defense: null }]}
+        trumpSuit="diamonds"
+        attackerId="p1"
+        defenderId="p1"
+        canThrowIn
+        onThrowInDrop={onThrowInDrop}
+      />,
+    );
+
+    const outline = screen.getByTestId('throw-in-outline');
+    expect(outline.classList.contains('target-outline')).toBe(true);
+    expect(outline.getAttribute('data-drop-zone')).toBe('throw-in');
+    expect(outline.closest('.table-pairs-group')).not.toBeNull();
+    // The generic "drop anywhere on the battlefield" fallback is gone.
+    expect(container.querySelector('.bout-area')?.hasAttribute('data-drop-zone')).toBe(false);
+
+    fireEvent.dragStart(screen.getByLabelText('king of clubs'), {
+      dataTransfer: { setData: vi.fn() },
+    });
+    fireEvent.drop(outline, { dataTransfer: { getData: () => '' } });
+    expect(onThrowInDrop).toHaveBeenCalledWith({ suit: 'clubs', rank: 'king' });
+  });
+
+  it('ITEM-6a: parts the hand and reports the reordered sequence', () => {
+    const onReorderHand = vi.fn();
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={[fourPlayerOpponents[0]]}
+        tablePairs={[]}
+        trumpSuit="diamonds"
+        defenderId="p1"
+        onReorderHand={onReorderHand}
+      />,
+    );
+
+    const handBox = screen.getByTestId('hand-turn-highlight');
+    vi.spyOn(handBox, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 300,
+      bottom: 140,
+      width: 300,
+      height: 140,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+
+    fireEvent.dragStart(screen.getByLabelText('six of spades'), {
+      dataTransfer: { setData: vi.fn() },
+    });
+    // The whole page carries the link pointer for the duration of the drag.
+    expect(document.body.getAttribute('data-dragging')).toBe('true');
+
+    fireEvent(
+      handBox,
+      new MouseEvent('dragover', { bubbles: true, cancelable: true, clientX: 300 }),
+    );
+    expect(handBox.getAttribute('data-reorder-target-index')).toBe('2');
+    const wrappers = Array.from(
+      handBox.querySelectorAll('.hand-card-wrapper'),
+    ) as HTMLElement[];
+    // The dragged card itself stays under the cursor; every other card left of
+    // the insertion slot parts to the left.
+    expect(wrappers.map((node) => node.getAttribute('data-part-direction'))).toEqual([
+      null,
+      'left',
+      'left',
+    ]);
+
+    fireEvent.drop(handBox, { clientX: 300, dataTransfer: { getData: () => '' } });
+    expect(onReorderHand).toHaveBeenCalledWith([
+      { suit: 'clubs', rank: 'king' },
+      { suit: 'hearts', rank: 'ace' },
+      { suit: 'spades', rank: 'six' },
+    ]);
+  });
+
+  it('ITEM-6a/7: pointer drag reorders any hand card even when it is not the turn', () => {
+    const onReorderHand = vi.fn();
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={[fourPlayerOpponents[0]]}
+        tablePairs={[]}
+        trumpSuit="diamonds"
+        defenderId="p1"
+        onReorderHand={onReorderHand}
+      />,
+    );
+
+    const handBox = screen.getByTestId('hand-turn-highlight');
+    vi.spyOn(handBox, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 300,
+      bottom: 140,
+      width: 300,
+      height: 140,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+
+    // No awaitingAttack/playableKeys here: the hand is not playable, yet a
+    // plain mouse drag must still part the row and reorder on release.
+    fireEvent.mouseDown(screen.getByLabelText('six of spades'), {
+      button: 0,
+      clientX: 10,
+      clientY: 20,
+    });
+    fireEvent.mouseMove(document, { clientX: 120, clientY: 22 });
+    expect(document.body.getAttribute('data-dragging')).toBe('true');
+    // Insertion slot 1: card 1 is left of the slot, card 2 is right of it.
+    expect(handBox.getAttribute('data-reorder-target-index')).toBe('1');
+    expect(
+      Array.from(handBox.querySelectorAll('.hand-card-wrapper')).map((node) =>
+        node.getAttribute('data-part-direction'),
+      ),
+    ).toEqual([null, 'left', 'right']);
+
+    fireEvent.mouseMove(document, { clientX: 300, clientY: 22 });
+    expect(handBox.getAttribute('data-reorder-target-index')).toBe('2');
+    expect(
+      Array.from(handBox.querySelectorAll('.hand-card-wrapper')).map((node) =>
+        node.getAttribute('data-part-direction'),
+      ),
+    ).toEqual([null, 'left', 'left']);
+
+    fireEvent.mouseUp(document, { clientX: 300, clientY: 22 });
+    expect(onReorderHand).toHaveBeenCalledWith([
+      { suit: 'clubs', rank: 'king' },
+      { suit: 'hearts', rank: 'ace' },
+      { suit: 'spades', rank: 'six' },
+    ]);
+    expect(document.body.hasAttribute('data-dragging')).toBe(false);
+  });
+
+  it('ITEM-10b: renders low-detail opponent cards with symmetrical trump badges', () => {
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={[
+          {
+            id: 'p1',
+            name: 'Bob',
+            cardCount: 3,
+            hasPassed: false,
+            finishRank: null,
+            cards: [
+              { suit: 'diamonds', rank: 'ace' },
+              { suit: 'spades', rank: 'king' },
+              { suit: 'hearts', rank: 'ten' },
+            ],
+          },
+        ]}
+        tablePairs={[]}
+        trumpSuit="diamonds"
+        defenderId="p1"
+        transparentMode
+      />,
+    );
+
+    const cards = screen.getAllByTestId('opponent-low-detail-card');
+    expect(cards).toHaveLength(3);
+    expect(cards.every((card) => card.classList.contains('opponent-low-detail-card'))).toBe(true);
+    expect(screen.getAllByTestId('low-detail-rank').map((node) => node.textContent)).toEqual([
+      'A',
+      'K',
+      '10',
+    ]);
+    expect(screen.getAllByTestId('low-detail-suit')).toHaveLength(3);
+    // Only the trump Ace carries the two symmetrical corner highlights.
+    expect(screen.getAllByTestId('low-detail-trump-top-right')).toHaveLength(1);
+    expect(screen.getAllByTestId('low-detail-trump-bottom-left')).toHaveLength(1);
+    expect(screen.getByTestId('opponent-card-count-p1').textContent).toBe('3');
+    // Face-down backs are gone while the hand is revealed.
+    expect(document.querySelectorAll('.opponent-card')).toHaveLength(0);
   });
 });
