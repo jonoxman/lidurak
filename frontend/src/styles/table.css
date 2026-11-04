@@ -6,6 +6,10 @@
   --durak-accent: #629924;
   --durak-danger: #c33;
   --durak-amber: #d9a326;
+  /* T-90-feedback-2: highlight aura multiplier written inline by settings.ts.
+     Every glow below multiplies its blur/spread by this factor, so the Theme ▸
+     Highlights intensity slider retunes the live table in real time. */
+  --highlight-intensity: 1;
 
   /* ==========================================================================
      T-90 semantic gameplay color families (Dark defaults).
@@ -442,7 +446,9 @@
   border: 2px dashed var(--role-attacker-border);
   border-radius: var(--app-roundness, 8px);
   background: var(--role-attacker-bg);
-  box-shadow: 0 0 10px 2px var(--role-attacker-glow);
+  box-shadow:
+    0 0 calc(10px * var(--highlight-intensity, 1)) calc(2px * var(--highlight-intensity, 1))
+      var(--role-attacker-glow);
   box-sizing: border-box;
   cursor: copy;
 }
@@ -464,7 +470,9 @@
   border: 2px dashed var(--redirect-border);
   border-radius: var(--app-roundness, 8px);
   background: var(--redirect-bg);
-  box-shadow: 0 0 10px 2px var(--redirect-glow);
+  box-shadow:
+    0 0 calc(10px * var(--highlight-intensity, 1)) calc(2px * var(--highlight-intensity, 1))
+      var(--redirect-glow);
   box-sizing: border-box;
   cursor: copy;
 }
@@ -919,7 +927,9 @@
 .playing-card.trump-card {
   box-sizing: border-box;
   border: 1px solid var(--trump-border);
-  box-shadow: 0 0 8px 1px var(--trump-glow);
+  box-shadow:
+    0 0 calc(8px * var(--highlight-intensity, 1)) calc(1px * var(--highlight-intensity, 1))
+      var(--trump-glow);
 }
 
 /* --- Row 3, column 2: the viewer's hand --- */
@@ -1988,7 +1998,9 @@
 [data-table-theme='light'] .target-outline {
   border-color: var(--role-attacker-border);
   background: var(--role-attacker-bg);
-  box-shadow: 0 0 10px 2px var(--role-attacker-glow);
+  box-shadow:
+    0 0 calc(10px * var(--highlight-intensity, 1)) calc(2px * var(--highlight-intensity, 1))
+      var(--role-attacker-glow);
 }
 
 :root[data-theme='light'] .target-outline.snap-active,
@@ -2004,7 +2016,9 @@
 [data-table-theme='light'] .redirect-outline {
   border-color: var(--redirect-border);
   background: var(--redirect-bg);
-  box-shadow: 0 0 10px 2px var(--redirect-glow);
+  box-shadow:
+    0 0 calc(10px * var(--highlight-intensity, 1)) calc(2px * var(--highlight-intensity, 1))
+      var(--redirect-glow);
 }
 
 :root[data-theme='light'] .redirect-outline.snap-active,
