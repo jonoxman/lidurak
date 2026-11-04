@@ -1,6 +1,12 @@
 package durak.engine
 
-/** A non-viewing player, reduced to public information only. */
+/**
+ * A non-viewing player, reduced to public information only.
+ *
+ * `cards` stays empty in an ordinary live projection. Transparent Mode (and a
+ * replay in review mode) fills it with the seat's actual hand, so the table can
+ * draw the low-detail suit/rank faces of every player's cards.
+ */
 case class PublicPlayerSummary(
   id: String,
   name: String,
@@ -10,7 +16,9 @@ case class PublicPlayerSummary(
   status: String = PlayerStatus.Active,
   isTurn: Boolean = false,
   // True while the opponent is connected (bots are always present).
-  isPresent: Boolean = false
+  isPresent: Boolean = false,
+  // Revealed hand: only Transparent Mode / review mode ever populates it.
+  cards: Vector[Card] = Vector.empty
 )
 
 /**
@@ -67,6 +75,11 @@ case class PlayerGameView(
   // Match settings the table needs to draw itself.
   allowRedirect: Boolean = true,
   chaosMode: Boolean = false,
+  // Transparent Mode: every opponent's `cards` list is populated face-up.
+  transparentMode: Boolean = false,
+  // Dev Mode: the POV switcher is open during live play. When false the server
+  // only allows a mid-game POV switch once the match is over.
+  devMode: Boolean = true,
   // Seats the current attacker may aim at. Populated during the initial attack
   // (a single clockwise defender normally, every other seat in Chaos mode).
   eligibleTargetIds: Vector[String] = Vector.empty,
@@ -88,12 +101,16 @@ object PlayerGameView:
   def forViewer(
       state: GameState,
       viewerId: String,
-      nowMs: Long = System.currentTimeMillis()
+      nowMs: Long = System.currentTimeMillis(),
+      // Review mode (the replay viewer of a finished match) reveals every hand,
+      // because there is nothing left to protect once the game is over.
+      reviewMode: Boolean = false
   ): PlayerGameView =
     val viewerIdx = state.players.indexWhere(_.id == viewerId)
     if viewerIdx == -1 then
       throw new IllegalArgumentException(s"Unknown player: $viewerId")
     val viewer = state.players(viewerIdx)
+    val revealHands = state.config.transparentMode || reviewMode
     val prompted = state.promptedPlayerIds
     // A finished game has no turn: its clock and its prompts are always idle,
     // whatever the caller's state was last stamped with.
@@ -116,7 +133,9 @@ object PlayerGameView:
             finishRank = finishRankFor(state, other),
             status = other.status,
             isTurn = prompted.contains(other.id),
-            isPresent = state.isPresentSeat(idx)
+            isPresent = state.isPresentSeat(idx),
+            // Hidden hands never leak outside Transparent Mode / review mode.
+            cards = if revealHands then other.hand else Vector.empty
           )
       }.toList,
       tablePairs = state.tablePairs,
@@ -153,6 +172,8 @@ object PlayerGameView:
       ),
       allowRedirect = state.config.allowRedirect,
       chaosMode = state.config.chaosMode,
+      transparentMode = state.config.transparentMode,
+      devMode = state.config.devMode,
       eligibleTargetIds =
         if state.boutPhase == BoutPhase.InitialAttack then
           GameEngine.eligibleInitialTargets(state).map(idx => state.players(idx).id)

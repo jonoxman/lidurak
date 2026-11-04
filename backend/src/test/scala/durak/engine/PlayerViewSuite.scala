@@ -590,6 +590,72 @@ class PlayerViewSuite extends munit.FunSuite:
     assertEquals(PlayerGameView.forViewer(gs, "p2").turnPlayerId, Some("p1"))
   }
 
+  // --- Transparent Mode & Dev Mode (T-90 ITEM-10a / ITEM-14a) ---
+
+  test("an ordinary live view keeps every opponent hand hidden") {
+    val gs = state(
+      Vector(
+        player("p0", List(card(Rank.Six))),
+        player("p1", List(card(Rank.Seven), card(Rank.Eight))),
+        player("p2", List(card(Rank.Nine)))
+      ),
+      boutPhase = BoutPhase.InitialAttack
+    )
+
+    val view = PlayerGameView.forViewer(gs, "p0")
+
+    assertEquals(view.transparentMode, false)
+    assertEquals(view.devMode, true)
+    assertEquals(view.opponents.map(_.cards), List(Vector.empty, Vector.empty))
+    assert(!view.asJson.noSpaces.contains("\"cards\":[{"), view.asJson.noSpaces)
+  }
+
+  test("Transparent Mode projects every opponent's actual hand") {
+    val bobHand = Vector(card(Rank.Seven), card(Rank.Nine, Suit.Diamonds))
+    val carolHand = Vector(card(Rank.Eight, Suit.Hearts))
+    val gs = state(
+      Vector(
+        player("p0", List(card(Rank.Six))),
+        player("p1", bobHand.toList),
+        player("p2", carolHand.toList)
+      ),
+      boutPhase = BoutPhase.InitialAttack
+    ).copy(config = GameConfig(3, seed = 42L, transparentMode = true))
+
+    val view = PlayerGameView.forViewer(gs, "p0")
+
+    assertEquals(view.transparentMode, true)
+    assertEquals(view.opponents.map(_.cards), List(bobHand, carolHand))
+    assertEquals(view.opponents.map(_.cardCount), List(2, 1))
+    // The viewer's own hand still travels through `myHand` only.
+    assertEquals(view.myHand, List(card(Rank.Six)))
+  }
+
+  test("a non-transparent replay keeps hands hidden until Game Over") {
+    val live = state(
+      Vector(player("p0", List(card(Rank.Six))), player("p1", List(card(Rank.Seven))))
+    )
+
+    val liveView = GameReplay.frozenViews(live, 0L)("p0")
+    assertEquals(liveView.opponents.map(_.cards), List(Vector.empty))
+
+    val finished = live.copy(boutPhase = BoutPhase.GameOver)
+    val reviewView = GameReplay.frozenViews(finished, 500L)("p0")
+    assertEquals(reviewView.opponents.map(_.cards), List(Vector(card(Rank.Seven))))
+    assertEquals(reviewView.transparentMode, false)
+  }
+
+  test("Dev Mode is projected from the config, including when it is off") {
+    val gs = state(
+      Vector(player("p0", List(card(Rank.Six))), player("p1", List(card(Rank.Seven))))
+    ).copy(config = GameConfig(2, seed = 42L, devMode = false))
+
+    val view = PlayerGameView.forViewer(gs, "p0")
+
+    assertEquals(view.devMode, false)
+    assertEquals(view.asJson.noSpaces.contains("\"devMode\":false"), true)
+  }
+
   test("during a surrender throw-in every eligible thrower is prompted") {
     val gs = state(
       Vector(

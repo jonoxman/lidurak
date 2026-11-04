@@ -98,6 +98,89 @@ class JsonCodecsSuite extends munit.FunSuite:
     assertEquals(decoded, view)
   }
 
+  // --- Transparent Mode & Dev Mode (T-90 ITEM-10a / ITEM-14a) ---
+
+  test("GameConfig round-trips transparentMode and devMode") {
+    val config = GameConfig(playerCount = 3, seed = 7L, transparentMode = true, devMode = false)
+    val json = config.asJson
+
+    assertEquals(json.hcursor.get[Boolean]("transparentMode").toOption, Some(true))
+    assertEquals(json.hcursor.get[Boolean]("devMode").toOption, Some(false))
+    assertEquals(parser.decode[GameConfig](json.noSpaces), Right(config))
+  }
+
+  test("a legacy GameConfig defaults transparentMode off and devMode on") {
+    val legacy = Json.obj(
+      "playerCount" -> 2.asJson,
+      "allowRedirect" -> true.asJson,
+      "seed" -> 7.asJson,
+      "playerTypes" -> Vector("human", "human").asJson,
+      "chaosMode" -> false.asJson
+    )
+
+    val decoded = parser
+      .decode[GameConfig](legacy.noSpaces)
+      .fold(error => fail(error.getMessage), identity)
+
+    assertEquals(decoded.transparentMode, false)
+    assertEquals(decoded.devMode, true)
+  }
+
+  test("PlayerGameView encodes and decodes the mode flags and opponent cards") {
+    val config = GameConfig(playerCount = 3, seed = 9L, transparentMode = true, devMode = false)
+    val game = GameEngine.createGame(config, Vector("a", "b", "c"))
+    val view = PlayerGameView.forViewer(game, "p0")
+    val json = view.asJson
+
+    assert(json.noSpaces.contains("\"transparentMode\":true"), json.noSpaces)
+    assert(json.noSpaces.contains("\"devMode\":false"), json.noSpaces)
+
+    val decoded = parser
+      .decode[PlayerGameView](json.noSpaces)
+      .fold(error => fail(error.getMessage), identity)
+
+    assertEquals(decoded, view)
+    assertEquals(decoded.transparentMode, true)
+    assertEquals(decoded.devMode, false)
+    assert(decoded.opponents.forall(_.cards.nonEmpty), decoded.opponents.toString)
+  }
+
+  test("legacy view payloads default the mode flags and keep opponent cards empty") {
+    val game = GameEngine.createGame(GameConfig(playerCount = 2, seed = 3L), Vector("a", "b"))
+    val view = PlayerGameView.forViewer(game, "p0")
+    val legacy = Json.fromJsonObject(
+      view.asJson.asObject
+        .getOrElse(fail("a view must encode as an object"))
+        .remove("transparentMode")
+        .remove("devMode")
+    )
+
+    val decoded = parser
+      .decode[PlayerGameView](legacy.noSpaces)
+      .fold(error => fail(error.getMessage), identity)
+
+    assertEquals(decoded.transparentMode, false)
+    assertEquals(decoded.devMode, true)
+    assertEquals(decoded.opponents.map(_.cards), List(Vector.empty))
+  }
+
+  test("an opponent summary without cards decodes to an empty hand") {
+    val legacy = Json.obj(
+      "id" -> "p1".asJson,
+      "name" -> "Bob".asJson,
+      "cardCount" -> 3.asJson,
+      "hasPassed" -> false.asJson,
+      "finishRank" -> Json.Null
+    )
+
+    val decoded = parser
+      .decode[PublicPlayerSummary](legacy.noSpaces)
+      .fold(error => fail(error.getMessage), identity)
+
+    assertEquals(decoded.cards, Vector.empty)
+    assertEquals(decoded.status, PlayerStatus.Active)
+  }
+
   // --- Game actions ---
 
   test("InitialAttack decodes from a JSON command") {

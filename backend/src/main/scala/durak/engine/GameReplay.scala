@@ -119,10 +119,19 @@ object GameReplay:
    * One projection per seat with the clock frozen at `elapsedMs`: the overall
    * timer appears to have started at `0` and ended at this move, and the turn
    * clock is idle, so a replay never shows a live countdown.
+   *
+   * The projection keeps `transparentMode` / `devMode` from the match config and
+   * fills every opponent's `cards` when Transparent Mode is on. Once the frame's
+   * state is `GameOver` the replay is a review, so all hands are revealed too.
    */
   def frozenViews(state: GameState, elapsedMs: Long): Map[String, PlayerGameView] =
     state.players.map { player =>
-      val view = PlayerGameView.forViewer(state, player.id, nowMs = 0L)
+      val view = PlayerGameView.forViewer(
+        state,
+        player.id,
+        nowMs = 0L,
+        reviewMode = state.isGameOver
+      )
       player.id -> view.copy(
         turnDeadlineMs = 0L,
         turnSecondsRemaining = 0,
