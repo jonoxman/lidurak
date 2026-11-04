@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createPresetGame } from '../api/client';
+import { createGame, createPresetGame, getGameView } from '../api/client';
 import {
   buildCoverCard,
   buildDeclareSurrender,
@@ -496,5 +496,114 @@ describe('viewer name parsing', () => {
 
   it('rejects a non-string myName', () => {
     expect(() => parsePlayerGameView({ ...sampleView, myName: 7 })).toThrow(/myName/);
+  });
+});
+
+/**
+ * T-90-feedback-20261104_165819-2: shared frontend protocol types — revealed
+ * opponent cards, Transparent/Dev Mode flags and the optional `requester` view
+ * query.
+ */
+describe('shared protocol types (T-90-2)', () => {
+  it('parses revealed opponent cards when a mode exposes them', () => {
+    const view = parsePlayerGameView({
+      ...sampleView,
+      opponents: [{ ...sampleView.opponents[0], cards: [six, seven] }],
+    });
+
+    expect(view.opponents[0].cards).toEqual([six, seven]);
+
+    // Ordinary projections keep the hand hidden: no field at all.
+    expect(parsePlayerGameView(sampleView).opponents[0].cards).toBeUndefined();
+
+    expect(() =>
+      parsePlayerGameView({
+        ...sampleView,
+        opponents: [{ ...sampleView.opponents[0], cards: 'nope' }],
+      }),
+    ).toThrow(/cards/);
+  });
+
+  it('parses the transparentMode and devMode projection flags', () => {
+    const view = parsePlayerGameView({ ...sampleView, transparentMode: true, devMode: true });
+
+    expect(view.transparentMode).toBe(true);
+    expect(view.devMode).toBe(true);
+
+    // Older payloads default both flags off.
+    const defaults = parsePlayerGameView(sampleView);
+    expect(defaults.transparentMode).toBe(false);
+    expect(defaults.devMode).toBe(false);
+
+    expect(() => parsePlayerGameView({ ...sampleView, transparentMode: 'yes' })).toThrow(
+      /transparentMode/,
+    );
+    expect(() => parsePlayerGameView({ ...sampleView, devMode: 1 })).toThrow(/devMode/);
+  });
+
+  it('forwards transparentMode and devMode in the POST /api/games body', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ gameId: 'g1', players: ['p0', 'p1'] }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const created = await createGame(2, ['Alice', 'Bob'], true, false, undefined, true, true);
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/games', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        playerCount: 2,
+        playerNames: ['Alice', 'Bob'],
+        allowRedirect: true,
+        chaosMode: false,
+        playerTypes: ['human', 'human'],
+        transparentMode: true,
+        devMode: true,
+      }),
+    });
+    expect(created).toEqual({ gameId: 'g1', players: ['p0', 'p1'] });
+    vi.unstubAllGlobals();
+  });
+
+  it('omits the mode flags when the caller did not opt in', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ gameId: 'g1', players: [] }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await createGame(2, ['Alice', 'Bob']);
+
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body) as Record<
+      string,
+      unknown
+    >;
+    expect(body).not.toHaveProperty('transparentMode');
+    expect(body).not.toHaveProperty('devMode');
+    vi.unstubAllGlobals();
+  });
+
+  it('appends ?requester= to the game view URL only when one is given', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => sampleView,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await getGameView('g1', 'p0', 'p2');
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/game/g1/view/p0?requester=p2');
+
+    await getGameView('g1', 'p0');
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/game/g1/view/p0');
+
+    await getGameView('g 1', 'p0', 'p 2');
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/game/g%201/view/p0?requester=p%202');
+
+    vi.unstubAllGlobals();
   });
 });

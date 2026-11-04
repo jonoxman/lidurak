@@ -19,7 +19,16 @@ export interface PublicPlayerSummary {
   finishRank?: number | null;
   /** False while the opponent's socket is disconnected. */
   isPresent?: boolean;
+  /**
+   * T-90-2: revealed cards. Only populated by modes that show an opponent's
+   * hand (Transparent Mode / Dev Mode); ordinary projections keep it absent so
+   * the anti-cheat state filter never leaks a hidden hand.
+   */
+  cards?: Card[];
 }
+
+/** Ticket alias for the public opponent summary consumed by the table. */
+export type OpponentInfo = PublicPlayerSummary;
 
 export interface PlayerGameView {
   myId: string;
@@ -79,6 +88,23 @@ export interface PlayerGameView {
   durak?: string | null;
   /** Seats the game is currently waiting on (several during a throw-in). */
   promptedPlayerIds?: string[];
+  /** T-90-2: Transparent Mode shows every opponent hand face-up. */
+  transparentMode?: boolean;
+  /** T-90-2: Dev Mode adds extra seat/debug metadata to the projection. */
+  devMode?: boolean;
+}
+
+/** Body of `POST /api/games` (`createGame` in `api/client.ts`). */
+export interface CreateGameRequest {
+  playerCount: number;
+  playerNames: string[];
+  allowRedirect: boolean;
+  chaosMode: boolean;
+  playerTypes: readonly PlayerType[];
+  /** T-90-2: deal with every hand face-up for debugging. */
+  transparentMode?: boolean;
+  /** T-90-2: expose seat/debug metadata to the clients. */
+  devMode?: boolean;
 }
 
 export interface GameAction {
@@ -160,6 +186,11 @@ function parsePublicPlayerSummary(value: unknown): PublicPlayerSummary {
   if (isPresent !== undefined && typeof isPresent !== 'boolean') {
     fail('opponent isPresent must be a boolean');
   }
+  const cards = raw.cards;
+  if (cards !== undefined && !Array.isArray(cards)) {
+    fail('opponent cards must be an array of cards');
+  }
+  const parsedCards = ((cards as unknown[] | undefined) ?? []).map(parseCard);
   return {
     id,
     name,
@@ -167,6 +198,7 @@ function parsePublicPlayerSummary(value: unknown): PublicPlayerSummary {
     hasPassed,
     finishRank: (finishRank as number | null | undefined) ?? null,
     ...(isPresent === undefined ? {} : { isPresent }),
+    ...(cards === undefined ? {} : { cards: parsedCards }),
   };
 }
 
@@ -265,6 +297,14 @@ export function parsePlayerGameView(value: unknown): PlayerGameView {
   if (myName !== undefined && typeof myName !== 'string') {
     fail('myName must be a string');
   }
+  const transparentMode = raw.transparentMode;
+  if (transparentMode !== undefined && typeof transparentMode !== 'boolean') {
+    fail('transparentMode must be a boolean');
+  }
+  const devMode = raw.devMode;
+  if (devMode !== undefined && typeof devMode !== 'boolean') {
+    fail('devMode must be a boolean');
+  }
   const presentPlayers = raw.presentPlayers;
   if (presentPlayers !== undefined) parseStringArray(presentPlayers, 'presentPlayers');
   const discardCount = raw.discardCount;
@@ -343,6 +383,8 @@ export function parsePlayerGameView(value: unknown): PlayerGameView {
       : { myFinishRank: myFinishRank as number | null }),
     durak: (durak as string | null | undefined) ?? null,
     promptedPlayerIds: (promptedPlayerIds as string[] | undefined) ?? [],
+    transparentMode: (transparentMode as boolean | undefined) ?? false,
+    devMode: (devMode as boolean | undefined) ?? false,
   };
 }
 

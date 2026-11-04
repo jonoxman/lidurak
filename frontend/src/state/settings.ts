@@ -19,6 +19,23 @@ import type { CardBackPattern } from '../components/CardBack';
 export type ThemeMode = 'device' | 'light' | 'dark';
 export type ResolvedTheme = 'light' | 'dark';
 
+/**
+ * T-90-2 ITEM-5 / ITEM-6b: the four hand-sorting schemas. `custom` is the
+ * user's own arrangement, so it only ever applies to the current game and is
+ * never written to `localStorage`.
+ */
+export type SortMode = 'suit' | 'pairs' | 'rank' | 'custom';
+
+/** Every schema, in the order the `HAND SORTING` bar renders them. */
+export const SORT_MODES: readonly SortMode[] = ['suit', 'pairs', 'rank', 'custom'];
+
+/** T-90-2 ITEM-5: new users start on Rank, not Suit. */
+export const DEFAULT_SORT_MODE: SortMode = 'rank';
+
+export function isSortMode(value: unknown): value is SortMode {
+  return typeof value === 'string' && (SORT_MODES as readonly string[]).includes(value);
+}
+
 /** T-90-feedback-2: six highlight colour scheme presets. */
 export type HighlightPresetId = 'classic' | 'warm' | 'cool' | 'neon' | 'pastel' | 'royal';
 
@@ -47,6 +64,8 @@ export interface AppSettings {
   tableTexture: TableTextureId;
   tableFilters: TableFilterSettings;
   cardBack: CardBackPattern;
+  /** Hand-sorting schema; `custom` is per-game and never persisted. */
+  sortMode: SortMode;
   /** Active highlight colour scheme preset. */
   highlightPreset: HighlightPresetId;
   /** Highlight aura intensity in percent, 20 (subtle) to 200 (bright). */
@@ -57,6 +76,8 @@ export interface AppSettings {
 export interface UserSettings {
   highlightPreset: HighlightPresetId;
   highlightIntensity: number;
+  /** Persisted hand-sorting preference — always one of Suit / Pairs / Rank. */
+  sortMode: SortMode;
 }
 
 export const ROUNDNESS_MIN = 0;
@@ -260,6 +281,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   tableTexture: DEFAULT_TABLE_TEXTURE_ID,
   tableFilters: { ...DEFAULT_TABLE_FILTERS },
   cardBack: DEFAULT_CARD_BACK,
+  sortMode: DEFAULT_SORT_MODE,
   highlightPreset: DEFAULT_HIGHLIGHT_PRESET,
   highlightIntensity: DEFAULT_HIGHLIGHT_INTENSITY,
 };
@@ -314,6 +336,7 @@ function defaultUserSettings(): UserSettings {
   return {
     highlightPreset: DEFAULT_SETTINGS.highlightPreset,
     highlightIntensity: DEFAULT_SETTINGS.highlightIntensity,
+    sortMode: DEFAULT_SETTINGS.sortMode,
   };
 }
 
@@ -332,6 +355,12 @@ function readStoredUserSettings(): UserSettings | null {
         typeof parsed.highlightIntensity === 'number'
           ? clampHighlightIntensity(parsed.highlightIntensity)
           : DEFAULT_SETTINGS.highlightIntensity,
+      // T-90-2 ITEM-6b: a stored `custom` is treated as unset, so a new game
+      // always starts on a real schema (Rank for a new user).
+      sortMode:
+        isSortMode(parsed.sortMode) && parsed.sortMode !== 'custom'
+          ? parsed.sortMode
+          : DEFAULT_SETTINGS.sortMode,
     };
   } catch {
     return null;
@@ -341,9 +370,13 @@ function readStoredUserSettings(): UserSettings | null {
 function persistUserSettings(settings: AppSettings): void {
   if (typeof window === 'undefined') return;
   try {
+    // T-90-2 ITEM-6b: `custom` never reaches storage; the last real schema is
+    // kept so the next game can start from it.
+    if (settings.sortMode !== 'custom') persistedSortMode = settings.sortMode;
     const stored: UserSettings = {
       highlightPreset: settings.highlightPreset,
       highlightIntensity: clampHighlightIntensity(settings.highlightIntensity),
+      sortMode: persistedSortMode,
     };
     window.localStorage?.setItem(USER_SETTINGS_STORAGE_KEY, JSON.stringify(stored));
   } catch {
@@ -352,6 +385,12 @@ function persistUserSettings(settings: AppSettings): void {
 }
 
 const storedAtBoot = readStoredUserSettings();
+
+/**
+ * The user's stored hand-sorting preference, mirrored from `UserSettings`.
+ * It is always a real schema: `custom` describes only the current hand.
+ */
+let persistedSortMode: SortMode = storedAtBoot?.sortMode ?? DEFAULT_SORT_MODE;
 
 let current: AppSettings = {
   ...DEFAULT_SETTINGS,
@@ -389,6 +428,23 @@ export function setHighlightIntensity(intensity: number): AppSettings {
   return setSettings({ highlightIntensity: clampHighlightIntensity(intensity) });
 }
 
+/**
+ * T-90-2 ITEM-5: the schema a new game opens on — the user's persisted
+ * preference, Rank (`'rank'`) for a new user.
+ */
+export function getStoredSortMode(): SortMode {
+  return persistedSortMode;
+}
+
+/**
+ * T-90-2 ITEM-6b: remembers a hand-sorting choice. `custom` is deliberately
+ * ignored by the persistence layer, so it applies to the current game only and
+ * the next game starts on the previous real preference (Rank by default).
+ */
+export function persistSortMode(mode: SortMode): AppSettings {
+  return setSettings({ sortMode: mode });
+}
+
 export function subscribeSettings(listener: Listener): () => void {
   listeners.add(listener);
   return () => {
@@ -401,6 +457,7 @@ export function resetSettings(): void {
     ...DEFAULT_SETTINGS,
     tableFilters: { ...DEFAULT_SETTINGS.tableFilters },
   };
+  persistedSortMode = DEFAULT_SORT_MODE;
   applySettings(current);
   persistUserSettings(current);
   notify();

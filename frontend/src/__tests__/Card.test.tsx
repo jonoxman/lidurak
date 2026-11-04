@@ -12,6 +12,7 @@ import {
   PIP_LAYOUT_BOUNDS,
   PIP_ROWS,
   resolveCardFrontTheme,
+  TRUMP_BADGES,
 } from '../components/Card';
 import {
   CARD_BACK_PATTERNS,
@@ -256,23 +257,14 @@ describe('Card', () => {
       expect(badge.right, rank).toBeLessThanOrEqual(68);
       expect(badge.bottom, rank).toBeLessThanOrEqual(20);
 
-      // No pip's glyph box may intersect the badge's box.
+      // No pip's painted ink may intersect the badge's box (the shared ink
+      // metrics, so the 40pt ace centrepiece is measured by its glyph and not
+      // by a full-em advance box).
       for (const pip of Array.from(container.querySelectorAll('[data-pip]'))) {
-        const x = Number(pip.getAttribute('x'));
-        const y = Number(pip.getAttribute('y'));
-        const fontSize = Number(pip.getAttribute('font-size'));
-        const box = {
-          left: x - fontSize * 0.45,
-          right: x + fontSize * 0.45,
-          top: y - fontSize * 0.8,
-          bottom: y + fontSize * 0.2,
-        };
-        const overlaps =
-          box.right > badge.left &&
-          box.left < badge.right &&
-          box.bottom > badge.top &&
-          box.top < badge.bottom;
-        expect(overlaps, `${rank} pip at ${x},${y}`).toBe(false);
+        expect(
+          overlaps(textBox(pip), badge),
+          `${rank} pip at ${pip.getAttribute('x')},${pip.getAttribute('y')}`,
+        ).toBe(false);
       }
 
       const text = screen.getByTestId('trump-marker').querySelector('text')!;
@@ -347,6 +339,28 @@ const textBox = (node: Element): Box => {
 const overlaps = (a: Box, b: Box): boolean =>
   a.right > b.left && a.left < b.right && a.bottom > b.top && a.top < b.bottom;
 
+/**
+ * The painted box of a glyph that may carry a `rotate(180 cx cy)` transform.
+ * T-90-2 ITEM-11 inverts the bottom-right corner index, so measuring where the
+ * ink actually lands needs the rotation applied instead of the raw `x`/`y`.
+ */
+const renderedBox = (node: Element): Box => {
+  const box = textBox(node);
+  const transform = node.getAttribute('transform') ?? '';
+  const rotation = /rotate\(\s*(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s*\)/.exec(transform);
+  if (!rotation) return box;
+  const angle = ((Number(rotation[1]) % 360) + 360) % 360;
+  if (Math.abs(angle - 180) > 1e-6) return box;
+  const cx = Number(rotation[2]);
+  const cy = Number(rotation[3]);
+  return {
+    left: 2 * cx - box.right,
+    right: 2 * cx - box.left,
+    top: 2 * cy - box.bottom,
+    bottom: 2 * cy - box.top,
+  };
+};
+
 const NUMBER_RANKS = [
   'two',
   'three',
@@ -383,7 +397,7 @@ describe('card face geometry and theme', () => {
       for (const pip of pips) {
         for (const index of indices) {
           expect(
-            overlaps(textBox(pip), textBox(index)),
+            overlaps(textBox(pip), renderedBox(index)),
             `${rank}: pip at ${pip.getAttribute('x')},${pip.getAttribute('y')} overlaps ${index.getAttribute(
               'data-index',
             )}`,
@@ -851,8 +865,8 @@ describe('corner pip alignment and face pip sizing (T-90 ITEM-3a / ITEM-3b)', ()
         // The rank and the larger suit glyph never overlap: the suit sits in
         // its own band (below the rank in the top-left corner, above it in the
         // mirrored bottom-right corner) with clean vertical breathing room.
-        const rankBox = textBox(rankNode);
-        const suitBox = textBox(suitNode);
+        const rankBox = renderedBox(rankNode);
+        const suitBox = renderedBox(suitNode);
         expect(overlaps(rankBox, suitBox), `${rank} ${rankId}/suit`).toBe(false);
         const gap = Math.max(rankBox.top - suitBox.bottom, suitBox.top - rankBox.bottom);
         expect(gap, `${rank} ${rankId}/gap`).toBeGreaterThanOrEqual(1);
@@ -886,7 +900,15 @@ describe('corner pip alignment and face pip sizing (T-90 ITEM-3a / ITEM-3b)', ()
     expect(PIP_LAYOUT_BOUNDS.minY + PIP_LAYOUT_BOUNDS.maxY).toBe(100);
     expect(PIP_LAYOUT_BOUNDS.minY).toBeGreaterThan(CARD_INDEX.topRank.y);
     expect(PIP_LAYOUT_BOUNDS.maxY - PIP_LAYOUT_BOUNDS.minY).toBeLessThan(78 - 33);
-    expect(PIP_LAYOUT_BOUNDS.maxY).toBeLessThan(CARD_INDEX.bottomSuit.y);
+    // T-90-2 ITEM-11: the bottom-right index is the 180° mirror of the
+    // top-left one (`y = 100 - 21` / `100 - 34`), so the grid clears it to the
+    // left of the rotated suit ink and above the rotated rank ink.
+    expect(CARD_INDEX.topSuit.y + CARD_INDEX.bottomSuit.y).toBe(100);
+    expect(CARD_INDEX.topRank.y + CARD_INDEX.bottomRank.y).toBe(100);
+    expect(PIP_LAYOUT_BOUNDS.maxY).toBeLessThan(CARD_INDEX.bottomRank.y);
+    expect(PIP_LAYOUT_BOUNDS.maxX + (PIP_FONT_SIZE * GLYPH_METRICS.suitWidth) / 2).toBeLessThan(
+      CARD_INDEX.bottomSuit.x - (CARD_INDEX.bottomSuit.fontSize * GLYPH_METRICS.suitWidth) / 2,
+    );
 
     // The columns are still far enough apart for a full 13pt glyph.
     const glyphWidth = PIP_FONT_SIZE * GLYPH_METRICS.suitWidth;
@@ -908,21 +930,28 @@ describe('corner pip alignment and face pip sizing (T-90 ITEM-3a / ITEM-3b)', ()
         expect(y, `${rank} y=${y}`).toBeLessThanOrEqual(PIP_LAYOUT_BOUNDS.maxY);
       }
 
-      // No pip collides with a corner rank/suit index or the gold trump badge,
-      // and no two pips collide with each other, even with the larger glyphs.
-      const badge = screen.getByTestId('trump-marker').querySelector('circle')!;
-      const cx = Number(badge.getAttribute('cx'));
-      const cy = Number(badge.getAttribute('cy'));
-      const r = Number(badge.getAttribute('r'));
-      const badgeBox = { left: cx - r, right: cx + r, top: cy - r, bottom: cy + r };
+      // No pip collides with a corner rank/suit index or either symmetrical
+      // trump badge, and no two pips collide with each other, even with the
+      // larger glyphs.
+      const badgeBoxes = Array.from(
+        screen.getByTestId('trump-marker').querySelectorAll('circle'),
+      ).map((circle) => {
+        const cx = Number(circle.getAttribute('cx'));
+        const cy = Number(circle.getAttribute('cy'));
+        const r = Number(circle.getAttribute('r'));
+        return { left: cx - r, right: cx + r, top: cy - r, bottom: cy + r };
+      });
+      expect(badgeBoxes, rank).toHaveLength(2);
       const indices = Array.from(container.querySelectorAll('[data-index]'));
 
       for (const pip of pips) {
         const box = textBox(pip);
-        expect(overlaps(box, badgeBox), `${rank}: badge`).toBe(false);
+        for (const badgeBox of badgeBoxes) {
+          expect(overlaps(box, badgeBox), `${rank}: badge`).toBe(false);
+        }
         for (const index of indices) {
           expect(
-            overlaps(box, textBox(index)),
+            overlaps(box, renderedBox(index)),
             `${rank}: pip ${pip.getAttribute('x')},${pip.getAttribute('y')} vs ${index.getAttribute(
               'data-index',
             )}`,
@@ -1184,20 +1213,24 @@ describe('centred card faces with equal margins (T-90-1 ITEM-3a / ITEM-3b)', () 
       expect(topSuit.getAttribute('x'), rank).toBe(topRank.getAttribute('x'));
       expect(bottomSuit.getAttribute('x'), rank).toBe(bottomRank.getAttribute('x'));
 
-      const circle = container.querySelector('[data-testid="trump-marker"] circle')!;
-      const badge = {
+      const badges = Array.from(
+        container.querySelectorAll('[data-testid="trump-marker"] circle'),
+      ).map((circle) => ({
         left: Number(circle.getAttribute('cx')) - Number(circle.getAttribute('r')),
         right: Number(circle.getAttribute('cx')) + Number(circle.getAttribute('r')),
         top: Number(circle.getAttribute('cy')) - Number(circle.getAttribute('r')),
         bottom: Number(circle.getAttribute('cy')) + Number(circle.getAttribute('r')),
-      };
+      }));
+      expect(badges, rank).toHaveLength(2);
 
-      // Zero overlap against any face pip or the gold trump badge.
+      // Zero overlap against any face pip or either symmetrical trump badge.
       for (const pip of cardPips(container)) {
         const box = textBox(pip);
         expect(overlaps(box, textBox(topSuit)), `${rank} top corner suit`).toBe(false);
-        expect(overlaps(box, textBox(bottomSuit)), `${rank} bottom corner suit`).toBe(false);
-        expect(overlaps(box, badge), `${rank} trump badge`).toBe(false);
+        expect(overlaps(box, renderedBox(bottomSuit)), `${rank} bottom corner suit`).toBe(false);
+        for (const badge of badges) {
+          expect(overlaps(box, badge), `${rank} trump badge`).toBe(false);
+        }
       }
 
       unmount();
@@ -1298,5 +1331,120 @@ describe('theme-adaptive card backs', () => {
     // Without an applied theme it falls back to the OS preference.
     expect(resolveCardBackTheme('device', false, document.createElement('div'))).toBe('light');
     expect(resolveCardBackTheme('device', true, document.createElement('div'))).toBe('dark');
+  });
+});
+
+/**
+ * T-90-feedback-20261104_165819-2: ITEM-11 inverted bottom-right corner indices
+ * and ITEM-12a/12b symmetrical, mutually inverted trump badges with no aura.
+ */
+describe('T-90-2 inverted corner indices and symmetrical trump badges', () => {
+  afterEach(() => {
+    resetSettings();
+  });
+
+  it('ITEM-11: keeps the top-left index upright and inverts the bottom-right corner', () => {
+    for (const [rank, label] of CORNER_RANKS) {
+      const { container, unmount } = render(<Card suit="hearts" rank={rank} />);
+
+      const topRank = container.querySelector('[data-testid="card-rank-top"]')!;
+      const topSuit = container.querySelector('[data-testid="card-suit-top"]')!;
+      const bottomRank = container.querySelector('[data-testid="card-rank-bottom"]')!;
+      const bottomSuit = container.querySelector('[data-testid="card-suit-bottom"]')!;
+
+      // Top-left: upright, unchanged and explicitly not inverted.
+      expect(topRank.getAttribute('data-inverted'), rank).toBe('false');
+      expect(topSuit.getAttribute('data-inverted'), rank).toBe('false');
+      expect(Number(topRank.getAttribute('x')), rank).toBe(11.5);
+      expect(Number(topRank.getAttribute('y')), rank).toBe(21);
+      expect(Number(topSuit.getAttribute('x')), rank).toBe(11.5);
+      expect(Number(topSuit.getAttribute('y')), rank).toBe(34);
+      expect(topRank.getAttribute('transform'), rank).toBeNull();
+      expect(topSuit.getAttribute('transform'), rank).toBeNull();
+
+      // Bottom-right: the exact 180° rotation around the (35, 50) card centre.
+      expect(bottomRank.getAttribute('data-inverted'), rank).toBe('true');
+      expect(bottomSuit.getAttribute('data-inverted'), rank).toBe('true');
+      expect(Number(bottomRank.getAttribute('x')), rank).toBe(70 - 11.5);
+      expect(Number(bottomRank.getAttribute('y')), rank).toBe(100 - 21);
+      expect(Number(bottomSuit.getAttribute('x')), rank).toBe(70 - 11.5);
+      expect(Number(bottomSuit.getAttribute('y')), rank).toBe(100 - 34);
+      expect(bottomRank.getAttribute('transform'), rank).toBe('rotate(180 58.5 79)');
+      expect(bottomSuit.getAttribute('transform'), rank).toBe('rotate(180 58.5 66)');
+      // The upside-down rank sits nearest the corner, the suit above it.
+      expect(Number(bottomRank.getAttribute('y')), rank).toBeGreaterThan(
+        Number(bottomSuit.getAttribute('y')),
+      );
+      expect(bottomRank.textContent, rank).toBe(label);
+      expect(bottomSuit.textContent, rank).toBe('♥');
+
+      unmount();
+    }
+  });
+
+  it('ITEM-12a: paints no glowing aura on a trump card', () => {
+    const { container } = render(<Card suit="spades" rank="ace" trump />);
+    const slot = container.querySelector('.card-slot') as HTMLElement;
+    const svg = container.querySelector('svg.playing-card') as SVGElement;
+
+    expect(slot.getAttribute('data-trump-glow')).toBe('false');
+    expect(svg.getAttribute('data-trump-glow')).toBe('false');
+    // No inline box-shadow anywhere on the card component.
+    expect(slot.style.boxShadow).toBe('');
+    expect(svg.getAttribute('style') ?? '').not.toContain('box-shadow');
+  });
+
+  it('ITEM-12a/12b: renders two 180°-symmetrical, mutually inverted trump badges', () => {
+    for (const suit of ['spades', 'hearts', 'diamonds', 'clubs']) {
+      const { container, unmount } = render(<Card suit={suit} rank="nine" trump />);
+
+      const marker = screen.getByTestId('trump-marker');
+      const badgeSet = screen.getByTestId('trump-badge');
+      const topRight = screen.getByTestId('trump-badge-top-right');
+      const bottomLeft = screen.getByTestId('trump-badge-bottom-left');
+
+      expect(marker.contains(badgeSet)).toBe(true);
+      expect(badgeSet.children).toHaveLength(2);
+      expect(topRight.getAttribute('data-inverted')).toBe('false');
+      expect(bottomLeft.getAttribute('data-inverted')).toBe('true');
+
+      const centreOf = (node: Element): { cx: number; cy: number; r: number } => {
+        const circle = node.querySelector('circle')!;
+        return {
+          cx: Number(circle.getAttribute('cx')),
+          cy: Number(circle.getAttribute('cy')),
+          r: Number(circle.getAttribute('r')),
+        };
+      };
+      const first = centreOf(topRight);
+      const second = centreOf(bottomLeft);
+
+      // Exact 180° rotational symmetry around the (35, 50) card centre.
+      expect(first.cx + second.cx, suit).toBe(70);
+      expect(first.cy + second.cy, suit).toBe(100);
+      expect(first.r, suit).toBe(second.r);
+      expect(first.r, suit).toBe(6);
+      expect(first.cx, suit).toBe(58.5);
+      expect(first.cy, suit).toBe(14);
+      expect(second.cx, suit).toBe(11.5);
+      expect(second.cy, suit).toBe(86);
+
+      // They match the exported geometry and differ only by the inversion.
+      expect(first.cx).toBe(TRUMP_BADGES.topRight.cx);
+      expect(first.cy).toBe(TRUMP_BADGES.topRight.cy);
+      expect(second.cx).toBe(TRUMP_BADGES.bottomLeft.cx);
+      expect(second.cy).toBe(TRUMP_BADGES.bottomLeft.cy);
+      expect(topRight.getAttribute('transform')).toBeNull();
+      expect(bottomLeft.getAttribute('transform')).toBe('rotate(180 11.5 86)');
+      expect(topRight.querySelector('text')!.textContent).toBe(
+        bottomLeft.querySelector('text')!.textContent,
+      );
+
+      // The bottom-left badge stays inside the always-visible left strip.
+      expect(second.cx - second.r).toBeGreaterThanOrEqual(2);
+      expect(second.cx + second.r).toBeLessThanOrEqual(22);
+
+      unmount();
+    }
   });
 });

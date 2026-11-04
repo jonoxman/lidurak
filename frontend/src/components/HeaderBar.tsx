@@ -348,11 +348,11 @@ function ThemeSubmenu() {
         <output class="setting-value">{settings.roundness}px</output>
       </label>
 
-      {/* T-90-feedback-2: the Highlights section sits below every existing
-          Theme control and above the connection tracker at the dropdown foot. */}
+      {/* T-90-feedback-2: the Palettes section sits below every existing Theme
+          control and above the connection tracker at the dropdown foot. */}
       <div class="theme-highlights-section" data-testid="theme-highlights-section">
         <div class="submenu-section-title" data-testid="theme-highlights-heading">
-          Highlights
+          Palettes
         </div>
 
         <div class="highlight-preset-grid" role="group" aria-label="Highlight color presets">
