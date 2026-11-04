@@ -2443,6 +2443,11 @@ describe('GamePage', () => {
     expect(box.getAttribute('data-highlight-variant')).toBe('defender');
     expect(box.classList.contains('defender-turn')).toBe(true);
     expect(zone.getAttribute('data-defenseless')).toBe('true');
+    // The wrapper is the documented `.player-hand-zone` alias and the stylesheet
+    // names it — plus `.hand-scroll-viewport` — in the neutral resets.
+    expect(zone.classList.contains('player-hand-zone')).toBe(true);
+    expect(tableCss).toContain('.hand-scroll-viewport');
+    expect(tableCss).toContain(".player-hand-zone[data-highlighted='true']");
 
     // ...and it is the ONLY highlight container: no second, wider wrapper outline.
     // The wrapper's own `turn-pulse` / `defender-turn` state classes are inert

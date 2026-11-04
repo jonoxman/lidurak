@@ -2914,6 +2914,52 @@ describe('T-90 ITEM-PREV-4a/4b: single tight hand highlight outline', () => {
     }
   });
 
+  it('names every outer hand wrapper in the Dark and Light neutral resets', () => {
+    const resets = ruleBlocks().filter((rule) => {
+      const properties = rule.declarations.map((declaration) => declaration.property);
+      return ['border', 'outline', 'box-shadow', 'background', 'animation'].every((property) =>
+        properties.includes(property),
+      );
+    });
+    expect(resets).toHaveLength(2);
+
+    const darkReset = resets.find((rule) => !rule.selector.includes("data-theme='light'"))!;
+    const lightReset = resets.find((rule) => rule.selector.includes("data-theme='light'"))!;
+    // The ticket names these wrappers verbatim: the outer column (both its
+    // `[data-zone="player-hand"]` and `.player-hand-zone` spellings, plain and
+    // highlighted) and the intermediate `.hand-scroll-viewport`. All of them
+    // are explicitly neutralised in both themes.
+    for (const reset of [darkReset, lightReset]) {
+      for (const wrapper of [
+        "[data-zone='player-hand']",
+        "[data-zone='player-hand'][data-highlighted='true']",
+        '.player-hand-zone',
+        ".player-hand-zone[data-highlighted='true']",
+        '.hand-scroll-viewport',
+      ]) {
+        expect(reset.selector).toContain(wrapper);
+      }
+    }
+
+    // No rule targeting any outer wrapper (or the scroll viewport) paints a
+    // border / outline / shadow / background / animation unless it is one of
+    // those two neutral resets. `.hand-cards` rules are excluded here because
+    // that tight box is the one element allowed to draw the highlight.
+    const wrappers = ['player-hand', 'player-hand-zone', 'hand-scroll-viewport'];
+    const wrapperRules = ruleBlocks().filter(
+      (rule) =>
+        wrappers.some((wrapper) => rule.selector.includes(wrapper)) &&
+        !rule.selector.includes('.hand-cards'),
+    );
+    expect(wrapperRules.length).toBeGreaterThan(0);
+    for (const rule of wrapperRules) {
+      for (const declaration of rule.declarations) {
+        if (!VISUAL_PROPERTIES.has(declaration.property)) continue;
+        expect(declaration.value).toMatch(/^(none|transparent)$/);
+      }
+    }
+  });
+
   it('keeps the tight .hand-cards box hugging the cards without lift headroom', () => {
     const rule = baseRule('.hand-cards');
     expect(rule).toContain('display: inline-flex');

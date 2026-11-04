@@ -933,7 +933,11 @@
 [data-zone='player-hand'][data-highlight-variant='none'],
 [data-zone='player-hand'][data-highlight-role='defender'],
 [data-zone='player-hand'][data-highlight-role='attacker'],
-[data-zone='player-hand'][data-highlight-role='throw-in'] {
+[data-zone='player-hand'][data-highlight-role='throw-in'],
+.player-hand-zone,
+.player-hand-zone[data-highlighted='true'],
+.player-hand-zone[data-highlighted='false'],
+.hand-scroll-viewport {
   border: none;
   outline: none;
   box-shadow: none;
@@ -1835,7 +1839,10 @@
 :root[data-theme='light'] [data-zone='player-hand'][data-highlight-variant='none'],
 :root[data-theme='light'] [data-zone='player-hand'][data-highlight-role='defender'],
 :root[data-theme='light'] [data-zone='player-hand'][data-highlight-role='attacker'],
-:root[data-theme='light'] [data-zone='player-hand'][data-highlight-role='throw-in'] {
+:root[data-theme='light'] [data-zone='player-hand'][data-highlight-role='throw-in'],
+:root[data-theme='light'] .player-hand-zone,
+:root[data-theme='light'] .player-hand-zone[data-highlighted='true'],
+:root[data-theme='light'] .hand-scroll-viewport {
   border: none;
   outline: none;
   box-shadow: none;
