@@ -136,7 +136,13 @@ Press `Ctrl+C` to stop both servers cleanly.
 - **Presence Dots:** Each name in the `PLAYERS` list carries a dot that is green while that player is present — their window is focused and the mouse or keyboard moved within the last 30 seconds — and grey otherwise.
 
 ### ⚡ QA Scenario Presets (One Click)
-**Colour-family check (T-90):** open the `Guest` Profile menu and step through `Theme`, `Table`, `Card Back` and `Sound` — every selected row and swatch is Royal Blue / Cobalt, never the attacker's emerald. Then click **`Surrender Half-Off`** in `⚡ QA Scenarios` to see the crimson defender hand, the pulsing crimson uncovered card and the crimson `Surrender` button together; click **`3P Redirect (Bob POV)`** to see the violet reflection outline and arrow beside the emerald attack target outlines, with the active clock half in cyan-teal. Repeat once in `Light` and once in `Dark` to compare both palettes side by side.
+**15-second QA verification flow (T-90):** the two accepted items can be checked in about fifteen seconds without playing a match:
+1. Open the `Guest` Profile menu and visit `Theme`, `Table`, `Card Back` and `Sound` — every selected row, swatch and slider is Royal Blue / Cobalt (`--ui-select-*`), never the attacker's emerald.
+2. Click **`Defenseless Auto-Surrender`** (`defenseless-surrender`) and land on Bob: the crimson defender `.hand-cards` glow is the **only** hand outline — the outer `[data-zone="player-hand"]` column draws no second, wider box — while the `Surrender` button counts `3 → 2 → 1` and the glow stays until it is pressed or fires.
+3. Click **`Surrender Half-Off`** (`surrender-half-off`) for the same crimson hand plus the pulsing crimson uncovered `7♠`, the crimson `Surrender` button and the half-off surrendered cards; switch `POV` to Alice for the emerald attacker hand glow beside the gold trump cards and the cyan-teal active clock half.
+4. Click **`3P Redirect (Bob POV)`** (`3p-redirect-bob`) for the violet `[data-testid="redirect-outline"]` and its arrow, clearly distinct from the emerald attack target outlines.
+5. Click **`4P Chaos Targets`** (`chaos-4p`) for one emerald target outline at every opponent seat, gold trump indicators and cobalt table chrome on the same screen.
+6. Repeat steps 1–5 once in `Light` and once in `Dark` to compare both palettes side by side; the six families never swap roles between themes.
 The **`⚡ QA Scenarios`** panel appears in the lobby and in the game's left sidebar. Each button calls `POST /api/games/preset` and opens the resulting room on the seat that makes the scenario readable, so a reviewer never has to play a full match to reach a state:
 
 | Button | Preset id | What you land in |
