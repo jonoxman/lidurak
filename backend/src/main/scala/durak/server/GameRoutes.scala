@@ -23,14 +23,18 @@ case class CreateGameRequest(
   playerNames: List[String],
   allowRedirect: Boolean = true,
   playerTypes: Option[Vector[String]] = None,
-  chaosMode: Boolean = false
+  chaosMode: Boolean = false,
+  // Transparent Mode: every hand is projected face-up. Off by default.
+  transparentMode: Option[Boolean] = None,
+  // Dev Mode: POV switching during live play. On by default while we test.
+  devMode: Option[Boolean] = None
 )
 
 object CreateGameRequest:
   /**
    * Decodes a create request. `allowRedirect` defaults to `true`, `chaosMode` to
-   * `false` and `playerTypes` to no bots, so older clients keep working
-   * unchanged.
+   * `false`, `playerTypes` to no bots, `transparentMode` to `false` and
+   * `devMode` to `true`, so older clients keep working unchanged.
    */
   given Decoder[CreateGameRequest] = Decoder.instance { cursor =>
     for
@@ -39,7 +43,17 @@ object CreateGameRequest:
       allowRedirect <- cursor.downField("allowRedirect").as[Option[Boolean]].map(_.getOrElse(true))
       playerTypes <- cursor.downField("playerTypes").as[Option[Vector[String]]]
       chaosMode <- cursor.downField("chaosMode").as[Option[Boolean]].map(_.getOrElse(false))
-    yield CreateGameRequest(playerCount, playerNames, allowRedirect, playerTypes, chaosMode)
+      transparentMode <- cursor.downField("transparentMode").as[Option[Boolean]]
+      devMode <- cursor.downField("devMode").as[Option[Boolean]]
+    yield CreateGameRequest(
+      playerCount,
+      playerNames,
+      allowRedirect,
+      playerTypes,
+      chaosMode,
+      transparentMode,
+      devMode
+    )
   }
 
 /** Body of `POST /api/games/preset`. */
@@ -91,8 +105,12 @@ object GameRoutes:
     case req @ POST -> Root / "api" / "game" / "create" =>
       createRoom(manager, req)
 
-    case GET -> Root / "api" / "games" / gameId / "view" :? PlayerQueryParam(requestedViewer) =>
-      viewOf(manager, gameId, requestedViewer)
+    case req @ GET -> Root / "api" / "games" / gameId / "view" :? PlayerQueryParam(requestedViewer) =>
+      viewOf(manager, gameId, requestedViewer, requesterOf(req))
+
+    // Documented seat-in-path form (ITEM-14a): the same projection and POV lock.
+    case req @ GET -> Root / "api" / "games" / gameId / "view" / playerId =>
+      viewOf(manager, gameId, Some(playerId), requesterOf(req))
 
     case GET -> Root / "api" / "games" / gameId / "replay" =>
       replayOf(manager, gameId)
@@ -100,8 +118,8 @@ object GameRoutes:
     case GET -> Root / "api" / "game" / gameId / "replay" =>
       replayOf(manager, gameId)
 
-    case GET -> Root / "api" / "game" / gameId / "view" / playerId =>
-      viewOf(manager, gameId, Some(playerId))
+    case req @ GET -> Root / "api" / "game" / gameId / "view" / playerId =>
+      viewOf(manager, gameId, Some(playerId), requesterOf(req))
 
     case req @ POST -> Root / "api" / "games" / gameId / "action" =>
       submitAction(manager, gameId, req)
@@ -111,6 +129,9 @@ object GameRoutes:
 
     case req @ POST -> Root / "api" / "games" / gameId / "presence" =>
       updatePresence(manager, gameId, req)
+
+    case POST -> Root / "api" / "games" / gameId / "rematch" =>
+      rematch(manager, gameId)
   }
 
   // --- REST handlers ---
@@ -136,7 +157,9 @@ object GameRoutes:
   /**
    * Seat types are normalized to exactly `playerCount` entries of `"human"`,
    * `"randomBot"` or `"basicBot"` (unknown values fall back to a human seat),
-   * and `chaosMode` opens every attack to any seat holding cards.
+   * `chaosMode` opens every attack to any seat holding cards, `transparentMode`
+   * deals every hand face-up and `devMode` keeps POV switching open during live
+   * play (both default to the production values when the client omits them).
    */
   private def configFor(request: CreateGameRequest): GameConfig =
     GameConfig(
@@ -146,7 +169,9 @@ object GameRoutes:
         request.playerCount,
         request.playerTypes.getOrElse(Vector.empty)
       ),
-      chaosMode = request.chaosMode
+      chaosMode = request.chaosMode,
+      transparentMode = request.transparentMode.getOrElse(false),
+      devMode = request.devMode.getOrElse(true)
     )
 
   /**
@@ -183,6 +208,8 @@ object GameRoutes:
       "playerTypes" -> Json.fromValues(state.players.indices.map { idx =>
         Json.fromString(state.config.seatType(idx))
       }),
+      "transparentMode" -> state.config.transparentMode.asJson,
+      "devMode" -> state.config.devMode.asJson,
       "defaultPlayerId" -> room.defaultPlayerId
         .filter(state.players.map(_.id).contains)
         .getOrElse(state.players.headOption.map(_.id).getOrElse("p0"))
@@ -193,22 +220,58 @@ object GameRoutes:
    * The projection for one seat. An omitted or blank `?player=` falls back to
    * `p0`, so a finished table stays readable from a bare game URL; only a
    * non-blank id that names no seat is a 404.
+   *
+   * `requester` names the seat that is asking (ITEM-14a). Outside Dev Mode a
+   * mid-game request for any other seat — or a second seat after the first was
+   * claimed — is rejected with `403 Forbidden`.
    */
   private def viewOf(
       manager: GameManager,
       gameId: String,
-      requestedViewer: Option[String]
+      requestedViewer: Option[String],
+      requester: Option[String]
   ): IO[Response[IO]] =
     withRoom(manager, gameId) { room =>
       room.stateRef.get.flatMap { state =>
-        requestedViewer.map(_.trim).filter(_.nonEmpty) match
-          case None =>
-            Ok(PlayerGameView.forViewer(state, DefaultViewerId).asJson)
-          case Some(playerId) =>
-            if state.players.exists(_.id == playerId) then
-              Ok(PlayerGameView.forViewer(state, playerId).asJson)
-            else NotFound(errorBody(s"Unknown player: $playerId"))
+        val viewerId =
+          requestedViewer.map(_.trim).filter(_.nonEmpty).getOrElse(DefaultViewerId)
+        if !state.players.exists(_.id == viewerId) then
+          NotFound(errorBody(s"Unknown player: $viewerId"))
+        else
+          GameActor.authorizePov(room, viewerId, requester).flatMap {
+            case Left(error) => Forbidden(errorBody(error))
+            case Right(_)    => Ok(PlayerGameView.forViewer(state, viewerId).asJson)
+          }
       }
+    }.handleErrorWith(errorResponse)
+
+  /**
+   * `POST /api/games/:gameId/rematch`: a fresh deal with the same seats, names
+   * and match settings — including `allowRedirect`, `chaosMode`,
+   * `transparentMode` and `devMode` — under a new game id (ITEM-10a / ITEM-14a).
+   */
+  private def rematch(manager: GameManager, gameId: String): IO[Response[IO]] =
+    manager.rematch(gameId).flatMap {
+      case None => NotFound(errorBody(s"Unknown game: $gameId"))
+      case Some(created) =>
+        created.stateRef.get.flatMap { fresh =>
+          Ok(
+            Json.obj(
+              "gameId" -> created.gameId.asJson,
+              "players" -> Json.fromValues(fresh.players.map { player =>
+                Json.obj("id" -> player.id.asJson, "name" -> player.name.asJson)
+              }),
+              "playerTypes" -> Json.fromValues(fresh.players.indices.map { idx =>
+                Json.fromString(fresh.config.seatType(idx))
+              }),
+              "defaultPlayerId" -> fresh.players.headOption.map(_.id).getOrElse("p0").asJson,
+              "allowRedirect" -> fresh.config.allowRedirect.asJson,
+              "chaosMode" -> fresh.config.chaosMode.asJson,
+              "transparentMode" -> fresh.config.transparentMode.asJson,
+              "devMode" -> fresh.config.devMode.asJson
+            )
+          )
+        }
     }.handleErrorWith(errorResponse)
 
   private def submitAction(      manager: GameManager,
@@ -286,12 +349,41 @@ object GameRoutes:
       webSockets: WebSocketBuilder2[IO]
   ): HttpRoutes[IO] = HttpRoutes.of[IO] {
 
-    case GET -> Root / "ws" / "game" / gameId / playerId =>
-      withRoom(manager, gameId) { room =>
-        room.stateRef.get.flatMap { state =>
-          if !state.players.exists(_.id == playerId) then
-            NotFound(errorBody(s"Unknown player: $playerId"))
-          else
+    case req @ GET -> Root / "ws" / "game" / gameId / playerId =>
+      handleSocket(manager, webSockets, gameId, playerId, requesterOf(req))
+
+    // The ticket's plural spelling of the same live-game socket (ITEM-14a).
+    case req @ GET -> Root / "ws" / "games" / gameId / playerId =>
+      handleSocket(manager, webSockets, gameId, playerId, requesterOf(req))
+  }
+
+  /** Applies the POV lock, then opens the viewer's filtered live socket. */
+  private def handleSocket(
+      manager: GameManager,
+      webSockets: WebSocketBuilder2[IO],
+      gameId: String,
+      playerId: String,
+      requester: Option[String]
+  ): IO[Response[IO]] =
+    withRoom(manager, gameId) { room =>
+      room.stateRef.get.flatMap { state =>
+        if !state.players.exists(_.id == playerId) then
+          NotFound(errorBody(s"Unknown player: $playerId"))
+        else
+          GameActor.authorizePov(room, playerId, requester).flatMap {
+            case Left(error) => Forbidden(errorBody(error))
+            case Right(_)    => openSocket(room, gameId, playerId, webSockets)
+          }
+      }
+    }
+
+  /** Streams the viewer's filtered projection down an open WebSocket. */
+  private def openSocket(
+      room: GameRoom,
+      gameId: String,
+      playerId: String,
+      webSockets: WebSocketBuilder2[IO]
+  ): IO[Response[IO]] =
             val views: Stream[IO, WebSocketFrame] =
               (Stream.eval(room.stateRef.get) ++ room.topic.subscribe(64))
                 .map { current =>
@@ -312,9 +404,6 @@ object GameRoutes:
             // An open socket means the human is watching this table.
             GameActor.setPresence(room, playerId, true) *>
               webSockets.build(views.merge(keepAlive), commands)
-        }
-      }
-  }
 
   /** Pings and pongs keep the pipe alive; only text frames carry commands. */
   private def handleFrame(
@@ -380,6 +469,10 @@ object GameRoutes:
    * `GET /api/games/.../view` route; a missing or blank value means `p0`.
    */
   private object PlayerQueryParam extends OptionalQueryParamDecoderMatcher[String]("player")
+
+  /** The optional `?requester=<seat>` naming the seat that asked for a view. */
+  private def requesterOf(req: Request[IO]): Option[String] =
+    req.uri.query.params.get("requester").map(_.trim).filter(_.nonEmpty)
 
   private def withRoom(manager: GameManager, gameId: String)(
       handle: GameRoom => IO[Response[IO]]

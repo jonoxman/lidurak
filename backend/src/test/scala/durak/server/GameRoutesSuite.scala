@@ -15,7 +15,10 @@ import scala.concurrent.duration.*
 
 class GameRoutesSuite extends munit.FunSuite:
 
-  private def newManager: GameManager = GameManager.create.unsafeRunSync()
+  private def newManager: GameManager =
+    GameManager
+      .create(BotTiming(randomBotDelay = 5.millis, initialBotStartDelay = 5.millis))
+      .unsafeRunSync()
 
   private def send(
       manager: GameManager,
@@ -451,4 +454,144 @@ class GameRoutesSuite extends munit.FunSuite:
     val (aliasStatus, aliasJson) = get(manager, s"/api/game/$gameId/replay")
     assertEquals(aliasStatus, Status.Ok)
     assertEquals(aliasJson.as[SerializedGame].map(_.gameId), Right(gameId))
+  }
+
+  // --- Transparent Mode & Dev Mode (T-90 ITEM-10a / ITEM-14a) ---
+
+  private def createWith(manager: GameManager, body: Json): String =
+    val (status, json) = post(manager, "/api/games", body)
+    assertEquals(status, Status.Ok, json.noSpaces)
+    json.hcursor
+      .get[String]("gameId")
+      .getOrElse(fail(s"missing gameId in ${json.noSpaces}"))
+
+  private def roomOf(manager: GameManager, gameId: String): GameState =
+    manager.getRoom(gameId).unsafeRunSync().getOrElse(fail(s"room $gameId is missing"))
+      .stateRef
+      .get
+      .unsafeRunSync()
+
+  test("POST /api/games forwards transparentMode and reveals every opponent hand") {
+    val manager = newManager
+    val gameId = createWith(
+      manager,
+      Json.obj(
+        "playerCount" -> 3.asJson,
+        "playerNames" -> List("Alice", "Bob", "Carol").asJson,
+        "transparentMode" -> true.asJson
+      )
+    )
+
+    val (status, json) = get(manager, s"/api/games/$gameId/view?player=p0")
+    assertEquals(status, Status.Ok)
+    val view = json.as[PlayerGameView].getOrElse(fail(s"invalid view body: ${json.noSpaces}"))
+
+    assertEquals(view.transparentMode, true)
+    // Dev Mode defaults to on in production while we are testing.
+    assertEquals(view.devMode, true)
+    assertEquals(view.opponents.size, 2)
+    view.opponents.foreach { opponent =>
+      assertEquals(opponent.cards.size, opponent.cardCount)
+      assert(opponent.cards.nonEmpty, s"no revealed hand for ${opponent.id}")
+    }
+    // Every hand is a distinct slice of the 36-card deck.
+    val revealed = view.myHand ++ view.opponents.flatMap(_.cards)
+    assertEquals(revealed.size, 18)
+    assertEquals(revealed.distinct.size, 18)
+  }
+
+  test("an ordinary game keeps opponent hands hidden and Dev Mode on") {
+    val manager = newManager
+    val gameId = createGame(manager, 3)
+
+    val (status, json) = get(manager, s"/api/games/$gameId/view?player=p0")
+    assertEquals(status, Status.Ok)
+    val view = json.as[PlayerGameView].getOrElse(fail(s"invalid view body: ${json.noSpaces}"))
+
+    assertEquals(view.transparentMode, false)
+    assertEquals(view.devMode, true)
+    view.opponents.foreach(opponent => assertEquals(opponent.cards, Vector.empty[Card]))
+    assert(!json.noSpaces.contains("\"cards\":[{"), s"a hidden hand leaked: ${json.noSpaces}")
+  }
+
+  test("a non-devMode game locks the POV to the first seat until Game Over") {
+    val manager = newManager
+    val gameId = createWith(
+      manager,
+      Json.obj(
+        "playerCount" -> 3.asJson,
+        "playerNames" -> List("Alice", "Bob", "Carol").asJson,
+        "devMode" -> false.asJson
+      )
+    )
+    assertEquals(roomOf(manager, gameId).config.devMode, false)
+
+    // A requester that names another seat is rejected before anything is claimed.
+    val (crossStatus, crossJson) = get(manager, s"/api/games/$gameId/view/p1?requester=p0")
+    assertEquals(crossStatus, Status.Forbidden)
+    assert(crossJson.hcursor.get[String]("error").exists(_.nonEmpty), crossJson.noSpaces)
+
+    // The first human seat claims the room...
+    val (ownStatus, ownJson) = get(manager, s"/api/games/$gameId/view/p0?requester=p0")
+    assertEquals(ownStatus, Status.Ok)
+    assertEquals(ownJson.as[PlayerGameView].map(_.myId), Right("p0"))
+
+    // ...and every other seat is refused, with or without a matching requester,
+    // so a client cannot switch POV by editing the DOM or calling the view URL.
+    assertEquals(get(manager, s"/api/games/$gameId/view/p1")._1, Status.Forbidden)
+    assertEquals(get(manager, s"/api/games/$gameId/view/p1?requester=p1")._1, Status.Forbidden)
+    assertEquals(get(manager, s"/api/game/$gameId/view/p2")._1, Status.Forbidden)
+    assertEquals(get(manager, s"/api/games/$gameId/view/p0")._1, Status.Ok)
+
+    // Once the game is over, review mode may inspect any seat again.
+    val room = manager.getRoom(gameId).unsafeRunSync().getOrElse(fail("room is missing"))
+    val finished = room.stateRef.get.unsafeRunSync().copy(boutPhase = BoutPhase.GameOver)
+    room.stateRef.set(finished).unsafeRunSync()
+    assertEquals(get(manager, s"/api/games/$gameId/view/p2")._1, Status.Ok)
+    assertEquals(get(manager, s"/api/games/$gameId/view/p2?requester=p0")._1, Status.Ok)
+  }
+
+  test("a devMode game keeps every seat open during live play") {
+    val manager = newManager
+    val gameId = createGame(manager, 3)
+
+    assertEquals(get(manager, s"/api/games/$gameId/view/p1")._1, Status.Ok)
+    assertEquals(get(manager, s"/api/games/$gameId/view/p2?requester=p0")._1, Status.Ok)
+  }
+
+  test("POST /api/games/:gameId/rematch preserves transparentMode and devMode") {
+    val manager = newManager
+    val gameId = createWith(
+      manager,
+      Json.obj(
+        "playerCount" -> 2.asJson,
+        "playerNames" -> List("Alice", "Bob").asJson,
+        "transparentMode" -> true.asJson,
+        "devMode" -> false.asJson,
+        "allowRedirect" -> false.asJson
+      )
+    )
+
+    val (status, json) = post(manager, s"/api/games/$gameId/rematch", Json.obj())
+    assertEquals(status, Status.Ok, json.noSpaces)
+    val nextId = json.hcursor
+      .get[String]("gameId")
+      .getOrElse(fail(s"missing rematch gameId in ${json.noSpaces}"))
+    assertNotEquals(nextId, gameId)
+    assertEquals(json.hcursor.get[Boolean]("transparentMode").toOption, Some(true))
+    assertEquals(json.hcursor.get[Boolean]("devMode").toOption, Some(false))
+    assertEquals(json.hcursor.get[Boolean]("allowRedirect").toOption, Some(false))
+    assertEquals(
+      json.hcursor.downField("players").as[List[Json]].map(_.size).toOption,
+      Some(2)
+    )
+
+    val nextRoom = manager.getRoom(nextId).unsafeRunSync().getOrElse(fail(s"room $nextId is missing"))
+    val nextState = nextRoom.stateRef.get.unsafeRunSync()
+    assertEquals(nextState.config.transparentMode, true)
+    assertEquals(nextState.config.devMode, false)
+    assertEquals(nextState.config.allowRedirect, false)
+    assertEquals(nextState.players.map(_.name), Vector("Alice", "Bob"))
+    // A rematch re-deals rather than replaying the same cards.
+    assertNotEquals(nextState.players.map(_.hand), roomOf(manager, gameId).players.map(_.hand))
   }

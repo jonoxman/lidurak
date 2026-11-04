@@ -15,7 +15,10 @@ import scala.concurrent.duration.*
 
 class PresetSuite extends munit.FunSuite:
 
-  private def newManager: GameManager = GameManager.create.unsafeRunSync()
+  private def newManager: GameManager =
+    GameManager
+      .create(BotTiming(randomBotDelay = 5.millis, initialBotStartDelay = 5.millis))
+      .unsafeRunSync()
 
   private def send(manager: GameManager, request: Request[IO]): (Status, Json) =
     GameRoutes
@@ -326,6 +329,50 @@ class PresetSuite extends munit.FunSuite:
     assertEquals(view(manager, gameId, "p0").durak, Some("p1"))
     assertEquals(view(manager, gameId, "p2").durak, Some("p1"))
     assertEquals(view(manager, gameId, "p2").myFinishRank, Some(1))
+  }
+
+  test("POST /api/games/preset starts a Transparent Mode table on Alice") {
+    val manager = newManager
+    val (gameId, json) = startPreset(manager, "transparent-mode")
+
+    assertEquals(json.hcursor.get[String]("defaultPlayerId").toOption, Some("p0"))
+    assertEquals(json.hcursor.get[Boolean]("transparentMode").toOption, Some(true))
+    assertEquals(json.hcursor.get[Boolean]("devMode").toOption, Some(true))
+    assertEquals(
+      json.hcursor.downField("players").as[List[Json]].map(_.size).toOption,
+      Some(3)
+    )
+
+    val alice = view(manager, gameId, "p0")
+    assertEquals(alice.transparentMode, true)
+    assertEquals(alice.devMode, true)
+    assertEquals(alice.allowRedirect, true)
+    assertEquals(alice.boutPhase, BoutPhase.InitialAttack)
+    assertEquals(alice.myHand.size, 6)
+    assertEquals(alice.opponents.size, 2)
+    // Both opponents hold a deterministic mix of trump and off-suit cards, so
+    // the low-detail opponent faces show both kinds at once.
+    alice.opponents.foreach { opponent =>
+      assertEquals(opponent.cards.size, 6)
+      assertEquals(opponent.cards.size, opponent.cardCount)
+      assert(opponent.cards.exists(_.suit == Suit.Diamonds), opponent.toString)
+      assert(opponent.cards.exists(_.suit != Suit.Diamonds), opponent.toString)
+    }
+
+    val room = manager.getRoom(gameId).unsafeRunSync().getOrElse(fail("room is missing"))
+    val state = room.stateRef.get.unsafeRunSync()
+    assertEquals(state.talon.size, 18)
+    assertEquals(state.bottomTrumpCard, state.talon.lastOption)
+    assertEquals(state.bottomTrumpCard.map(_.suit), Some(Suit.Diamonds))
+    val allCards = state.players.flatMap(_.hand) ++ state.talon
+    assertEquals(allCards.size, 36)
+    assertEquals(allCards.distinct.size, 36)
+
+    // Transparent Mode is a match setting, so every seat sees the same reveal.
+    val bob = view(manager, gameId, "p1")
+    assertEquals(bob.transparentMode, true)
+    assert(bob.opponents.forall(_.cards.size == 6), bob.opponents.toString)
+    assert(bob.myName == "Bob")
   }
 
   test("an unknown preset is rejected with 400 and an error message") {

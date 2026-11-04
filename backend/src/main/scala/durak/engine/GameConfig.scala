@@ -9,13 +9,22 @@ package durak.engine
  *
  * `chaosMode` opens every opening attack and every redirect to any other seat
  * that still holds cards, instead of only the clockwise neighbour.
+ *
+ * `transparentMode` deals every hand face-up: each player's projection then
+ * carries the other seats' actual cards, so a reviewer can see all hands.
+ *
+ * `devMode` keeps the local POV switcher open during live play. When it is off,
+ * the server rejects a point-of-view switch until the match is over and in
+ * review mode, so the seat cannot be changed from the client.
  */
 case class GameConfig(
   playerCount: Int,
   allowRedirect: Boolean = true,
   seed: Long = System.currentTimeMillis(),
   playerTypes: Vector[String] = Vector.empty,
-  chaosMode: Boolean = false
+  chaosMode: Boolean = false,
+  transparentMode: Boolean = false,
+  devMode: Boolean = true
 ):
 
   /** The raw seat type of `seatIdx`, defaulting to a human. */

@@ -55,8 +55,55 @@ object JsonCodecs:
 
   // --- Views ---
 
-  given Encoder[PublicPlayerSummary] = deriveEncoder[PublicPlayerSummary]
-  given Decoder[PublicPlayerSummary] = deriveDecoder[PublicPlayerSummary]
+  /**
+   * Opponent summaries are written out by hand so `cards` can default to an
+   * empty vector: an older payload (live mode) simply omits the field and must
+   * never decode into a revealed hand.
+   */
+  given Encoder[PublicPlayerSummary] = Encoder.instance { summary =>
+    Json.obj(
+      "id" -> summary.id.asJson,
+      "name" -> summary.name.asJson,
+      "cardCount" -> summary.cardCount.asJson,
+      "hasPassed" -> summary.hasPassed.asJson,
+      "finishRank" -> summary.finishRank.asJson,
+      "status" -> summary.status.asJson,
+      "isTurn" -> summary.isTurn.asJson,
+      "isPresent" -> summary.isPresent.asJson,
+      "cards" -> summary.cards.asJson
+    )
+  }
+
+  given Decoder[PublicPlayerSummary] = Decoder.instance { cursor =>
+    for
+      id <- cursor.downField("id").as[String]
+      name <- cursor.downField("name").as[String]
+      cardCount <- cursor.downField("cardCount").as[Int]
+      hasPassed <- cursor.downField("hasPassed").as[Boolean]
+      finishRank <- cursor.downField("finishRank").as[Option[Int]]
+      status <- cursor
+        .downField("status")
+        .as[Option[String]]
+        .map(_.getOrElse(PlayerStatus.Active))
+      isTurn <- cursor.downField("isTurn").as[Option[Boolean]].map(_.getOrElse(false))
+      isPresent <- cursor.downField("isPresent").as[Option[Boolean]].map(_.getOrElse(false))
+      // Only an explicit revealed-hand payload fills `cards`.
+      cards <- cursor
+        .downField("cards")
+        .as[Option[Vector[Card]]]
+        .map(_.getOrElse(Vector.empty))
+    yield PublicPlayerSummary(
+      id = id,
+      name = name,
+      cardCount = cardCount,
+      hasPassed = hasPassed,
+      finishRank = finishRank,
+      status = status,
+      isTurn = isTurn,
+      isPresent = isPresent,
+      cards = cards
+    )
+  }
 
   /**
    * `PlayerGameView` carries more fields than the compiler's inline budget lets
@@ -99,6 +146,8 @@ object JsonCodecs:
       "playerTypes" -> view.playerTypes.asJson,
       "allowRedirect" -> view.allowRedirect.asJson,
       "chaosMode" -> view.chaosMode.asJson,
+      "transparentMode" -> view.transparentMode.asJson,
+      "devMode" -> view.devMode.asJson,
       "eligibleTargetIds" -> view.eligibleTargetIds.asJson,
       "redirectTargetId" -> view.redirectTargetId.asJson
     )
@@ -154,6 +203,13 @@ object JsonCodecs:
         .as[Option[Boolean]]
         .map(_.getOrElse(true))
       chaosMode <- cursor.downField("chaosMode").as[Option[Boolean]].map(_.getOrElse(false))
+      // Optional additions: an ordinary (hidden-hand) payload omits them, and a
+      // legacy payload predates Dev Mode, which defaults to on.
+      transparentMode <- cursor
+        .downField("transparentMode")
+        .as[Option[Boolean]]
+        .map(_.getOrElse(false))
+      devMode <- cursor.downField("devMode").as[Option[Boolean]].map(_.getOrElse(true))
       eligibleTargetIds <- cursor
         .downField("eligibleTargetIds")
         .as[Option[Vector[String]]]
@@ -194,6 +250,8 @@ object JsonCodecs:
       playerTypes = playerTypes,
       allowRedirect = allowRedirect,
       chaosMode = chaosMode,
+      transparentMode = transparentMode,
+      devMode = devMode,
       eligibleTargetIds = eligibleTargetIds,
       redirectTargetId = redirectTargetId
     )
@@ -305,7 +363,22 @@ object JsonCodecs:
         .as[Option[Vector[String]]]
         .map(_.getOrElse(Vector.empty))
       chaosMode <- cursor.downField("chaosMode").as[Option[Boolean]].map(_.getOrElse(false))
-    yield GameConfig(playerCount, allowRedirect, seed, playerTypes, chaosMode)
+      // Optional settings: Transparent Mode is off and Dev Mode is on by
+      // default, so an older stored config keeps its live-POV behaviour.
+      transparentMode <- cursor
+        .downField("transparentMode")
+        .as[Option[Boolean]]
+        .map(_.getOrElse(false))
+      devMode <- cursor.downField("devMode").as[Option[Boolean]].map(_.getOrElse(true))
+    yield GameConfig(
+      playerCount,
+      allowRedirect,
+      seed,
+      playerTypes,
+      chaosMode,
+      transparentMode,
+      devMode
+    )
   }
 
   given Encoder[PlayerState] = deriveEncoder[PlayerState]

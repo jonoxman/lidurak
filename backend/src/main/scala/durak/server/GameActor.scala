@@ -23,6 +23,10 @@ case class GameRoom(
   replay: Ref[IO, SerializedGame],
   // Serialises every submitted move, so a multi-card action applies as one unit.
   lock: Semaphore[IO],
+  // First human seat inspected in a non-Dev-Mode game. Once claimed, the
+  // server rejects every other seat until the match is over, so the POV cannot
+  // be switched by tampering with the client.
+  povSeat: Ref[IO, Option[String]],
   playerIds: Vector[String],
   turnSeconds: Int,
   clockStop: Deferred[IO, Unit],
@@ -33,7 +37,12 @@ case class GameRoom(
   // Delay before a player who cannot throw in is passed for them. The engine
   // never passes such a seat inside the same transition, so the surrendered
   // cards stay half-off the felt for exactly this long.
-  noThrowInAutoPassDelay: FiniteDuration = GameActor.DefaultNoThrowInAutoPassDelay
+  noThrowInAutoPassDelay: FiniteDuration = GameActor.DefaultNoThrowInAutoPassDelay,
+  // Pause a RandomBot takes between moves once the match is under way.
+  randomBotDelay: FiniteDuration = GameActor.DefaultRandomBotDelay,
+  // One-off pause before the very first bot move of a match, so a reviewer has
+  // time to open the game link between two RandomBots.
+  initialBotStartDelay: FiniteDuration = GameActor.DefaultInitialBotStartDelay
 )
 
 object GameActor:
@@ -44,11 +53,23 @@ object GameActor:
   /** Grace period a defender with no legal defense gets before auto-surrender. */
   val DefenselessGraceSeconds: Int = 3
 
-  /** Shortest pause a bot takes before it plays, so moves stay readable. */
+  /** Shortest pause a BasicBot takes before it plays, so moves stay readable. */
   val DefaultBotDelayMin: FiniteDuration = 500.millis
 
-  /** Longest pause a bot takes before it plays. */
+  /** Longest pause a BasicBot takes before it plays. */
   val DefaultBotDelayMax: FiniteDuration = 2000.millis
+
+  /**
+   * Pause a RandomBot takes between moves: fast enough to feel live, slow enough
+   * that each move is visible instead of the whole match resolving instantly.
+   */
+  val DefaultRandomBotDelay: FiniteDuration = 200.millis
+
+  /**
+   * One-off pause before the very first bot move of a match. It gives a reviewer
+   * time to click the game link and open the table between two RandomBots.
+   */
+  val DefaultInitialBotStartDelay: FiniteDuration = 2.seconds
 
   /**
    * How long the server waits before auto-passing players who hold no legal
@@ -90,7 +111,9 @@ object GameActor:
       turnSeconds: Int = DefaultTurnSeconds,
       botDelayMin: FiniteDuration = DefaultBotDelayMin,
       botDelayMax: FiniteDuration = DefaultBotDelayMax,
-      noThrowInAutoPassDelay: FiniteDuration = DefaultNoThrowInAutoPassDelay
+      noThrowInAutoPassDelay: FiniteDuration = DefaultNoThrowInAutoPassDelay,
+      randomBotDelay: FiniteDuration = DefaultRandomBotDelay,
+      initialBotStartDelay: FiniteDuration = DefaultInitialBotStartDelay
   ): IO[GameRoom] =
     IO.delay(GameEngine.createGame(config, playerNames)).flatMap { initialState =>
       createFrom(
@@ -98,7 +121,9 @@ object GameActor:
         turnSeconds,
         botDelayMin,
         botDelayMax,
-        noThrowInAutoPassDelay = noThrowInAutoPassDelay
+        noThrowInAutoPassDelay = noThrowInAutoPassDelay,
+        randomBotDelay = randomBotDelay,
+        initialBotStartDelay = initialBotStartDelay
       )
     }
 
@@ -112,7 +137,9 @@ object GameActor:
       botDelayMin: FiniteDuration = DefaultBotDelayMin,
       botDelayMax: FiniteDuration = DefaultBotDelayMax,
       defaultPlayerId: Option[String] = None,
-      noThrowInAutoPassDelay: FiniteDuration = DefaultNoThrowInAutoPassDelay
+      noThrowInAutoPassDelay: FiniteDuration = DefaultNoThrowInAutoPassDelay,
+      randomBotDelay: FiniteDuration = DefaultRandomBotDelay,
+      initialBotStartDelay: FiniteDuration = DefaultInitialBotStartDelay
   ): IO[GameRoom] =
     nowMs.flatMap { now =>
       val gameId = GameManager.generateGameId()
@@ -124,6 +151,7 @@ object GameActor:
         // The replay starts from the pristine deal, before any move or clock.
         replay <- Ref.of[IO, SerializedGame](GameReplay.initial(gameId, initialState))
         lock <- Semaphore[IO](1)
+        povSeat <- Ref.of[IO, Option[String]](None)
         clockStop <- Deferred[IO, Unit]
         room = GameRoom(
           gameId = gameId,
@@ -131,13 +159,16 @@ object GameActor:
           topic = topic,
           replay = replay,
           lock = lock,
+          povSeat = povSeat,
           playerIds = initialState.players.map(_.id),
           turnSeconds = turnSeconds,
           clockStop = clockStop,
           botDelayMin = botDelayMin,
           botDelayMax = botDelayMax,
           defaultPlayerId = defaultPlayerId,
-          noThrowInAutoPassDelay = noThrowInAutoPassDelay
+          noThrowInAutoPassDelay = noThrowInAutoPassDelay,
+          randomBotDelay = randomBotDelay,
+          initialBotStartDelay = initialBotStartDelay
         )
         _ <- startClock(room)
         _ <- startBots(room)
@@ -283,6 +314,52 @@ object GameActor:
         case Some(updated) => room.topic.publish1(updated).void
         case None          => IO.unit
       }
+
+  // --- Point-of-view access control (ITEM-14a) ---
+
+  /** Error returned when a client tries to switch POV outside Dev Mode. */
+  val PovLockError: String =
+    "POV switching is disabled outside Dev Mode until the game is over"
+
+  /**
+   * Authorises a view / WebSocket request for `playerId` (ITEM-14a).
+   *
+   * Dev Mode (the default) leaves every seat open, and so does a finished game:
+   * the server only projects one seat per request, and review mode may inspect
+   * any of them. Outside Dev Mode, while the match is still running:
+   *
+   *  - an explicit `requester` that names a different seat is rejected, so a
+   *    view call cannot be repointed at another player's hand;
+   *  - the first human seat viewed or connected claims the room and every other
+   *    seat is rejected until `BoutPhase.GameOver`, so editing the DOM (or a
+   *    direct API call that omits `requester`) cannot switch POV;
+   *  - a bot seat is never claimable, because its hand is hidden information.
+   */
+  def authorizePov(
+      room: GameRoom,
+      playerId: String,
+      requester: Option[String] = None
+  ): IO[Either[String, Unit]] =
+    room.stateRef.get.flatMap { state =>
+      val locked = !state.config.devMode && state.boutPhase != BoutPhase.GameOver
+      if !locked then IO.pure(Right(()))
+      else
+        requester.map(_.trim).filter(_.nonEmpty) match
+          case Some(requestedBy) if requestedBy != playerId =>
+            IO.pure(Left(PovLockError))
+          case _ =>
+            room.povSeat.modify { current =>
+              current match
+                case Some(seat) =>
+                  if seat == playerId then (Some(seat), Right(()))
+                  else (Some(seat), Left(PovLockError))
+                case None =>
+                  val seatIdx = state.players.indexWhere(_.id == playerId)
+                  val humanSeat = seatIdx >= 0 && !state.config.isBotSeat(seatIdx)
+                  if humanSeat then (Some(playerId), Right(()))
+                  else (None, Left(PovLockError))
+            }
+    }
 
   // --- Turn clock ---
 
@@ -565,26 +642,17 @@ object GameActor:
         promptedBotId(state) match
           case None => awaitStateChange(room, state) *> botLoop(room)
           case Some(botId) =>
-            botDelayFor(room, state, botId) match
-              // A random bot plays instantly. Yielding first keeps fiber
-              // scheduling fair, so the HTTP and WebSocket handlers of the same
-              // runtime are never starved during an all-RandomBot game.
-              case None =>
-                IO.cede *> room.stateRef.get.flatMap { current =>
-                  // Never play for a superseded position, and never after game over.
-                  if current != state || current.isGameOver then botLoop(room)
-                  else playBotMove(room, current, botId) *> botLoop(room)
-                }
-              case Some(delay) =>
-                IO.sleep(delay).race(awaitStateChange(room, state)).flatMap {
-                  case Right(_) => botLoop(room) // the table moved on: reconsider
-                  case Left(_) =>
-                    room.stateRef.get.flatMap { current =>
-                      // Never play for a superseded position, and never after game over.
-                      if current != state || current.isGameOver then botLoop(room)
-                      else playBotMove(room, current, botId) *> botLoop(room)
-                    }
-                }
+            botPause(room, state, botId).flatMap { delay =>
+              IO.sleep(delay).race(awaitStateChange(room, state)).flatMap {
+                case Right(_) => botLoop(room) // the table moved on: reconsider
+                case Left(_) =>
+                  room.stateRef.get.flatMap { current =>
+                    // Never play for a superseded position, and never after game over.
+                    if current != state || current.isGameOver then botLoop(room)
+                    else playBotMove(room, current, botId) *> botLoop(room)
+                  }
+              }
+            }
     }
 
   /** Plays the bot's move for `state`, or waits when the position no longer has one. */
@@ -594,15 +662,39 @@ object GameActor:
       case Some(action) => playBotAction(room, action)
 
   /**
-   * The pause a bot seat takes before it plays. A `"randomBot"` seat returns
-   * `None` and therefore plays with no delay at all; a `"basicBot"` seat keeps
-   * the room's human-like pause, a random value in `minBotDelay..maxBotDelay`
-   * (`500 ms`–`2000 ms` unless the room was constructed with other bounds).
+   * The pause before `botId`'s next move. Before the match's first recorded
+   * move the room's `initialBotStartDelay` (`2 s` by default) is used, so a
+   * reviewer can click the game link and open the table between two bots
+   * (ITEM-9b). Afterwards a `"randomBot"` waits only `room.randomBotDelay`
+   * (`200 ms` by default, ITEM-9a), while a `"basicBot"` keeps its human-like
+   * `500 ms`–`2000 ms` window.
+   */
+  def botPause(room: GameRoom, state: GameState, botId: String): IO[FiniteDuration] =
+    val moveDelay = botDelayFor(room, state, botId).getOrElse(Duration.Zero)
+    room.replay.get.map { replay =>
+      if isOpeningPosition(replay) then maxDuration(moveDelay, room.initialBotStartDelay)
+      else moveDelay
+    }
+
+  /** True until the match's first move (visible or skipped) has been recorded. */
+  def isOpeningPosition(replay: SerializedGame): Boolean =
+    replay.moves.isEmpty && replay.skippedMoves.isEmpty
+
+  private def maxDuration(left: FiniteDuration, right: FiniteDuration): FiniteDuration =
+    if left >= right then left else right
+
+  /**
+   * The per-move pause of a bot seat: a `"randomBot"` waits the room's
+   * `randomBotDelay` (fast, but never instant, ITEM-9a), a `"basicBot"` keeps
+   * the room's human-like pause in `minBotDelay..maxBotDelay` (`500 ms`–
+   * `2000 ms` unless the room was constructed with other bounds), and a human or
+   * unknown seat has no bot pause at all.
    */
   def botDelayFor(room: GameRoom, state: GameState, botId: String): Option[FiniteDuration] =
     botSeatType(state, botId) match
-      case GameConfig.BasicBotSeat => Some(randomBotDelay(room))
-      case _                       => None
+      case GameConfig.RandomBotSeat => Some(room.randomBotDelay.max(Duration.Zero))
+      case GameConfig.BasicBotSeat  => Some(randomBotDelay(room))
+      case _                        => None
 
   /** The canonical seat type of the seat played by `botId` (human when unknown). */
   def botSeatType(state: GameState, botId: String): String =
