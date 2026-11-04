@@ -57,6 +57,7 @@ import {
   resetSettings,
   setHighlightIntensity,
   setHighlightPreset,
+  setSettings,
 } from '../state/settings';
 import appCss from '../app.css?raw';
 import tableCss from '../styles/table.css?raw';
@@ -2064,19 +2065,19 @@ describe('GamePage', () => {
       /html\[data-theme='light'\] \.status-badge\[data-role='attacker'\]\s*{[^}]*border-color: var\(--role-attacker-border\)/,
     );
     expect(appCss).toMatch(
-      /html\[data-theme='light'\] \.status-badge\[data-role='attacker'\]\s*{[^}]*0 0 14px 3px var\(--role-attacker-glow\)/,
+      /html\[data-theme='light'\] \.status-badge\[data-role='attacker'\]\s*{[^}]*0 0 10px 2px var\(--role-attacker-glow\)/,
     );
     expect(appCss).toMatch(
-      /html\[data-theme='light'\] \.status-badge\[data-role='attacker'\]\s*{[^}]*inset 0 0 10px var\(--role-attacker-bg\)/,
+      /html\[data-theme='light'\] \.status-badge\[data-role='attacker'\]\s*{[^}]*inset 0 0 8px var\(--role-attacker-bg\)/,
     );
     expect(appCss).toMatch(
       /html\[data-theme='light'\] \.status-badge\[data-role='defender'\]\s*{[^}]*border-color: var\(--role-defender-border\)/,
     );
     expect(appCss).toMatch(
-      /html\[data-theme='light'\] \.status-badge\[data-role='defender'\]\s*{[^}]*0 0 14px 3px var\(--role-defender-glow\)/,
+      /html\[data-theme='light'\] \.status-badge\[data-role='defender'\]\s*{[^}]*0 0 10px 2px var\(--role-defender-glow\)/,
     );
     expect(appCss).toMatch(
-      /html\[data-theme='light'\] \.status-badge\[data-role='defender'\]\s*{[^}]*inset 0 0 10px var\(--role-defender-bg\)/,
+      /html\[data-theme='light'\] \.status-badge\[data-role='defender'\]\s*{[^}]*inset 0 0 8px var\(--role-defender-bg\)/,
     );
 
     // ITEM-ADD-8a: every row has a name track, a centred count track and a
@@ -2125,7 +2126,7 @@ describe('GamePage', () => {
     ).toContain('var(--clock-urgent-glow)');
     expect(
       cssRule(appCss, "html[data-theme='light'] .turn-clock[data-low-time='true']"),
-    ).toContain('#ea580c');
+    ).toContain('var(--clock-urgent-accent)');
     expect(
       cssRule(tableCss, "[data-theme='light'] .presence-dot.present"),
     ).toContain('rgba(21, 128, 61, 0.7)');
@@ -2389,6 +2390,67 @@ describe('GamePage', () => {
 
     await waitFor(() => expect(createPresetGameMock).toHaveBeenCalledWith('3p-redirect-bob'));
     await waitFor(() => expect(onNavigateGame).toHaveBeenCalledWith('preset-1', 'p1'));
+  });
+
+  it('T-90-feedback-3: a light-mode QA preset paints the paler highlights live', async () => {
+    setSettings({ theme: 'light' });
+    const lightDefense: PlayerGameView = {
+      ...view,
+      myHand: [
+        { suit: 'hearts', rank: 'six' },
+        { suit: 'diamonds', rank: 'nine' },
+      ],
+      opponents: [{ id: 'p1', name: 'Bob', cardCount: 5, hasPassed: false, finishRank: null }],
+      tablePairs: [{ attack: { suit: 'clubs', rank: 'six' }, defense: null }],
+      trumpSuit: 'clubs',
+      boutPhase: 'defense',
+      attackerIdx: 1,
+      defenderIdx: 0,
+      legalActions: ['surrender'],
+    };
+    getGameView.mockResolvedValue(lightDefense);
+    getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
+    createPresetGameMock.mockResolvedValue({
+      gameId: 'preset-3',
+      players: ['p0', 'p1'],
+      playerTypes: ['human', 'human'],
+      defaultPlayerId: 'p0',
+    });
+    const onNavigateGame = vi.fn();
+
+    render(
+      <GamePage
+        gameId="game-1"
+        playerId="p0"
+        onSwitchPlayer={() => {}}
+        onNavigateGame={onNavigateGame}
+      />,
+    );
+
+    const panel = await screen.findByTestId('qa-scenarios');
+    expect(panel.closest('[data-zone="sidebar-left"]')).not.toBeNull();
+    fireEvent.click(within(panel).getByRole('button', { name: 'Surrender Half-Off' }));
+    await waitFor(() => expect(createPresetGameMock).toHaveBeenCalledWith('surrender-half-off'));
+    await waitFor(() => expect(onNavigateGame).toHaveBeenCalledWith('preset-3', 'p0'));
+
+    // The document tokens resolved from the paler Light palette...
+    const root = document.documentElement;
+    expect(root.getAttribute('data-theme')).toBe('light');
+    expect(root.style.getPropertyValue('--ui-select-accent')).toBe('#5b87f5');
+    expect(root.style.getPropertyValue('--role-attacker-accent')).toBe('#46a76f');
+    expect(root.style.getPropertyValue('--role-defender-accent')).toBe('#dc6868');
+    expect(root.style.getPropertyValue('--trump-accent')).toBe('#d4943a');
+    expect(root.style.getPropertyValue('--redirect-accent')).toBe('#a375e6');
+    expect(root.style.getPropertyValue('--clock-urgent-accent')).toBe('#e27c43');
+    expect(root.style.getPropertyValue('--role-defender-glow')).toBe(
+      'rgba(220, 104, 104, 0.34)',
+    );
+
+    // ...and the live defending hand / uncovered attack consume them.
+    const box = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+    expect(box.getAttribute('data-highlighted')).toBe('true');
+    expect(box.getAttribute('data-highlight-variant')).toBe('defender');
+    expect(document.querySelector('.table-card-uncovered')).not.toBeNull();
   });
 
   it('T-90 ITEM-PREV-4a: the Defenseless Auto-Surrender preset shows one tight hand outline', async () => {

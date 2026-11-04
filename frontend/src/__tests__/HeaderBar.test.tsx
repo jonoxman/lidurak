@@ -8,13 +8,18 @@ import {
   HIGHLIGHT_INTENSITY_MAX,
   HIGHLIGHT_INTENSITY_MIN,
   HIGHLIGHT_PRESETS,
+  LIGHT_SLOT_ALPHA,
   USER_SETTINGS_STORAGE_KEY,
   clampRoundness,
   getSettings,
+  highlightRgba,
   resetSettings,
   resolveTheme,
+  setHighlightIntensity,
+  setHighlightPreset,
   setSettings,
   subscribeSettings,
+  type HighlightSlot,
 } from '../state/settings';
 import appCss from '../app.css?raw';
 
@@ -506,7 +511,7 @@ describe('T-90-3 light-mode menu and appearance glows', () => {
       cssRule(appCss, "html[data-theme='light'] .header-menu-dropdown a:hover"),
     ).toContain('var(--ui-select-border)');
     expect(cssRule(appCss, "html[data-theme='light'] .profile-item.active")).toContain(
-      'rgba(29, 78, 216, 0.8)',
+      'var(--ui-select-border)',
     );
 
     // Dark mode uses the same blue family, never the attacker green.
@@ -594,7 +599,7 @@ describe('T-90 item 1b: appearance menus select in royal blue', () => {
     expect(cssRule(appCss, ':root')).toContain('--ui-select-bg: rgba(59, 130, 246, 0.16)');
     expect(cssRule(appCss, ':root')).toContain('--ui-select-text: #93c5fd');
     expect(cssRule(appCss, "html[data-theme='light']")).toContain(
-      '--ui-select-bg: rgba(37, 99, 235, 0.14)',
+      '--ui-select-bg: rgba(91, 135, 245, 0.1)',
     );
     expect(cssRule(appCss, "html[data-theme='light']")).toContain('--ui-select-text: #1e3a8a');
   });
@@ -700,12 +705,12 @@ describe('T-90-feedback-2 Theme Highlights section', () => {
 
     const root = document.documentElement;
     expect(root.getAttribute('data-theme')).toBe('light');
-    expect(root.style.getPropertyValue('--ui-select-accent')).toBe('#b45309');
-    expect(root.style.getPropertyValue('--role-attacker-accent')).toBe('#4d7c0f');
-    expect(root.style.getPropertyValue('--role-defender-accent')).toBe('#be123c');
-    expect(root.style.getPropertyValue('--trump-accent')).toBe('#a16207');
-    expect(root.style.getPropertyValue('--redirect-accent')).toBe('#be185d');
-    expect(root.style.getPropertyValue('--clock-urgent-accent')).toBe('#9a3412');
+    expect(root.style.getPropertyValue('--ui-select-accent')).toBe('#c47a2c');
+    expect(root.style.getPropertyValue('--role-attacker-accent')).toBe('#6b9a2e');
+    expect(root.style.getPropertyValue('--role-defender-accent')).toBe('#d9526b');
+    expect(root.style.getPropertyValue('--trump-accent')).toBe('#c9a227');
+    expect(root.style.getPropertyValue('--redirect-accent')).toBe('#d9558f');
+    expect(root.style.getPropertyValue('--clock-urgent-accent')).toBe('#d97a45');
 
     // Switching back to dark reloads the dark half of the same preset.
     fireEvent.click(screen.getByRole('button', { name: 'Dark' }));
@@ -798,5 +803,143 @@ describe('T-90-feedback-2 Theme Highlights section', () => {
     ) as { highlightPreset: string; highlightIntensity: number };
     expect(stored.highlightIntensity).toBe(20);
     expect(stored.highlightPreset).toBe('classic');
+  });
+});
+
+/**
+ * T-90-feedback-20261104_133915-1: Light mode highlights are slightly paler and
+ * softer at the default 100% intensity across every preset and every semantic
+ * role, while the Intensity slider still scales them in real time.
+ */
+describe('T-90-feedback-3 paler light-mode highlights', () => {
+  const PREFIXES: Record<HighlightSlot, string> = {
+    uiSelect: '--ui-select',
+    attacker: '--role-attacker',
+    defender: '--role-defender',
+    trump: '--trump',
+    redirect: '--redirect',
+    clockUrgent: '--clock-urgent',
+  };
+
+  const alphaOf = (value: string): number => {
+    const match = /rgba\([^)]*,\s*([0-9.]+)\)/.exec(value);
+    return match ? Number(match[1]) : Number.NaN;
+  };
+
+  /** jsdom reports inline background hex colours as `rgb(r, g, b)`. */
+  const rgbCss = (hex: string): string => {
+    const value = hex.replace('#', '');
+    const [r, g, b] = [0, 2, 4].map((offset) => parseInt(value.slice(offset, offset + 2), 16));
+    return `rgb(${r}, ${g}, ${b})`;
+  };
+
+  beforeEach(() => {
+    resetSettings();
+    window.localStorage.clear();
+  });
+
+  afterEach(() => {
+    cleanup();
+    resetSettings();
+  });
+
+  it('ITEM-LIGHT-1: every preset resolves to its paler Light palette in Light mode', () => {
+    setSettings({ theme: 'light' });
+    const root = document.documentElement;
+    expect(root.getAttribute('data-theme')).toBe('light');
+
+    for (const preset of HIGHLIGHT_PRESETS) {
+      setHighlightPreset(preset.id);
+      expect(root.dataset.highlightPreset).toBe(preset.id);
+
+      for (const slot of Object.keys(PREFIXES) as HighlightSlot[]) {
+        expect(
+          root.style.getPropertyValue(`${PREFIXES[slot]}-accent`),
+          `${preset.id} ${slot}`,
+        ).toBe(preset.light[slot]);
+
+        // Softer Light alphas at the default 100% intensity.
+        const border = alphaOf(root.style.getPropertyValue(`${PREFIXES[slot]}-border`));
+        const glow = alphaOf(root.style.getPropertyValue(`${PREFIXES[slot]}-glow`));
+        const bg = alphaOf(root.style.getPropertyValue(`${PREFIXES[slot]}-bg`));
+        expect(border, `${preset.id} ${slot} border`).toBeGreaterThanOrEqual(0.55);
+        expect(border, `${preset.id} ${slot} border`).toBeLessThanOrEqual(0.68);
+        expect(glow, `${preset.id} ${slot} glow`).toBeGreaterThanOrEqual(0.24);
+        expect(glow, `${preset.id} ${slot} glow`).toBeLessThanOrEqual(0.38);
+        expect(bg, `${preset.id} ${slot} tint`).toBeGreaterThanOrEqual(0.08);
+        expect(bg, `${preset.id} ${slot} tint`).toBeLessThanOrEqual(0.12);
+      }
+    }
+
+    // Dark mode is untouched by the Light calibration.
+    setSettings({ theme: 'dark' });
+    setHighlightPreset('classic');
+    expect(root.style.getPropertyValue('--ui-select-accent')).toBe('#3b82f6');
+    expect(root.style.getPropertyValue('--role-defender-glow')).toBe('rgba(239, 68, 68, 0.6)');
+    expect(alphaOf(root.style.getPropertyValue('--role-attacker-glow'))).toBeCloseTo(0.55);
+  });
+
+  it('ITEM-LIGHT-2: all six roles stay mutually distinct in Light mode', () => {
+    setSettings({ theme: 'light' });
+    render(<HeaderBar />);
+    openSubmenu('Theme');
+
+    for (const preset of HIGHLIGHT_PRESETS) {
+      fireEvent.click(screen.getByTestId(`highlight-preset-${preset.id}`));
+      const preview = screen.getByTestId(`highlight-preset-preview-${preset.id}`);
+      const lines = Array.from(preview.querySelectorAll('.highlight-preview-line')) as HTMLElement[];
+      expect(lines, preset.id).toHaveLength(6);
+
+      const colors = lines.map((line) => line.style.background || line.style.backgroundColor);
+      expect(new Set(colors).size, preset.id).toBe(6);
+      // The preview lines show exactly the paler Light palette.
+      expect(colors).toEqual(
+        [
+          preset.light.uiSelect,
+          preset.light.attacker,
+          preset.light.defender,
+          preset.light.trump,
+          preset.light.redirect,
+          preset.light.clockUrgent,
+        ].map(rgbCss),
+      );
+    }
+  });
+
+  it('ITEM-LIGHT-3: the Intensity slider scales Light alphas monotonically', () => {
+    setSettings({ theme: 'light' });
+    render(<HeaderBar />);
+    openSubmenu('Theme');
+
+    const slider = screen.getByTestId('highlight-intensity-slider') as HTMLInputElement;
+    const root = document.documentElement;
+    const samples = [20, 100, 200].map((value) => {
+      fireEvent.input(slider, { target: { value: String(value) } });
+      expect(root.style.getPropertyValue('--highlight-intensity')).toBe(String(value / 100));
+      return {
+        border: alphaOf(root.style.getPropertyValue('--role-defender-border')),
+        glow: alphaOf(root.style.getPropertyValue('--role-defender-glow')),
+        halo: alphaOf(root.style.getPropertyValue('--role-defender-pulse-halo')),
+        tint: alphaOf(root.style.getPropertyValue('--role-attacker-bg')),
+        trump: alphaOf(root.style.getPropertyValue('--trump-glow')),
+        redirect: alphaOf(root.style.getPropertyValue('--redirect-glow')),
+        clock: alphaOf(root.style.getPropertyValue('--clock-urgent-glow')),
+      };
+    });
+
+    for (let i = 1; i < samples.length; i += 1) {
+      for (const key of Object.keys(samples[i]) as Array<keyof (typeof samples)[number]>) {
+        expect(samples[i][key], key).toBeGreaterThan(samples[i - 1][key]);
+      }
+    }
+
+    // At the default 100% the tokens equal the softer Light calibration exactly.
+    setHighlightIntensity(100);
+    expect(root.style.getPropertyValue('--role-defender-glow')).toBe(
+      highlightRgba('#dc6868', LIGHT_SLOT_ALPHA.defender.glow),
+    );
+    expect(root.style.getPropertyValue('--trump-bg')).toBe(
+      highlightRgba('#d4943a', LIGHT_SLOT_ALPHA.trump.bg),
+    );
   });
 });

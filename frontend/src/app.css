@@ -52,11 +52,11 @@ html[data-theme='light'] {
   --durak-accent: #4f7d1c;
   --durak-danger: #b3261e;
   --durak-amber: #a9761b;
-  /* High-contrast cobalt selection chrome for the light theme. */
-  --ui-select-accent: #1d4ed8;
-  --ui-select-border: rgba(29, 78, 216, 0.9);
-  --ui-select-glow: rgba(29, 78, 216, 0.45);
-  --ui-select-bg: rgba(37, 99, 235, 0.14);
+  /* T-90-feedback-3: paler, calmer cobalt selection chrome for Light mode. */
+  --ui-select-accent: #5b87f5;
+  --ui-select-border: rgba(91, 135, 245, 0.62);
+  --ui-select-glow: rgba(91, 135, 245, 0.3);
+  --ui-select-bg: rgba(91, 135, 245, 0.1);
   --ui-select-surface: var(--ui-select-bg);
   --ui-select-text: #1e3a8a;
 }
@@ -76,10 +76,10 @@ html[data-theme='light'] {
     --app-profile-hover: #1f6fa8;
     --app-input-bg: #ffffff;
     --app-shadow: 0 18px 36px rgba(31, 41, 55, 0.12);
-    --ui-select-accent: #1d4ed8;
-    --ui-select-border: rgba(29, 78, 216, 0.9);
-    --ui-select-glow: rgba(29, 78, 216, 0.45);
-    --ui-select-bg: rgba(37, 99, 235, 0.14);
+    --ui-select-accent: #5b87f5;
+    --ui-select-border: rgba(91, 135, 245, 0.62);
+    --ui-select-glow: rgba(91, 135, 245, 0.3);
+    --ui-select-bg: rgba(91, 135, 245, 0.1);
     --ui-select-surface: var(--ui-select-bg);
     --ui-select-text: #1e3a8a;
   }
@@ -642,17 +642,18 @@ html[data-theme='light'] .error-banner {
 html[data-theme='light'] .status-badge[data-role='attacker'] {
   border-color: var(--role-attacker-border);
   outline: none;
+  /* T-90-feedback-3: softer spread; the alphas come from the paler tokens. */
   box-shadow:
-    0 0 14px 3px var(--role-attacker-glow),
-    inset 0 0 10px var(--role-attacker-bg);
+    0 0 10px 2px var(--role-attacker-glow),
+    inset 0 0 8px var(--role-attacker-bg);
 }
 
 html[data-theme='light'] .status-badge[data-role='defender'] {
   border-color: var(--role-defender-border);
   outline: none;
   box-shadow:
-    0 0 14px 3px var(--role-defender-glow),
-    inset 0 0 10px var(--role-defender-bg);
+    0 0 10px 2px var(--role-defender-glow),
+    inset 0 0 8px var(--role-defender-bg);
 }
 
 .game-meta {
@@ -1677,7 +1678,7 @@ html[data-theme='light'] .header-menu-trigger:focus-visible {
 html[data-theme='light'] .header-menu-dropdown {
   box-shadow:
     0 14px 28px rgba(15, 23, 42, 0.22),
-    0 0 0 1px rgba(29, 78, 216, 0.5);
+    0 0 0 1px var(--ui-select-border);
 }
 
 html[data-theme='light'] .header-menu-dropdown a:hover,
@@ -1693,7 +1694,7 @@ html[data-theme='light'] .profile-item.active,
 html[data-theme='light'] .profile-item:focus-visible {
   color: var(--ui-select-text);
   background: var(--ui-select-bg);
-  box-shadow: inset 0 0 0 1px rgba(29, 78, 216, 0.8);
+  box-shadow: inset 0 0 0 1px var(--ui-select-border);
 }
 
 /* Selected Theme / Table / Card Back / Sound options: cobalt, never green. */
@@ -1727,7 +1728,7 @@ html[data-theme='light'] .pack-option:hover,
 html[data-theme='light'] .theme-option:hover,
 html[data-theme='light'] .texture-option:hover,
 html[data-theme='light'] .cardback-option:hover {
-  box-shadow: 0 0 12px 2px rgba(29, 78, 216, 0.3);
+  box-shadow: 0 0 12px 2px var(--ui-select-glow);
   color: var(--ui-select-text);
 }
 
@@ -1750,7 +1751,7 @@ html[data-theme='light'] .cardback-option[aria-pressed='true'] .cardback-preview
 html[data-theme='light'] .hotseat-tab:hover,
 html[data-theme='light'] .pov-tab:hover {
   border-color: var(--ui-select-accent);
-  box-shadow: 0 0 12px 2px rgba(29, 78, 216, 0.4);
+  box-shadow: 0 0 12px 2px var(--ui-select-glow);
   color: var(--ui-select-text);
 }
 
@@ -1814,8 +1815,8 @@ html[data-theme='light'] .turn-clock.active {
 }
 
 html[data-theme='light'] .turn-clock[data-low-time='true'] {
-  color: #ea580c;
-  text-shadow: 0 0 12px rgba(194, 65, 12, 0.75);
+  color: var(--clock-urgent-accent);
+  text-shadow: 0 0 12px var(--clock-urgent-glow);
 }
 
 /* Lobby: the player-count / seat selectors and every focused field. */
@@ -1842,15 +1843,15 @@ html[data-theme='light'] .lobby-form .action-button.green,
 html[data-theme='light'] .game-over-banner .action-button.banner-rematch-button {
   color: #f8fafc;
   box-shadow:
-    0 0 12px 2px rgba(29, 78, 216, 0.55),
-    inset 0 0 8px rgba(37, 99, 235, 0.3);
+    0 0 12px 2px var(--ui-select-glow),
+    inset 0 0 8px var(--ui-select-bg);
 }
 
 html[data-theme='light'] .lobby-form .action-button.green:hover:not(:disabled),
 html[data-theme='light'] .game-over-banner .action-button.banner-rematch-button:hover:not(:disabled) {
   box-shadow:
-    0 0 16px 4px rgba(29, 78, 216, 0.7),
-    inset 0 0 8px rgba(37, 99, 235, 0.35);
+    0 0 16px 4px var(--ui-select-glow),
+    inset 0 0 8px var(--ui-select-bg);
 }
 
 html[data-theme='light'] .player-tabs a:hover,

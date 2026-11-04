@@ -314,7 +314,7 @@ describe('LobbyPage', () => {
 
     // Dark and light values of the UI selection family.
     expect(appCss).toContain('--ui-select-accent: #3b82f6');
-    expect(appCss).toContain('--ui-select-accent: #1d4ed8');
+    expect(appCss).toContain('--ui-select-accent: #5b87f5');
     expect(appCss).toMatch(
       /\.lobby-form \.field select\s*{[^}]*border-color: var\(--ui-select-border\)/,
     );
@@ -356,8 +356,8 @@ describe('LobbyPage', () => {
     // The family values exist for both themes.
     expect(appCss).toContain('--ui-select-border: rgba(59, 130, 246, 0.85)');
     expect(appCss).toContain('--ui-select-bg: rgba(59, 130, 246, 0.16)');
-    expect(appCss).toContain('--ui-select-border: rgba(29, 78, 216, 0.9)');
-    expect(appCss).toContain('--ui-select-bg: rgba(37, 99, 235, 0.14)');
+    expect(appCss).toContain('--ui-select-border: rgba(91, 135, 245, 0.62)');
+    expect(appCss).toContain('--ui-select-bg: rgba(91, 135, 245, 0.1)');
 
     // The player-count selector, focused inputs, checkboxes and primary actions.
     expect(cssRule(appCss, '.lobby-form .field select')).toContain('var(--ui-select-border)');
