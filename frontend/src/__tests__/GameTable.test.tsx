@@ -2697,7 +2697,7 @@ describe('T-90-2 ITEM-PREV-4: defender hand glow before the surrender decision',
       );
       // The light pulse uses the emerald Attacker family in both layers.
       expect(tableCss).toMatch(
-        /@keyframes lightAttackerHandPulse\s*{[\s\S]*?50%\s*{[\s\S]*?0 0 14px 3px var\(--role-attacker-glow\)[\s\S]*?inset 0 0 8px var\(--role-attacker-surface\)/,
+        /@keyframes lightAttackerHandPulse\s*{[\s\S]*?50%\s*{[\s\S]*?0 0 14px 3px var\(--role-attacker-glow\)[\s\S]*?inset 0 0 8px var\(--role-attacker-bg\)/,
       );
       // Dark mode keeps its original amber attacker pulse untouched.
       expect(tableCss).toMatch(
@@ -2716,7 +2716,7 @@ describe('T-90-2 ITEM-PREV-4: defender hand glow before the surrender decision',
       expect(defender).toContain('border: 1px solid var(--role-defender-border)');
       expect(defender).toContain('lightDefenderHandPulse');
       expect(tableCss).toMatch(
-        /@keyframes lightDefenderHandPulse\s*{[\s\S]*?0 0 16px 4px var\(--role-defender-glow\)[\s\S]*?inset 0 0 8px var\(--role-defender-surface\)/,
+        /@keyframes lightDefenderHandPulse\s*{[\s\S]*?0 0 16px 4px var\(--role-defender-glow\)[\s\S]*?inset 0 0 8px var\(--role-defender-bg\)/,
       );
       // Dark mode keeps its crimson keyframe with the softer spread.
       expect(tableCss).toMatch(
@@ -3124,5 +3124,131 @@ describe('T-90 ITEM-PREV-4a/4b: single tight hand highlight outline', () => {
     expect(zone.querySelectorAll('.hand-cards, .attacker-turn, .defender-turn, .throw-in-turn')).toHaveLength(
       1,
     );
+  });
+});
+
+/**
+ * T-90 ITEM-1c: every gameplay feature owns a distinct family on the felt —
+ * emerald for attack targets, violet for the `Perevod` reflection, gold for
+ * trump indicators and crimson for uncovered attacks.
+ */
+describe('T-90 ITEM-1c: distinct gameplay feature colours', () => {
+  it('paints attack target outlines emerald and the reflection outline violet', () => {
+    const { container } = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={uncoveredPair}
+        trumpSuit="diamonds"
+        defenderId="p1"
+        canRedirect
+      />,
+    );
+
+    // Violet reflection outline + its directional arrow, never the attack green.
+    const outline = screen.getByTestId('redirect-outline');
+    expect(outline.classList.contains('redirect-outline')).toBe(true);
+    const arrow = outline.querySelector('svg') as SVGElement;
+    expect(arrow.outerHTML).toContain('var(--redirect-accent');
+    expect(arrow.outerHTML).not.toContain('var(--role-attacker-accent');
+    expect(cssRule(tableCss, '.redirect-outline')).toContain('var(--redirect-border)');
+    expect(cssRule(tableCss, '.redirect-outline')).toContain('var(--redirect-bg)');
+    expect(tableCss).not.toMatch(/\n\.redirect-outline\s*{[^}]*var\(--role-attacker/);
+
+    // The uncovered attack card on the felt pulses crimson.
+    expect(container.querySelectorAll('.redirect-outline')).toHaveLength(1);
+    expect(tableCss).toMatch(
+      /:root\[data-theme='light'\] \.table-card-uncovered \.card-slot/,
+    );
+    expect(tableCss).toMatch(/@keyframes lightUncoveredPulse\s*{[\s\S]*?var\(--role-defender-glow\)/);
+    expect(tableCss).toMatch(
+      /:root:not\(\[data-theme='light'\]\) \.table-card-uncovered \.card-slot\s*{[^}]*turnPulse/,
+    );
+  });
+
+  it('uses the emerald family for a legal attack target outline', () => {
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={[]}
+        trumpSuit="diamonds"
+        defenderId="p1"
+        awaitingAttack
+      />,
+    );
+
+    const target = screen.getByTestId('target-outline-p1');
+    expect(target.classList.contains('target-outline')).toBe(true);
+    expect(tableCss).toMatch(
+      /\n\.target-outline\s*{[^}]*border: 2px dashed var\(--role-attacker-border\)[^}]*var\(--role-attacker-glow\)/,
+    );
+    expect(tableCss).not.toMatch(/\n\.target-outline\s*{[^}]*var\(--redirect-/);
+  });
+
+  it('marks a face-up trump card with the gold trump-card class', () => {
+    const { container } = render(
+      <GameTable
+        myId="p0"
+        myHand={[{ suit: 'diamonds', rank: 'seven' }]}
+        opponents={opponents}
+        tablePairs={[]}
+        trumpSuit="diamonds"
+        attackerId="p1"
+        defenderId="p0"
+      />,
+    );
+
+    const face = container.querySelector('.card-slot.trump .playing-card') as HTMLElement;
+    expect(face).not.toBeNull();
+    expect(face.classList.contains('trump-card')).toBe(true);
+    expect(face.getAttribute('data-card-face')).not.toBeNull();
+
+    expect(cssRule(tableCss, '.playing-card.trump-card')).toContain('var(--trump-border)');
+    expect(cssRule(tableCss, '.card-slot.trump')).toContain('border: 1px solid var(--trump-accent)');
+    expect(cssRule(tableCss, '.trump-badge')).toContain('var(--trump-accent)');
+  });
+
+  it('tags Pass and Surrender with their role classes and families', () => {
+    render(<ActionBar legalActions={['pass', 'surrender']} onAction={() => {}} />);
+
+    const pass = screen.getByTestId('pass-button');
+    const surrender = screen.getByTestId('surrender-button');
+    expect(pass.classList.contains('action-btn-pass')).toBe(true);
+    expect(surrender.classList.contains('action-btn-surrender')).toBe(true);
+    expect(pass.classList.contains('action-button')).toBe(true);
+    expect(surrender.classList.contains('action-button')).toBe(true);
+
+    expect(cssRule(tableCss, '.action-btn-pass')).toContain('var(--role-attacker-accent)');
+    expect(cssRule(tableCss, '.action-btn-surrender')).toContain('var(--role-defender-accent)');
+    expect(cssRule(tableCss, '.action-btn-pass')).not.toMatch(/#f59e0b|#ef4444/);
+    expect(cssRule(tableCss, '.action-btn-surrender')).not.toMatch(/#f59e0b|#22c55e/);
+  });
+
+  it('defines all six non-overlapping families with the ticket values', () => {
+    const dark = cssRule(tableCss, ':root');
+    const light = cssRule(tableCss, ":root[data-theme='light']");
+    for (const [rule, accent, bg] of [
+      [dark, '--role-attacker-accent: #22c55e', '--role-attacker-bg: rgba(34, 197, 94, 0.14)'],
+      [dark, '--role-defender-accent: #ef4444', '--role-defender-bg: rgba(239, 68, 68, 0.15)'],
+      [dark, '--trump-accent: #f59e0b', '--trump-bg: rgba(245, 158, 11, 0.14)'],
+      [dark, '--redirect-accent: #a855f7', '--redirect-bg: rgba(168, 85, 247, 0.14)'],
+      [dark, '--clock-active-accent: #22d3ee', '--clock-active-bg: rgba(6, 182, 212, 0.12)'],
+      [light, '--role-attacker-accent: #15803d', '--role-attacker-bg: rgba(21, 128, 61, 0.18)'],
+      [light, '--role-defender-accent: #b91c1c', '--role-defender-bg: rgba(185, 28, 28, 0.18)'],
+      [light, '--trump-accent: #b45309', '--trump-bg: rgba(180, 83, 9, 0.16)'],
+      [light, '--redirect-accent: #7e22ce', '--redirect-bg: rgba(126, 34, 206, 0.15)'],
+      [light, '--clock-active-accent: #0e7490', '--clock-active-bg: rgba(14, 116, 144, 0.14)'],
+    ] as const) {
+      expect(rule).toContain(accent);
+      expect(rule).toContain(bg);
+    }
+    expect(dark).toContain('--clock-urgent-accent: #ea580c');
+    expect(light).toContain('--clock-urgent-accent: #c2410c');
+    expect(dark).toContain('--trump-glow: rgba(245, 158, 11, 0.42)');
+    expect(dark).toContain('--clock-active-glow: rgba(6, 182, 212, 0.38)');
+    expect(light).toContain('--redirect-border: rgba(126, 34, 206, 0.92)');
   });
 });

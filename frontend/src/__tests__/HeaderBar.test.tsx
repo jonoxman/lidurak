@@ -459,11 +459,11 @@ describe('T-90-3 light-mode menu and appearance glows', () => {
       'true',
     );
     expect(cssRule(appCss, "html[data-theme='light'] .theme-option.active")).toContain(
-      'box-shadow: 0 0 12px 2px rgba(29, 78, 216, 0.45)',
+      'box-shadow: 0 0 12px 2px var(--ui-select-glow)',
     );
     expect(
       cssRule(appCss, "html[data-theme='light'] .theme-option[aria-pressed='true']"),
-    ).toContain('border-color: #1d4ed8');
+    ).toContain('border-color: var(--ui-select-accent)');
 
     // Each submenu lives in place of the main list, so start from a clean tree.
     cleanup();
@@ -474,7 +474,7 @@ describe('T-90-3 light-mode menu and appearance glows', () => {
     expect(emerald.querySelector('.texture-swatch')).not.toBeNull();
     expect(
       cssRule(appCss, "html[data-theme='light'] .texture-option.active .texture-swatch"),
-    ).toContain('outline: 2px solid #1d4ed8');
+    ).toContain('outline: 2px solid var(--ui-select-accent)');
 
     cleanup();
     render(<HeaderBar />);
@@ -484,23 +484,23 @@ describe('T-90-3 light-mode menu and appearance glows', () => {
     expect(classic.querySelector('.cardback-preview')).not.toBeNull();
     expect(
       cssRule(appCss, "html[data-theme='light'] .cardback-option.active .cardback-preview"),
-    ).toContain('box-shadow: 0 0 12px 2px rgba(29, 78, 216, 0.45)');
+    ).toContain('box-shadow: 0 0 12px 2px var(--ui-select-glow)');
 
     cleanup();
     render(<HeaderBar />);
     openSubmenu('Sound');
     expect(
       cssRule(appCss, "html[data-theme='light'] .pack-option.active"),
-    ).toContain('box-shadow: 0 0 12px 2px rgba(29, 78, 216, 0.45)');
+    ).toContain('box-shadow: 0 0 12px 2px var(--ui-select-glow)');
   });
 
   it('darkens the top navigation and profile menu hover/focus glows', () => {
     expect(
       cssRule(appCss, "html[data-theme='light'] .header-menu-trigger:hover"),
-    ).toContain('rgba(29, 78, 216, 0.45)');
+    ).toContain('var(--ui-select-glow)');
     expect(
       cssRule(appCss, "html[data-theme='light'] .header-menu-dropdown a:hover"),
-    ).toContain('rgba(29, 78, 216, 0.9)');
+    ).toContain('var(--ui-select-border)');
     expect(cssRule(appCss, "html[data-theme='light'] .profile-item.active")).toContain(
       'rgba(29, 78, 216, 0.8)',
     );
@@ -509,5 +509,89 @@ describe('T-90-3 light-mode menu and appearance glows', () => {
     expect(cssRule(appCss, '.theme-option.active')).toContain('var(--ui-select-accent)');
     expect(cssRule(appCss, '.theme-option.active')).not.toMatch(/#22c55e|#15803d/);
     expect(appCss).not.toMatch(/\n\.header-menu-trigger:hover\s*{[^}]*#22c55e/);
+  });
+});
+
+/**
+ * T-90 ITEM-1b: every UI customization menu (Theme, Table, Card Back, Sound)
+ * selects through the Royal Blue / Cobalt `--ui-select-*` family — never the
+ * attacker's emerald green — in both the Dark and Light themes.
+ */
+describe('T-90 item 1b: appearance menus select in royal blue', () => {
+  beforeEach(() => {
+    resetSettings();
+    window.localStorage.clear();
+  });
+
+  afterEach(() => {
+    cleanup();
+    resetSettings();
+  });
+
+  it('tags every Theme / Table / Card Back / Sound choice with the chrome classes', () => {
+    render(<HeaderBar />);
+    openSubmenu('Theme');
+    const theme = screen.getByRole('button', { name: 'Device theme' });
+    expect(theme.classList.contains('appearance-choice')).toBe(true);
+    expect(theme.classList.contains('active')).toBe(true);
+
+    cleanup();
+    render(<HeaderBar />);
+    openSubmenu('Table');
+    const felt = screen.getByRole('button', { name: /Emerald Felt/ });
+    expect(felt.classList.contains('appearance-choice')).toBe(true);
+    expect(felt.classList.contains('felt-swatch-btn')).toBe(true);
+    expect(felt.classList.contains('active')).toBe(true);
+    expect(felt.querySelector('.texture-swatch')).not.toBeNull();
+
+    cleanup();
+    render(<HeaderBar />);
+    openSubmenu('Card Back');
+    const back = screen.getByRole('button', { name: /Classic Hatch/ });
+    expect(back.classList.contains('appearance-choice')).toBe(true);
+    expect(back.classList.contains('card-back-swatch-btn')).toBe(true);
+    expect(back.classList.contains('active')).toBe(true);
+    expect(back.querySelector('.cardback-preview')).not.toBeNull();
+
+    cleanup();
+    render(<HeaderBar />);
+    openSubmenu('Sound');
+    const pack = document.querySelector(
+      '[data-testid="submenu-sound"] .pack-option.active',
+    ) as HTMLElement;
+    expect(pack).not.toBeNull();
+    expect(pack.classList.contains('appearance-choice')).toBe(true);
+    expect(pack.classList.contains('sound-pack-btn')).toBe(true);
+  });
+
+  it('styles every appearance selection with --ui-select-* and never attacker green', () => {
+    const selectors = [
+      '.appearance-choice.active',
+      '.sound-pack-btn.active',
+      '.felt-swatch-btn.active',
+      '.card-back-swatch-btn.active',
+      '.theme-option.active',
+      '.texture-option.active',
+      '.cardback-option.active',
+      '.pack-option.active',
+      '.felt-swatch-btn.active .texture-swatch',
+      '.card-back-swatch-btn.active .cardback-preview',
+      '.header-brand:hover',
+      '.pov-tab.active',
+      ".setting-row input[type='range']",
+    ];
+    for (const selector of selectors) {
+      const rule = cssRule(appCss, selector);
+      expect(rule, selector).toContain('var(--ui-select-');
+      expect(rule, selector).not.toMatch(/#4ade80|#22c55e|#15803d/);
+    }
+
+    // Both themes define the same four-value family.
+    expect(cssRule(appCss, ':root')).toContain('--ui-select-bg: rgba(59, 130, 246, 0.16)');
+    expect(cssRule(appCss, ':root')).toContain('--ui-select-text: #93c5fd');
+    expect(cssRule(appCss, "html[data-theme='light']")).toContain(
+      '--ui-select-bg: rgba(37, 99, 235, 0.14)',
+    );
+    expect(cssRule(appCss, "html[data-theme='light']")).toContain('--ui-select-text: #1e3a8a');
   });
 });
