@@ -1113,7 +1113,10 @@ export function GameTable({
   // visual glow rule is scoped to `.hand-cards`, and the wrapper is pinned to
   // border/outline/box-shadow/background/animation `none` in both themes, so
   // exactly one tight outline is ever drawn around the rendered cards.
-  const handClasses = ['player-hand'];
+  // `player-hand-zone` is the documented alias of the outer column: the
+  // stylesheet's neutral reset names both, so neither can ever paint a second
+  // (vertically wider) outline around the hand.
+  const handClasses = ['player-hand', 'player-hand-zone'];
   const handCardClasses = ['hand-cards'];
   // Item 3b: the glow belongs to every player who can act — the opening
   // attacker AND any player holding a legal throw-in after the first card of
