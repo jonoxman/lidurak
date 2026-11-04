@@ -97,10 +97,15 @@ describe('LobbyPage', () => {
     submitForm();
 
     await waitFor(() =>
-      expect(createGame).toHaveBeenCalledWith(2, ['Alice', 'Bob'], true, false, [
-        'basicBot',
-        'human',
-      ]),
+      expect(createGame).toHaveBeenCalledWith(
+        2,
+        ['Alice', 'Bob'],
+        true,
+        false,
+        ['basicBot', 'human'],
+        false,
+        true,
+      ),
     );
   });
 
@@ -112,10 +117,15 @@ describe('LobbyPage', () => {
     submitForm();
 
     await waitFor(() =>
-      expect(createGame).toHaveBeenCalledWith(2, ['Alice', 'Bob'], true, false, [
-        'human',
-        'randomBot',
-      ]),
+      expect(createGame).toHaveBeenCalledWith(
+        2,
+        ['Alice', 'Bob'],
+        true,
+        false,
+        ['human', 'randomBot'],
+        false,
+        true,
+      ),
     );
   });
 
@@ -146,6 +156,8 @@ describe('LobbyPage', () => {
         false,
         false,
         humanSeats(3),
+        false,
+        true,
       ),
     );
 
@@ -179,6 +191,8 @@ describe('LobbyPage', () => {
         true,
         true,
         humanSeats(3),
+        false,
+        true,
       ),
     );
   });
@@ -195,8 +209,117 @@ describe('LobbyPage', () => {
     submitForm();
 
     await waitFor(() =>
-      expect(createGame).toHaveBeenCalledWith(2, ['Alice', 'Bob'], true, false, humanSeats(2)),
+      expect(createGame).toHaveBeenCalledWith(
+        2,
+        ['Alice', 'Bob'],
+        true,
+        false,
+        humanSeats(2),
+        false,
+        true,
+      ),
     );
+  });
+
+  /** T-90-2 ITEM-10b: Transparent Mode is opt-in and never leaks into a default game. */
+  it('defaults Transparent mode to unchecked and forwards transparentMode: true', async () => {
+    createGame.mockResolvedValue({ gameId: 'game-t', players: ['p0', 'p1'] });
+    render(<LobbyPage initialServerReady />);
+
+    const checkbox = screen.getByTestId('transparent-mode-checkbox') as HTMLInputElement;
+    expect(checkbox.type).toBe('checkbox');
+    expect(checkbox.checked).toBe(false);
+
+    fireEvent.click(checkbox);
+    expect(checkbox.checked).toBe(true);
+    submitForm();
+
+    await waitFor(() =>
+      expect(createGame).toHaveBeenCalledWith(
+        2,
+        ['Alice', 'Bob'],
+        true,
+        false,
+        humanSeats(2),
+        true,
+        true,
+      ),
+    );
+  });
+
+  /** Transparent Mode is available for 2, 3 and 4 players and mixes with both variants. */
+  it('keeps Transparent mode available at every player count and alongside Chaos mode', async () => {
+    createGame.mockResolvedValue({ gameId: 'game-t4', players: ['p0', 'p1', 'p2', 'p3'] });
+    render(<LobbyPage initialServerReady />);
+
+    for (const count of ['2', '3', '4']) {
+      fireEvent.change(screen.getByLabelText('Players'), { target: { value: count } });
+      await waitFor(() => expect(screen.getByTestId('transparent-mode-checkbox')).toBeTruthy());
+    }
+
+    // A four-player table can combine redirects, Chaos mode and Transparent mode.
+    fireEvent.click(screen.getByLabelText('Chaos mode (attack any player)'));
+    fireEvent.click(screen.getByTestId('transparent-mode-checkbox'));
+    submitForm();
+
+    await waitFor(() =>
+      expect(createGame).toHaveBeenCalledWith(
+        4,
+        ['Alice', 'Bob', 'Carol', 'Dave'],
+        true,
+        true,
+        humanSeats(4),
+        true,
+        true,
+      ),
+    );
+  });
+
+  /** T-90-2 ITEM-14a: Dev Mode defaults on, and unchecking it locks POV switching server-side. */
+  it('defaults Dev mode to checked and forwards devMode: false when unchecked', async () => {
+    createGame.mockResolvedValue({ gameId: 'game-d', players: ['p0', 'p1'] });
+    render(<LobbyPage initialServerReady />);
+
+    const checkbox = screen.getByTestId('dev-mode-checkbox') as HTMLInputElement;
+    expect(checkbox.type).toBe('checkbox');
+    expect(checkbox.checked).toBe(true);
+
+    fireEvent.click(checkbox);
+    expect(checkbox.checked).toBe(false);
+    submitForm();
+
+    await waitFor(() =>
+      expect(createGame).toHaveBeenCalledWith(
+        2,
+        ['Alice', 'Bob'],
+        true,
+        false,
+        humanSeats(2),
+        false,
+        false,
+      ),
+    );
+  });
+
+  /** T-90-2 ITEM-10b: one click opens the backend's Transparent Mode scenario. */
+  it('starts the Transparent Mode QA scenario preset in one click', async () => {
+    createPresetGame.mockResolvedValue({
+      gameId: 'preset-t',
+      players: ['p0', 'p1', 'p2'],
+      playerTypes: ['human', 'human', 'human'],
+      defaultPlayerId: 'p0',
+    });
+    render(<LobbyPage initialServerReady />);
+
+    const panel = screen.getByTestId('qa-scenarios');
+    const button = within(panel).getByTestId('qa-preset-transparent-mode');
+    expect(button.getAttribute('data-preset')).toBe('transparent-mode');
+    expect(button.textContent).toBe('Transparent Mode');
+
+    fireEvent.click(button);
+
+    await waitFor(() => expect(createPresetGame).toHaveBeenCalledWith('transparent-mode'));
+    await waitFor(() => expect(window.location.hash).toBe('#/g/preset-t?player=p0'));
   });
 
   it('shows a themed loading page until the backend answers its health check', async () => {

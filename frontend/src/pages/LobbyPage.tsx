@@ -21,6 +21,7 @@ const QA_SCENARIOS: { id: string; label: string }[] = [
   { id: 'surrender-half-off', label: 'Surrender Half-Off' },
   { id: 'defenseless-surrender', label: 'Defenseless Auto-Surrender' },
   { id: 'discard-and-endgame', label: 'Discard & Endgame Durak' },
+  { id: 'transparent-mode', label: 'Transparent Mode' },
   { id: LIGHT_THEME_PRESET_ID, label: 'Light Theme Header' },
 ];
 
@@ -64,6 +65,13 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
   const [playerTypes, setPlayerTypes] = useState<PlayerType[]>(['human', 'human']);
   const [allowRedirect, setAllowRedirect] = useState(true);
   const [chaosMode, setChaosMode] = useState(false);
+  // T-90-2 ITEM-10b: Transparent Mode reveals every hand; it is legal at every
+  // player count and combines with Allow redirects / Chaos mode.
+  const [transparentMode, setTransparentMode] = useState(false);
+  // T-90-2 ITEM-14a: Dev Mode keeps POV switching open during live play. It is
+  // on by default while testing; unchecking it hands control to the server's
+  // `devMode` lock, which DOM tampering cannot override.
+  const [devMode, setDevMode] = useState(true);
   const [serverReady, setServerReady] = useState(initialServerReady);
   const [creating, setCreating] = useState(false);
   const [created, setCreated] = useState<CreatedRoom | null>(null);
@@ -134,7 +142,15 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
     setCreating(true);
     setError(null);
     setCreated(null);
-    createGame(playerCount, names, allowRedirect, playerCount > 2 && chaosMode, playerTypes)
+    createGame(
+      playerCount,
+      names,
+      allowRedirect,
+      playerCount > 2 && chaosMode,
+      playerTypes,
+      transparentMode,
+      devMode,
+    )
       .then((room: CreatedGame) => {
         setCreated({
           gameId: room.gameId,
@@ -255,6 +271,28 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
               </label>
             ) : null}
 
+            <label class="checkbox-field">
+              <input
+                type="checkbox"
+                data-testid="transparent-mode-checkbox"
+                checked={transparentMode}
+                onChange={(event) =>
+                  setTransparentMode((event.target as HTMLInputElement).checked)
+                }
+              />
+              Transparent mode (all hands visible)
+            </label>
+
+            <label class="checkbox-field">
+              <input
+                type="checkbox"
+                data-testid="dev-mode-checkbox"
+                checked={devMode}
+                onChange={(event) => setDevMode((event.target as HTMLInputElement).checked)}
+              />
+              Dev mode (allow POV switching)
+            </label>
+
             <button type="submit" class="action-button green" disabled={creating}>
               {creating ? 'Creating…' : 'Create Game'}
             </button>
@@ -272,6 +310,7 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
                   key={scenario.id}
                   type="button"
                   class="qa-scenario-button"
+                  data-testid={`qa-preset-${scenario.id}`}
                   data-preset={scenario.id}
                   disabled={presetPending}
                   onClick={() => startPreset(scenario.id)}
