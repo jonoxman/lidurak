@@ -205,7 +205,11 @@ describe('T-90 semantic feature color system', () => {
       '--clock-active-accent: #0e7490',
     );
     expect(cssRule(appCss, ".game-clock[data-active='true']")).toContain(
-      'var(--clock-active-accent)',
+      'var(--clock-idle-text)',
+    );
+    expect(cssRule(tableCss, ':root')).toContain('--clock-idle-text: #f8fafc');
+    expect(cssRule(tableCss, ":root[data-theme='light']")).toContain(
+      '--clock-idle-text: #0f172a',
     );
     expect(cssRule(appCss, ".turn-clock[data-low-time='true']")).toContain(
       'var(--clock-urgent-accent)',

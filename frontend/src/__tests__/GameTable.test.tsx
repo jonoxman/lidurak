@@ -420,6 +420,7 @@ describe('turn nudges', () => {
         trumpSuit="diamonds"
         attackerId="p1"
         defenderId="p0"
+        boutPhase="Defense"
         defending
       />,
     );
@@ -2643,6 +2644,119 @@ describe('T-90-2 ITEM-PREV-4: defender hand glow before the surrender decision',
     expect(container.querySelectorAll('.turn-pulse.table-card-uncovered')).toHaveLength(
       uncoveredPair.length,
     );
+  });
+
+  it('T-90 ITEM-PREV-4b: shows the uncovered prompt only to the defender', () => {
+    const defender = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={uncoveredPair}
+        trumpSuit="clubs"
+        attackerId="p1"
+        defenderId="p0"
+        boutPhase="Defense"
+        defending
+        turnPlayerId="p0"
+      />,
+    );
+
+    const pair = defender.container.querySelector('.table-pair') as HTMLElement;
+    const attack = defender.container.querySelector('.table-pair-attack') as HTMLElement;
+    expect(pair.classList.contains('table-card-uncovered')).toBe(true);
+    expect(pair.getAttribute('data-uncovered-highlighted')).toBe('true');
+    expect(attack.getAttribute('data-uncovered-highlighted')).toBe('true');
+    defender.unmount();
+
+    // The initial attacker (p0) sees the same uncovered card with no prompt.
+    const attacker = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={uncoveredPair}
+        trumpSuit="clubs"
+        attackerId="p0"
+        defenderId="p1"
+        boutPhase="Defense"
+        turnPlayerId="p1"
+      />,
+    );
+    expect(attacker.container.querySelectorAll('.table-card-uncovered')).toHaveLength(0);
+    expect(
+      attacker.container.querySelector('.table-pair')!.getAttribute('data-uncovered-highlighted'),
+    ).toBe('false');
+    attacker.unmount();
+
+    // A non-defending third seat (spectator POV) also sees no prompt.
+    const spectator = render(
+      <GameTable
+        myId="p2"
+        myHand={hand}
+        opponents={[
+          { id: 'p0', name: 'Alice', cardCount: 4, hasPassed: false, finishRank: null },
+          { id: 'p1', name: 'Bob', cardCount: 4, hasPassed: false, finishRank: null },
+        ]}
+        tablePairs={uncoveredPair}
+        trumpSuit="clubs"
+        attackerId="p0"
+        defenderId="p1"
+        boutPhase="Defense"
+        turnPlayerId="p1"
+      />,
+    );
+    expect(spectator.container.querySelectorAll('.table-card-uncovered')).toHaveLength(0);
+    expect(
+      spectator.container.querySelector('.table-pair')!.getAttribute('data-uncovered-highlighted'),
+    ).toBe('false');
+  });
+
+  it('T-90 ITEM-PREV-4a: clears the uncovered prompt once surrender is decided', () => {
+    const baseProps = {
+      myId: 'p0',
+      myHand: hand,
+      opponents: activeOpponents,
+      tablePairs: uncoveredPair,
+      trumpSuit: 'clubs',
+      attackerId: 'p1',
+      defenderId: 'p0',
+    };
+
+    // The Surrender click is already in flight (the new projection has not
+    // landed yet): the felt stops prompting immediately.
+    const clicked = render(
+      <GameTable {...baseProps} boutPhase="Defense" defending surrenderTriggered />,
+    );
+    expect(clicked.container.querySelectorAll('.table-card-uncovered')).toHaveLength(0);
+    expect(
+      clicked.container.querySelector('.table-pair')!.getAttribute('data-uncovered-highlighted'),
+    ).toBe('false');
+    clicked.unmount();
+
+    // The server has moved the bout into `SurrenderThrowIn`.
+    const phase = render(
+      <GameTable {...baseProps} boutPhase="SurrenderThrowIn" defending />,
+    );
+    expect(phase.container.querySelectorAll('.table-card-uncovered')).toHaveLength(0);
+    expect(
+      phase.container.querySelector('.table-pair')!.getAttribute('data-uncovered-highlighted'),
+    ).toBe('false');
+    phase.unmount();
+
+    // The handed-down flag names the surrendered defender outright.
+    const handedDown = render(
+      <GameTable {...baseProps} boutPhase="Defense" isSurrenderingDefender />,
+    );
+    expect(handedDown.container.querySelectorAll('.table-card-uncovered')).toHaveLength(0);
+    expect(
+      handedDown.container.querySelector('.table-pair')!.getAttribute('data-uncovered-highlighted'),
+    ).toBe('false');
+    handedDown.unmount();
+
+    // Once the new bout starts in `Defense`, the defender is prompted again.
+    const fresh = render(<GameTable {...baseProps} boutPhase="Defense" defending />);
+    expect(fresh.container.querySelectorAll('.table-card-uncovered')).toHaveLength(1);
   });
 
   it('T-90-2: drops the red glow the moment Surrender is pressed', () => {

@@ -456,19 +456,36 @@ html[data-theme='light'] .error-banner {
   box-sizing: border-box;
 }
 
-/* T-90 ITEM-1a/1c: the running Game or Turn half glows cyan-teal, never the
-   attacker green or the defender crimson. */
+/* T-90 ITEM-QA-1: no clock half is highlighted during normal play. The Game
+   clock only counts up, and the Turn clock stays neutral above five seconds. */
 .clock-half[data-active='true'],
 .split-clock-half[data-active='true'] {
-  background: var(--clock-active-bg);
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+  border-color: transparent;
+}
+
+.clock-half[data-active='true']:not(.clock-low) .split-clock-value,
+.split-clock-half[data-active='true']:not(.clock-low) .split-clock-value {
+  color: var(--clock-idle-text);
+  text-shadow: none;
+}
+
+/* Only the final five seconds of the running Turn clock glow (urgent aura). */
+.clock-half.clock-low,
+.clock-half[data-low-time='true'],
+.split-clock-half.clock-low,
+.split-clock-half[data-low-time='true'] {
+  background: var(--clock-urgent-bg);
   box-shadow:
-    inset 0 0 0 1px var(--clock-active-border),
-    inset 0 0 12px var(--clock-active-glow);
+    inset 0 0 0 1px var(--clock-urgent-border),
+    inset 0 0 12px var(--clock-urgent-glow);
 }
 
 /* The divider between the two vertical halves of the single clock panel. */
-.clock-half.turn-clock-half {
-  border-top: 1px solid var(--app-border);
+.clock-split-panel .split-clock-half.game-clock-half {
+  border-bottom: 1px solid var(--app-border);
 }
 
 .turn-clock {
@@ -788,8 +805,8 @@ html[data-theme='light'] .status-badge[data-role='defender'] {
 }
 
 .game-clock[data-active='true'] {
-  color: var(--clock-active-accent);
-  text-shadow: 0 0 10px var(--clock-active-glow);
+  color: var(--clock-idle-text);
+  text-shadow: none;
   opacity: 1;
 }
 
@@ -1682,31 +1699,40 @@ html[data-theme='light'] .review-nav-button:focus-visible {
   box-shadow: 0 0 12px 2px var(--ui-select-glow);
 }
 
-/* Right sidebar: the running clock half and the low-time warning. */
+/* Right sidebar: no highlight during normal play; only the final five seconds
+   of the running Turn clock switch to the urgent aura. */
 html[data-theme='light'] .clock-half[data-active='true'],
 html[data-theme='light'] .split-clock-half[data-active='true'] {
-  background: var(--clock-active-bg);
-  box-shadow:
-    inset 0 0 0 1px var(--clock-active-border),
-    inset 0 0 12px var(--clock-active-glow);
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+  border-color: transparent;
 }
 
-html[data-theme='light'] .clock-half.turn-clock-half[data-active='true'],
-html[data-theme='light'] .split-clock-half.turn-clock-half[data-active='true'] {
-  background: var(--clock-active-bg);
+html[data-theme='light'] .clock-half[data-active='true']:not(.clock-low) .split-clock-value,
+html[data-theme='light'] .split-clock-half[data-active='true']:not(.clock-low) .split-clock-value {
+  color: var(--clock-idle-text);
+  text-shadow: none;
+}
+
+html[data-theme='light'] .clock-half.clock-low,
+html[data-theme='light'] .clock-half[data-low-time='true'],
+html[data-theme='light'] .split-clock-half.clock-low,
+html[data-theme='light'] .split-clock-half[data-low-time='true'] {
+  background: var(--clock-urgent-bg);
   box-shadow:
-    inset 0 0 0 1px var(--clock-active-border),
-    inset 0 0 12px var(--clock-active-glow);
+    inset 0 0 0 1px var(--clock-urgent-border),
+    inset 0 0 12px var(--clock-urgent-glow);
 }
 
 html[data-theme='light'] .game-clock[data-active='true'] {
-  color: #0e7490;
-  text-shadow: 0 0 10px rgba(14, 116, 144, 0.64);
+  color: var(--clock-idle-text);
+  text-shadow: none;
 }
 
 html[data-theme='light'] .turn-clock.active {
-  color: #0e7490;
-  text-shadow: 0 0 10px rgba(14, 116, 144, 0.64);
+  color: var(--clock-idle-text);
+  text-shadow: none;
 }
 
 html[data-theme='light'] .turn-clock[data-low-time='true'] {

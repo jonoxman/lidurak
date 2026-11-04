@@ -6,6 +6,12 @@ export interface TablePairProps {
   trumpSuit?: string;
   /** Rhythm nudge for the defending client only. */
   pulse?: boolean;
+  /**
+   * T-90 ITEM-PREV-4a/4b: the uncovered attack prompt is allowed. Only the
+   * bout's defender, in `Defense`, before surrendering, in live play sets this.
+   * Any other viewer/phase renders the attack card without the crimson glow.
+   */
+  highlightUncovered?: boolean;
   /** Magnetic-snap highlight while a dragged card hovers this slot. */
   snap?: boolean;
   /** Stable id of this pair as a drop zone (`cover:<index>`). */
@@ -27,6 +33,7 @@ export function TablePair({
   defense,
   trumpSuit = '',
   pulse = false,
+  highlightUncovered,
   snap = false,
   dropZone,
   marginLeft,
@@ -38,10 +45,11 @@ export function TablePair({
   const isTrump = (card: CardData): boolean =>
     trumpSuit.length > 0 && card.suit.toLowerCase() === trumpSuit.toLowerCase();
 
+  // T-90 ITEM-PREV-4a/4b: the crimson prompt may only appear on an uncovered
+  // card when the caller explicitly allows it. `pulse` stays a legacy alias.
+  const uncoveredHighlighted = defense == null && (highlightUncovered ?? pulse);
   const classes = ['table-pair'];
-  // T-90 ITEM-1c: an uncovered attacking card is a Defender prompt, exposed via
-  // the dedicated `table-card-uncovered` hook as well as the legacy pulse class.
-  if (pulse) classes.push('turn-pulse', 'table-card-uncovered');
+  if (uncoveredHighlighted) classes.push('turn-pulse', 'table-card-uncovered');
   if (snap) classes.push('snap-active');
 
   // Item 8: an attack card sits flush with the top of an exact card-sized box,
@@ -50,11 +58,13 @@ export function TablePair({
     <div
       class={classes.join(' ')}
       data-card-align="top"
+      data-uncovered-highlighted={uncoveredHighlighted ? 'true' : 'false'}
       style={marginLeft ? { marginLeft } : undefined}
     >
       <div
-        class="table-pair-attack"
+        class="table-pair-attack table-card-attack"
         data-card-align="top"
+        data-uncovered-highlighted={uncoveredHighlighted ? 'true' : 'false'}
         data-drop-zone={dropZone}
         onDragOver={onDragOverCard}
         onDragLeave={onDragLeaveCard}
