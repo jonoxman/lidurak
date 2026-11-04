@@ -67,6 +67,11 @@
    its semantic hue, but at a higher lightness and gentler chroma, with softer
    border / glow / tint alphas at the default 100% intensity. Dark is unchanged. */
 :root[data-theme='light'] {
+  /* T-90-feedback-4: gameplay panels sit on the same cooler grey page family
+     as the lobby, never the old warm beige. */
+  --durak-bg: #d8dde4;
+  --durak-panel: #e8ecf1;
+  --durak-border: #b9c2ce;
   --role-attacker-accent: #46a76f;
   --role-attacker-border: rgba(70, 167, 111, 0.6);
   --role-attacker-glow: rgba(70, 167, 111, 0.3);

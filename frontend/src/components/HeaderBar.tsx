@@ -565,6 +565,10 @@ export function HeaderBar({ pingMs = 24, serverDelayMs = 12 }: HeaderBarProps) {
   const [submenu, setSubmenu] = useState<SubmenuId | null>(null);
   const [barsUpdating, setBarsUpdating] = useState(false);
   const previousLevel = useRef<number | null>(null);
+  // T-90-feedback-4: expose the page gradient direction for deterministic CSS
+  // and tests — Light is the inverse ("lightening") of Dark ("darkening").
+  const settings = useSettings();
+  const resolvedTheme = resolveTableTheme(settings.theme);
 
   // The tracker follows the live measured round-trip time reported by the app.
   const level = connectionLevel(pingMs);
@@ -586,7 +590,12 @@ export function HeaderBar({ pingMs = 24, serverDelayMs = 12 }: HeaderBarProps) {
   }, [level]);
 
   return (
-    <header class="site-header" data-zone="site-header">
+    <header
+      class="site-header"
+      data-zone="site-header"
+      data-theme={resolvedTheme}
+      data-header-gradient={resolvedTheme === 'light' ? 'lightening' : 'darkening'}
+    >
       <a class="header-brand" href="#/" onClick={() => setOpenMenu(null)}>
         <svg
           class="header-logo"

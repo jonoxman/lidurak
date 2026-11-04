@@ -12,6 +12,22 @@
   --app-input-bg: #161512;
   --app-shadow: 0 18px 36px rgba(0, 0, 0, 0.42);
   --app-roundness: 8px;
+  /* T-90-feedback-4: neutral page/surface aliases plus the header-gradient
+     tokens. Dark mode is the "darkening" direction: the header starts lighter
+     than the page and the page darkens downward. */
+  --bg-base: #161512;
+  --bg-page: var(--bg-base);
+  --bg-surface: #262421;
+  --bg-elevated: #2b2925;
+  --bg-panel: #262421;
+  --header-bg-top: #201f1c;
+  --header-gradient-mid: #1b1a17;
+  --header-gradient-extent: 220px;
+  --page-top-gradient: linear-gradient(
+    180deg,
+    var(--header-bg-top) 0,
+    var(--bg-base) var(--header-gradient-extent)
+  );
   /* T-90-feedback-2: global highlight aura multiplier, 0.2 subtle – 2 bright.
      `settings.ts` overwrites this inline from the Intensity slider; the fallback
      keeps every glow sane before JavaScript applies the saved setting. */
@@ -29,26 +45,45 @@
   --ui-select-text: #93c5fd;
 }
 
-/* Light durak palette: same structure, softer surfaces, readable contrast. */
+/* Light durak palette: T-90-feedback-4 replaces the warm beige off-whites with
+   a slightly darker, neutral cool-grey family (R <= G <= B everywhere). */
 html[data-theme='light'] {
-  --app-bg: #f4f1ea;
-  --app-bg-soft: #ece7dc;
-  --app-header: #fffdf7;
-  --app-panel: #ffffff;
-  --app-text: #3a3833;
-  --app-text-strong: #1d1c19;
-  --app-border: #d7d2c6;
+  --bg-base: #d8dde4;
+  --bg-page: var(--bg-base);
+  --bg-surface: #e4e8ee;
+  --bg-elevated: #eceff4;
+  --bg-panel: #eef1f5;
+  --app-bg: var(--bg-base);
+  --app-bg-soft: #cfd5de;
+  /* The header starts darker than the page and lightens downward. */
+  --app-header: var(--header-bg-top);
+  --app-panel: var(--bg-panel);
+  --app-text: #334155;
+  --app-text-strong: #1e293b;
+  --app-border: #b9c2ce;
   --app-accent: #4f7d1c;
   --app-accent-soft: rgba(98, 153, 36, 0.14);
   --app-profile-hover: #1f6fa8;
-  --app-input-bg: #ffffff;
-  --app-shadow: 0 18px 36px rgba(31, 41, 55, 0.12);
+  --app-input-bg: #f2f5f9;
+  --app-shadow: 0 18px 36px rgba(31, 41, 55, 0.16);
+  /* T-90-feedback-4 ITEM-NEW-1b: the inverse header gradient. It starts at the
+     darker header shade, passes through the bar and reaches --bg-base ~100px
+     below the header (160px from the top of the viewport). */
+  --header-bg-top: #b8c0cc;
+  --header-gradient-mid: #c8cfd9;
+  --header-gradient-extent: 160px;
+  --page-top-gradient: linear-gradient(
+    180deg,
+    var(--header-bg-top) 0,
+    var(--header-gradient-mid) 64px,
+    var(--bg-base) var(--header-gradient-extent)
+  );
   /* Consumed by table.css via the --durak-* variables. */
-  --durak-bg: #f4f1ea;
-  --durak-panel: #ffffff;
+  --durak-bg: var(--bg-base);
+  --durak-panel: #e8ecf1;
   --durak-felt: #dfe8dc;
-  --durak-text: #3a3833;
-  --durak-border: #d7d2c6;
+  --durak-text: #334155;
+  --durak-border: #b9c2ce;
   --durak-accent: #4f7d1c;
   --durak-danger: #b3261e;
   --durak-amber: #a9761b;
@@ -64,18 +99,40 @@ html[data-theme='light'] {
 /* Before JavaScript applies data-theme, follow a light OS preference. */
 @media (prefers-color-scheme: light) {
   html:not([data-theme]) {
-    --app-bg: #f4f1ea;
-    --app-bg-soft: #ece7dc;
-    --app-header: #fffdf7;
-    --app-panel: #ffffff;
-    --app-text: #3a3833;
-    --app-text-strong: #1d1c19;
-    --app-border: #d7d2c6;
+    --bg-base: #d8dde4;
+    --bg-page: var(--bg-base);
+    --bg-surface: #e4e8ee;
+    --bg-elevated: #eceff4;
+    --bg-panel: #eef1f5;
+    --app-bg: var(--bg-base);
+    --app-bg-soft: #cfd5de;
+    --app-header: var(--header-bg-top);
+    --app-panel: var(--bg-panel);
+    --app-text: #334155;
+    --app-text-strong: #1e293b;
+    --app-border: #b9c2ce;
     --app-accent: #4f7d1c;
     --app-accent-soft: rgba(98, 153, 36, 0.14);
     --app-profile-hover: #1f6fa8;
-    --app-input-bg: #ffffff;
-    --app-shadow: 0 18px 36px rgba(31, 41, 55, 0.12);
+    --app-input-bg: #f2f5f9;
+    --app-shadow: 0 18px 36px rgba(31, 41, 55, 0.16);
+    --header-bg-top: #b8c0cc;
+    --header-gradient-mid: #c8cfd9;
+    --header-gradient-extent: 160px;
+    --page-top-gradient: linear-gradient(
+      180deg,
+      var(--header-bg-top) 0,
+      var(--header-gradient-mid) 64px,
+      var(--bg-base) var(--header-gradient-extent)
+    );
+    --durak-bg: var(--bg-base);
+    --durak-panel: #e8ecf1;
+    --durak-felt: #dfe8dc;
+    --durak-text: #334155;
+    --durak-border: #b9c2ce;
+    --durak-accent: #4f7d1c;
+    --durak-danger: #b3261e;
+    --durak-amber: #a9761b;
     --ui-select-accent: #5b87f5;
     --ui-select-border: rgba(91, 135, 245, 0.62);
     --ui-select-glow: rgba(91, 135, 245, 0.3);
@@ -94,8 +151,13 @@ body {
 
 .app {
   min-height: 100vh;
-  /* Seamless transition from the header shade into the page background. */
-  background: linear-gradient(180deg, var(--app-header) 0, var(--app-bg) 220px);
+  /* T-90-feedback-4: one continuous page-level gradient. It is defined per
+     theme so light mode can lighten from a darker header into the page, the
+     inverse of dark mode. */
+  background: var(
+    --page-top-gradient,
+    linear-gradient(180deg, var(--app-header) 0, var(--app-bg) 220px)
+  );
 }
 
 .app-title {
@@ -924,6 +986,17 @@ html[data-theme='light'] .status-badge[data-role='defender'] {
   padding: 10px 18px;
   background: var(--app-header);
   border-bottom: 1px solid var(--app-border);
+}
+
+/* T-90-feedback-4 ITEM-NEW-1b: in Light mode the header paints no opaque
+   strip and no hard border of its own. The darker top shade comes from the
+   page-level lightening gradient behind it, so the bar flows seamlessly into
+   the rest of the page a little way below it. Dark mode ("darkening") keeps
+   its own opaque header surface. */
+.site-header[data-header-gradient='lightening'],
+html[data-theme='light'] .site-header {
+  background: transparent;
+  border-bottom-color: transparent;
 }
 
 /* Brand link: the SVG mark sits immediately left of the LIDURAK wordmark. */
