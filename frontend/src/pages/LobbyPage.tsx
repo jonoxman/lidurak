@@ -6,7 +6,11 @@ import {
   type CreatedGame,
 } from '../api/client';
 import type { PlayerType } from '../types';
+import { setSettings } from '../state/settings';
 import '../styles/table.css';
+
+/** One-click Light-theme preset; it only repaints, so no room is created. */
+export const LIGHT_THEME_PRESET_ID = 'light-theme-gradient';
 
 const DEFAULT_NAMES = ['Alice', 'Bob', 'Carol', 'Dave'];
 
@@ -17,6 +21,7 @@ const QA_SCENARIOS: { id: string; label: string }[] = [
   { id: 'surrender-half-off', label: 'Surrender Half-Off' },
   { id: 'defenseless-surrender', label: 'Defenseless Auto-Surrender' },
   { id: 'discard-and-endgame', label: 'Discard & Endgame Durak' },
+  { id: LIGHT_THEME_PRESET_ID, label: 'Light Theme Header' },
 ];
 
 /** Seat choices offered per player row; values match the backend's `playerTypes`. */
@@ -150,6 +155,13 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
 
   // QA presets open a scripted position on the seat that makes it readable.
   const startPreset = (presetId: string) => {
+    // T-90-feedback-4: the Light theme check repaints the lobby in place; it
+    // is deliberately backend-free so a reviewer sees the new page/header
+    // gradient in one click even before creating a room.
+    if (presetId === LIGHT_THEME_PRESET_ID) {
+      setSettings({ theme: 'light' });
+      return;
+    }
     if (presetPending) return;
     setPresetPending(true);
     setPresetError(null);

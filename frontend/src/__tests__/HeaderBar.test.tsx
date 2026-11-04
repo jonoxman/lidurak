@@ -943,3 +943,87 @@ describe('T-90-feedback-3 paler light-mode highlights', () => {
     );
   });
 });
+
+/**
+ * T-90-feedback-4: the Light page is a darker cool-grey family (never beige)
+ * and the header bar is the inverse of Dark — darker than the page, lightening
+ * via one continuous gradient that continues past the bar into the page.
+ */
+function rgbOf(hex: string): { r: number; g: number; b: number } {
+  const value = hex.replace('#', '');
+  return {
+    r: Number.parseInt(value.slice(0, 2), 16),
+    g: Number.parseInt(value.slice(2, 4), 16),
+    b: Number.parseInt(value.slice(4, 6), 16),
+  };
+}
+
+function relativeLuminance(hex: string): number {
+  const { r, g, b } = rgbOf(hex);
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+}
+
+describe('T-90-feedback-4 light page background & inverse header gradient', () => {
+  beforeEach(() => {
+    resetSettings();
+    window.localStorage.clear();
+  });
+
+  afterEach(() => {
+    resetSettings();
+    vi.restoreAllMocks();
+  });
+
+  it('repaints the Light page with a darker, cool-grey, non-beige palette', () => {
+    const light = cssRule(appCss, "html[data-theme='light']");
+    const base = /--bg-base:\s*(#[0-9a-fA-F]{6})/.exec(light)?.[1] ?? '';
+    expect(base.toLowerCase()).toBe('#d8dde4');
+
+    // Neutral/cool grey: R <= G <= B, never the old warm beige (R > B).
+    const { r, g, b } = rgbOf(base);
+    expect(r).toBeLessThanOrEqual(g);
+    expect(g).toBeLessThanOrEqual(b);
+    // Noticeably darker than the previous bright light theme.
+    expect(relativeLuminance(base)).toBeLessThan(relativeLuminance('#f0f0f0'));
+    expect(relativeLuminance(base)).toBeLessThan(relativeLuminance('#f4f1ea'));
+
+    // Coordinated grey surfaces, all in the same neutral/cool family.
+    for (const token of ['--bg-surface: #e4e8ee', '--bg-elevated: #eceff4', '--bg-panel: #eef1f5']) {
+      expect(light).toContain(token);
+    }
+    expect(cssRule(appCss, ':root')).toContain('--bg-base: #161512');
+    expect(cssRule(appCss, 'body')).toContain('background-color: var(--app-bg)');
+    expect(cssRule(appCss, '.app')).toContain('--page-top-gradient,');
+  });
+
+  it('applies the lightening header gradient in Light, inverse to Dark', () => {
+    render(<HeaderBar />);
+    openSubmenu('Theme');
+    const panel = screen.getByTestId('submenu-theme');
+
+    fireEvent.click(within(panel).getByRole('button', { name: 'Light' }));
+    expect(screen.getByRole('banner').getAttribute('data-header-gradient')).toBe('lightening');
+
+    const light = cssRule(appCss, "html[data-theme='light']");
+    expect(light).toContain('--header-bg-top: #b8c0cc');
+    expect(light).toContain('--header-gradient-mid: #c8cfd9');
+    expect(light).toContain('--header-gradient-extent: 160px');
+    expect(light).toMatch(/--page-top-gradient:\s*linear-gradient\(/);
+
+    // The header region is darker than the rest-of-page background.
+    expect(relativeLuminance('#b8c0cc')).toBeLessThan(relativeLuminance('#d8dde4'));
+    expect(relativeLuminance('#c8cfd9')).toBeLessThan(relativeLuminance('#d8dde4'));
+
+    // The bar paints no lighter opaque strip and no hard border, so the same
+    // gradient continues through and a little way below it into the page.
+    expect(
+      cssRule(appCss, ".site-header[data-header-gradient='lightening']"),
+    ).toContain('background: transparent');
+    expect(cssRule(appCss, "html[data-theme='light'] .site-header")).toContain(
+      'border-bottom-color: transparent',
+    );
+
+    fireEvent.click(within(panel).getByRole('button', { name: 'Dark' }));
+    expect(screen.getByRole('banner').getAttribute('data-header-gradient')).toBe('darkening');
+  });
+});

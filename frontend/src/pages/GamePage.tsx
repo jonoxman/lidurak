@@ -11,6 +11,10 @@ import {
 } from '../api/client';
 import { GameWebSocket } from '../api/websocket';
 import { soundEngine } from '../audio/SoundEngine';
+import { setSettings } from '../state/settings';
+
+/** One-click Light-theme preset; it only repaints, so no new room is created. */
+export const LIGHT_THEME_PRESET_ID = 'light-theme-gradient';
 import {
   buildCoverCard,
   buildDeclareSurrender,
@@ -272,6 +276,7 @@ export const QA_SCENARIOS: { id: string; label: string }[] = [
   { id: 'surrender-half-off', label: 'Surrender Half-Off' },
   { id: 'defenseless-surrender', label: 'Defenseless Auto-Surrender' },
   { id: 'discard-and-endgame', label: 'Discard & Endgame Durak' },
+  { id: LIGHT_THEME_PRESET_ID, label: 'Light Theme Header' },
 ];
 
 /**
@@ -1369,6 +1374,12 @@ export function GamePage({
 
   // QA presets: one click drops the reviewer into a scripted position.
   const startPreset = (presetId: string) => {
+    // T-90-feedback-4: the Light theme check repaints this live table in place
+    // (darker grey page + inverse header gradient) without leaving the game.
+    if (presetId === LIGHT_THEME_PRESET_ID) {
+      setSettings({ theme: 'light' });
+      return;
+    }
     if (presetPending) return;
     setPresetPending(true);
     setPresetError(null);

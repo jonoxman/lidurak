@@ -287,3 +287,42 @@ describe('parseRoute', () => {
     });
   });
 });
+
+/** T-90-feedback-4: Light page surface + inverse header gradient tokens. */
+describe('T-90-feedback-4 light page and header gradient', () => {
+  const rgbOf = (hex: string) => {
+    const value = hex.replace('#', '');
+    return {
+      r: Number.parseInt(value.slice(0, 2), 16),
+      g: Number.parseInt(value.slice(2, 4), 16),
+      b: Number.parseInt(value.slice(4, 6), 16),
+    };
+  };
+  const luminance = (hex: string) => {
+    const { r, g, b } = rgbOf(hex);
+    return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  };
+
+  it('uses a darker neutral grey page instead of the warm beige off-white', () => {
+    const light = cssRule(appCss, "html[data-theme='light']");
+    const base = /--bg-base:\s*(#[0-9a-fA-F]{6})/.exec(light)?.[1] ?? '';
+    expect(base.toLowerCase()).toBe('#d8dde4');
+    const { r, g, b } = rgbOf(base);
+    expect(r).toBeLessThanOrEqual(g);
+    expect(g).toBeLessThanOrEqual(b);
+    expect(luminance(base)).toBeLessThan(luminance('#f0f0f0'));
+    expect(light).toContain('--durak-bg: var(--bg-base)');
+    expect(light).toContain('--durak-panel: #e8ecf1');
+  });
+
+  it('defines one page gradient that lightens from the header into the page', () => {
+    const light = cssRule(appCss, "html[data-theme='light']");
+    expect(light).toContain('--header-bg-top: #b8c0cc');
+    expect(light).toContain('--header-gradient-mid: #c8cfd9');
+    expect(light).toMatch(/--bg-base\) var\(--header-gradient-extent\)/);
+    expect(cssRule(appCss, '.app')).toContain('--page-top-gradient,');
+    expect(
+      cssRule(appCss, ".site-header[data-header-gradient='lightening']"),
+    ).toContain('background: transparent');
+  });
+});

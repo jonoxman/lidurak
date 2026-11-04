@@ -2992,3 +2992,38 @@ describe('T-90-feedback-2 live table highlight presets and intensity', () => {
     expect(root.style.getPropertyValue('--role-defender-accent')).toBe('#e11d48');
   });
 });
+
+/**
+ * T-90-feedback-4: the Light Theme Header QA preset repaints the live game in
+ * place, so both page backgrounds and the inverse header gradient are one
+ * click away from the lobby or the left sidebar.
+ */
+describe('T-90-feedback-4 Light theme QA preset', () => {
+  beforeEach(() => {
+    resetSettings();
+    window.localStorage.clear();
+  });
+
+  afterEach(() => {
+    resetSettings();
+    window.localStorage.clear();
+  });
+
+  it('applies the light theme in one click without creating a room', async () => {
+    createPresetGameMock.mockClear();
+    getGameView.mockResolvedValue(view);
+    getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
+
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    const panel = await screen.findByTestId('qa-scenarios');
+    const button = within(panel).getByRole('button', { name: 'Light Theme Header' });
+    expect(button.getAttribute('data-preset')).toBe('light-theme-gradient');
+
+    fireEvent.click(button);
+
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
+    expect(getSettings().theme).toBe('light');
+    expect(createPresetGameMock).not.toHaveBeenCalled();
+  });
+});
