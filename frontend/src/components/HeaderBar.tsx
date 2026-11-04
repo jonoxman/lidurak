@@ -8,8 +8,15 @@ import {
   tableTexturePalette,
 } from '../styles/tableTextures';
 import {
+  HIGHLIGHT_INTENSITY_MAX,
+  HIGHLIGHT_INTENSITY_MIN,
+  HIGHLIGHT_PRESETS,
+  HIGHLIGHT_SLOTS,
   ROUNDNESS_MAX,
   ROUNDNESS_MIN,
+  highlightIntensityScale,
+  setHighlightIntensity,
+  setHighlightPreset,
   setSettings,
   useSettings,
   type ThemeMode,
@@ -301,6 +308,7 @@ function SoundSubmenu() {
 
 function ThemeSubmenu() {
   const settings = useSettings();
+  const resolvedTheme = resolveTableTheme(settings.theme);
   const themes: ReadonlyArray<{ id: ThemeMode; label: string }> = [
     { id: 'device', label: 'Device theme' },
     { id: 'light', label: 'Light' },
@@ -332,12 +340,83 @@ function ThemeSubmenu() {
           step={1}
           value={settings.roundness}
           aria-label="Roundness"
+          data-testid="roundness-slider"
           onInput={(event) =>
             setSettings({ roundness: Number((event.target as HTMLInputElement).value) })
           }
         />
         <output class="setting-value">{settings.roundness}px</output>
       </label>
+
+      {/* T-90-feedback-2: the Highlights section sits below every existing
+          Theme control and above the connection tracker at the dropdown foot. */}
+      <div class="theme-highlights-section" data-testid="theme-highlights-section">
+        <div class="submenu-section-title" data-testid="theme-highlights-heading">
+          Highlights
+        </div>
+
+        <div class="highlight-preset-grid" role="group" aria-label="Highlight color presets">
+          {HIGHLIGHT_PRESETS.map((preset) => {
+            const active = settings.highlightPreset === preset.id;
+            const palette = resolvedTheme === 'light' ? preset.light : preset.dark;
+            // Preview lines track the live intensity, just like the table aura.
+            const scale = highlightIntensityScale(settings.highlightIntensity);
+            return (
+              <button
+                type="button"
+                key={preset.id}
+                class={`appearance-choice highlight-preset-btn${active ? ' active' : ''}`}
+                data-testid={`highlight-preset-${preset.id}`}
+                data-preset={preset.id}
+                aria-pressed={active}
+                onClick={() => setHighlightPreset(preset.id)}
+              >
+                <span class="highlight-preset-name">{preset.label}</span>
+                <span
+                  class="highlight-preset-lines"
+                  data-testid={`highlight-preset-preview-${preset.id}`}
+                  aria-hidden="true"
+                >
+                  {HIGHLIGHT_SLOTS.map(({ slot, label }) => {
+                    const color = palette[slot];
+                    return (
+                      <span
+                        key={slot}
+                        class="highlight-preview-line"
+                        data-slot={slot}
+                        title={label}
+                        style={{
+                          background: color,
+                          boxShadow: `0 0 ${(5 * scale).toFixed(1)}px ${color}`,
+                        }}
+                      />
+                    );
+                  })}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <label class="setting-row">
+          <span class="setting-label">Intensity</span>
+          <input
+            type="range"
+            min={HIGHLIGHT_INTENSITY_MIN}
+            max={HIGHLIGHT_INTENSITY_MAX}
+            step={1}
+            value={settings.highlightIntensity}
+            aria-label="Highlight intensity"
+            data-testid="highlight-intensity-slider"
+            onInput={(event) =>
+              setHighlightIntensity(Number((event.target as HTMLInputElement).value))
+            }
+          />
+          <output class="setting-value" data-testid="highlight-intensity-value">
+            {settings.highlightIntensity}%
+          </output>
+        </label>
+      </div>
     </div>
   );
 }

@@ -52,6 +52,12 @@ vi.mock('../api/websocket', () => ({
 
 import * as client from '../api/client';
 import { GamePage } from '../pages/GamePage';
+import {
+  getSettings,
+  resetSettings,
+  setHighlightIntensity,
+  setHighlightPreset,
+} from '../state/settings';
 import appCss from '../app.css?raw';
 import tableCss from '../styles/table.css?raw';
 
@@ -2852,5 +2858,75 @@ describe('GamePage client auto-surrender and auto-pass delays', () => {
     expect(cssRule(appCss, ".turn-clock[data-low-time='true']")).toContain(
       'var(--clock-urgent-accent)',
     );
+  });
+});
+
+/**
+ * T-90-feedback-2 ITEM-NEW-1b / ITEM-NEW-1d: the Theme ▸ Highlights preset and
+ * Intensity controls retheme the live GameTable in real time — no reload and no
+ * closing of the dropdown — because the settings store repaints `<html>`.
+ */
+describe('T-90-feedback-2 live table highlight presets and intensity', () => {
+  beforeEach(() => {
+    resetSettings();
+    window.localStorage.clear();
+    getGameView.mockReset();
+    getGameReplay.mockReset();
+    sendAction.mockReset();
+    createGameMock.mockReset();
+    createPresetGameMock.mockReset();
+    wsState.onUpdate = null;
+    wsState.presence = [];
+  });
+
+  afterEach(() => {
+    resetSettings();
+    window.localStorage.clear();
+  });
+
+  it('retunes the mounted table tokens when preset and intensity change', async () => {
+    getGameView.mockResolvedValue(view);
+    getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
+
+    const { container } = render(
+      <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
+    );
+    await waitFor(() => expect(screen.getByTestId('clock-panel')).toBeTruthy());
+
+    const root = document.documentElement;
+    // Defaults are the Classic scheme at 100%.
+    expect(getSettings().highlightPreset).toBe('classic');
+    expect(root.dataset.highlightPreset).toBe('classic');
+    expect(root.style.getPropertyValue('--highlight-intensity')).toBe('1');
+    expect(root.style.getPropertyValue('--role-attacker-accent')).toBe('#22c55e');
+
+    // Selecting Cool, then raising the Intensity slider, repaints the arena.
+    setHighlightPreset('cool');
+    setHighlightIntensity(175);
+
+    expect(root.dataset.highlightPreset).toBe('cool');
+    expect(root.dataset.highlightIntensity).toBe('175');
+    expect(root.style.getPropertyValue('--highlight-intensity')).toBe('1.75');
+    expect(root.style.getPropertyValue('--ui-select-accent')).toBe('#06b6d4');
+    expect(root.style.getPropertyValue('--role-attacker-accent')).toBe('#10b981');
+    expect(root.style.getPropertyValue('--role-defender-accent')).toBe('#e11d48');
+    expect(root.style.getPropertyValue('--trump-accent')).toBe('#38bdf8');
+    expect(root.style.getPropertyValue('--redirect-accent')).toBe('#8b5cf6');
+    expect(root.style.getPropertyValue('--clock-urgent-accent')).toBe('#f97316');
+    expect(root.style.getPropertyValue('--role-attacker-pulse-outer')).not.toBe('');
+
+    // The live table is still mounted and consumes the very same tokens.
+    expect(container.querySelector('[data-zone="table-arena"]')).not.toBeNull();
+    expect(screen.getByTestId('hand-turn-highlight')).toBeTruthy();
+    expect(tableCss).toContain("var(--role-defender-glow)");
+    expect(tableCss).toContain(".hand-cards[data-highlighted='true'][data-highlight-variant='defender']");
+    // Outlines and the urgent clock scale their aura with the same factor.
+    expect(tableCss).toContain('calc(10px * var(--highlight-intensity, 1))');
+    expect(appCss).toContain('calc(12px * var(--highlight-intensity, 1))');
+
+    // Lowering the intensity softens the same palette; the preset is unchanged.
+    setHighlightIntensity(20);
+    expect(root.style.getPropertyValue('--highlight-intensity')).toBe('0.2');
+    expect(root.style.getPropertyValue('--role-defender-accent')).toBe('#e11d48');
   });
 });

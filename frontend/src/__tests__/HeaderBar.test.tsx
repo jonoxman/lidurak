@@ -5,6 +5,10 @@ import { ALL_CARD_BACK_PATTERNS, CardBack } from '../components/CardBack';
 import { soundEngine } from '../audio/SoundEngine';
 import { TABLE_TEXTURES } from '../styles/tableTextures';
 import {
+  HIGHLIGHT_INTENSITY_MAX,
+  HIGHLIGHT_INTENSITY_MIN,
+  HIGHLIGHT_PRESETS,
+  USER_SETTINGS_STORAGE_KEY,
   clampRoundness,
   getSettings,
   resetSettings,
@@ -593,5 +597,206 @@ describe('T-90 item 1b: appearance menus select in royal blue', () => {
       '--ui-select-bg: rgba(37, 99, 235, 0.14)',
     );
     expect(cssRule(appCss, "html[data-theme='light']")).toContain('--ui-select-text: #1e3a8a');
+  });
+});
+
+/**
+ * T-90-feedback-2: Theme ▸ Highlights — placement, six presets with multi-line
+ * previews, and the real-time Intensity slider.
+ */
+describe('T-90-feedback-2 Theme Highlights section', () => {
+  beforeEach(() => {
+    resetSettings();
+    window.localStorage.clear();
+  });
+
+  afterEach(() => {
+    cleanup();
+    resetSettings();
+    window.localStorage.clear();
+  });
+
+  const openHighlights = () => {
+    render(<HeaderBar />);
+    openSubmenu('Theme');
+    return screen.getByTestId('theme-highlights-section');
+  };
+
+  it('ITEM-NEW-1a: renders Highlights below Roundness and above the connection tracker', () => {
+    const section = openHighlights();
+
+    expect(section.classList.contains('theme-highlights-section')).toBe(true);
+    const heading = screen.getByTestId('theme-highlights-heading');
+    expect(heading.textContent).toBe('Highlights');
+    expect(heading.classList.contains('submenu-section-title')).toBe(true);
+
+    const roundness = screen.getByTestId('roundness-slider');
+    const tracker = document.querySelector('.connection-tracker') as HTMLElement;
+    expect(roundness).not.toBeNull();
+    expect(tracker).not.toBeNull();
+    // Roundness precedes the Highlights section, which precedes the PING tracker.
+    expect(
+      roundness.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      section.compareDocumentPosition(tracker) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(within(screen.getByTestId('submenu-theme')).getByTestId('theme-highlights-section'))
+      .toBe(section);
+  });
+
+  it('ITEM-NEW-1b: renders six presets and applies each palette in real time', () => {
+    const section = openHighlights();
+    const buttons = within(section).getAllByRole('button');
+    // Six presets + the Intensity slider is not a button, so exactly six.
+    expect(buttons).toHaveLength(HIGHLIGHT_PRESETS.length);
+    expect(HIGHLIGHT_PRESETS.map((preset) => preset.id)).toEqual([
+      'classic',
+      'warm',
+      'cool',
+      'neon',
+      'pastel',
+      'royal',
+    ]);
+
+    const root = document.documentElement;
+    expect(root.dataset.highlightPreset).toBe('classic');
+    expect(root.style.getPropertyValue('--ui-select-accent')).toBe('#3b82f6');
+    expect(within(section).getByTestId('highlight-preset-classic').getAttribute('aria-pressed'))
+      .toBe('true');
+
+    for (const preset of HIGHLIGHT_PRESETS) {
+      const button = within(section).getByTestId(`highlight-preset-${preset.id}`) as HTMLElement;
+      expect(button.classList.contains('highlight-preset-btn')).toBe(true);
+      expect(button.getAttribute('data-preset')).toBe(preset.id);
+
+      fireEvent.click(button);
+
+      expect(getSettings().highlightPreset).toBe(preset.id);
+      expect(root.dataset.highlightPreset).toBe(preset.id);
+      expect(button.getAttribute('aria-pressed')).toBe('true');
+      expect(button.classList.contains('active')).toBe(true);
+      // Every semantic accent token is rewritten from the preset's dark palette
+      // (the default Device theme resolves to dark in jsdom).
+      expect(root.style.getPropertyValue('--ui-select-accent')).toBe(preset.dark.uiSelect);
+      expect(root.style.getPropertyValue('--role-attacker-accent')).toBe(preset.dark.attacker);
+      expect(root.style.getPropertyValue('--role-defender-accent')).toBe(preset.dark.defender);
+      expect(root.style.getPropertyValue('--trump-accent')).toBe(preset.dark.trump);
+      expect(root.style.getPropertyValue('--redirect-accent')).toBe(preset.dark.redirect);
+      expect(root.style.getPropertyValue('--clock-urgent-accent')).toBe(preset.dark.clockUrgent);
+    }
+
+    // Warm and Cool are two of the six, and each selected palette sticks.
+    fireEvent.click(within(section).getByTestId('highlight-preset-warm'));
+    expect(root.style.getPropertyValue('--role-attacker-accent')).toBe('#84cc16');
+    fireEvent.click(within(section).getByTestId('highlight-preset-cool'));
+    expect(root.style.getPropertyValue('--ui-select-accent')).toBe('#06b6d4');
+  });
+
+  it('ITEM-NEW-1b: repaints the palette for the light theme too', () => {
+    setSettings({ theme: 'light' });
+    const section = openHighlights();
+    fireEvent.click(within(section).getByTestId('highlight-preset-warm'));
+
+    const root = document.documentElement;
+    expect(root.getAttribute('data-theme')).toBe('light');
+    expect(root.style.getPropertyValue('--ui-select-accent')).toBe('#b45309');
+    expect(root.style.getPropertyValue('--role-attacker-accent')).toBe('#4d7c0f');
+    expect(root.style.getPropertyValue('--role-defender-accent')).toBe('#be123c');
+    expect(root.style.getPropertyValue('--trump-accent')).toBe('#a16207');
+    expect(root.style.getPropertyValue('--redirect-accent')).toBe('#be185d');
+    expect(root.style.getPropertyValue('--clock-urgent-accent')).toBe('#9a3412');
+
+    // Switching back to dark reloads the dark half of the same preset.
+    fireEvent.click(screen.getByRole('button', { name: 'Dark' }));
+    expect(root.style.getPropertyValue('--ui-select-accent')).toBe('#d97706');
+  });
+
+  it('ITEM-NEW-1c: each preset button previews six distinct highlight lines', () => {
+    const section = openHighlights();
+
+    for (const preset of HIGHLIGHT_PRESETS) {
+      const preview = within(section).getByTestId(`highlight-preset-preview-${preset.id}`);
+      expect(preview.classList.contains('highlight-preset-lines')).toBe(true);
+      const lines = Array.from(preview.querySelectorAll('.highlight-preview-line')) as HTMLElement[];
+      expect(lines, preset.id).toHaveLength(6);
+
+      const colors = lines.map((line) => line.style.background || line.style.backgroundColor);
+      // One line per semantic slot, each with its own preset colour.
+      expect(new Set(colors).size, preset.id).toBe(6);
+      for (const line of lines) {
+        expect(line.getAttribute('data-slot')).toBeTruthy();
+        expect(line.style.boxShadow).not.toBe('');
+      }
+      expect(lines[0].getAttribute('data-slot')).toBe('uiSelect');
+      expect(lines[5].getAttribute('data-slot')).toBe('clockUrgent');
+    }
+
+    // Changing preset visibly repaints the preview lines inside the buttons.
+    const classicLine = within(section)
+      .getByTestId('highlight-preset-preview-classic')
+      .querySelector('.highlight-preview-line') as HTMLElement;
+    const classicColor = classicLine.style.background || classicLine.style.backgroundColor;
+    const warmLine = within(section)
+      .getByTestId('highlight-preset-preview-warm')
+      .querySelector('.highlight-preview-line') as HTMLElement;
+    expect(warmLine.style.background || warmLine.style.backgroundColor).not.toBe(classicColor);
+  });
+
+  it('ITEM-NEW-1d: the Intensity slider scales every aura token in real time', () => {
+    const section = openHighlights();
+    const slider = screen.getByTestId('highlight-intensity-slider') as HTMLInputElement;
+    const readout = screen.getByTestId('highlight-intensity-value');
+    const root = document.documentElement;
+
+    expect(slider.type).toBe('range');
+    expect(slider.min).toBe(String(HIGHLIGHT_INTENSITY_MIN));
+    expect(slider.max).toBe(String(HIGHLIGHT_INTENSITY_MAX));
+    expect(slider.value).toBe('100');
+    expect(readout.textContent).toBe('100%');
+    expect(root.dataset.highlightIntensity).toBe('100');
+    expect(root.style.getPropertyValue('--highlight-intensity')).toBe('1');
+    expect(section.contains(slider)).toBe(true);
+
+    const baseGlow = root.style.getPropertyValue('--role-defender-glow');
+    const basePreviewShadow = (
+      within(section)
+        .getByTestId('highlight-preset-preview-classic')
+        .querySelector('.highlight-preview-line') as HTMLElement
+    ).style.boxShadow;
+
+    fireEvent.input(slider, { target: { value: '180' } });
+
+    expect(getSettings().highlightIntensity).toBe(180);
+    expect(root.dataset.highlightIntensity).toBe('180');
+    expect(root.style.getPropertyValue('--highlight-intensity')).toBe('1.8');
+    expect(readout.textContent).toBe('180%');
+    expect(root.style.getPropertyValue('--role-defender-glow')).not.toBe(baseGlow);
+    expect(root.style.getPropertyValue('--role-attacker-pulse-outer')).not.toBe('');
+    expect(root.style.getPropertyValue('--role-defender-pulse-halo')).not.toBe('');
+    expect(root.style.getPropertyValue('--trump-glow')).not.toBe('');
+    expect(root.style.getPropertyValue('--redirect-glow')).not.toBe('');
+    expect(root.style.getPropertyValue('--clock-low-glow')).not.toBe('');
+
+    // The preview bars brighten with the same live factor.
+    const previewShadow = (
+      within(section)
+        .getByTestId('highlight-preset-preview-classic')
+        .querySelector('.highlight-preview-line') as HTMLElement
+    ).style.boxShadow;
+    expect(previewShadow).not.toBe(basePreviewShadow);
+
+    // Subtle end of the range: 20% still applies, just much softer.
+    fireEvent.input(slider, { target: { value: '20' } });
+    expect(root.dataset.highlightIntensity).toBe('20');
+    expect(root.style.getPropertyValue('--highlight-intensity')).toBe('0.2');
+    expect(readout.textContent).toBe('20%');
+
+    // The choice is persisted as UserSettings.
+    const stored = JSON.parse(
+      window.localStorage.getItem(USER_SETTINGS_STORAGE_KEY) as string,
+    ) as { highlightPreset: string; highlightIntensity: number };
+    expect(stored.highlightIntensity).toBe(20);
+    expect(stored.highlightPreset).toBe('classic');
   });
 });

@@ -12,6 +12,10 @@
   --app-input-bg: #161512;
   --app-shadow: 0 18px 36px rgba(0, 0, 0, 0.42);
   --app-roundness: 8px;
+  /* T-90-feedback-2: global highlight aura multiplier, 0.2 subtle – 2 bright.
+     `settings.ts` overwrites this inline from the Intensity slider; the fallback
+     keeps every glow sane before JavaScript applies the saved setting. */
+  --highlight-intensity: 1;
   /* T-90 UI customization / navigation chrome family: Royal Blue / Cobalt.
      Reserved exclusively for menu selections, POV tabs, hand-sorting, QA and
      replay hover chrome and lobby form controls. Never green, never crimson or
@@ -480,7 +484,7 @@ html[data-theme='light'] .error-banner {
   background: var(--clock-urgent-bg);
   box-shadow:
     inset 0 0 0 1px var(--clock-urgent-border),
-    inset 0 0 12px var(--clock-urgent-glow);
+    inset 0 0 calc(12px * var(--highlight-intensity, 1)) var(--clock-urgent-glow);
 }
 
 /* The divider between the two vertical halves of the single clock panel. */
@@ -1213,6 +1217,80 @@ html[data-theme='light'] .status-badge[data-role='defender'] {
   text-align: right;
   font-variant-numeric: tabular-nums;
   color: var(--app-text-strong);
+}
+
+/* ==========================================================================
+   T-90-feedback-2: Theme ▸ Highlights.
+   The section sits below every Theme control (mode buttons + Roundness) and
+   above the connection tracker. Six preset buttons each carry a live multi-line
+   preview of their own highlight colours, and the Intensity slider scales the
+   preview aura exactly like the live table. Layout is plain CSS Grid with an
+   explicit gap — no freeform positioning.
+   ========================================================================== */
+.theme-highlights-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--app-border);
+  box-sizing: border-box;
+}
+
+.submenu-section-title {
+  color: var(--app-text-strong);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.highlight-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  min-width: 0;
+}
+
+.highlight-preset-btn {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 7px 8px;
+  background: var(--app-bg-soft);
+  border: 1px solid var(--app-border);
+  border-radius: calc(var(--app-roundness) * 0.75);
+  color: var(--app-text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.highlight-preset-name {
+  display: block;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Six horizontal preview lines, one per semantic highlight slot. */
+.highlight-preset-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.highlight-preview-line {
+  display: block;
+  width: 100%;
+  height: 3px;
+  border-radius: 999px;
+  /* Inline style supplies the preset colour and its live intensity glow. */
+  transition: box-shadow 80ms linear;
 }
 
 .pack-grid,
