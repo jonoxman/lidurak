@@ -81,7 +81,7 @@ describe('App', () => {
 
     expect(
       cssRule(appCss, "html[data-theme='light'] .lobby-form .field select:focus-visible"),
-    ).toContain('rgba(29, 78, 216, 0.45)');
+    ).toContain('var(--ui-select-glow)');
     expect(
       cssRule(appCss, "html[data-theme='light'] .lobby-form .action-button.green"),
     ).toContain('rgba(29, 78, 216, 0.55)');
@@ -104,11 +104,11 @@ describe('T-90 semantic feature color system', () => {
     expect(dark).toContain('--ui-select-accent: #3b82f6');
     expect(dark).toContain('--ui-select-border: rgba(59, 130, 246, 0.85)');
     expect(dark).toContain('--ui-select-glow: rgba(59, 130, 246, 0.4)');
-    expect(dark).toContain('--ui-select-surface: rgba(59, 130, 246, 0.16)');
+    expect(dark).toContain('--ui-select-bg: rgba(59, 130, 246, 0.16)');
     expect(light).toContain('--ui-select-accent: #1d4ed8');
     expect(light).toContain('--ui-select-border: rgba(29, 78, 216, 0.9)');
     expect(light).toContain('--ui-select-glow: rgba(29, 78, 216, 0.45)');
-    expect(light).toContain('--ui-select-surface: rgba(37, 99, 235, 0.14)');
+    expect(light).toContain('--ui-select-bg: rgba(37, 99, 235, 0.14)');
   });
 
   it('keeps every menu, POV, hand-sorting and lobby selection on the blue family', () => {
@@ -135,7 +135,7 @@ describe('T-90 semantic feature color system', () => {
     );
     expect(
       cssRule(appCss, "html[data-theme='light'] .lobby-form .field select:focus-visible"),
-    ).toContain('#1d4ed8');
+    ).toContain('var(--ui-select-accent)');
     expect(cssRule(appCss, '.lobby-form .action-button.green')).toContain(
       'background: var(--ui-select-accent)',
     );
@@ -208,7 +208,7 @@ describe('T-90 semantic feature color system', () => {
       'var(--clock-active-accent)',
     );
     expect(cssRule(appCss, ".turn-clock[data-low-time='true']")).toContain(
-      'var(--clock-low-accent)',
+      'var(--clock-urgent-accent)',
     );
   });
 });

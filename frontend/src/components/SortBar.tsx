@@ -23,7 +23,7 @@ export function SortBar({ mode, onModeChange }: SortBarProps) {
     <label class="sort-bar" data-testid="sort-bar" title="Sort the cards in your hand">
       <span class="sort-label">HAND SORTING</span>
       <select
-        class="sort-select"
+        class="sort-select sort-btn active"
         aria-label="Sort hand"
         value={mode}
         data-sort-mode={mode}

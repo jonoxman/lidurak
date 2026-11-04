@@ -282,7 +282,7 @@ function SoundSubmenu() {
           <button
             type="button"
             key={option.id}
-            class={`pack-option${pack === option.id ? ' active' : ''}`}
+            class={`pack-option appearance-choice sound-pack-btn${pack === option.id ? ' active' : ''}`}
             aria-pressed={pack === option.id}
             onClick={() => {
               soundEngine.setSoundPack(option.id);
@@ -314,7 +314,7 @@ function ThemeSubmenu() {
           <button
             type="button"
             key={theme.id}
-            class={`theme-option${settings.theme === theme.id ? ' active' : ''}`}
+            class={`theme-option appearance-choice${settings.theme === theme.id ? ' active' : ''}`}
             aria-pressed={settings.theme === theme.id}
             onClick={() => setSettings({ theme: theme.id })}
           >
@@ -360,7 +360,7 @@ function TableSubmenu() {
             <button
               type="button"
               key={texture.id}
-              class={`texture-option${settings.tableTexture === texture.id ? ' active' : ''}`}
+              class={`texture-option appearance-choice felt-swatch-btn${settings.tableTexture === texture.id ? ' active' : ''}`}
               aria-label={texture.name}
               aria-pressed={settings.tableTexture === texture.id}
               data-testid={`table-texture-${texture.id}`}
@@ -445,7 +445,7 @@ function CardBackSubmenu() {
           <button
             type="button"
             key={pattern}
-            class={`cardback-option${settings.cardBack === pattern ? ' active' : ''}`}
+            class={`cardback-option appearance-choice card-back-swatch-btn${settings.cardBack === pattern ? ' active' : ''}`}
             aria-label={CARD_BACK_LABELS[pattern]}
             title={CARD_BACK_LABELS[pattern]}
             aria-pressed={settings.cardBack === pattern}

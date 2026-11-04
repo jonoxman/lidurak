@@ -1449,7 +1449,7 @@ export function GamePage({
                   type="button"
                   role="tab"
                   aria-selected={id === playerId}
-                  class={`hotseat-tab${id === playerId ? ' active' : ''}`}
+                  class={`hotseat-tab pov-tab${id === playerId ? ' active' : ''}`}
                   onClick={() => onSwitchPlayer(id)}
                 >
                   <span class="hotseat-name">
@@ -1637,7 +1637,10 @@ export function GamePage({
             data-testid="clock-panel"
             aria-label="Game and turn clocks"
           >
-            <div class="clock-half game-clock-half" data-active={gameClockActive ? 'true' : 'false'}>
+            <div
+              class="clock-half split-clock-half game-clock-half"
+              data-active={gameClockActive ? 'true' : 'false'}
+            >
               <h2>Game</h2>
               <span
                 class="game-clock"
@@ -1647,7 +1650,10 @@ export function GamePage({
                 {gameClock}
               </span>
             </div>
-            <div class="clock-half turn-clock-half" data-active={displayViewerOnClock ? 'true' : 'false'}>
+            <div
+              class="clock-half split-clock-half turn-clock-half"
+              data-active={displayViewerOnClock ? 'true' : 'false'}
+            >
               <h2>Turn</h2>
               <span
                 class={clockClasses.join(' ')}

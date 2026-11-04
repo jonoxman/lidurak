@@ -19,8 +19,10 @@
   --ui-select-accent: #3b82f6;
   --ui-select-border: rgba(59, 130, 246, 0.85);
   --ui-select-glow: rgba(59, 130, 246, 0.4);
-  --ui-select-surface: rgba(59, 130, 246, 0.16);
-  --ui-select-text: #bfdbfe;
+  --ui-select-bg: rgba(59, 130, 246, 0.16);
+  /* Legacy alias kept for the pre-T-90 rules that still read `-surface`. */
+  --ui-select-surface: var(--ui-select-bg);
+  --ui-select-text: #93c5fd;
 }
 
 /* Light durak palette: same structure, softer surfaces, readable contrast. */
@@ -50,7 +52,8 @@ html[data-theme='light'] {
   --ui-select-accent: #1d4ed8;
   --ui-select-border: rgba(29, 78, 216, 0.9);
   --ui-select-glow: rgba(29, 78, 216, 0.45);
-  --ui-select-surface: rgba(37, 99, 235, 0.14);
+  --ui-select-bg: rgba(37, 99, 235, 0.14);
+  --ui-select-surface: var(--ui-select-bg);
   --ui-select-text: #1e3a8a;
 }
 
@@ -72,7 +75,8 @@ html[data-theme='light'] {
     --ui-select-accent: #1d4ed8;
     --ui-select-border: rgba(29, 78, 216, 0.9);
     --ui-select-glow: rgba(29, 78, 216, 0.45);
-    --ui-select-surface: rgba(37, 99, 235, 0.14);
+    --ui-select-bg: rgba(37, 99, 235, 0.14);
+    --ui-select-surface: var(--ui-select-bg);
     --ui-select-text: #1e3a8a;
   }
 }
@@ -128,7 +132,7 @@ body {
    action use the Royal Blue / Cobalt selection family. */
 .lobby-form .field select {
   border-color: var(--ui-select-border);
-  box-shadow: inset 0 0 0 1px var(--ui-select-surface);
+  box-shadow: inset 0 0 0 1px var(--ui-select-bg);
 }
 
 .lobby-form .action-button.green,
@@ -394,15 +398,17 @@ html[data-theme='light'] .error-banner {
   cursor: pointer;
 }
 
-.hotseat-tab:hover {
+.hotseat-tab:hover,
+.pov-tab:hover {
   border-color: var(--ui-select-accent);
   color: var(--ui-select-text);
   box-shadow: 0 0 8px 1px var(--ui-select-glow);
 }
 
-.hotseat-tab.active {
+.hotseat-tab.active,
+.pov-tab.active {
   border-color: var(--ui-select-accent);
-  background: var(--ui-select-surface);
+  background: var(--ui-select-bg);
   color: var(--ui-select-text);
   box-shadow: 0 0 10px 2px var(--ui-select-glow);
 }
@@ -452,8 +458,9 @@ html[data-theme='light'] .error-banner {
 
 /* T-90 ITEM-1a/1c: the running Game or Turn half glows cyan-teal, never the
    attacker green or the defender crimson. */
-.clock-half[data-active='true'] {
-  background: var(--clock-active-surface);
+.clock-half[data-active='true'],
+.split-clock-half[data-active='true'] {
+  background: var(--clock-active-bg);
   box-shadow:
     inset 0 0 0 1px var(--clock-active-border),
     inset 0 0 12px var(--clock-active-glow);
@@ -474,8 +481,8 @@ html[data-theme='light'] .error-banner {
 /* The final 5 seconds switch to warm orange-amber, distinct from the defender
    crimson and from the normal teal clock. */
 .turn-clock[data-low-time='true'] {
-  color: var(--clock-low-accent);
-  text-shadow: 0 0 12px var(--clock-low-glow);
+  color: var(--clock-urgent-accent);
+  text-shadow: 0 0 12px var(--clock-urgent-glow);
 }
 
 .status-badges {
@@ -597,7 +604,7 @@ html[data-theme='light'] .error-banner {
   outline: none;
   box-shadow:
     0 0 12px 2px var(--role-attacker-glow),
-    inset 0 0 8px var(--role-attacker-surface);
+    inset 0 0 8px var(--role-attacker-bg);
 }
 
 .status-badge[data-role='defender'] {
@@ -605,7 +612,7 @@ html[data-theme='light'] .error-banner {
   outline: none;
   box-shadow:
     0 0 12px 2px var(--role-defender-glow),
-    inset 0 0 8px var(--role-defender-surface);
+    inset 0 0 8px var(--role-defender-bg);
 }
 
 /* T-90-3 ITEM-1b: the light theme keeps the same diffused shape but uses much
@@ -616,7 +623,7 @@ html[data-theme='light'] .status-badge[data-role='attacker'] {
   outline: none;
   box-shadow:
     0 0 14px 3px var(--role-attacker-glow),
-    inset 0 0 10px var(--role-attacker-surface);
+    inset 0 0 10px var(--role-attacker-bg);
 }
 
 html[data-theme='light'] .status-badge[data-role='defender'] {
@@ -624,7 +631,7 @@ html[data-theme='light'] .status-badge[data-role='defender'] {
   outline: none;
   box-shadow:
     0 0 14px 3px var(--role-defender-glow),
-    inset 0 0 10px var(--role-defender-surface);
+    inset 0 0 10px var(--role-defender-bg);
 }
 
 .game-meta {
@@ -961,7 +968,7 @@ html[data-theme='light'] .status-badge[data-role='defender'] {
 .header-menu-trigger:hover,
 .header-menu-trigger:focus-visible {
   color: var(--ui-select-text);
-  background: var(--ui-select-surface);
+  background: var(--ui-select-bg);
   box-shadow: 0 0 8px 1px var(--ui-select-glow), inset 0 0 0 1px var(--ui-select-border);
 }
 
@@ -1007,7 +1014,7 @@ html[data-theme='light'] .status-badge[data-role='defender'] {
 .header-menu-dropdown a:hover,
 .header-menu-dropdown a:focus-visible {
   color: var(--ui-select-text);
-  background: var(--ui-select-surface);
+  background: var(--ui-select-bg);
   box-shadow: inset 0 0 0 1px var(--ui-select-border);
 }
 
@@ -1087,7 +1094,7 @@ html[data-theme='light'] .status-badge[data-role='defender'] {
 .profile-item.active,
 .profile-item:focus-visible {
   color: var(--ui-select-text);
-  background: var(--ui-select-surface);
+  background: var(--ui-select-bg);
   box-shadow: inset 0 0 0 1px var(--ui-select-border);
 }
 
@@ -1143,7 +1150,7 @@ html[data-theme='light'] .status-badge[data-role='defender'] {
 .submenu-header:hover,
 .submenu-header:focus-visible {
   color: var(--ui-select-text);
-  background: var(--ui-select-surface);
+  background: var(--ui-select-bg);
 }
 
 .submenu-title {
@@ -1231,32 +1238,48 @@ html[data-theme='light'] .status-badge[data-role='defender'] {
 
 /* T-90 ITEM-1a: every UI customization selection uses Royal Blue / Cobalt,
    never the attacker's emerald green. */
+.appearance-choice:hover,
+.sound-pack-btn:hover,
+.felt-swatch-btn:hover,
+.card-back-swatch-btn:hover,
 .pack-option:hover,
 .theme-option:hover,
 .texture-option:hover,
 .cardback-option:hover {
-  background: var(--ui-select-surface);
+  background: var(--ui-select-bg);
   color: var(--ui-select-text);
   box-shadow: 0 0 8px 1px var(--ui-select-glow);
 }
 
+.appearance-choice.active,
+.sound-pack-btn.active,
+.felt-swatch-btn.active,
+.card-back-swatch-btn.active,
 .pack-option.active,
 .theme-option.active,
 .texture-option.active,
 .cardback-option.active,
+.appearance-choice[aria-pressed='true'],
+.sound-pack-btn[aria-pressed='true'],
+.felt-swatch-btn[aria-pressed='true'],
+.card-back-swatch-btn[aria-pressed='true'],
 .pack-option[aria-pressed='true'],
 .theme-option[aria-pressed='true'],
 .texture-option[aria-pressed='true'],
 .cardback-option[aria-pressed='true'] {
   border-color: var(--ui-select-accent);
-  background: var(--ui-select-surface);
+  background: var(--ui-select-bg);
   color: var(--ui-select-text);
   box-shadow: 0 0 10px 2px var(--ui-select-glow);
 }
 
 /* Selected felt / card-back previews carry the same blue ring and halo. */
+.felt-swatch-btn.active .texture-swatch,
+.felt-swatch-btn[aria-pressed='true'] .texture-swatch,
 .texture-option.active .texture-swatch,
 .texture-option[aria-pressed='true'] .texture-swatch,
+.card-back-swatch-btn.active .cardback-preview,
+.card-back-swatch-btn[aria-pressed='true'] .cardback-preview,
 .cardback-option.active .cardback-preview,
 .cardback-option[aria-pressed='true'] .cardback-preview {
   outline: 2px solid var(--ui-select-accent);
@@ -1551,9 +1574,9 @@ html[data-theme='light'] .game-page .back-to-lobby:hover {
 /* Top navigation menus (PLAY / PUZZLES / LEARN / WATCH). */
 html[data-theme='light'] .header-menu-trigger:hover,
 html[data-theme='light'] .header-menu-trigger:focus-visible {
-  color: #1e3a8a;
-  background: rgba(37, 99, 235, 0.14);
-  box-shadow: 0 0 12px 2px rgba(29, 78, 216, 0.45), inset 0 0 0 1px rgba(29, 78, 216, 0.9);
+  color: var(--ui-select-text);
+  background: var(--ui-select-bg);
+  box-shadow: 0 0 12px 2px var(--ui-select-glow), inset 0 0 0 1px var(--ui-select-border);
 }
 
 html[data-theme='light'] .header-menu-dropdown {
@@ -1564,93 +1587,113 @@ html[data-theme='light'] .header-menu-dropdown {
 
 html[data-theme='light'] .header-menu-dropdown a:hover,
 html[data-theme='light'] .header-menu-dropdown a:focus-visible {
-  color: #1e3a8a;
-  background: rgba(37, 99, 235, 0.14);
-  box-shadow: inset 0 0 0 1px rgba(29, 78, 216, 0.9);
+  color: var(--ui-select-text);
+  background: var(--ui-select-bg);
+  box-shadow: inset 0 0 0 1px var(--ui-select-border);
 }
 
 /* Profile / Appearance dropdown rows. */
 html[data-theme='light'] .profile-item:hover,
 html[data-theme='light'] .profile-item.active,
 html[data-theme='light'] .profile-item:focus-visible {
-  color: #1e3a8a;
-  background: rgba(37, 99, 235, 0.14);
+  color: var(--ui-select-text);
+  background: var(--ui-select-bg);
   box-shadow: inset 0 0 0 1px rgba(29, 78, 216, 0.8);
 }
 
 /* Selected Theme / Table / Card Back / Sound options: cobalt, never green. */
+html[data-theme='light'] .appearance-choice.active,
+html[data-theme='light'] .sound-pack-btn.active,
+html[data-theme='light'] .felt-swatch-btn.active,
+html[data-theme='light'] .card-back-swatch-btn.active,
 html[data-theme='light'] .pack-option.active,
 html[data-theme='light'] .theme-option.active,
 html[data-theme='light'] .texture-option.active,
 html[data-theme='light'] .cardback-option.active,
+html[data-theme='light'] .appearance-choice[aria-pressed='true'],
+html[data-theme='light'] .sound-pack-btn[aria-pressed='true'],
+html[data-theme='light'] .felt-swatch-btn[aria-pressed='true'],
+html[data-theme='light'] .card-back-swatch-btn[aria-pressed='true'],
 html[data-theme='light'] .pack-option[aria-pressed='true'],
 html[data-theme='light'] .theme-option[aria-pressed='true'],
 html[data-theme='light'] .texture-option[aria-pressed='true'],
 html[data-theme='light'] .cardback-option[aria-pressed='true'] {
-  border-color: #1d4ed8;
-  background: rgba(37, 99, 235, 0.14);
-  box-shadow: 0 0 12px 2px rgba(29, 78, 216, 0.45);
-  color: #1e3a8a;
+  border-color: var(--ui-select-accent);
+  background: var(--ui-select-bg);
+  box-shadow: 0 0 12px 2px var(--ui-select-glow);
+  color: var(--ui-select-text);
 }
 
+html[data-theme='light'] .appearance-choice:hover,
+html[data-theme='light'] .sound-pack-btn:hover,
+html[data-theme='light'] .felt-swatch-btn:hover,
+html[data-theme='light'] .card-back-swatch-btn:hover,
 html[data-theme='light'] .pack-option:hover,
 html[data-theme='light'] .theme-option:hover,
 html[data-theme='light'] .texture-option:hover,
 html[data-theme='light'] .cardback-option:hover {
   box-shadow: 0 0 12px 2px rgba(29, 78, 216, 0.3);
-  color: #1e3a8a;
+  color: var(--ui-select-text);
 }
 
 /* The selected felt swatch and card-back preview get a cobalt ring plus a halo,
    so the chosen design is obvious inside the light dropdown. */
+html[data-theme='light'] .felt-swatch-btn.active .texture-swatch,
+html[data-theme='light'] .felt-swatch-btn[aria-pressed='true'] .texture-swatch,
 html[data-theme='light'] .texture-option.active .texture-swatch,
 html[data-theme='light'] .texture-option[aria-pressed='true'] .texture-swatch,
+html[data-theme='light'] .card-back-swatch-btn.active .cardback-preview,
+html[data-theme='light'] .card-back-swatch-btn[aria-pressed='true'] .cardback-preview,
 html[data-theme='light'] .cardback-option.active .cardback-preview,
 html[data-theme='light'] .cardback-option[aria-pressed='true'] .cardback-preview {
-  outline: 2px solid #1d4ed8;
+  outline: 2px solid var(--ui-select-accent);
   outline-offset: 1px;
-  box-shadow: 0 0 12px 2px rgba(29, 78, 216, 0.45);
+  box-shadow: 0 0 12px 2px var(--ui-select-glow);
 }
 
 /* Left sidebar: active POV tab. */
-html[data-theme='light'] .hotseat-tab:hover {
-  border-color: #1d4ed8;
+html[data-theme='light'] .hotseat-tab:hover,
+html[data-theme='light'] .pov-tab:hover {
+  border-color: var(--ui-select-accent);
   box-shadow: 0 0 12px 2px rgba(29, 78, 216, 0.4);
-  color: #1e3a8a;
+  color: var(--ui-select-text);
 }
 
-html[data-theme='light'] .hotseat-tab.active {
-  border-color: #1d4ed8;
-  background: rgba(37, 99, 235, 0.14);
-  box-shadow: 0 0 12px 2px rgba(29, 78, 216, 0.45);
-  color: #1e3a8a;
+html[data-theme='light'] .hotseat-tab.active,
+html[data-theme='light'] .pov-tab.active {
+  border-color: var(--ui-select-accent);
+  background: var(--ui-select-bg);
+  box-shadow: 0 0 12px 2px var(--ui-select-glow);
+  color: var(--ui-select-text);
 }
 
 /* Left sidebar: ⚡ QA Scenarios hover/focus. */
 html[data-theme='light'] .qa-scenario-button:hover:not(:disabled),
 html[data-theme='light'] .qa-scenario-button:focus-visible {
-  border-color: #1d4ed8;
-  box-shadow: 0 0 12px 2px rgba(29, 78, 216, 0.45);
-  color: #1e3a8a;
+  border-color: var(--ui-select-accent);
+  box-shadow: 0 0 12px 2px var(--ui-select-glow);
+  color: var(--ui-select-text);
 }
 
 /* Left sidebar: Replay navigation hover/focus uses the same chrome family. */
 html[data-theme='light'] .review-nav-button:hover:not(:disabled),
 html[data-theme='light'] .review-nav-button:focus-visible {
-  border-color: #1d4ed8;
-  box-shadow: 0 0 12px 2px rgba(29, 78, 216, 0.45);
+  border-color: var(--ui-select-accent);
+  box-shadow: 0 0 12px 2px var(--ui-select-glow);
 }
 
 /* Right sidebar: the running clock half and the low-time warning. */
-html[data-theme='light'] .clock-half[data-active='true'] {
-  background: var(--clock-active-surface);
+html[data-theme='light'] .clock-half[data-active='true'],
+html[data-theme='light'] .split-clock-half[data-active='true'] {
+  background: var(--clock-active-bg);
   box-shadow:
     inset 0 0 0 1px var(--clock-active-border),
     inset 0 0 12px var(--clock-active-glow);
 }
 
-html[data-theme='light'] .clock-half.turn-clock-half[data-active='true'] {
-  background: var(--clock-active-surface);
+html[data-theme='light'] .clock-half.turn-clock-half[data-active='true'],
+html[data-theme='light'] .split-clock-half.turn-clock-half[data-active='true'] {
+  background: var(--clock-active-bg);
   box-shadow:
     inset 0 0 0 1px var(--clock-active-border),
     inset 0 0 12px var(--clock-active-glow);
@@ -1678,16 +1721,16 @@ html[data-theme='light'] .lobby-form .field input {
 }
 
 html[data-theme='light'] .lobby-form .field select {
-  border-color: rgba(29, 78, 216, 0.9);
-  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.14);
+  border-color: var(--ui-select-border);
+  box-shadow: inset 0 0 0 1px var(--ui-select-bg);
 }
 
 html[data-theme='light'] .lobby-form .field select:focus-visible,
 html[data-theme='light'] .lobby-form .field input:focus-visible {
-  outline: 2px solid #1d4ed8;
+  outline: 2px solid var(--ui-select-accent);
   outline-offset: 1px;
-  border-color: #1d4ed8;
-  box-shadow: 0 0 12px 2px rgba(29, 78, 216, 0.45);
+  border-color: var(--ui-select-accent);
+  box-shadow: 0 0 12px 2px var(--ui-select-glow);
 }
 
 /* Lobby: the primary Create Game button and the game-over Rematch button. */
@@ -1708,7 +1751,7 @@ html[data-theme='light'] .game-over-banner .action-button.banner-rematch-button:
 
 html[data-theme='light'] .player-tabs a:hover,
 html[data-theme='light'] .player-tabs a:focus-visible {
-  border-color: #1d4ed8;
-  box-shadow: 0 0 12px 2px rgba(29, 78, 216, 0.45);
-  color: #1e3a8a;
+  border-color: var(--ui-select-accent);
+  box-shadow: 0 0 12px 2px var(--ui-select-glow);
+  color: var(--ui-select-text);
 }

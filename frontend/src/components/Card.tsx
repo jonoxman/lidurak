@@ -451,7 +451,7 @@ export function Card({
       onDragEnd={onDragEnd}
     >
       <svg
-        class="playing-card card-face"
+        class={trump ? 'playing-card card-face trump-card' : 'playing-card card-face'}
         viewBox="0 0 70 100"
         role="img"
         aria-label={`${rank} of ${suit}`}

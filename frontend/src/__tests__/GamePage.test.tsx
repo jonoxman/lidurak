@@ -2034,7 +2034,7 @@ describe('GamePage', () => {
       /\.status-badge\[data-role='attacker'\]\s*{[^}]*box-shadow:[^}]*var\(--role-attacker-glow\)/,
     );
     expect(appCss).toMatch(
-      /\.status-badge\[data-role='attacker'\]\s*{[^}]*inset 0 0 8px var\(--role-attacker-surface\)/,
+      /\.status-badge\[data-role='attacker'\]\s*{[^}]*inset 0 0 8px var\(--role-attacker-bg\)/,
     );
     expect(appCss).toMatch(
       /\.status-badge\[data-role='attacker'\]\s*{[^}]*border: 1px solid var\(--role-attacker-border\)/,
@@ -2044,7 +2044,7 @@ describe('GamePage', () => {
       /\.status-badge\[data-role='defender'\]\s*{[^}]*box-shadow:[^}]*var\(--role-defender-glow\)/,
     );
     expect(appCss).toMatch(
-      /\.status-badge\[data-role='defender'\]\s*{[^}]*inset 0 0 8px var\(--role-defender-surface\)/,
+      /\.status-badge\[data-role='defender'\]\s*{[^}]*inset 0 0 8px var\(--role-defender-bg\)/,
     );
     expect(appCss).toMatch(
       /\.status-badge\[data-role='defender'\]\s*{[^}]*border: 1px solid var\(--role-defender-border\)/,
@@ -2061,7 +2061,7 @@ describe('GamePage', () => {
       /html\[data-theme='light'\] \.status-badge\[data-role='attacker'\]\s*{[^}]*0 0 14px 3px var\(--role-attacker-glow\)/,
     );
     expect(appCss).toMatch(
-      /html\[data-theme='light'\] \.status-badge\[data-role='attacker'\]\s*{[^}]*inset 0 0 10px var\(--role-attacker-surface\)/,
+      /html\[data-theme='light'\] \.status-badge\[data-role='attacker'\]\s*{[^}]*inset 0 0 10px var\(--role-attacker-bg\)/,
     );
     expect(appCss).toMatch(
       /html\[data-theme='light'\] \.status-badge\[data-role='defender'\]\s*{[^}]*border-color: var\(--role-defender-border\)/,
@@ -2070,7 +2070,7 @@ describe('GamePage', () => {
       /html\[data-theme='light'\] \.status-badge\[data-role='defender'\]\s*{[^}]*0 0 14px 3px var\(--role-defender-glow\)/,
     );
     expect(appCss).toMatch(
-      /html\[data-theme='light'\] \.status-badge\[data-role='defender'\]\s*{[^}]*inset 0 0 10px var\(--role-defender-surface\)/,
+      /html\[data-theme='light'\] \.status-badge\[data-role='defender'\]\s*{[^}]*inset 0 0 10px var\(--role-defender-bg\)/,
     );
 
     // ITEM-ADD-8a: every row has a name track, a centred count track and a
@@ -2126,14 +2126,14 @@ describe('GamePage', () => {
 
     // Left sidebar: active POV tab, QA buttons and replay controls all blue.
     expect(cssRule(appCss, "html[data-theme='light'] .hotseat-tab.active")).toContain(
-      'box-shadow: 0 0 12px 2px rgba(29, 78, 216, 0.45)',
+      'box-shadow: 0 0 12px 2px var(--ui-select-glow)',
     );
     expect(
       cssRule(appCss, "html[data-theme='light'] .qa-scenario-button:hover"),
-    ).toContain('rgba(29, 78, 216, 0.45)');
+    ).toContain('var(--ui-select-glow)');
     expect(
       cssRule(appCss, "html[data-theme='light'] .review-nav-button:hover"),
-    ).toContain('rgba(29, 78, 216, 0.45)');
+    ).toContain('var(--ui-select-glow)');
 
     // HAND SORTING: the selected mode and its hover/focus glow.
     expect(cssRule(tableCss, ":root[data-theme='light'] .sort-select")).toContain(
@@ -2690,5 +2690,57 @@ describe('GamePage client auto-surrender and auto-pass delays', () => {
       vi.advanceTimersByTime(2000);
     });
     expect(sendAction).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * T-90 ITEM-1b/1c: the live game chrome (POV tabs, HAND SORTING) is cobalt,
+   * the running clock is cyan-teal, and each gameplay role keeps its own
+   * family, so no unrelated feature can share a colour.
+   */
+  it('T-90: keeps chrome cobalt, the clock cyan and each role in its own family', async () => {
+    getGameView.mockResolvedValue(view);
+
+    const { container } = render(
+      <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('clock-panel')).toBeTruthy());
+
+    // POV player switcher: every tab is a `.pov-tab`, and the viewed seat is active.
+    const tabs = Array.from(container.querySelectorAll('.pov-tab')) as HTMLElement[];
+    expect(tabs.length).toBeGreaterThan(0);
+    const activeTab = container.querySelector('.pov-tab.active') as HTMLElement;
+    expect(activeTab).not.toBeNull();
+    expect(activeTab.getAttribute('aria-selected')).toBe('true');
+
+    // Both clock halves expose the ticket's `.split-clock-half` hook.
+    expect(container.querySelectorAll('.split-clock-half')).toHaveLength(2);
+
+    // HAND SORTING: the live selector is the active sort control.
+    const sort = container.querySelector('[data-testid="sort-bar"] select') as HTMLElement;
+    expect(sort).not.toBeNull();
+    expect(sort.classList.contains('sort-btn')).toBe(true);
+    expect(sort.classList.contains('active')).toBe(true);
+    expect(sort.getAttribute('data-sort-mode')).toMatch(/^(suit|pairs|rank)$/);
+
+    // Cobalt chrome, cyan clock, emerald attacker, crimson defender.
+    expect(cssRule(appCss, '.pov-tab.active')).toContain('var(--ui-select-accent)');
+    expect(cssRule(appCss, ".split-clock-half[data-active='true']")).toContain(
+      'var(--clock-active-bg)',
+    );
+    expect(cssRule(appCss, ".split-clock-half[data-active='true']")).toContain(
+      'var(--clock-active-glow)',
+    );
+    expect(cssRule(tableCss, '.sort-btn.active')).toContain('var(--ui-select-accent)');
+    expect(cssRule(appCss, ".status-badge[data-role='attacker']")).toContain(
+      'var(--role-attacker-border)',
+    );
+    expect(cssRule(appCss, ".status-badge[data-role='defender']")).toContain(
+      'var(--role-defender-border)',
+    );
+    // The two clock halves are the only elements reading the clock family.
+    expect(cssRule(appCss, ".turn-clock[data-low-time='true']")).toContain(
+      'var(--clock-urgent-accent)',
+    );
   });
 });

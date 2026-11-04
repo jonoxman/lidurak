@@ -15,6 +15,15 @@ const createGame = client.createGame as unknown as ReturnType<typeof vi.fn>;
 const checkServerHealth = client.checkServerHealth as unknown as ReturnType<typeof vi.fn>;
 const createPresetGame = client.createPresetGame as unknown as ReturnType<typeof vi.fn>;
 
+/** Declarations of the first rule whose selector text contains `selector`. */
+function cssRule(css: string, selector: string): string {
+  const start = css.indexOf(selector);
+  if (start === -1) return '';
+  const open = css.indexOf('{', start);
+  const close = css.indexOf('}', open);
+  return open === -1 || close === -1 ? '' : css.slice(open + 1, close);
+}
+
 const submitForm = () => {
   const button = screen.getByRole('button', { name: /Create Game|Creating/ });
   fireEvent.submit(button.closest('form') as HTMLFormElement);
@@ -325,5 +334,55 @@ describe('LobbyPage', () => {
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('backend down');
     expect(screen.queryByTestId('server-loading')).toBeNull();
+  });
+
+  /**
+   * T-90 ITEM-1b: the active player-count selector, focused inputs, variant
+   * checkboxes and the Create Game / Rematch actions are chrome, so they read
+   * from `--ui-select-*` and never from the attacker's emerald green.
+   */
+  it('T-90 ITEM-1b: every lobby selection stays inside the royal-blue family', () => {
+    render(<LobbyPage initialServerReady />);
+
+    const players = screen.getByLabelText('Players') as HTMLSelectElement;
+    fireEvent.change(players, { target: { value: '3' } });
+
+    expect(screen.getByLabelText('Allow redirects')).toBeTruthy();
+    expect(screen.getByLabelText(/Chaos mode/i)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Create Game' }).classList.contains('green')).toBe(
+      true,
+    );
+
+    // The family values exist for both themes.
+    expect(appCss).toContain('--ui-select-border: rgba(59, 130, 246, 0.85)');
+    expect(appCss).toContain('--ui-select-bg: rgba(59, 130, 246, 0.16)');
+    expect(appCss).toContain('--ui-select-border: rgba(29, 78, 216, 0.9)');
+    expect(appCss).toContain('--ui-select-bg: rgba(37, 99, 235, 0.14)');
+
+    // The player-count selector, focused inputs, checkboxes and primary actions.
+    expect(cssRule(appCss, '.lobby-form .field select')).toContain('var(--ui-select-border)');
+    expect(cssRule(appCss, '.field select:focus-visible')).toContain(
+      'outline: 2px solid var(--ui-select-accent)',
+    );
+    expect(cssRule(appCss, '.checkbox-field input')).toContain(
+      'accent-color: var(--ui-select-accent)',
+    );
+    expect(cssRule(appCss, '.lobby-form .action-button.green')).toContain(
+      'background: var(--ui-select-accent)',
+    );
+    expect(
+      cssRule(appCss, '.game-over-banner .action-button.banner-rematch-button'),
+    ).toContain('background: var(--ui-select-accent)');
+
+    // ...and no lobby selector falls back to attacker green.
+    for (const selector of [
+      '.lobby-form .field select',
+      '.field select:focus-visible',
+      '.checkbox-field input',
+      '.lobby-form .action-button.green',
+      '.game-over-banner .action-button.banner-rematch-button',
+    ]) {
+      expect(cssRule(appCss, selector), selector).not.toMatch(/#4ade80|#22c55e|#15803d/);
+    }
   });
 });

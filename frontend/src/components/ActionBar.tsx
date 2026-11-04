@@ -50,7 +50,9 @@ export function ActionBar({
         <button
           key={button.action}
           type="button"
-          class={`action-button ${button.variant}`}
+          class={`action-button ${button.variant} ${
+            button.action === 'pass' ? 'action-btn-pass' : 'action-btn-surrender'
+          }`}
           data-testid={`${button.action}-button`}
           onClick={() => onAction({ type: button.type })}
         >
