@@ -1354,7 +1354,7 @@ export function GamePage({
           return (
             <li
               key={player.id}
-              class={`status-badge${player.mine ? ' mine' : ''}`}
+              class={`status-badge${player.mine ? ' mine me' : ''}`}
               data-testid={`player-row-${player.id}`}
               data-player-id={player.id}
               data-role={role}

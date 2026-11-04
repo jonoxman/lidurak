@@ -200,6 +200,8 @@ export const DISCARD_FALLBACK_WIDTH = 236;
  * stack always keeps this much of its left edge (the peek strip) visible.
  */
 export const MIN_VISIBLE_STRIP_PX = 22;
+/** Spec alias: the visible left strip of an overlapped card in any row. */
+export const MIN_VISIBLE_CARD_LEFT_PX = MIN_VISIBLE_STRIP_PX;
 
 /** Size of one card in play; mirrors `--bout-card-width/height` in table.css. */
 export const BOUT_CARD_WIDTH = CARD_WIDTH;
@@ -1423,9 +1425,21 @@ export function GameTable({
     if (!onReorderHand || !dragCard) return;
     event.preventDefault();
     setSnapZone(null);
-    const element = event.currentTarget as unknown as HTMLElement | null;
+    // The hit box is always the card row, even when the event fires on the
+    // outer hand zone; lifted/oversized areas still map to the same slots.
+    const element =
+      handRef.current ?? (event.currentTarget as unknown as HTMLElement | null);
     if (!element) return;
     setReorderIndex(reorderIndexFromClientX(event.clientX, element));
+  };
+
+  // `dragleave` bubbles from the cards/SVG children; ignore moves that stay
+  // inside the row so the insertion slot does not flicker mid-drag.
+  const leaveHand = (event: DragEvent) => {
+    const current = event.currentTarget as Node | null;
+    const related = event.relatedTarget as Node | null;
+    if (current && related && current.contains(related)) return;
+    setReorderIndex(null);
   };
 
   const dropOnHand = (event: DragLike) => {
@@ -1433,7 +1447,8 @@ export function GameTable({
     event.preventDefault();
     event.stopPropagation();
     const card = readDraggedCard(event);
-    const element = event.currentTarget as unknown as HTMLElement | null;
+    const element =
+      handRef.current ?? (event.currentTarget as unknown as HTMLElement | null);
     const targetIndex =
       reorderIndex ?? (element ? reorderIndexFromClientX(event.clientX, element) : 0);
     setDragCard(null);
@@ -1829,6 +1844,8 @@ export function GameTable({
         data-surrendering={surrenderingHand ? 'true' : 'false'}
         data-defenseless={defenderDefenseless ? 'true' : 'false'}
         ref={handZoneRef}
+        onDragOver={draggable && onReorderHand ? hoverHandZone : undefined}
+        onDrop={draggable && onReorderHand ? dropOnHand : undefined}
       >
         <span
           class={`hand-clock${viewerOnClock ? ' active' : ''}`}
@@ -1868,9 +1885,7 @@ export function GameTable({
               : undefined
           }
           onMouseLeave={hiddenCards > 0 ? () => setCursorFraction(0.5) : undefined}
-          onDragLeave={
-            draggable && onReorderHand ? () => setReorderIndex(null) : undefined
-          }
+          onDragLeave={draggable && onReorderHand ? leaveHand : undefined}
         >
         {hand.map((card, index) => {
           const hidden =
@@ -1879,22 +1894,16 @@ export function GameTable({
           const draggedIndex = dragCard
             ? hand.findIndex((candidate) => cardKey(candidate) === cardKey(dragCard))
             : -1;
-          // ITEM-6a: the other cards part around the insertion slot. The
-          // target index is the dragged card's final position, so cards move
-          // left when the card travels right and vice versa.
-          const movingRight = draggedIndex >= 0 && reorderIndex !== null && draggedIndex < reorderIndex;
-          const movingLeft = draggedIndex >= 0 && reorderIndex !== null && draggedIndex > reorderIndex;
+          // ITEM-6a: compare every other card's index among the remaining
+          // cards with the insertion slot — cards left of it shift left,
+          // cards at or right of it shift right, even for a no-op slot.
+          const effectiveIndex =
+            draggedIndex >= 0 && index > draggedIndex ? index - 1 : index;
           const partDirection =
             reorderIndex !== null && dragCard !== null && index !== draggedIndex
-              ? movingRight
-                ? index > draggedIndex && index <= reorderIndex
-                  ? 'left'
-                  : undefined
-                : movingLeft
-                  ? index >= reorderIndex && index < draggedIndex
-                    ? 'right'
-                    : undefined
-                  : undefined
+              ? effectiveIndex < reorderIndex
+                ? 'left'
+                : 'right'
               : undefined;
           return (
             <div

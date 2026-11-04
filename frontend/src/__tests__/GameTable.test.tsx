@@ -27,6 +27,7 @@ import {
   rowWidth,
   seatForOffset,
   canonicalSeatOrder,
+  MIN_VISIBLE_CARD_LEFT_PX,
   MIN_VISIBLE_STRIP_PX,
   BOUT_CARD_HEIGHT,
   BOUT_CARD_WIDTH,
@@ -3391,6 +3392,7 @@ describe('T-90-4: larger cards, aura containment, throw-in slot, hand reorder an
     expect(tableCss).toMatch(
       /\.hand-card-wrapper\s*{[^}]*width: var\(--hand-card-width, 100px\);[^}]*height: var\(--hand-card-height, 140px\);/,
     );
+    expect(MIN_VISIBLE_CARD_LEFT_PX).toBe(22);
     expect(tableCss).toMatch(/\.target-outline\s*{[^}]*width: 100px;[^}]*height: 140px;/);
     expect(tableCss).toMatch(
       /\.table-card-base,\s*\.table-card-cover,\s*\.drag-ghost\s*{[^}]*width: var\(--bout-card-width, 100px\);[^}]*height: var\(--bout-card-height, 140px\);/,
@@ -3555,6 +3557,13 @@ describe('T-90-4: larger cards, aura containment, throw-in slot, hand reorder an
     });
     fireEvent.mouseMove(document, { clientX: 120, clientY: 22 });
     expect(document.body.getAttribute('data-dragging')).toBe('true');
+    // Insertion slot 1: card 1 is left of the slot, card 2 is right of it.
+    expect(handBox.getAttribute('data-reorder-target-index')).toBe('1');
+    expect(
+      Array.from(handBox.querySelectorAll('.hand-card-wrapper')).map((node) =>
+        node.getAttribute('data-part-direction'),
+      ),
+    ).toEqual([null, 'left', 'right']);
 
     fireEvent.mouseMove(document, { clientX: 300, clientY: 22 });
     expect(handBox.getAttribute('data-reorder-target-index')).toBe('2');
