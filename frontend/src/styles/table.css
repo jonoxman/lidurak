@@ -63,32 +63,34 @@
   --durak-border: #3a3733;
 }
 
-/* T-90: high-visibility light-theme gameplay palette. */
+/* T-90-feedback-3: paler, calmer light-theme gameplay palette. Every role keeps
+   its semantic hue, but at a higher lightness and gentler chroma, with softer
+   border / glow / tint alphas at the default 100% intensity. Dark is unchanged. */
 :root[data-theme='light'] {
-  --role-attacker-accent: #15803d;
-  --role-attacker-border: rgba(15, 118, 54, 0.88);
-  --role-attacker-glow: rgba(21, 128, 61, 0.78);
-  --role-attacker-bg: rgba(21, 128, 61, 0.18);
-  --role-defender-accent: #b91c1c;
-  --role-defender-border: rgba(185, 28, 28, 0.9);
-  --role-defender-glow: rgba(185, 28, 28, 0.78);
-  --role-defender-bg: rgba(185, 28, 28, 0.18);
-  --trump-accent: #b45309;
-  --trump-border: rgba(180, 83, 9, 0.9);
-  --trump-glow: rgba(180, 83, 9, 0.55);
-  --trump-bg: rgba(180, 83, 9, 0.16);
-  --redirect-accent: #7e22ce;
-  --redirect-border: rgba(126, 34, 206, 0.92);
-  --redirect-glow: rgba(126, 34, 206, 0.65);
-  --redirect-bg: rgba(126, 34, 206, 0.15);
+  --role-attacker-accent: #46a76f;
+  --role-attacker-border: rgba(70, 167, 111, 0.6);
+  --role-attacker-glow: rgba(70, 167, 111, 0.3);
+  --role-attacker-bg: rgba(70, 167, 111, 0.1);
+  --role-defender-accent: #dc6868;
+  --role-defender-border: rgba(220, 104, 104, 0.65);
+  --role-defender-glow: rgba(220, 104, 104, 0.34);
+  --role-defender-bg: rgba(220, 104, 104, 0.11);
+  --trump-accent: #d4943a;
+  --trump-border: rgba(212, 148, 58, 0.58);
+  --trump-glow: rgba(212, 148, 58, 0.28);
+  --trump-bg: rgba(212, 148, 58, 0.1);
+  --redirect-accent: #a375e6;
+  --redirect-border: rgba(163, 117, 230, 0.62);
+  --redirect-glow: rgba(163, 117, 230, 0.3);
+  --redirect-bg: rgba(163, 117, 230, 0.1);
   --clock-active-accent: #0e7490;
   --clock-active-border: rgba(14, 116, 144, 0.85);
   --clock-active-glow: rgba(14, 116, 144, 0.55);
   --clock-active-bg: rgba(14, 116, 144, 0.14);
-  --clock-urgent-accent: #c2410c;
-  --clock-urgent-border: #c2410c;
-  --clock-urgent-glow: rgba(194, 65, 12, 0.7);
-  --clock-urgent-bg: rgba(194, 65, 12, 0.14);
+  --clock-urgent-accent: #e27c43;
+  --clock-urgent-border: rgba(226, 124, 67, 0.68);
+  --clock-urgent-glow: rgba(226, 124, 67, 0.34);
+  --clock-urgent-bg: rgba(226, 124, 67, 0.1);
   --clock-idle-text: #0f172a;
 }
 
@@ -1840,26 +1842,26 @@
    base outline colours — stay byte-for-byte unchanged.
    ========================================================================== */
 
-/* Light-mode pulse keyframes: same 2.4s rhythm as the dark ones, but they peak
-   at 0.82+ alpha with an inset inner glow, so the prompt is unmistakable on a
-   pale felt / white card surface. */
+/* Light-mode pulse keyframes: same 2.4s rhythm as the dark ones, but they read
+   the paler Light tokens (glow ≈ 0.3 at 100%) and keep a modest spread, so the
+   prompt stays legible on a pale felt without glaring. */
 @keyframes lightAttackerHandPulse {
   0%,
   100% {
-    box-shadow: 0 0 6px 1px var(--role-attacker-glow), inset 0 0 5px var(--role-attacker-bg);
+    box-shadow: 0 0 5px 1px var(--role-attacker-glow), inset 0 0 4px var(--role-attacker-bg);
   }
   50% {
-    box-shadow: 0 0 14px 3px var(--role-attacker-glow), inset 0 0 8px var(--role-attacker-bg);
+    box-shadow: 0 0 10px 2px var(--role-attacker-glow), inset 0 0 7px var(--role-attacker-bg);
   }
 }
 
 @keyframes lightDefenderHandPulse {
   0%,
   100% {
-    box-shadow: 0 0 6px 1px var(--role-defender-glow), inset 0 0 5px var(--role-defender-bg);
+    box-shadow: 0 0 5px 1px var(--role-defender-glow), inset 0 0 4px var(--role-defender-bg);
   }
   50% {
-    box-shadow: 0 0 16px 4px var(--role-defender-glow), inset 0 0 8px var(--role-defender-bg);
+    box-shadow: 0 0 11px 3px var(--role-defender-glow), inset 0 0 7px var(--role-defender-bg);
   }
 }
 
@@ -1869,7 +1871,7 @@
     box-shadow: 0 0 4px 1px var(--role-defender-bg);
   }
   50% {
-    box-shadow: 0 0 14px 4px var(--role-defender-glow);
+    box-shadow: 0 0 10px 3px var(--role-defender-glow);
   }
 }
 
@@ -1947,18 +1949,18 @@
    emerald ring, so the legal cards visibly pop off the pale felt. */
 :root[data-theme='light'] .hand-cards .card-slot.legal-playable {
   box-shadow:
-    0 3px 10px 1px rgba(15, 118, 54, 0.35),
-    0 0 0 2px rgba(21, 128, 61, 0.55);
+    0 3px 10px 1px var(--role-attacker-bg),
+    0 0 0 2px var(--role-attacker-border);
 }
 
 :root[data-theme='light'] .hand-cards .card-slot.legal-playable:hover {
   box-shadow:
-    0 5px 14px 2px rgba(15, 118, 54, 0.45),
-    0 0 0 2px rgba(21, 128, 61, 0.75);
+    0 5px 14px 2px var(--role-attacker-bg),
+    0 0 0 2px var(--role-attacker-accent);
 }
 
 :root[data-theme='light'] .hand-cards .card-slot.selected {
-  box-shadow: 0 0 0 3px var(--role-attacker-accent), 0 4px 12px 2px rgba(15, 118, 54, 0.4);
+  box-shadow: 0 0 0 3px var(--role-attacker-accent), 0 4px 12px 2px var(--role-attacker-bg);
 }
 
 :root[data-theme='light'] .card-slot.clickable:hover {
@@ -1970,7 +1972,7 @@
 :root[data-theme='light'] .table-pair-attack[data-drop-zone] .card-slot,
 [data-table-theme='light'] .table-pair.snap-active .table-pair-attack .card-slot,
 [data-table-theme='light'] .table-pair-attack[data-drop-zone] .card-slot {
-  box-shadow: 0 0 0 3px var(--role-attacker-accent), 0 0 12px 3px rgba(21, 128, 61, 0.6);
+  box-shadow: 0 0 0 3px var(--role-attacker-border), 0 0 10px 2px var(--role-attacker-glow);
 }
 
 /* Uncovered attacking card on the felt (`.table-card-uncovered` /

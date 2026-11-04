@@ -2811,7 +2811,7 @@ describe('T-90-2 ITEM-PREV-4: defender hand glow before the surrender decision',
       );
       // The light pulse uses the emerald Attacker family in both layers.
       expect(tableCss).toMatch(
-        /@keyframes lightAttackerHandPulse\s*{[\s\S]*?50%\s*{[\s\S]*?0 0 14px 3px var\(--role-attacker-glow\)[\s\S]*?inset 0 0 8px var\(--role-attacker-bg\)/,
+        /@keyframes lightAttackerHandPulse\s*{[\s\S]*?50%\s*{[\s\S]*?0 0 10px 2px var\(--role-attacker-glow\)[\s\S]*?inset 0 0 7px var\(--role-attacker-bg\)/,
       );
       // Dark mode keeps its original amber attacker pulse untouched.
       expect(tableCss).toMatch(
@@ -2830,7 +2830,7 @@ describe('T-90-2 ITEM-PREV-4: defender hand glow before the surrender decision',
       expect(defender).toContain('border: 1px solid var(--role-defender-border)');
       expect(defender).toContain('lightDefenderHandPulse');
       expect(tableCss).toMatch(
-        /@keyframes lightDefenderHandPulse\s*{[\s\S]*?0 0 16px 4px var\(--role-defender-glow\)[\s\S]*?inset 0 0 8px var\(--role-defender-bg\)/,
+        /@keyframes lightDefenderHandPulse\s*{[\s\S]*?0 0 11px 3px var\(--role-defender-glow\)[\s\S]*?inset 0 0 7px var\(--role-defender-bg\)/
       );
       // Dark mode keeps its crimson keyframe with the softer spread.
       expect(tableCss).toMatch(
@@ -2853,7 +2853,7 @@ describe('T-90-2 ITEM-PREV-4: defender hand glow before the surrender decision',
       );
       expect(uncovered).toContain('lightUncoveredPulse');
       expect(tableCss).toMatch(
-        /@keyframes lightUncoveredPulse\s*{[\s\S]*?0 0 14px 4px var\(--role-defender-glow\)/,
+        /@keyframes lightUncoveredPulse\s*{[\s\S]*?0 0 10px 3px var\(--role-defender-glow\)/
       );
       // The dark uncovered pulse is the crimson Defender family too.
       expect(tableCss).toMatch(
@@ -3350,19 +3350,19 @@ describe('T-90 ITEM-1c: distinct gameplay feature colours', () => {
       [dark, '--trump-accent: #f59e0b', '--trump-bg: rgba(245, 158, 11, 0.14)'],
       [dark, '--redirect-accent: #a855f7', '--redirect-bg: rgba(168, 85, 247, 0.14)'],
       [dark, '--clock-active-accent: #22d3ee', '--clock-active-bg: rgba(6, 182, 212, 0.12)'],
-      [light, '--role-attacker-accent: #15803d', '--role-attacker-bg: rgba(21, 128, 61, 0.18)'],
-      [light, '--role-defender-accent: #b91c1c', '--role-defender-bg: rgba(185, 28, 28, 0.18)'],
-      [light, '--trump-accent: #b45309', '--trump-bg: rgba(180, 83, 9, 0.16)'],
-      [light, '--redirect-accent: #7e22ce', '--redirect-bg: rgba(126, 34, 206, 0.15)'],
+      [light, '--role-attacker-accent: #46a76f', '--role-attacker-bg: rgba(70, 167, 111, 0.1)'],
+      [light, '--role-defender-accent: #dc6868', '--role-defender-bg: rgba(220, 104, 104, 0.11)'],
+      [light, '--trump-accent: #d4943a', '--trump-bg: rgba(212, 148, 58, 0.1)'],
+      [light, '--redirect-accent: #a375e6', '--redirect-bg: rgba(163, 117, 230, 0.1)'],
       [light, '--clock-active-accent: #0e7490', '--clock-active-bg: rgba(14, 116, 144, 0.14)'],
     ] as const) {
       expect(rule).toContain(accent);
       expect(rule).toContain(bg);
     }
     expect(dark).toContain('--clock-urgent-accent: #ea580c');
-    expect(light).toContain('--clock-urgent-accent: #c2410c');
+    expect(light).toContain('--clock-urgent-accent: #e27c43');
     expect(dark).toContain('--trump-glow: rgba(245, 158, 11, 0.42)');
     expect(dark).toContain('--clock-active-glow: rgba(6, 182, 212, 0.38)');
-    expect(light).toContain('--redirect-border: rgba(126, 34, 206, 0.92)');
+    expect(light).toContain('--redirect-border: rgba(163, 117, 230, 0.62)');
   });
 });

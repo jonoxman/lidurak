@@ -92,12 +92,12 @@ export const HIGHLIGHT_PRESETS: readonly HighlightPreset[] = [
       clockUrgent: '#ea580c',
     },
     light: {
-      uiSelect: '#1d4ed8',
-      attacker: '#15803d',
-      defender: '#b91c1c',
-      trump: '#b45309',
-      redirect: '#7e22ce',
-      clockUrgent: '#c2410c',
+      uiSelect: '#5b87f5',
+      attacker: '#46a76f',
+      defender: '#dc6868',
+      trump: '#d4943a',
+      redirect: '#a375e6',
+      clockUrgent: '#e27c43',
     },
   },
   {
@@ -112,12 +112,12 @@ export const HIGHLIGHT_PRESETS: readonly HighlightPreset[] = [
       clockUrgent: '#ea580c',
     },
     light: {
-      uiSelect: '#b45309',
-      attacker: '#4d7c0f',
-      defender: '#be123c',
-      trump: '#a16207',
-      redirect: '#be185d',
-      clockUrgent: '#9a3412',
+      uiSelect: '#c47a2c',
+      attacker: '#6b9a2e',
+      defender: '#d9526b',
+      trump: '#c9a227',
+      redirect: '#d9558f',
+      clockUrgent: '#d97a45',
     },
   },
   {
@@ -132,12 +132,12 @@ export const HIGHLIGHT_PRESETS: readonly HighlightPreset[] = [
       clockUrgent: '#f97316',
     },
     light: {
-      uiSelect: '#0e7490',
-      attacker: '#047857',
-      defender: '#9f1239',
-      trump: '#0369a1',
-      redirect: '#6d28d9',
-      clockUrgent: '#c2410c',
+      uiSelect: '#3b93ad',
+      attacker: '#3d9c84',
+      defender: '#c0506b',
+      trump: '#4a8fc4',
+      redirect: '#8b6fd6',
+      clockUrgent: '#d9786a',
     },
   },
   {
@@ -152,12 +152,12 @@ export const HIGHLIGHT_PRESETS: readonly HighlightPreset[] = [
       clockUrgent: '#ff6b00',
     },
     light: {
-      uiSelect: '#0284c7',
-      attacker: '#16a34a',
-      defender: '#db2777',
-      trump: '#ca8a04',
-      redirect: '#9333ea',
-      clockUrgent: '#ea580c',
+      uiSelect: '#38a3d6',
+      attacker: '#49b96b',
+      defender: '#e05a9e',
+      trump: '#d9b53a',
+      redirect: '#a875e0',
+      clockUrgent: '#e6773d',
     },
   },
   {
@@ -172,12 +172,12 @@ export const HIGHLIGHT_PRESETS: readonly HighlightPreset[] = [
       clockUrgent: '#fb923c',
     },
     light: {
-      uiSelect: '#4f46e5',
-      attacker: '#16a34a',
-      defender: '#e11d48',
-      trump: '#d97706',
-      redirect: '#7c3aed',
-      clockUrgent: '#ea580c',
+      uiSelect: '#7c83e8',
+      attacker: '#63b07a',
+      defender: '#ea8296',
+      trump: '#e2a95c',
+      redirect: '#a98aea',
+      clockUrgent: '#ed9a63',
     },
   },
   {
@@ -192,12 +192,12 @@ export const HIGHLIGHT_PRESETS: readonly HighlightPreset[] = [
       clockUrgent: '#ea580c',
     },
     light: {
-      uiSelect: '#1e40af',
-      attacker: '#065f46',
-      defender: '#991b1b',
-      trump: '#92400e',
-      redirect: '#5b21b6',
-      clockUrgent: '#9a3412',
+      uiSelect: '#3a6ac9',
+      attacker: '#2f8a6a',
+      defender: '#c94c4c',
+      trump: '#b07a2a',
+      redirect: '#7d5bc4',
+      clockUrgent: '#c26a3d',
     },
   },
 ];
@@ -226,6 +226,33 @@ const SLOT_ALPHA: Record<HighlightSlot, { border: number; glow: number; bg: numb
   redirect: { border: 0.9, glow: 0.55, bg: 0.14 },
   clockUrgent: { border: 1, glow: 0.7, bg: 0.14 },
 };
+
+/**
+ * T-90-feedback-20261104_133915-1: Light mode is deliberately calmer than Dark.
+ * At the default 100% intensity the borders sit around `0.58–0.68`, the auras
+ * around `0.28–0.34` and the surface tints around `0.10–0.11`, so highlights
+ * harmonise with a pale surface instead of glaring against it. The Intensity
+ * slider still scales every value from 20% to 200%.
+ */
+export const LIGHT_SLOT_ALPHA: Record<
+  HighlightSlot,
+  { border: number; glow: number; bg: number }
+> = {
+  uiSelect: { border: 0.62, glow: 0.3, bg: 0.1 },
+  attacker: { border: 0.6, glow: 0.3, bg: 0.1 },
+  defender: { border: 0.65, glow: 0.34, bg: 0.11 },
+  trump: { border: 0.58, glow: 0.28, bg: 0.1 },
+  redirect: { border: 0.62, glow: 0.3, bg: 0.1 },
+  clockUrgent: { border: 0.68, glow: 0.34, bg: 0.1 },
+};
+
+/** Alpha shape for a slot in the given theme (Light is the paler calibration). */
+export function highlightSlotAlpha(
+  slot: HighlightSlot,
+  theme: ResolvedTheme,
+): { border: number; glow: number; bg: number } {
+  return theme === 'light' ? LIGHT_SLOT_ALPHA[slot] : SLOT_ALPHA[slot];
+}
 
 export const DEFAULT_SETTINGS: AppSettings = {
   theme: 'device',
@@ -408,11 +435,21 @@ function tintTowardWhite(hex: string, amount: number): string {
   return `#${toHex(mix(rgb.r))}${toHex(mix(rgb.g))}${toHex(mix(rgb.b))}`;
 }
 
+/** Mixes a hex colour toward black, keeping selected labels readable on white. */
+function shadeTowardBlack(hex: string, amount: number): string {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return hex;
+  const mix = (channel: number) => Math.round(channel * (1 - amount));
+  const toHex = (channel: number) => channel.toString(16).padStart(2, '0');
+  return `#${toHex(mix(rgb.r))}${toHex(mix(rgb.g))}${toHex(mix(rgb.b))}`;
+}
+
 /**
  * Applies the active highlight preset and intensity. Every semantic token is
  * recomputed from the preset's palette for the resolved theme and scaled by
  * `intensity / 100`, so menu selections, hand glows, table outlines, trump
- * rings, reflection outlines and the urgent clock all change together.
+ * rings, reflection outlines and the urgent clock all change together. Light
+ * mode uses the paler `LIGHT_SLOT_ALPHA` calibration; Dark is unchanged.
  */
 export function applyHighlightTokens(
   settings: AppSettings,
@@ -430,12 +467,15 @@ export function applyHighlightTokens(
 
   for (const { slot, prefix } of HIGHLIGHT_SLOTS) {
     const accent = palette[slot];
-    const alphas = SLOT_ALPHA[slot];
+    const alphas = highlightSlotAlpha(slot, resolvedTheme);
     const borderAlpha = alphas.border * (0.6 + 0.4 * scale);
     target.style.setProperty(`${prefix}-accent`, accent);
     target.style.setProperty(
       `${prefix}-border`,
-      slot === 'clockUrgent' ? accent : highlightRgba(accent, borderAlpha),
+      // Clock borders are solid in Dark; Light keeps the paler translucent edge.
+      slot === 'clockUrgent' && resolvedTheme === 'dark'
+        ? accent
+        : highlightRgba(accent, borderAlpha),
     );
     target.style.setProperty(`${prefix}-glow`, highlightRgba(accent, alphas.glow * scale));
     target.style.setProperty(`${prefix}-bg`, highlightRgba(accent, alphas.bg * scale));
@@ -445,7 +485,10 @@ export function applyHighlightTokens(
   target.style.setProperty('--ui-select-surface', 'var(--ui-select-bg)');
   target.style.setProperty(
     '--ui-select-text',
-    resolvedTheme === 'light' ? palette.uiSelect : tintTowardWhite(palette.uiSelect, 0.45),
+    // Pale light-mode accents need a darker label colour to stay readable.
+    resolvedTheme === 'light'
+      ? shadeTowardBlack(palette.uiSelect, 0.4)
+      : tintTowardWhite(palette.uiSelect, 0.45),
   );
   target.style.setProperty('--role-attacker-surface', 'var(--role-attacker-bg)');
   target.style.setProperty('--role-defender-surface', 'var(--role-defender-bg)');
@@ -458,7 +501,7 @@ export function applyHighlightTokens(
     ['defender', '--role-defender'],
   ] as const) {
     const accent = palette[slot];
-    const alphas = SLOT_ALPHA[slot];
+    const alphas = highlightSlotAlpha(slot, resolvedTheme);
     target.style.setProperty(
       `${prefix}-pulse-outer`,
       highlightRgba(accent, alphas.glow * scale),
@@ -471,14 +514,28 @@ export function applyHighlightTokens(
 
   // Urgent clock aliases point at the same scaled values.
   target.style.setProperty('--clock-low-accent', palette.clockUrgent);
-  target.style.setProperty('--clock-low-border', palette.clockUrgent);
+  target.style.setProperty(
+    '--clock-low-border',
+    resolvedTheme === 'light'
+      ? highlightRgba(
+          palette.clockUrgent,
+          highlightSlotAlpha('clockUrgent', 'light').border * (0.6 + 0.4 * scale),
+        )
+      : palette.clockUrgent,
+  );
   target.style.setProperty(
     '--clock-low-glow',
-    highlightRgba(palette.clockUrgent, SLOT_ALPHA.clockUrgent.glow * scale),
+    highlightRgba(
+      palette.clockUrgent,
+      highlightSlotAlpha('clockUrgent', resolvedTheme).glow * scale,
+    ),
   );
   target.style.setProperty(
     '--clock-low-bg',
-    highlightRgba(palette.clockUrgent, SLOT_ALPHA.clockUrgent.bg * scale),
+    highlightRgba(
+      palette.clockUrgent,
+      highlightSlotAlpha('clockUrgent', resolvedTheme).bg * scale,
+    ),
   );
 }
 

@@ -84,10 +84,10 @@ describe('App', () => {
     ).toContain('var(--ui-select-glow)');
     expect(
       cssRule(appCss, "html[data-theme='light'] .lobby-form .action-button.green"),
-    ).toContain('rgba(29, 78, 216, 0.55)');
+    ).toContain('var(--ui-select-glow)');
     expect(
       cssRule(appCss, "html[data-theme='light'] .lobby-form .action-button.green:hover"),
-    ).toContain('rgba(29, 78, 216, 0.7)');
+    ).toContain('var(--ui-select-glow)');
 
     // The primary button is blue, never the attacker green.
     expect(cssRule(appCss, '.lobby-form .action-button.green')).toContain(
@@ -105,10 +105,12 @@ describe('T-90 semantic feature color system', () => {
     expect(dark).toContain('--ui-select-border: rgba(59, 130, 246, 0.85)');
     expect(dark).toContain('--ui-select-glow: rgba(59, 130, 246, 0.4)');
     expect(dark).toContain('--ui-select-bg: rgba(59, 130, 246, 0.16)');
-    expect(light).toContain('--ui-select-accent: #1d4ed8');
-    expect(light).toContain('--ui-select-border: rgba(29, 78, 216, 0.9)');
-    expect(light).toContain('--ui-select-glow: rgba(29, 78, 216, 0.45)');
-    expect(light).toContain('--ui-select-bg: rgba(37, 99, 235, 0.14)');
+    // T-90-feedback-3: the Light palette is paler and the alphas softer.
+    expect(light).toContain('--ui-select-accent: #5b87f5');
+    expect(light).toContain('--ui-select-border: rgba(91, 135, 245, 0.62)');
+    expect(light).toContain('--ui-select-glow: rgba(91, 135, 245, 0.3)');
+    expect(light).toContain('--ui-select-bg: rgba(91, 135, 245, 0.1)');
+    expect(light).not.toMatch(/#1d4ed8|rgba\(29, 78, 216/);
   });
 
   it('keeps every menu, POV, hand-sorting and lobby selection on the blue family', () => {
@@ -151,15 +153,17 @@ describe('T-90 semantic feature color system', () => {
     expect(dark).toContain('--role-attacker-accent: #22c55e');
     expect(dark).toContain('--role-attacker-border: rgba(34, 197, 94, 0.85)');
     expect(dark).toContain('--role-attacker-glow: rgba(34, 197, 94, 0.55)');
-    expect(light).toContain('--role-attacker-accent: #15803d');
-    expect(light).toContain('--role-attacker-border: rgba(15, 118, 54, 0.88)');
-    expect(light).toContain('--role-attacker-glow: rgba(21, 128, 61, 0.78)');
+    expect(light).toContain('--role-attacker-accent: #46a76f');
+    expect(light).toContain('--role-attacker-border: rgba(70, 167, 111, 0.6)');
+    expect(light).toContain('--role-attacker-glow: rgba(70, 167, 111, 0.3)');
     expect(dark).toContain('--role-defender-accent: #ef4444');
     expect(dark).toContain('--role-defender-border: rgba(239, 68, 68, 0.88)');
     expect(dark).toContain('--role-defender-glow: rgba(239, 68, 68, 0.6)');
-    expect(light).toContain('--role-defender-accent: #b91c1c');
-    expect(light).toContain('--role-defender-border: rgba(185, 28, 28, 0.9)');
-    expect(light).toContain('--role-defender-glow: rgba(185, 28, 28, 0.78)');
+    expect(light).toContain('--role-defender-accent: #dc6868');
+    expect(light).toContain('--role-defender-border: rgba(220, 104, 104, 0.65)');
+    expect(light).toContain('--role-defender-glow: rgba(220, 104, 104, 0.34)');
+    // None of the old high-emphasis Light colours survive.
+    expect(light).not.toMatch(/#15803d|#b91c1c|rgba\(21, 128, 61|rgba\(185, 28, 28/);
   });
 
   it('wires every Attacker, Defender, trump, redirect and clock feature to its family', () => {
@@ -195,11 +199,11 @@ describe('T-90 semantic feature color system', () => {
     expect(cssRule(tableCss, '.action-button.red')).toContain('var(--role-defender-accent)');
     // Trump / redirect / clock tokens.
     expect(cssRule(tableCss, ':root')).toContain('--trump-accent: #f59e0b');
-    expect(cssRule(tableCss, ":root[data-theme='light']")).toContain('--trump-accent: #b45309');
+    expect(cssRule(tableCss, ":root[data-theme='light']")).toContain('--trump-accent: #d4943a');
     expect(cssRule(tableCss, '.card-slot.trump')).toContain('var(--trump-accent)');
     expect(cssRule(tableCss, '.trump-badge')).toContain('var(--trump-border)');
     expect(cssRule(tableCss, ':root')).toContain('--redirect-accent: #a855f7');
-    expect(cssRule(tableCss, ":root[data-theme='light']")).toContain('--redirect-accent: #7e22ce');
+    expect(cssRule(tableCss, ":root[data-theme='light']")).toContain('--redirect-accent: #a375e6');
     expect(cssRule(tableCss, ':root')).toContain('--clock-active-accent: #22d3ee');
     expect(cssRule(tableCss, ":root[data-theme='light']")).toContain(
       '--clock-active-accent: #0e7490',
