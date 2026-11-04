@@ -107,13 +107,15 @@
   /* T-90-3 ITEM-ADD-6: every row is a fixed or viewport-clamped track. A seat
      that runs out of cards or a hand that empties never resizes the table. */
   --seat-row-height: 150px;
-  --battlefield-height: clamp(200px, 26vh, 280px);
-  --hand-row-height: calc(var(--hand-card-height, 114px) + 38px);
+  --battlefield-height: clamp(240px, 30vh, 320px);
+  --hand-row-height: calc(var(--hand-card-height, 140px) + 38px);
   grid-template-rows: var(--seat-row-height) var(--battlefield-height) var(--hand-row-height);
-  gap: 16px;
+  gap: 18px;
   min-width: 0;
-  min-height: 620px;
-  padding: 20px;
+  min-height: 700px;
+  /* ITEM-1: 28px of felt on every side means the full hand / player-box
+     highlight aura always fits on the table itself, never off it. */
+  padding: 24px 28px 28px 28px;
   /* ITEM-NEW-1a / ITEM-NEW-1b: the Theme menu Roundness slider rounds the felt
      table itself. The 1.5 factor keeps the table's corner just outside the
      cards' own radius, so the two roundings stay visually nested. */
@@ -341,9 +343,9 @@
   justify-self: center;
   align-self: center;
   width: 88%;
-  height: var(--battlefield-height, clamp(200px, 26vh, 280px));
-  min-height: 150px;
-  max-height: var(--battlefield-height, clamp(200px, 26vh, 280px));
+  height: var(--battlefield-height, clamp(240px, 30vh, 320px));
+  min-height: 180px;
+  max-height: var(--battlefield-height, clamp(240px, 30vh, 320px));
   /* Small, consistent inner margin between the border and any anchored card. */
   padding: 12px;
   background: rgba(38, 36, 33, 0.55);
@@ -387,9 +389,10 @@
 .table-pairs-group {
   /* Item 8: the card box and the reserve under each card are shared with the
      reflection outline, so both always line up on the same card edges. */
-  --bout-card-width: 80px;
-  --bout-card-height: 114px;
-  --bout-card-offset: 15px;
+  /* ITEM-13: cards in play are 100x140, matching the hand (+25%). */
+  --bout-card-width: 100px;
+  --bout-card-height: 140px;
+  --bout-card-offset: 18px;
   display: flex;
   /* ITEM-NEW-2a/2b: the cards in play are one single compact row that never
      wraps; the per-slot `margin-left` written by `boutLayout` carries the
@@ -447,8 +450,8 @@
 /* T-90 ITEM-1b: a legal attack target belongs to the Attacker (emerald) family,
    so it reads as gameplay rather than as a UI menu selection. */
 .target-outline {
-  width: 80px;
-  height: 114px;
+  width: 100px;
+  height: 140px;
   margin-top: 10px;
   border: 2px dashed var(--role-attacker-border);
   border-radius: var(--app-roundness, 8px);
@@ -471,9 +474,9 @@
   place-items: center;
   flex: 0 0 auto;
   align-self: flex-start;
-  width: var(--bout-card-width, 80px);
-  height: var(--bout-card-height, 114px);
-  margin: 0 0 var(--bout-card-offset, 15px) 0;
+  width: var(--bout-card-width, 100px);
+  height: var(--bout-card-height, 140px);
+  margin: 0 0 var(--bout-card-offset, 18px) 0;
   border: 2px dashed var(--redirect-border);
   border-radius: var(--app-roundness, 8px);
   background: var(--redirect-bg);
@@ -511,8 +514,8 @@
 
 .table-pair {
   display: grid;
-  grid-template-columns: var(--bout-card-width, 80px);
-  grid-template-rows: var(--bout-card-height, 114px);
+  grid-template-columns: var(--bout-card-width, 100px);
+  grid-template-rows: var(--bout-card-height, 140px);
   /* Item 8: cards start flush with the top of the pair box, so the attack cards
      and the reflection outline share one top edge. The bottom/right reserve is
      the space the overlapping defence card needs. */
@@ -522,7 +525,7 @@
   /* ITEM-NEW-2b: only the card itself is reserved horizontally; the defence
      card overhangs to the right, and the compact row spacing comes from the
      inline `margin-left` on every slot. */
-  padding: 0 0 var(--bout-card-offset, 15px) 0;
+  padding: 0 0 var(--bout-card-offset, 18px) 0;
   box-sizing: border-box;
 }
 
@@ -919,14 +922,16 @@
 
 /* Item 4 / T-90: trump cards carry the Gold/Bronze family glow and corner
    marker. The family is exclusive to trump indicators. */
+/* ITEM-12a: trump cards carry no glowing aura any more — the symmetrical
+   top-right / bottom-left badges (Ticket 2) are the only distinction. */
 .card-slot.trump {
   border: 1px solid var(--trump-accent);
   border-color: var(--trump-accent);
-  box-shadow: 0 0 10px var(--trump-glow);
+  box-shadow: none;
 }
 
 .card-slot.trump.selected {
-  box-shadow: 0 0 0 3px var(--durak-accent), 0 0 10px var(--trump-glow);
+  box-shadow: 0 0 0 3px var(--durak-accent);
 }
 
 /* T-90 ITEM-1c: the face of a trump card carries the same Gold/Bronze ring, so
@@ -934,9 +939,8 @@
 .playing-card.trump-card {
   box-sizing: border-box;
   border: 1px solid var(--trump-border);
-  box-shadow:
-    0 0 calc(8px * var(--highlight-intensity, 1)) calc(1px * var(--highlight-intensity, 1))
-      var(--trump-glow);
+  /* ITEM-12a: no glowing aura on trump cards in either theme. */
+  box-shadow: none;
 }
 
 /* --- Row 3, column 2: the viewer's hand --- */
@@ -1018,8 +1022,8 @@
 .hand-slot {
   display: flex;
   flex: 0 0 auto;
-  width: var(--hand-card-width, 80px);
-  height: var(--hand-card-height, 114px);
+  width: var(--hand-card-width, 100px);
+  height: var(--hand-card-height, 140px);
   /* No wrapper padding or margins: all spacing is the inline `margin-left`. */
   margin: 0;
   padding: 0;
@@ -1671,16 +1675,32 @@
   color: #0f172a;
 }
 
+/* ITEM-3: the light-theme TRUMP label is a high-contrast warm-amber pill, so it
+   no longer disappears against the pale deck box. */
+:root[data-theme='light'] .deck-trump-badge,
+:root[data-theme='light'] .trump-suit-pill,
 :root[data-theme='light'] .trump-badge {
-  background: var(--trump-bg);
-  border-color: var(--trump-border);
-  color: var(--trump-accent);
-  box-shadow: 0 0 8px 1px var(--trump-glow);
+  background: #fef3c7;
+  border: 1px solid #b45309;
+  color: #78350f;
+  box-shadow: none;
+  text-shadow: none;
+}
+
+:root[data-theme='light'] .trump-badge .trump-symbol {
+  color: #0f172a;
 }
 
 :root[data-theme='light'] .trump-badge.red .trump-symbol,
-:root[data-theme='light'] .trump-badge.black .trump-symbol {
-  color: var(--trump-accent);
+:root[data-theme='light'] .trump-badge[data-suit='hearts'] .trump-symbol,
+:root[data-theme='light'] .trump-badge[data-suit='diamonds'] .trump-symbol {
+  color: #b91c1c;
+}
+
+:root[data-theme='light'] .trump-badge.black .trump-symbol,
+:root[data-theme='light'] .trump-badge[data-suit='spades'] .trump-symbol,
+:root[data-theme='light'] .trump-badge[data-suit='clubs'] .trump-symbol {
+  color: #0f172a;
 }
 
 :root[data-theme='light'] .sort-select {
@@ -1942,12 +1962,13 @@
 :root[data-theme='light'] .card-slot.trump,
 [data-table-theme='light'] .card-slot.trump {
   border-color: var(--trump-accent);
-  box-shadow: 0 0 10px 2px var(--trump-glow);
+  /* ITEM-12a: no trump aura in the light theme either. */
+  box-shadow: none;
 }
 
 :root[data-theme='light'] .card-slot.trump.selected,
 [data-table-theme='light'] .card-slot.trump.selected {
-  box-shadow: 0 0 0 3px var(--durak-accent), 0 0 12px 3px var(--trump-glow);
+  box-shadow: 0 0 0 3px var(--durak-accent);
 }
 
 /* Legal / lifted / hovered hand cards carry a real contact shadow and a dark
@@ -2072,4 +2093,162 @@
 :root[data-theme='light'] .sort-btn:focus-visible {
   border-color: var(--ui-select-accent);
   box-shadow: 0 0 12px 3px var(--ui-select-glow);
+}
+
+/* --- 5. T-90-4: aura containment, throw-in slot, custom hand drag and the
+   low-detail opponent cards of Transparent Mode ---------------------------- */
+
+/* ITEM-1: Row 1 seats and the Row 3 hand sit further inside the felt, so the
+   entire highlight aura (not just the cards) stays on [data-zone=table-arena]
+   in 2P, 3P and 4P. No absolute positioning: plain margins inside the grid. */
+[data-zone='table-arena'][data-aura-contained='true'] {
+  overflow: visible;
+}
+
+[data-zone='table-arena'][data-aura-contained='true'] .opponent-seat {
+  margin-inline: 4px;
+}
+
+[data-zone='table-arena'][data-aura-contained='true'] [data-zone='player-hand'] {
+  padding-inline: 8px;
+}
+
+/* ITEM-7: the whole drag gesture keeps the link pointer finger. */
+.hand-card-wrapper,
+.hand-slot[draggable='true'],
+.drag-ghost,
+.throw-in-outline {
+  cursor: pointer;
+}
+
+.table-arena[data-dragging='true'] *,
+body[data-dragging='true'],
+body[data-dragging='true'] * {
+  cursor: pointer !important;
+}
+
+/* ITEM-6a: every other card parts around the insertion slot while a card is
+   dragged through the hand. */
+.hand-card-wrapper {
+  transition: transform 150ms ease-out;
+}
+
+.hand-card-wrapper[data-part-direction='left'] {
+  transform: translateX(-18px);
+}
+
+.hand-card-wrapper[data-part-direction='right'] {
+  transform: translateX(18px);
+}
+
+/* ITEM-8: the dedicated throw-in slot beside the played cards. */
+.throw-in-outline {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  align-self: flex-start;
+  width: var(--bout-card-width, 100px);
+  height: var(--bout-card-height, 140px);
+  margin: 0 0 var(--bout-card-offset, 18px) 0;
+  border: 2px dashed var(--role-attacker-border);
+  border-radius: var(--app-roundness, 8px);
+  background: rgba(34, 197, 94, 0.06);
+  box-shadow:
+    0 0 calc(8px * var(--highlight-intensity, 1)) calc(1px * var(--highlight-intensity, 1))
+      var(--role-attacker-glow);
+  box-sizing: border-box;
+  cursor: pointer;
+}
+
+.throw-in-icon {
+  width: 42%;
+  height: 42%;
+  stroke: var(--role-attacker-accent, #22c55e);
+  stroke-width: 4;
+  stroke-linecap: round;
+  fill: none;
+  opacity: 0.8;
+}
+
+.throw-in-outline.snap-active {
+  border-style: solid;
+  background: var(--role-attacker-bg);
+  box-shadow: 0 0 12px 2px var(--role-attacker-glow);
+}
+
+/* ITEM-10b: low-detail opponent cards only show rank, suit and (for trumps) the
+   symmetrical corner badges. Plain CSS Grid, no absolute positioning. */
+.opponent-low-detail-card {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: auto 1fr auto;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 36px;
+  padding: 2px 2px 1px;
+  border: 1px solid #94a3b8;
+  border-radius: calc(var(--app-roundness, 8px) * 0.4);
+  background: #e2e8f0;
+  box-sizing: border-box;
+}
+
+.low-detail-index {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1;
+}
+
+.low-detail-rank {
+  font-size: 10px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.low-detail-suit {
+  font-size: 8px;
+  line-height: 1;
+}
+
+.low-detail-suit.red {
+  color: #b91c1c;
+}
+
+.low-detail-suit.black {
+  color: #0f172a;
+}
+
+.low-detail-trump {
+  font-size: 7px;
+  line-height: 1;
+  color: #b45309;
+}
+
+.low-detail-trump-top-right {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: end;
+}
+
+.low-detail-trump-bottom-left {
+  grid-column: 1;
+  grid-row: 3;
+  justify-self: start;
+  transform: rotate(180deg);
+}
+
+:root[data-theme='light'] .opponent-low-detail-card {
+  background: #ffffff;
+  border-color: #64748b;
+}
+
+:root[data-theme='light'] .low-detail-rank {
+  color: #0f172a;
+}
+
+:root[data-theme='light'] .throw-in-outline {
+  border-color: var(--role-attacker-border);
+  background: var(--role-attacker-bg);
 }

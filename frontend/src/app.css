@@ -594,8 +594,22 @@ html[data-theme='light'] .error-banner {
   box-sizing: border-box;
 }
 
-.status-badge.mine {
-  border-color: var(--app-accent);
+/* ITEM-2: the active user's row has no green outline any more; the ` (You)`
+   suffix is the only distinction. Role indicators (attacker / defender) still
+   use their own gameplay families below. */
+.status-badge.mine,
+.status-badge.me {
+  border-color: var(--app-border);
+  outline: none;
+  box-shadow: none;
+}
+
+.status-badge[data-pov-clickable='true'] {
+  cursor: pointer;
+}
+
+.status-badge[data-pov-clickable='false'] {
+  cursor: default;
 }
 
 /* ITEM-ADD-8a: the status pill wrapper keeps the right slot tidy for both the
@@ -1932,4 +1946,47 @@ html[data-theme='light'] .player-tabs a:focus-visible {
   border-color: var(--ui-select-accent);
   box-shadow: 0 0 12px 2px var(--ui-select-glow);
   color: var(--ui-select-text);
+}
+
+/* ITEM-3: high-contrast light-theme WINNER / OUT / DURAK / PASSED labels in the
+   PLAYERS list. Dark theme keeps its own palette. */
+:root[data-theme='light'] .status-tag,
+:root[data-theme='light'] .status-tag.winner-tag,
+:root[data-theme='light'] .status-rank {
+  font-weight: 700;
+}
+
+:root[data-theme='light'] .status-tag.winner-tag,
+:root[data-theme='light'] .status-rank.winner-tag {
+  color: #065f46;
+  background: #d1fae5;
+  border: 1px solid #10b981;
+}
+
+:root[data-theme='light'] .status-tag.durak-tag,
+:root[data-theme='light'] [data-testid^='player-durak-tag-'] {
+  color: #991b1b;
+  background: #fee2e2;
+  border: 1px solid #ef4444;
+}
+
+:root[data-theme='light'] .status-tag.out-tag,
+:root[data-theme='light'] .status-rank.out-tag {
+  color: #1e293b;
+  background: #cbd5e1;
+  border: 1px solid #64748b;
+}
+
+:root[data-theme='light'] .status-tag.passed-tag {
+  color: #1e3a8a;
+  background: #dbeafe;
+  border: 1px solid #3b82f6;
+  opacity: 1;
+}
+
+/* The light-theme role indicators must not repaint the ` (You)` row green; they
+   only apply to the attacking / defending seats. */
+:root[data-theme='light'] .status-badge.mine[data-role='none'] {
+  border-color: var(--app-border);
+  box-shadow: none;
 }

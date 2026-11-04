@@ -11,7 +11,7 @@ import {
 } from '../api/client';
 import { GameWebSocket } from '../api/websocket';
 import { soundEngine } from '../audio/SoundEngine';
-import { setSettings } from '../state/settings';
+import { getStoredSortMode, setSettings } from '../state/settings';
 
 /** One-click Light-theme preset; it only repaints, so no new room is created. */
 export const LIGHT_THEME_PRESET_ID = 'light-theme-gradient';
@@ -276,6 +276,7 @@ export const QA_SCENARIOS: { id: string; label: string }[] = [
   { id: 'surrender-half-off', label: 'Surrender Half-Off' },
   { id: 'defenseless-surrender', label: 'Defenseless Auto-Surrender' },
   { id: 'discard-and-endgame', label: 'Discard & Endgame Durak' },
+  { id: 'transparent-mode', label: 'Transparent Mode' },
   { id: LIGHT_THEME_PRESET_ID, label: 'Light Theme Header' },
 ];
 
@@ -417,8 +418,14 @@ export function GamePage({
   const tickedSecondRef = useRef(0);
   const [selfPresent, setSelfPresent] = useState(true);
   // Hand order is display-only state shared between the sidebar dropdown and
-  // the table's hand.
-  const [sortMode, setSortMode] = useState<SortMode>('suit');
+  // the table's hand. ITEM-5: new users open on Rank, and `custom` always
+  // falls back to the saved non-custom schema when a new game starts.
+  const [sortMode, setSortMode] = useState<SortMode>(() => {
+    const stored = getStoredSortMode();
+    return stored === 'custom' ? 'rank' : stored;
+  });
+  // ITEM-6b: the player's own card sequence, kept for this game only.
+  const [customHandOrder, setCustomHandOrder] = useState<string[]>([]);
   // Item 12: the recorded match and the frame the review controls are showing.
   const [replay, setReplay] = useState<GameReplay | null>(null);
   const [replayFrameIdx, setReplayFrameIdx] = useState(0);
@@ -452,6 +459,9 @@ export function GamePage({
   // The match whose view is mounted, so a POV switch is never mistaken for a
   // new game (ITEM-PB-12a).
   const viewGameRef = useRef<string | null>(null);
+  // ITEM-14b: the seat this match was opened with. Every view fetch carries it
+  // as the requester, so the server also rejects an unauthorised seat switch.
+  const initialSeatIdRef = useRef<string | null>(null);
   // Latest inspected seat, read by the once-per-match replay fetch.
   const playerIdRef = useRef(playerId);
   playerIdRef.current = playerId;
@@ -468,10 +478,14 @@ export function GamePage({
     // switching the inspected seat keeps the frame the reviewer is on.
     if (viewGameRef.current !== gameId) {
       viewGameRef.current = gameId;
+      initialSeatIdRef.current = playerId;
       setView(null);
       setSelection(null);
       setLoadedReplay(null);
       setReplayFrameIdx(0);
+      // ITEM-6b: `custom` never survives into another game.
+      setCustomHandOrder([]);
+      setSortMode((current) => (current === 'custom' ? getStoredSortMode() : current));
       replayLoadedGameRef.current = null;
     }
     // A different seat is a different projection: never diff sounds across it.
@@ -488,7 +502,10 @@ export function GamePage({
 
     // The socket sends the current state on connect; this REST read covers the
     // window before it opens and keeps the table usable if WebSockets are down.
-    getGameView(gameId, playerId)
+    // ITEM-14b: every fetch carries the seat that opened the match as the
+    // requester, so the backend can reject an unauthorised mid-game POV switch.
+    const requesterId = initialSeatIdRef.current ?? playerId;
+    getGameView(gameId, playerId, requesterId)
       .then((initial) => {
         if (active) setView((current) => current ?? initial);
       })
@@ -1156,6 +1173,24 @@ export function GamePage({
   // Item 12: a finished game is reviewed read-only against the selected replay
   // frame; a live match always renders the authoritative view.
   const displayedView = reviewMode && activeFrame ? activeFrameView ?? view : view;
+  // ITEM-6b: the custom sequence drops every played card, keeps the surviving
+  // order and appends each newly drawn card at the end.
+  const customOrderedHand = (() => {
+    if (sortMode !== 'custom') return displayedView.myHand;
+    const remaining = [...displayedView.myHand];
+    const ordered: GameCard[] = [];
+    for (const key of customHandOrder) {
+      const index = remaining.findIndex((card) => cardKey(card) === key);
+      if (index >= 0) ordered.push(...remaining.splice(index, 1));
+    }
+    return [...ordered, ...remaining];
+  })();
+  // ITEM-6a/6b: dropping a card in the hand stores the new sequence and puts
+  // the HAND SORTING bar into Custom until the next game.
+  const reorderHand = (cards: GameCard[]) => {
+    setCustomHandOrder(cards.map(cardKey));
+    setSortMode('custom');
+  };
   // T-90-2 ITEM-PREV-4: the surrendered defender never gets a glow around their
   // hand — the highlight prompts a card move, and this seat has none. During
   // `Defense` the decision has not been made yet (not even when the only legal
@@ -1286,6 +1321,107 @@ export function GamePage({
     if (id === defenderSeatId) return 'defender';
     return 'none';
   };
+  // ITEM-14b: POV switching lives only in the PLAYERS rows now. Dev Mode (a
+  // server-side config flag that defaults to active) keeps it open during live
+  // play; without it the rows unlock once the match is over in review mode.
+  const canSwitchPov =
+    displayedView.devMode !== false || isGameOverPhase(displayedView.boutPhase);
+  const playersPanel = (
+    <section class="panel players-panel" data-testid="players-panel" aria-label="Player status">
+      <h2>Players</h2>
+      <ul class="status-badges players-list" data-testid="players-list">
+        {playersInSeatOrder.map((player) => {
+          const present =
+            player.id === displayedView.myId
+              ? selfPresent
+              : displayedView.presentPlayers
+                ? displayedView.presentPlayers.includes(player.id)
+                : (displayedView.opponents.find((opponent) => opponent.id === player.id)
+                    ?.isPresent ?? false);
+          const role = roleForSeat(player.id);
+          const isDurak = gameOver && durakId === player.id;
+          // ITEM-ADD-8b: WINNER / OUT only ever label a seat with an empty
+          // hand. A seat still holding cards shows PASSED (or nothing).
+          const statusTag: 'DURAK' | 'WINNER' | 'OUT' | 'PASSED' | null = isDurak
+            ? 'DURAK'
+            : player.cardCount === 0 && player.finishRank != null
+              ? player.finishRank === 1
+                ? 'WINNER'
+                : 'OUT'
+              : player.hasPassed
+                ? 'PASSED'
+                : null;
+          return (
+            <li
+              key={player.id}
+              class={`status-badge${player.mine ? ' mine' : ''}`}
+              data-testid={`player-row-${player.id}`}
+              data-player-id={player.id}
+              data-role={role}
+              data-pov-clickable={canSwitchPov ? 'true' : 'false'}
+              aria-disabled={canSwitchPov ? undefined : 'true'}
+              title={
+                canSwitchPov
+                  ? `View the table as ${player.name}`
+                  : 'POV switching unlocks when the game is over (or in Dev Mode)'
+              }
+              onClick={
+                canSwitchPov && player.id !== playerId
+                  ? () => onSwitchPlayer(player.id)
+                  : undefined
+              }
+            >
+              <span class="status-player">
+                <span
+                  class={`presence-dot${present ? ' present' : ''}`}
+                  data-testid={`presence-dot-${player.id}`}
+                  data-present={present ? 'true' : 'false'}
+                  role="img"
+                  aria-label={present ? 'Present' : 'Away'}
+                />
+                <span class="status-name">
+                  {formatPlayerDisplayName(player.id, player.name, playerId)}
+                </span>
+              </span>
+              {/* ITEM-ADD-8a: the card count owns the centre track, so it
+                  never shifts when a status tag appears or disappears. */}
+              <span class="status-cards" data-testid={`player-cards-${player.id}`}>
+                {player.cardCount} cards
+              </span>
+              <span class="status-state-slot">
+                {statusTag ? (
+                  <span
+                    class="status-tag-slot"
+                    data-testid={`player-status-tag-${player.id}`}
+                    data-status={statusTag}
+                  >
+                    {statusTag === 'DURAK' ? (
+                      <span
+                        class="status-tag durak-tag"
+                        data-testid={`player-durak-tag-${player.id}`}
+                      >
+                        DURAK
+                      </span>
+                    ) : statusTag === 'PASSED' ? (
+                      <span class="status-tag passed-tag">PASSED</span>
+                    ) : (
+                      <span
+                        class={`status-tag ${
+                          statusTag === 'WINNER' ? 'winner-tag' : 'out-tag'
+                        } status-rank`}
+                      >
+                        {statusTag}
+                      </span>
+                    )}
+                  </span>
+                ) : null}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
 
   // The replay clock is frozen at the frame's elapsed time (`00:00` on the
   // opening move); live play uses the recorded start/end timestamps.
@@ -1349,9 +1485,10 @@ export function GamePage({
       playersInSeatOrder.length,
       playersInSeatOrder.map((player) => player.name),
       displayedView.allowRedirect ?? true,
-      displayedView.chaosMode ?? false,
-      playerTypes,
-    )
+      displayedView.chaosMode ?? false,        playerTypes,
+        displayedView.transparentMode ?? false,
+        displayedView.devMode,
+      )
       .then((created) => {
         // Reset the finished match and its review state so the new match opens
         // on a fresh table instead of the old replay.
@@ -1408,26 +1545,6 @@ export function GamePage({
           <span class={`connection ${live ? 'live' : 'pending'}`}>
             {live ? 'Connected' : 'Connecting…'}
           </span>
-          {/* Req 13: the header POV menu switches the inspected seat by name. */}
-          <label class="pov-menu">
-            <span class="pov-label">POV</span>
-            <select
-              class="pov-select"
-              data-testid="pov-menu"
-              aria-label="View as player"
-              value={playerId}
-              onChange={(event) => {
-                const next = (event.currentTarget as HTMLSelectElement).value;
-                if (next !== playerId) onSwitchPlayer(next);
-              }}
-            >
-              {playersInSeatOrder.map((player) => (
-                <option key={player.id} value={player.id}>
-                  {formatPlayerDisplayName(player.id, player.name, playerId)}
-                </option>
-              ))}
-            </select>
-          </label>
         </div>
         <button type="button" class="action-button back-to-lobby" onClick={leaveGame}>
             Back to lobby
@@ -1472,26 +1589,9 @@ export function GamePage({
 
       <div class="game-shell">
         <aside class="game-sidebar sidebar-left" data-zone="sidebar-left">
-          <section class="panel">
-            <h2>POV</h2>
-            <div class="hotseat-tabs" role="tablist" aria-label="POV player switcher">
-              {playerOptions.map((id) => (
-                <button
-                  key={id}
-                  type="button"
-                  role="tab"
-                  aria-selected={id === playerId}
-                  class={`hotseat-tab pov-tab${id === playerId ? ' active' : ''}`}
-                  onClick={() => onSwitchPlayer(id)}
-                >
-                  <span class="hotseat-name">
-                    {formatPlayerDisplayName(id, nameFor(id), playerId)}
-                  </span>
-                  <span class="hotseat-id">{id}</span>
-                </button>
-              ))}
-            </div>
-          </section>
+          {/* ITEM-14a: PLAYERS is the top element of the left column and the
+              only POV switcher in the UI. */}
+          {playersPanel}
 
           {/* QA presets: jump straight into a scripted position in one click. */}
           <section
@@ -1507,6 +1607,7 @@ export function GamePage({
                   type="button"
                   class="qa-scenario-button"
                   data-preset={scenario.id}
+                  data-testid={`qa-preset-${scenario.id}`}
                   disabled={presetPending}
                   onClick={() => startPreset(scenario.id)}
                 >
@@ -1574,7 +1675,7 @@ export function GamePage({
         <div class="table-column">
         <GameTable
           myId={displayedView.myId}
-          myHand={displayedView.myHand}
+          myHand={customOrderedHand}
           opponents={displayedView.opponents}
           tablePairs={displayedView.tablePairs}
           trumpSuit={displayedView.trumpSuit}
@@ -1605,6 +1706,7 @@ export function GamePage({
           turnPlayerId={turnPlayerIdFor(displayedView)}
           turnSecondsRemaining={clockSeconds(displayedView, now)}
           sortMode={sortMode}
+          transparentMode={displayedView.transparentMode ?? false}
           selectedKeys={reviewMode ? [] : selectedKeys}
           playableKeys={reviewMode ? [] : playableKeys}
           onCardClick={reviewMode ? undefined : toggleCard}
@@ -1616,6 +1718,7 @@ export function GamePage({
           onCoverDrop={reviewMode ? undefined : playCoverDrop}
           onThrowInDrop={reviewMode ? undefined : playThrowInDrop}
           onRedirectDrop={reviewMode ? undefined : playRedirectDrop}
+          onReorderHand={reviewMode ? undefined : reorderHand}
         >
           {gameOver || isBotViewer ? null : (
             <div class="game-buttons">
@@ -1704,82 +1807,6 @@ export function GamePage({
                 {formatClock(displaySeconds)}
               </span>
             </div>
-          </section>
-
-          <section class="panel" aria-label="Player status">
-            <h2>Players</h2>
-            <ul class="status-badges players-list" data-testid="players-list">
-              {playersInSeatOrder.map((player) => {
-                const present =
-                  player.id === displayedView.myId
-                    ? selfPresent
-                    : displayedView.presentPlayers
-                      ? displayedView.presentPlayers.includes(player.id)
-                      : (displayedView.opponents.find((opponent) => opponent.id === player.id)
-                          ?.isPresent ?? false);
-                const role = roleForSeat(player.id);
-                const isDurak = gameOver && durakId === player.id;
-                // ITEM-ADD-8b: WINNER / OUT only ever label a seat with an empty
-                // hand. A seat still holding cards shows PASSED (or nothing).
-                const statusTag: 'DURAK' | 'WINNER' | 'OUT' | 'PASSED' | null = isDurak
-                  ? 'DURAK'
-                  : player.cardCount === 0 && player.finishRank != null
-                    ? player.finishRank === 1
-                      ? 'WINNER'
-                      : 'OUT'
-                    : player.hasPassed
-                      ? 'PASSED'
-                      : null;
-                return (
-                <li
-                  key={player.id}
-                  class={`status-badge${player.mine ? ' mine' : ''}`}
-                  data-player-id={player.id}
-                  data-role={role}
-                >
-                  <span class="status-player">
-                    <span
-                      class={`presence-dot${present ? ' present' : ''}`}
-                      data-testid={`presence-dot-${player.id}`}
-                      data-present={present ? 'true' : 'false'}
-                      role="img"
-                      aria-label={present ? 'Present' : 'Away'}
-                    />
-                    <span class="status-name">
-                      {formatPlayerDisplayName(player.id, player.name, playerId)}
-                    </span>
-                  </span>
-                  {/* ITEM-ADD-8a: the card count owns the centre track, so it
-                      never shifts when a status tag appears or disappears. */}
-                  <span class="status-cards" data-testid={`player-cards-${player.id}`}>
-                    {player.cardCount} cards
-                  </span>
-                  <span class="status-state-slot">
-                    {statusTag ? (
-                      <span
-                        class="status-tag-slot"
-                        data-testid={`player-status-tag-${player.id}`}
-                        data-status={statusTag}
-                      >
-                        {statusTag === 'DURAK' ? (
-                          <span
-                            class="status-tag durak-tag"
-                            data-testid={`player-durak-tag-${player.id}`}
-                          >
-                            DURAK
-                          </span>
-                        ) : statusTag === 'PASSED' ? (
-                          <span class="status-tag passed-tag">PASSED</span>
-                        ) : (
-                          <span class="status-rank">{statusTag}</span>
-                        )}
-                      </span>
-                    ) : null}
-                  </span>
-                </li>
-                );
-              })}
-            </ul>
           </section>
 
           <TableDeck

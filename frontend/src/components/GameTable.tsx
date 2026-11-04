@@ -20,6 +20,8 @@ export interface OpponentSummary {
   cardCount: number;
   hasPassed: boolean;
   finishRank?: number | null;
+  /** T-90-4 ITEM-10b: revealed hand, only sent by Transparent Mode / review. */
+  cards?: CardData[];
 }
 
 export interface TablePairData {
@@ -104,6 +106,8 @@ export interface GameTableProps {
   turnSecondsRemaining?: number;
   /** Display order of the viewer's own hand; the dropdown lives in the sidebar. */
   sortMode?: SortMode;
+  /** ITEM-10b: draw every opponent hand as a low-detail rank/suit mini-card. */
+  transparentMode?: boolean;
   /**
    * Review mode: hides the command controls, drop outlines, drags, double-click
    * submission and turn glow, while hand sorting keeps working.
@@ -123,6 +127,8 @@ export interface GameTableProps {
   onThrowInDrop?: (card: CardData) => void;
   /** A hand card was dropped on the reflection outline. */
   onRedirectDrop?: (card: CardData) => void;
+  /** ITEM-6a/6b: a hand card was dragged to a new position inside the hand. */
+  onReorderHand?: (cards: CardData[]) => void;
   children?: ComponentChildren;
 }
 
@@ -136,6 +142,7 @@ interface DragLike {
   } | null;
   clientX: number;
   clientY: number;
+  currentTarget?: EventTarget | null;
 }
 
 const SUIT_ORDER: Record<string, number> = {
@@ -169,8 +176,10 @@ export const SEAT_BOX = { width: 240, height: 140 } as const;
 
 /** --- Hand overlap geometry --- */
 
-/** Width of one hand card at desktop scale. */
-export const HAND_CARD_WIDTH = 80;
+/** ITEM-13: width of one hand card at desktop scale (+25% from 80). */
+export const HAND_CARD_WIDTH = 100;
+/** ITEM-13: height of one hand card at desktop scale (+25% from 114). */
+export const HAND_CARD_HEIGHT = 140;
 /** Neighbouring hand cards never sit farther apart than this overlap. */
 export const HAND_MIN_OVERLAP = 8;
 /** Used until the hand has been measured (jsdom reports zero widths). */
@@ -190,8 +199,8 @@ export const DISCARD_FALLBACK_WIDTH = 236;
 export const MIN_VISIBLE_STRIP_PX = 22;
 
 /** Size of one card in play; mirrors `--bout-card-width/height` in table.css. */
-export const BOUT_CARD_WIDTH = 80;
-export const BOUT_CARD_HEIGHT = 114;
+export const BOUT_CARD_WIDTH = 100;
+export const BOUT_CARD_HEIGHT = 140;
 /**
  * ITEM-NEW-2b: however many cards are in play, the left strip of every card —
  * where the rank and suit index are drawn — stays visible.
@@ -236,6 +245,29 @@ export const OPPONENT_CARD_WIDTH = 22;
 export const OPPONENT_CARDS_WIDTH = 208;
 /** Opponent card backs always overlap at least this much. */
 export const OPPONENT_MIN_OVERLAP = 4;
+/** ITEM-10b: size of the low-detail rank/suit card shown in Transparent Mode. */
+export const LOW_DETAIL_CARD_WIDTH = 26;
+export const LOW_DETAIL_CARD_HEIGHT = 36;
+
+const RANK_SYMBOLS: Record<string, string> = {
+  two: '2',
+  three: '3',
+  four: '4',
+  five: '5',
+  six: '6',
+  seven: '7',
+  eight: '8',
+  nine: '9',
+  ten: '10',
+  jack: 'J',
+  queen: 'Q',
+  king: 'K',
+  ace: 'A',
+};
+
+/** `2`..`10`, `J`, `Q`, `K`, `A` for the low-detail opponent cards. */
+export const lowDetailRank = (rank: string): string =>
+  RANK_SYMBOLS[rank.toLowerCase()] ?? rank.toUpperCase();
 
 /** Left strip kept visible so the top-left rank/suit index stays readable. */
 const readableEdge = (cardWidth: number): number =>
@@ -324,6 +356,11 @@ export function rowWidth(layout: HandLayout, cardWidth = HAND_CARD_WIDTH): numbe
   const step = cardWidth - layout.overlap;
   return (layout.visibleCount - 1) * step + cardWidth;
 }
+
+/** ITEM-13: documented alias of [[handLayout]] used by the hand geometry spec. */
+export const computeHandLayout = handLayout;
+/** ITEM-13: documented alias of [[boutLayout]] used by the play-area spec. */
+export const computeBoutLayout = boutLayout;
 
 /** Overlap for a fixed-width opponent card row; never reacts to the cursor. */
 export function opponentOverlap(
@@ -670,7 +707,7 @@ const isTrumpCard = (card: CardData, trumpSuit: string): boolean =>
  */
 export function sortHand(
   hand: CardData[],
-  mode: SortMode = 'suit',
+  mode: SortMode = 'rank',
   trumpSuit = '',
 ): CardData[] {
   const cards = [...hand];
@@ -678,6 +715,9 @@ export function sortHand(
     rankValue(left.rank) - rankValue(right.rank) || suitIndex(left.suit) - suitIndex(right.suit);
 
   switch (mode) {
+    case 'custom':
+      // ITEM-6b: the player's own arrangement, applied before the table renders.
+      return cards;
     case 'pairs':
       return cards.sort(byRank);
     case 'rank':
@@ -1000,7 +1040,8 @@ export function GameTable({
   canThrowIn = false,
   turnPlayerId,
   turnSecondsRemaining = 15,
-  sortMode = 'suit',
+  sortMode = 'rank',
+  transparentMode = false,
   isReviewMode = false,
   selectedKeys = [],
   playableKeys = [],
@@ -1011,10 +1052,14 @@ export function GameTable({
   onCoverDrop,
   onThrowInDrop,
   onRedirectDrop,
+  onReorderHand,
   children,
 }: GameTableProps) {
   const [dragCard, setDragCard] = useState<CardData | null>(null);
   const [snapZone, setSnapZone] = useState<string | null>(null);
+  // ITEM-6a: insertion slot the dragged hand card would land in, or null when
+  // the pointer is not over the hand row.
+  const [reorderIndex, setReorderIndex] = useState<number | null>(null);
   const [handWidth, setHandWidth] = useState(0);
   const [cardWidth, setCardWidth] = useState(HAND_CARD_WIDTH);
   const [cursorFraction, setCursorFraction] = useState(0.5);
@@ -1260,8 +1305,68 @@ export function GameTable({
       : 'top-center';
 
   // Review mode freezes the table: no drags, no drop surfaces, no submission.
-  const draggable = !reviewMode && Boolean(onAttackDrop || onCoverDrop || onThrowInDrop || onRedirectDrop);
+  // ITEM-6a: a hand card stays draggable even when it is not playable, because
+  // a drag may either play the card or only reorganise the hand.
+  const draggable =
+    !reviewMode &&
+    Boolean(onAttackDrop || onCoverDrop || onThrowInDrop || onRedirectDrop || onReorderHand);
   const throwInEnabled = !reviewMode && canThrowIn;
+
+  // ITEM-7: the whole page keeps the link pointer finger for the entire drag,
+  // including outside the arena where the browser would paint its own cursor.
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined;
+    if (dragCard) {
+      document.body.dataset.dragging = 'true';
+    } else {
+      delete document.body.dataset.dragging;
+    }
+    return () => {
+      delete document.body.dataset.dragging;
+    };
+  }, [dragCard]);
+
+  /** ITEM-6a: insertion index `0..hand.length` from the pointer's clientX. */
+  const reorderIndexFromClientX = (clientX: number, element: HTMLElement): number => {
+    const rect =
+      typeof element.getBoundingClientRect === 'function'
+        ? element.getBoundingClientRect()
+        : null;
+    const width = rect?.width ?? 0;
+    if (width <= 0) return 0;
+    const left = rect?.left ?? 0;
+    const fraction = Math.min(1, Math.max(0, (clientX - left) / width));
+    return Math.max(0, Math.min(hand.length, Math.round(fraction * hand.length)));
+  };
+
+  const hoverHandZone = (event: DragLike) => {
+    if (!onReorderHand || !dragCard) return;
+    event.preventDefault();
+    setSnapZone(null);
+    const element = event.currentTarget as unknown as HTMLElement | null;
+    if (!element) return;
+    setReorderIndex(reorderIndexFromClientX(event.clientX, element));
+  };
+
+  const dropOnHand = (event: DragLike) => {
+    if (!onReorderHand) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const card = readDraggedCard(event);
+    const element = event.currentTarget as unknown as HTMLElement | null;
+    const targetIndex =
+      reorderIndex ?? (element ? reorderIndexFromClientX(event.clientX, element) : 0);
+    setDragCard(null);
+    setSnapZone(null);
+    setReorderIndex(null);
+    if (!card) return;
+    const from = hand.findIndex((candidate) => cardKey(candidate) === cardKey(card));
+    if (from < 0) return;
+    const next = hand.filter((_, position) => position !== from);
+    const insertAt = Math.max(0, Math.min(next.length, targetIndex > from ? targetIndex - 1 : targetIndex));
+    next.splice(insertAt, 0, card);
+    onReorderHand(next);
+  };
 
   const readDraggedCard = (event: DragLike): CardData | null => {
     if (dragCard) return dragCard;
@@ -1329,8 +1434,12 @@ export function GameTable({
   // gap while the bout fits, then an overlap that never covers the left
   // rank/suit strip of the previous card, so the cards never wrap.
   const redirectSlot = !reviewMode && canRedirect && tablePairs.length > 0 ? 1 : 0;
+  // ITEM-8: the throw-in outline takes the next slot right after the cards in
+  // play, so the single compact row still never wraps with six pairs + both
+  // outlines.
+  const throwInSlot = throwInEnabled && tablePairs.length > 0 ? 1 : 0;
   const boutGeometry = boutLayout(
-    tablePairs.length + redirectSlot,
+    tablePairs.length + throwInSlot + redirectSlot,
     boutWidth > 0 ? boutWidth : BOUT_FALLBACK_WIDTH,
     boutCardWidth,
   );
@@ -1348,6 +1457,7 @@ export function GameTable({
       data-review-mode={isReviewMode ? 'true' : 'false'}
       data-bot-locked={isBotView ? 'true' : 'false'}
       data-dragging={dragCard ? 'true' : 'false'}
+      data-aura-contained="true"
       data-texture={settings.tableTexture}
       style={{ '--table-filter': getTableFilterCss(settings.tableFilters) }}
       ref={arenaRef}
@@ -1397,18 +1507,71 @@ export function GameTable({
                   {opponent.cardCount}
                 </span>
                 <div class="opponent-cards" aria-label={`${opponent.name}'s cards`}>
-                  {Array.from({ length: opponent.cardCount }, (_, index) => (
-                    <span
-                      key={index}
-                      class="opponent-card"
-                      style={{
-                        marginLeft:
-                          index === 0 ? '0px' : `-${opponentOverlap(opponent.cardCount)}px`,
-                      }}
-                    >
-                      <CardBack />
-                    </span>
-                  ))}
+                  {opponent.cards && opponent.cards.length > 0
+                    ? opponent.cards.map((card, index) => (
+                        <span
+                          key={`${card.suit}-${card.rank}-${index}`}
+                          class="opponent-low-detail-card"
+                          data-testid="opponent-low-detail-card"
+                          data-suit={card.suit.toLowerCase()}
+                          data-rank={card.rank.toLowerCase()}
+                          data-trump={
+                            isTrumpCard(card, trumpSuit) ? 'true' : 'false'
+                          }
+                          style={{
+                            marginLeft:
+                              index === 0
+                                ? '0px'
+                                : `-${opponentOverlap(
+                                    opponent.cards?.length ?? 0,
+                                    OPPONENT_CARDS_WIDTH,
+                                    LOW_DETAIL_CARD_WIDTH,
+                                  )}px`,
+                          }}
+                        >
+                          <span class="low-detail-index">
+                            <span class="low-detail-rank" data-testid="low-detail-rank">
+                              {lowDetailRank(card.rank)}
+                            </span>
+                            <span
+                              class={`low-detail-suit${isRedSuit(card.suit) ? ' red' : ' black'}`}
+                              data-testid="low-detail-suit"
+                            >
+                              {suitSymbol(card.suit)}
+                            </span>
+                          </span>
+                          {isTrumpCard(card, trumpSuit) ? (
+                            <>
+                              <span
+                                class="low-detail-trump low-detail-trump-top-right"
+                                data-testid="low-detail-trump-top-right"
+                                aria-hidden="true"
+                              >
+                                {suitSymbol(card.suit)}
+                              </span>
+                              <span
+                                class="low-detail-trump low-detail-trump-bottom-left"
+                                data-testid="low-detail-trump-bottom-left"
+                                aria-hidden="true"
+                              >
+                                {suitSymbol(card.suit)}
+                              </span>
+                            </>
+                          ) : null}
+                        </span>
+                      ))
+                    : Array.from({ length: opponent.cardCount }, (_, index) => (
+                        <span
+                          key={index}
+                          class="opponent-card"
+                          style={{
+                            marginLeft:
+                              index === 0 ? '0px' : `-${opponentOverlap(opponent.cardCount)}px`,
+                          }}
+                        >
+                          <CardBack />
+                        </span>
+                      ))}
                 </div>
               </div>
               {opponent.finishRank != null || opponent.hasPassed ? (
@@ -1431,14 +1594,6 @@ export function GameTable({
         data-zone="bout"
         data-anchor={boutAnchor}
         aria-label="Battle"
-        data-drop-zone={throwInEnabled ? 'throw-in' : undefined}
-        onDragOver={throwInEnabled ? hoverZone('throw-in') : undefined}
-        onDragLeave={throwInEnabled ? clearSnap : undefined}
-        onDrop={
-          throwInEnabled
-            ? (event) => dropOn('throw-in', event, (card) => onThrowInDrop?.(card))
-            : undefined
-        }
       >
         {/* Item 7: the tinted play area keeps one fixed, table-relative size, so
             it never grows or shrinks with the number of cards in play. */}
@@ -1516,6 +1671,30 @@ export function GameTable({
             );
           })}
 
+          {/* ITEM-8: the dedicated throw-in slot sits immediately right of the
+              cards in play. It is the ONLY throw-in drop zone, so a card
+              dropped elsewhere on the felt is not played. */}
+          {throwInSlot > 0 ? (
+            <div
+              class={`target-outline throw-in-outline${
+                snapZone === 'throw-in' ? ' snap-active' : ''
+              }`}
+              data-testid="throw-in-outline"
+              style={{ marginLeft: boutSlotMargin(tablePairs.length) }}
+              data-drop-zone="throw-in"
+              aria-label="Throw in another card"
+              onDragOver={hoverZone('throw-in')}
+              onDragLeave={clearSnap}
+              onDrop={(event) =>
+                dropOn('throw-in', event, (card) => onThrowInDrop?.(card))
+              }
+            >
+              <svg class="throw-in-icon" viewBox="0 0 40 40" aria-hidden="true">
+                <path d="M20 8 L20 32 M8 20 L32 20" />
+              </svg>
+            </div>
+          ) : null}
+
           {/* Item 8: the dashed reflection outline is a sibling of the attack
               cards in the same single row, so its top, centre and bottom edges
               always line up with every card in play at any table width. */}
@@ -1523,7 +1702,7 @@ export function GameTable({
             <div
               class={`redirect-outline${snapZone === 'redirect' ? ' snap-active' : ''}`}
               data-testid="redirect-outline"
-              style={{ marginLeft: boutSlotMargin(tablePairs.length) }}
+              style={{ marginLeft: boutSlotMargin(tablePairs.length + throwInSlot) }}
               data-drop-zone="redirect"
               data-direction={redirectDirection}
               data-target-seat={redirectDirection}
@@ -1580,7 +1759,10 @@ export function GameTable({
           data-overlap={handLayoutState.overlap}
           data-hidden-left={handLayoutState.hiddenLeft}
           data-hidden-right={handLayoutState.hiddenRight}
+          data-reorder-target-index={reorderIndex === null ? undefined : reorderIndex}
           ref={handRef}
+          onDragOver={draggable && onReorderHand ? hoverHandZone : undefined}
+          onDrop={draggable && onReorderHand ? dropOnHand : undefined}
           onMouseMove={
             hiddenCards > 0
               ? (event) => {
@@ -1592,17 +1774,31 @@ export function GameTable({
               : undefined
           }
           onMouseLeave={hiddenCards > 0 ? () => setCursorFraction(0.5) : undefined}
+          onDragLeave={
+            draggable && onReorderHand ? () => setReorderIndex(null) : undefined
+          }
         >
         {hand.map((card, index) => {
           const hidden =
             index < handLayoutState.hiddenLeft ||
             index >= handLayoutState.hiddenLeft + handLayoutState.visibleCount;
+          const draggedIndex = dragCard
+            ? hand.findIndex((candidate) => cardKey(candidate) === cardKey(dragCard))
+            : -1;
+          // ITEM-6a: the other cards visibly part around the insertion slot.
+          const partDirection =
+            reorderIndex !== null && dragCard !== null && index !== draggedIndex
+              ? index < reorderIndex
+                ? 'left'
+                : 'right'
+              : undefined;
           return (
             <div
               key={`${cardKey(card)}-${index}`}
-              class="hand-slot"
+              class="hand-slot hand-card-wrapper"
               data-hidden={hidden ? 'true' : 'false'}
               data-index={index}
+              data-part-direction={partDirection}
               aria-hidden={hidden ? 'true' : undefined}
               style={{ marginLeft: `${handMarginList[index]}px` }}
             >
@@ -1641,6 +1837,7 @@ export function GameTable({
                 onDragEnd={() => {
                   setDragCard(null);
                   setSnapZone(null);
+                  setReorderIndex(null);
                 }}
               />
             </div>
