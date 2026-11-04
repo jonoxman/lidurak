@@ -67,6 +67,13 @@ export interface GameTableProps {
   /** True while the viewer is the defender facing uncovered attacks. */
   defending?: boolean;
   /**
+   * T-90 ITEM-PREV-4a/4b: the uncovered attack prompt may be shown. GamePage
+   * passes the authoritative decision (defender POV, `Defense` phase, not
+   * surrendered, not review mode); when omitted the table derives it from its
+   * own props so it can never prompt the wrong seat.
+   */
+  highlightUncovered?: boolean;
+  /**
    * T-90-2 ITEM-PREV-4: the viewed seat is the defender of a bout they already
    * surrendered (or the phase is a surrender throw-in), so no hand glow may
    * prompt them for a move they no longer have.
@@ -984,6 +991,7 @@ export function GameTable({
   isBotSeat = false,
   awaitingAttack = false,
   defending = false,
+  highlightUncovered,
   isSurrenderingDefender = false,
   surrenderTriggered = false,
   defenderDefenseless = false,
@@ -1134,6 +1142,22 @@ export function GameTable({
     isSurrenderingDefender ||
     surrenderTriggered ||
     (defending && isSurrenderedPhase(boutPhase));
+  // T-90 ITEM-PREV-4a/4b: an uncovered card is only prompted to the bout's own
+  // defender, only during `Defense`, only before the surrender decision, and
+  // never in review/bot mode. `GamePage` passes the authoritative flag; the
+  // derived fallback keeps standalone `GameTable` renders correct.
+  const defensePhase =
+    (boutPhase ?? '').replace(/[^a-z]/gi, '').toLowerCase() === 'defense';
+  const uncoveredHighlightDerived =
+    !reviewMode &&
+    !surrenderingHand &&
+    defending &&
+    defenderId != null &&
+    defenderId === myId &&
+    defensePhase &&
+    tablePairs.some((pair) => !pair.defense);
+  const uncoveredHighlight =
+    !reviewMode && (highlightUncovered ?? uncoveredHighlightDerived);
   const defenderTurn =
     !reviewMode &&
     !surrenderingHand &&
@@ -1475,7 +1499,7 @@ export function GameTable({
                 defense={pair.defense}
                 trumpSuit={trumpSuit}
                 marginLeft={boutSlotMargin(index)}
-                pulse={defending && !surrenderingHand && !pair.defense}
+                highlightUncovered={uncoveredHighlight && !pair.defense}
                 snap={snapZone === zone}
                 dropZone={coverable ? zone : undefined}
                 onAttackClick={

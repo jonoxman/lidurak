@@ -43,6 +43,9 @@
   --clock-urgent-accent: #ea580c;
   --clock-urgent-border: #c2410c;
   --clock-urgent-glow: rgba(234, 88, 12, 0.7);
+  --clock-urgent-bg: rgba(234, 88, 12, 0.14);
+  /* T-90 ITEM-QA-1: neutral clock text while no urgent low-time aura is on. */
+  --clock-idle-text: #f8fafc;
   /* Legacy aliases: older rules read these names; both point at the canonical
      families above so no colour can drift. */
   --role-attacker-surface: var(--role-attacker-bg);
@@ -81,6 +84,8 @@
   --clock-urgent-accent: #c2410c;
   --clock-urgent-border: #c2410c;
   --clock-urgent-glow: rgba(194, 65, 12, 0.7);
+  --clock-urgent-bg: rgba(194, 65, 12, 0.14);
+  --clock-idle-text: #0f172a;
 }
 
 /* --- Felt arena: 3x3 CSS Grid --- */
@@ -1779,10 +1784,31 @@
     inset 0 0 0 1px rgba(6, 78, 59, 0.5);
 }
 
-/* The clock brightens only while this viewer is the player being waited on. */
+/* T-90 ITEM-QA-1: the clock stays neutral during normal play; only the final
+   five seconds of the running Turn clock carry the urgent aura. */
 .turn-clock.active {
-  color: var(--clock-active-accent);
-  text-shadow: 0 0 10px var(--clock-active-glow);
+  color: var(--clock-idle-text);
+  text-shadow: none;
+}
+
+.split-clock-half[data-active='true']:not(.clock-low) {
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+  border-color: transparent;
+}
+
+.split-clock-half[data-active='true']:not(.clock-low) .split-clock-value {
+  color: var(--clock-idle-text);
+  text-shadow: none;
+}
+
+.split-clock-half.clock-low,
+.split-clock-half[data-low-time='true'] {
+  background: var(--clock-urgent-bg);
+  box-shadow:
+    inset 0 0 0 1px var(--clock-urgent-border),
+    inset 0 0 12px var(--clock-urgent-glow);
 }
 
 .turn-clock[data-low-time='true'] {

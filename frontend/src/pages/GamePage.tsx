@@ -1167,6 +1167,15 @@ export function GamePage({
     !reviewMode &&
     viewerIsDefender &&
     (isSurrenderPhase(displayedView.boutPhase) || surrenderLatchActive);
+  // T-90 ITEM-PREV-4a/4b: the pulsing prompt on uncovered attacks belongs only
+  // to the bout's defender, only in `Defense`, and drops the instant the
+  // decision to surrender is made (manual click, client countdown or phase).
+  const highlightUncovered =
+    !reviewMode &&
+    viewerIsDefender &&
+    !surrenderingDefender &&
+    normalizeToken(displayedView.boutPhase) === 'defense' &&
+    displayedView.tablePairs.some((pair) => !pair.defense);
   const defenderDefenseless =
     !reviewMode &&
     viewerIsDefender &&
@@ -1287,7 +1296,19 @@ export function GamePage({
   // During review the turn clock rests at 00:15 instead of a live countdown.
   const displayViewerOnClock = !reviewMode && viewerOnClock;
   const displaySeconds = displayViewerOnClock ? seconds : 15;
-  const clockClasses = ['turn-clock', displayViewerOnClock ? ' active' : ''];
+  // T-90 ITEM-QA-1: neither clock half is highlighted during normal play. Only
+  // the final five seconds of the running Turn clock (`00:05` … `00:01`) light
+  // up with the urgent aura; the Game clock counts up and never highlights.
+  const turnLowTime =
+    displayViewerOnClock && displaySeconds <= 5 && displaySeconds > 0;
+  const clockClasses = [
+    'turn-clock',
+    'split-clock-value',
+    displayViewerOnClock ? 'active' : '',
+    turnLowTime ? 'clock-low' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   const leaveGame = () => {
     if (onLeaveGame) {
@@ -1562,6 +1583,7 @@ export function GamePage({
             viewerIsDefender &&
             displayedView.tablePairs.some((pair) => !pair.defense)
           }
+          highlightUncovered={highlightUncovered}
           isSurrenderingDefender={surrenderingDefender}
           surrenderTriggered={surrenderLatchActive}
           defenderDefenseless={defenderDefenseless}
@@ -1639,27 +1661,34 @@ export function GamePage({
           >
             <div
               class="clock-half split-clock-half game-clock-half"
+              data-testid="game-clock-half"
               data-active={gameClockActive ? 'true' : 'false'}
+              data-highlighted="false"
             >
               <h2>Game</h2>
               <span
-                class="game-clock"
+                class="game-clock split-clock-value"
                 data-testid="game-clock"
                 data-active={gameClockActive ? 'true' : 'false'}
+                data-highlighted="false"
               >
                 {gameClock}
               </span>
             </div>
             <div
-              class="clock-half split-clock-half turn-clock-half"
+              class={`clock-half split-clock-half turn-clock-half${turnLowTime ? ' clock-low' : ''}`}
+              data-testid="turn-clock-half"
               data-active={displayViewerOnClock ? 'true' : 'false'}
+              data-highlighted={turnLowTime ? 'true' : 'false'}
+              data-low-time={turnLowTime ? 'true' : 'false'}
             >
               <h2>Turn</h2>
               <span
-                class={clockClasses.join(' ')}
+                class={clockClasses}
                 data-testid="turn-clock"
                 data-active={displayViewerOnClock ? 'true' : 'false'}
-                data-low-time={displayViewerOnClock && displaySeconds <= 5 ? 'true' : 'false'}
+                data-highlighted={turnLowTime ? 'true' : 'false'}
+                data-low-time={turnLowTime ? 'true' : 'false'}
               >
                 {formatClock(displaySeconds)}
               </span>

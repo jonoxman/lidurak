@@ -2113,10 +2113,10 @@ describe('GamePage', () => {
     // Right sidebar: stronger attacker / defender rows, presence dot and clock.
     expect(
       cssRule(appCss, "html[data-theme='light'] .clock-half[data-active='true']"),
-    ).toContain('var(--clock-active-glow)');
+    ).toContain('box-shadow: none');
     expect(
-      cssRule(appCss, "html[data-theme='light'] .clock-half.turn-clock-half[data-active='true']"),
-    ).toContain('var(--clock-active-glow)');
+      cssRule(appCss, "html[data-theme='light'] .clock-half.clock-low"),
+    ).toContain('var(--clock-urgent-glow)');
     expect(
       cssRule(appCss, "html[data-theme='light'] .turn-clock[data-low-time='true']"),
     ).toContain('#ea580c');
@@ -2693,6 +2693,113 @@ describe('GamePage client auto-surrender and auto-pass delays', () => {
   });
 
   /**
+   * T-90 ITEM-PREV-4a/4b & ITEM-QA-1: the crimson uncovered-card prompt belongs
+   * only to the defender and disappears on surrender, while both clock halves
+   * stay quiet until the Turn clock reaches its final five seconds.
+   */
+  it('T-90: shows the uncovered prompt only to the defender and clears it on surrender', async () => {
+    const bobDefense: PlayerGameView = {
+      ...view,
+      myId: 'p1',
+      myName: 'Bob',
+      myHand: [
+        { suit: 'hearts', rank: 'six' },
+        { suit: 'diamonds', rank: 'nine' },
+      ],
+      opponents: [
+        { id: 'p0', name: 'Alice', cardCount: 6, hasPassed: false, finishRank: null },
+        { id: 'p2', name: 'Carol', cardCount: 4, hasPassed: false, finishRank: null },
+      ],
+      tablePairs: [
+        { attack: { suit: 'clubs', rank: 'six' }, defense: { suit: 'clubs', rank: 'nine' } },
+        { attack: { suit: 'spades', rank: 'seven' }, defense: null },
+      ],
+      trumpSuit: 'clubs',
+      attackerIdx: 0,
+      defenderIdx: 1,
+      boutPhase: 'Defense',
+      legalActions: ['cover', 'surrender'],
+      defenderDefenseless: false,
+      gameStartedAtMs: 1_000,
+      turnDeadlineMs: Date.now() + 12_000,
+    };
+    getGameView.mockResolvedValue(bobDefense);
+    getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
+    sendAction.mockResolvedValue({
+      ...bobDefense,
+      boutPhase: 'SurrenderThrowIn',
+      legalActions: [],
+    });
+
+    const bob = render(
+      <GamePage gameId="game-1" playerId="p1" onSwitchPlayer={() => {}} />,
+    );
+    await waitFor(() => expect(screen.getByTestId('surrender-button')).toBeTruthy());
+
+    // Bob is the defender: the uncovered 7♠ pulses, and neither clock is lit.
+    expect(bob.container.querySelectorAll('.table-card-uncovered')).toHaveLength(1);
+    const bobPair = bob.container.querySelector('.table-card-uncovered') as HTMLElement;
+    expect(bobPair.getAttribute('data-uncovered-highlighted')).toBe('true');
+    expect(screen.getByTestId('game-clock-half').getAttribute('data-highlighted')).toBe('false');
+    expect(screen.getByTestId('turn-clock-half').getAttribute('data-highlighted')).toBe('false');
+    expect(screen.getByTestId('turn-clock-half').getAttribute('data-low-time')).toBe('false');
+    const gameHalfCss = cssRule(appCss, ".split-clock-half[data-active='true']");
+    expect(gameHalfCss).toContain('background: transparent');
+    expect(gameHalfCss).toContain('box-shadow: none');
+
+    // The decision to surrender clears the prompt before the server replies.
+    fireEvent.click(screen.getByTestId('surrender-button'));
+    expect(bob.container.querySelectorAll('.table-card-uncovered')).toHaveLength(0);
+    expect(
+      bob.container.querySelector('.table-pair')!.getAttribute('data-uncovered-highlighted'),
+    ).toBe('false');
+    bob.unmount();
+
+    // Alice (p0) is the attacker, not the defender: no crimson prompt at all.
+    getGameView.mockResolvedValue({
+      ...bobDefense,
+      myId: 'p0',
+      myName: 'Alice',
+      myHand: [{ suit: 'hearts', rank: 'seven' }],
+      opponents: [
+        { id: 'p1', name: 'Bob', cardCount: 4, hasPassed: false, finishRank: null },
+        { id: 'p2', name: 'Carol', cardCount: 4, hasPassed: false, finishRank: null },
+      ],
+      legalActions: ['throwIn', 'pass'],
+    });
+    const alice = render(
+      <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
+    );
+    await waitFor(() => expect(screen.getByTestId('clock-panel')).toBeTruthy());
+    expect(alice.container.querySelectorAll('.table-card-uncovered')).toHaveLength(0);
+    expect(
+      alice.container.querySelector('.table-pair')!.getAttribute('data-uncovered-highlighted'),
+    ).toBe('false');
+    alice.unmount();
+
+    // Final five seconds: only the Turn half lights up with the urgent aura.
+    getGameView.mockResolvedValue({
+      ...bobDefense,
+      turnDeadlineMs: Date.now() + 4_000,
+    });
+    const low = render(
+      <GamePage gameId="game-1" playerId="p1" onSwitchPlayer={() => {}} />,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('turn-clock-half').getAttribute('data-low-time')).toBe('true'),
+    );
+    expect(screen.getByTestId('turn-clock-half').getAttribute('data-highlighted')).toBe('true');
+    expect(screen.getByTestId('turn-clock-half').classList.contains('clock-low')).toBe(true);
+    expect(screen.getByTestId('turn-clock').getAttribute('data-low-time')).toBe('true');
+    expect(screen.getByTestId('game-clock-half').getAttribute('data-highlighted')).toBe('false');
+    expect(Number(screen.getByTestId('turn-clock').textContent?.slice(-2))).toBeLessThanOrEqual(5);
+    expect(cssRule(appCss, '.split-clock-half.clock-low')).toContain(
+      'var(--clock-urgent-glow)',
+    );
+    low.unmount();
+  });
+
+  /**
    * T-90 ITEM-1b/1c: the live game chrome (POV tabs, HAND SORTING) is cobalt,
    * the running clock is cyan-teal, and each gameplay role keeps its own
    * family, so no unrelated feature can share a colour.
@@ -2726,10 +2833,13 @@ describe('GamePage client auto-surrender and auto-pass delays', () => {
     // Cobalt chrome, cyan clock, emerald attacker, crimson defender.
     expect(cssRule(appCss, '.pov-tab.active')).toContain('var(--ui-select-accent)');
     expect(cssRule(appCss, ".split-clock-half[data-active='true']")).toContain(
-      'var(--clock-active-bg)',
+      'background: transparent',
     );
     expect(cssRule(appCss, ".split-clock-half[data-active='true']")).toContain(
-      'var(--clock-active-glow)',
+      'box-shadow: none',
+    );
+    expect(cssRule(tableCss, '.split-clock-half.clock-low')).toContain(
+      'var(--clock-urgent-border)',
     );
     expect(cssRule(tableCss, '.sort-btn.active')).toContain('var(--ui-select-accent)');
     expect(cssRule(appCss, ".status-badge[data-role='attacker']")).toContain(
