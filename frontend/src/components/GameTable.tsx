@@ -176,10 +176,13 @@ export const SEAT_BOX = { width: 240, height: 140 } as const;
 
 /** --- Hand overlap geometry --- */
 
+/** ITEM-13: the single card size shared by the hand, the play area and the outlines. */
+export const CARD_WIDTH = 100;
+export const CARD_HEIGHT = 140;
 /** ITEM-13: width of one hand card at desktop scale (+25% from 80). */
-export const HAND_CARD_WIDTH = 100;
+export const HAND_CARD_WIDTH = CARD_WIDTH;
 /** ITEM-13: height of one hand card at desktop scale (+25% from 114). */
-export const HAND_CARD_HEIGHT = 140;
+export const HAND_CARD_HEIGHT = CARD_HEIGHT;
 /** Neighbouring hand cards never sit farther apart than this overlap. */
 export const HAND_MIN_OVERLAP = 8;
 /** Used until the hand has been measured (jsdom reports zero widths). */
@@ -199,8 +202,8 @@ export const DISCARD_FALLBACK_WIDTH = 236;
 export const MIN_VISIBLE_STRIP_PX = 22;
 
 /** Size of one card in play; mirrors `--bout-card-width/height` in table.css. */
-export const BOUT_CARD_WIDTH = 100;
-export const BOUT_CARD_HEIGHT = 140;
+export const BOUT_CARD_WIDTH = CARD_WIDTH;
+export const BOUT_CARD_HEIGHT = CARD_HEIGHT;
 /**
  * ITEM-NEW-2b: however many cards are in play, the left strip of every card —
  * where the rank and suit index are drawn — stays visible.
@@ -1055,11 +1058,25 @@ export function GameTable({
   onReorderHand,
   children,
 }: GameTableProps) {
+  // ITEM-6a/7: one drag state feeds both the HTML5 reorder/play drops and the
+  // pointer/mouse path, so the cursor and the parting animation are identical.
   const [dragCard, setDragCard] = useState<CardData | null>(null);
+  const dragState = dragCard;
   const [snapZone, setSnapZone] = useState<string | null>(null);
   // ITEM-6a: insertion slot the dragged hand card would land in, or null when
   // the pointer is not over the hand row.
   const [reorderIndex, setReorderIndex] = useState<number | null>(null);
+  const reorderIndexRef = useRef<number | null>(null);
+  reorderIndexRef.current = reorderIndex;
+  // A press only becomes a pointer drag after 4px of movement, so a plain click
+  // and a double-click still play/select the card normally.
+  const pointerDragRef = useRef<{
+    card: CardData;
+    startX: number;
+    startY: number;
+    active: boolean;
+  } | null>(null);
+  const suppressClickRef = useRef(false);
   const [handWidth, setHandWidth] = useState(0);
   const [cardWidth, setCardWidth] = useState(HAND_CARD_WIDTH);
   const [cursorFraction, setCursorFraction] = useState(0.5);
@@ -1326,7 +1343,7 @@ export function GameTable({
     };
   }, [dragCard]);
 
-  /** ITEM-6a: insertion index `0..hand.length` from the pointer's clientX. */
+  /** ITEM-6a: insertion index `0..hand.length - 1` from the pointer's clientX. */
   const reorderIndexFromClientX = (clientX: number, element: HTMLElement): number => {
     const rect =
       typeof element.getBoundingClientRect === 'function'
@@ -1336,8 +1353,71 @@ export function GameTable({
     if (width <= 0) return 0;
     const left = rect?.left ?? 0;
     const fraction = Math.min(1, Math.max(0, (clientX - left) / width));
-    return Math.max(0, Math.min(hand.length, Math.round(fraction * hand.length)));
+    return Math.max(
+      0,
+      Math.min(Math.max(0, hand.length - 1), Math.round(fraction * hand.length)),
+    );
   };
+
+  // ITEM-6a/7: pointer/mouse dragging works for ANY hand card, even when it is
+  // not the viewer's turn and no table drop is legal. Native HTML5 drag handles
+  // play drops; this path guarantees the live parting animation and the
+  // drop-to-reorder gesture with a plain mouse press + move.
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined;
+    const move = (event: MouseEvent) => {
+      const pointer = pointerDragRef.current;
+      if (!pointer) return;
+      if (!pointer.active) {
+        if (
+          Math.abs(event.clientX - pointer.startX) < 4 &&
+          Math.abs(event.clientY - pointer.startY) < 4
+        ) {
+          return;
+        }
+        pointer.active = true;
+        setDragCard(pointer.card);
+      }
+      event.preventDefault();
+      const box = handRef.current;
+      if (!box) return;
+      const rect = box.getBoundingClientRect();
+      const nearHand =
+        event.clientX >= rect.left - 40 &&
+        event.clientX <= rect.right + 40 &&
+        event.clientY >= rect.top - 40 &&
+        event.clientY <= rect.bottom + 60;
+      setReorderIndex(nearHand ? reorderIndexFromClientX(event.clientX, box) : null);
+    };
+    const up = () => {
+      const pointer = pointerDragRef.current;
+      pointerDragRef.current = null;
+      if (!pointer?.active) return;
+      const targetIndex = reorderIndexRef.current;
+      if (targetIndex !== null && onReorderHand) {
+        const from = hand.findIndex(
+          (candidate) => cardKey(candidate) === cardKey(pointer.card),
+        );
+        if (from >= 0) {
+          const next = hand.filter((_, position) => position !== from);
+          const insertAt = Math.max(0, Math.min(next.length, targetIndex));
+          next.splice(insertAt, 0, pointer.card);
+          onReorderHand(next);
+        }
+      }
+      // Stop the click that follows a completed drag from selecting the card.
+      suppressClickRef.current = true;
+      setDragCard(null);
+      setSnapZone(null);
+      setReorderIndex(null);
+    };
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
+    return () => {
+      document.removeEventListener('mousemove', move);
+      document.removeEventListener('mouseup', up);
+    };
+  }, [hand, onReorderHand]);
 
   const hoverHandZone = (event: DragLike) => {
     if (!onReorderHand || !dragCard) return;
@@ -1363,7 +1443,9 @@ export function GameTable({
     const from = hand.findIndex((candidate) => cardKey(candidate) === cardKey(card));
     if (from < 0) return;
     const next = hand.filter((_, position) => position !== from);
-    const insertAt = Math.max(0, Math.min(next.length, targetIndex > from ? targetIndex - 1 : targetIndex));
+    // `targetIndex` is the card's final position (`0..hand.length - 1`), so it
+    // already accounts for the removed source card.
+    const insertAt = Math.max(0, Math.min(next.length, targetIndex));
     next.splice(insertAt, 0, card);
     onReorderHand(next);
   };
@@ -1446,17 +1528,29 @@ export function GameTable({
   const boutSlotMargin = (index: number): string | undefined =>
     index === 0 ? undefined : `${boutGeometry.step - boutCardWidth}px`;
 
+  // Starts the pointer fallback for any card, at any time; review/bot seats and
+  // non-primary buttons are ignored so they keep their read-only behaviour.
+  const beginPointerDrag = (card: CardData) => (event: MouseEvent) => {
+    if (reviewMode || event.button !== 0) return;
+    pointerDragRef.current = {
+      card,
+      startX: event.clientX,
+      startY: event.clientY,
+      active: false,
+    };
+  };
+
   const boutClasses = ['bout-area'];
 
   return (
     <div
-      class={`table-arena${dragCard ? ' dragging' : ''}`}
+      class={`table-arena${dragState ? ' dragging' : ''}`}
       data-zone="table-arena"
       data-my-id={myId}
       data-chaos={chaosMode ? 'true' : 'false'}
       data-review-mode={isReviewMode ? 'true' : 'false'}
       data-bot-locked={isBotView ? 'true' : 'false'}
-      data-dragging={dragCard ? 'true' : 'false'}
+      data-dragging={dragState ? 'true' : 'false'}
       data-aura-contained="true"
       data-texture={settings.tableTexture}
       style={{ '--table-filter': getTableFilterCss(settings.tableFilters) }}
@@ -1785,12 +1879,22 @@ export function GameTable({
           const draggedIndex = dragCard
             ? hand.findIndex((candidate) => cardKey(candidate) === cardKey(dragCard))
             : -1;
-          // ITEM-6a: the other cards visibly part around the insertion slot.
+          // ITEM-6a: the other cards part around the insertion slot. The
+          // target index is the dragged card's final position, so cards move
+          // left when the card travels right and vice versa.
+          const movingRight = draggedIndex >= 0 && reorderIndex !== null && draggedIndex < reorderIndex;
+          const movingLeft = draggedIndex >= 0 && reorderIndex !== null && draggedIndex > reorderIndex;
           const partDirection =
             reorderIndex !== null && dragCard !== null && index !== draggedIndex
-              ? index < reorderIndex
-                ? 'left'
-                : 'right'
+              ? movingRight
+                ? index > draggedIndex && index <= reorderIndex
+                  ? 'left'
+                  : undefined
+                : movingLeft
+                  ? index >= reorderIndex && index < draggedIndex
+                    ? 'right'
+                    : undefined
+                  : undefined
               : undefined;
           return (
             <div
@@ -1799,8 +1903,16 @@ export function GameTable({
               data-hidden={hidden ? 'true' : 'false'}
               data-index={index}
               data-part-direction={partDirection}
+              data-draggable={draggable ? 'true' : 'false'}
               aria-hidden={hidden ? 'true' : undefined}
               style={{ marginLeft: `${handMarginList[index]}px` }}
+              onMouseDown={beginPointerDrag(card)}
+              onClickCapture={(event) => {
+                if (!suppressClickRef.current) return;
+                suppressClickRef.current = false;
+                event.stopPropagation();
+                event.preventDefault();
+              }}
             >
               <Card
                 suit={card.suit}
@@ -1827,6 +1939,8 @@ export function GameTable({
                 }
                 draggable={draggable}
                 onDragStart={(event) => {
+                  // Native HTML5 drag takes over from the pointer fallback.
+                  pointerDragRef.current = null;
                   setDragCard(card);
                   if (event.dataTransfer) {
                     // A move drag keeps the pointer cursor instead of the copy arrow.

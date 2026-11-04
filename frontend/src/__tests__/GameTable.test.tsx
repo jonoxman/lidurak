@@ -31,6 +31,8 @@ import {
   BOUT_CARD_HEIGHT,
   BOUT_CARD_WIDTH,
   BOUT_MIN_VISIBLE_LEFT,
+  CARD_HEIGHT,
+  CARD_WIDTH,
   sortHand,
   type OpponentSummary,
   type TablePairData,
@@ -3378,13 +3380,31 @@ describe('T-90-4: larger cards, aura containment, throw-in slot, hand reorder an
   ];
 
   it('ITEM-13: uses 100x140 cards in the hand and in the play area', () => {
-    expect(HAND_CARD_WIDTH).toBe(100);
-    expect(HAND_CARD_HEIGHT).toBe(140);
-    expect(BOUT_CARD_WIDTH).toBe(100);
-    expect(BOUT_CARD_HEIGHT).toBe(140);
+    expect(CARD_WIDTH).toBe(100);
+    expect(CARD_HEIGHT).toBe(140);
+    expect(HAND_CARD_WIDTH).toBe(CARD_WIDTH);
+    expect(HAND_CARD_HEIGHT).toBe(CARD_HEIGHT);
+    expect(BOUT_CARD_WIDTH).toBe(CARD_WIDTH);
+    expect(BOUT_CARD_HEIGHT).toBe(CARD_HEIGHT);
     expect(cssRule(tableCss, '.hand-slot')).toContain('var(--hand-card-width, 100px)');
     expect(cssRule(tableCss, '.hand-slot')).toContain('var(--hand-card-height, 140px)');
+    expect(tableCss).toMatch(
+      /\.hand-card-wrapper\s*{[^}]*width: var\(--hand-card-width, 100px\);[^}]*height: var\(--hand-card-height, 140px\);/,
+    );
     expect(tableCss).toMatch(/\.target-outline\s*{[^}]*width: 100px;[^}]*height: 140px;/);
+    expect(tableCss).toMatch(
+      /\.table-card-base,\s*\.table-card-cover,\s*\.drag-ghost\s*{[^}]*width: var\(--bout-card-width, 100px\);[^}]*height: var\(--bout-card-height, 140px\);/,
+    );
+  });
+
+  it('ITEM-13: marks the attack and cover cards as base/cover card boxes', () => {
+    const { container } = renderTable();
+    expect(
+      container.querySelector('.table-pair-attack')?.classList.contains('table-card-base'),
+    ).toBe(true);
+    expect(
+      container.querySelector('.table-pair-defense')?.classList.contains('table-card-cover'),
+    ).toBe(true);
   });
 
   it('ITEM-1: keeps the full aura inside the felt in 4-player mode', () => {
@@ -3479,7 +3499,7 @@ describe('T-90-4: larger cards, aura containment, throw-in slot, hand reorder an
       handBox,
       new MouseEvent('dragover', { bubbles: true, cancelable: true, clientX: 300 }),
     );
-    expect(handBox.getAttribute('data-reorder-target-index')).toBe('3');
+    expect(handBox.getAttribute('data-reorder-target-index')).toBe('2');
     const wrappers = Array.from(
       handBox.querySelectorAll('.hand-card-wrapper'),
     ) as HTMLElement[];
@@ -3497,6 +3517,60 @@ describe('T-90-4: larger cards, aura containment, throw-in slot, hand reorder an
       { suit: 'hearts', rank: 'ace' },
       { suit: 'spades', rank: 'six' },
     ]);
+  });
+
+  it('ITEM-6a/7: pointer drag reorders any hand card even when it is not the turn', () => {
+    const onReorderHand = vi.fn();
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={[fourPlayerOpponents[0]]}
+        tablePairs={[]}
+        trumpSuit="diamonds"
+        defenderId="p1"
+        onReorderHand={onReorderHand}
+      />,
+    );
+
+    const handBox = screen.getByTestId('hand-turn-highlight');
+    vi.spyOn(handBox, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 300,
+      bottom: 140,
+      width: 300,
+      height: 140,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+
+    // No awaitingAttack/playableKeys here: the hand is not playable, yet a
+    // plain mouse drag must still part the row and reorder on release.
+    fireEvent.mouseDown(screen.getByLabelText('six of spades'), {
+      button: 0,
+      clientX: 10,
+      clientY: 20,
+    });
+    fireEvent.mouseMove(document, { clientX: 120, clientY: 22 });
+    expect(document.body.getAttribute('data-dragging')).toBe('true');
+
+    fireEvent.mouseMove(document, { clientX: 300, clientY: 22 });
+    expect(handBox.getAttribute('data-reorder-target-index')).toBe('2');
+    expect(
+      Array.from(handBox.querySelectorAll('.hand-card-wrapper')).map((node) =>
+        node.getAttribute('data-part-direction'),
+      ),
+    ).toEqual([null, 'left', 'left']);
+
+    fireEvent.mouseUp(document, { clientX: 300, clientY: 22 });
+    expect(onReorderHand).toHaveBeenCalledWith([
+      { suit: 'clubs', rank: 'king' },
+      { suit: 'hearts', rank: 'ace' },
+      { suit: 'spades', rank: 'six' },
+    ]);
+    expect(document.body.hasAttribute('data-dragging')).toBe(false);
   });
 
   it('ITEM-10b: renders low-detail opponent cards with symmetrical trump badges', () => {

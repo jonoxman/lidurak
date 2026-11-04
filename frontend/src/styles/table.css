@@ -512,6 +512,20 @@
   border-radius: var(--app-roundness, 8px);
 }
 
+/* ITEM-13: the base and cover cards are exactly one 100x140 card; the shown
+   drag ghost reuses the same footprint so its snap preview never jumps size. */
+.table-card-base,
+.table-card-cover,
+.drag-ghost {
+  width: var(--bout-card-width, 100px);
+  height: var(--bout-card-height, 140px);
+  box-sizing: border-box;
+}
+
+.drag-ghost {
+  cursor: pointer;
+}
+
 .table-pair {
   display: grid;
   grid-template-columns: var(--bout-card-width, 100px);
@@ -2130,6 +2144,8 @@ body[data-dragging='true'] * {
 /* ITEM-6a: every other card parts around the insertion slot while a card is
    dragged through the hand. */
 .hand-card-wrapper {
+  width: var(--hand-card-width, 100px);
+  height: var(--hand-card-height, 140px);
   transition: transform 150ms ease-out;
 }
 
