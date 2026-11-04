@@ -1,6 +1,7 @@
 import {
   parseGameReplay,
   parsePlayerGameView,
+  type CreateGameRequest,
   type GameAction,
   type GameReplay,
   type PlayerGameView,
@@ -44,13 +45,26 @@ export async function createGame(
   allowRedirect = true,
   chaosMode = false,
   playerTypes?: readonly PlayerType[],
+  transparentMode?: boolean,
+  devMode?: boolean,
 ): Promise<CreatedGame> {
   const seats: readonly PlayerType[] =
     playerTypes ?? Array.from({ length: playerCount }, (): PlayerType => 'human');
-  const response = await fetch('/api/game/create', {
+  // T-90-2: Transparent Mode and Dev Mode are forwarded verbatim, and only when
+  // the caller opted in, so an ordinary `POST /api/games` body is unchanged.
+  const request: CreateGameRequest = {
+    playerCount,
+    playerNames,
+    allowRedirect,
+    chaosMode,
+    playerTypes: seats,
+    ...(transparentMode === undefined ? {} : { transparentMode }),
+    ...(devMode === undefined ? {} : { devMode }),
+  };
+  const response = await fetch('/api/games', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ playerCount, playerNames, allowRedirect, chaosMode, playerTypes: seats }),
+    body: JSON.stringify(request),
   });
   const body = await readJson(response);
 
@@ -141,9 +155,16 @@ export async function createPresetGame(preset: string): Promise<CreatedPresetGam
   return { gameId, players, playerTypes, defaultPlayerId };
 }
 
-export async function getGameView(gameId: string, playerId: string): Promise<PlayerGameView> {
+export async function getGameView(
+  gameId: string,
+  playerId: string,
+  requesterId?: string,
+): Promise<PlayerGameView> {
+  // T-90-2: an explicit `requester` asks the backend which seat is asking, so
+  // debug / Transparent projections can be filtered for that viewer.
+  const query = requesterId ? `?requester=${encodeURIComponent(requesterId)}` : '';
   const response = await fetch(
-    `/api/game/${encodeURIComponent(gameId)}/view/${encodeURIComponent(playerId)}`,
+    `/api/game/${encodeURIComponent(gameId)}/view/${encodeURIComponent(playerId)}${query}`,
   );
   const body = await readJson(response);
 

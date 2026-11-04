@@ -92,8 +92,12 @@ export const CARD_BORDER_RADIUS = 'var(--app-roundness, 8px)';
 export const CARD_INDEX = {
   topRank: { x: 11.5, y: 21, fontSize: 15 },
   topSuit: { x: 11.5, y: 34, fontSize: 12 },
-  bottomRank: { x: 58.5, y: 96, fontSize: 15 },
-  bottomSuit: { x: 58.5, y: 82, fontSize: 12 },
+  // T-90-2 ITEM-11: the bottom-right corner is the exact 180° rotation of the
+  // top-left one around the `(35, 50)` card centre, so the upside-down rank
+  // sits nearest the corner (`70 - 11.5`, `100 - 21`) and the upside-down suit
+  // directly above it (`70 - 11.5`, `100 - 34`).
+  bottomRank: { x: 58.5, y: 79, fontSize: 15 },
+  bottomSuit: { x: 58.5, y: 66, fontSize: 12 },
 } as const;
 
 /**
@@ -112,7 +116,7 @@ export const PIP_FONT_SIZE = 13;
  * `left + right = 70` and the left and right margins are identical (`22.5` from
  * either edge). The spacing `12.5` still clears a full 13-unit suit glyph
  * (whose ink is about `10.4` units wide), and the right column ends at `47.5`,
- * well clear of the trump badge (`cx = 61`, `r = 6`).
+ * clear of the top-right trump badge (`cx = 58.5`, `r = 6`).
  */
 export const PIP_COLUMNS = { left: 22.5, center: 35, right: 47.5 } as const;
 
@@ -156,8 +160,17 @@ export const PIP_LAYOUT_BOUNDS = {
  */
 export const ACE_PIP = { x: 35, y: 50, fontSize: 40 } as const;
 
-/** Golden corner badge on a trump card. */
-export const TRUMP_BADGE = { cx: 61, cy: 10, r: 6 } as const;
+/**
+ * T-90-2 ITEM-12a / ITEM-12b: the two symmetrical trump badges, both `r = 6`.
+ * They are exact 180° rotations of one another around the `(35, 50)` card
+ * centre (`58.5 + 11.5 = 70`, `14 + 86 = 100`), and the bottom-left badge sits
+ * on the `x = 11.5` axis that every overlapped card in a fan keeps visible, so
+ * a trump reads as a trump however the hand is stacked.
+ */
+export const TRUMP_BADGES = {
+  topRight: { cx: 58.5, cy: 14, r: 6 },
+  bottomLeft: { cx: 11.5, cy: 86, r: 6 },
+} as const;
 
 /**
  * Standard pip arrangements inside the 70x100 viewBox (T-90-1 ITEM-3a): the
@@ -443,6 +456,7 @@ export function Card({
       data-rank={rank.toLowerCase()}
       data-card-theme={theme}
       data-roundness={roundness}
+      data-trump-glow="false"
       style={{ borderRadius: CARD_BORDER_RADIUS }}
       onClick={onClick}
       onDblClick={onDoubleClick}
@@ -458,6 +472,7 @@ export function Card({
         data-card-theme={theme}
         data-card-face={palette.face}
         data-roundness={roundness}
+        data-trump-glow="false"
         style={{ borderRadius: CARD_BORDER_RADIUS }}
       >
         {/* Card face: the surface the pips are drawn on. */}
@@ -479,6 +494,7 @@ export function Card({
           data-index="top-rank"
           data-testid="card-rank-top"
           data-font-style="sans-serif"
+          data-inverted="false"
           x={CARD_INDEX.topRank.x}
           y={CARD_INDEX.topRank.y}
           font-size={CARD_INDEX.topRank.fontSize}
@@ -495,6 +511,7 @@ export function Card({
           class="card-suit-index"
           data-index="top-suit"
           data-testid="card-suit-top"
+          data-inverted="false"
           x={CARD_INDEX.topSuit.x}
           y={CARD_INDEX.topSuit.y}
           font-size={CARD_INDEX.topSuit.fontSize}
@@ -583,39 +600,83 @@ export function Card({
 
         {trump ? (
           <g class="trump-marker" data-testid="trump-marker">
-            {/* A compact 12-14px badge tucked into the top-right corner, clear
-                of the corner index and every center pip. */}
-            <circle
-              cx={TRUMP_BADGE.cx}
-              cy={TRUMP_BADGE.cy}
-              r={TRUMP_BADGE.r}
-              fill="var(--trump-accent, #f59e0b)"
-            />
-            <text
-              x={TRUMP_BADGE.cx}
-              y={TRUMP_BADGE.cy}
-              font-size={8}
-              text-anchor="middle"
-              dominant-baseline="central"
-              fill="#161512"
-            >
-              {symbol}
-            </text>
+            {/* T-90-2 ITEM-12a/12b: two compact 12-14px badges — top-right and
+                the 180°-symmetric bottom-left — and no glow aura (the card only
+                exposes `data-trump-glow="false"`, it paints no inline shadow). */}
+            <g class="trump-badge-set" data-testid="trump-badge">
+              <g
+                class="trump-badge-icon"
+                data-testid="trump-badge-top-right"
+                data-side="top-right"
+                data-inverted="false"
+                data-cx={TRUMP_BADGES.topRight.cx}
+                data-cy={TRUMP_BADGES.topRight.cy}
+                data-r={TRUMP_BADGES.topRight.r}
+              >
+                <circle
+                  cx={TRUMP_BADGES.topRight.cx}
+                  cy={TRUMP_BADGES.topRight.cy}
+                  r={TRUMP_BADGES.topRight.r}
+                  fill="var(--trump-accent, #f59e0b)"
+                />
+                <text
+                  x={TRUMP_BADGES.topRight.cx}
+                  y={TRUMP_BADGES.topRight.cy}
+                  font-size={8}
+                  text-anchor="middle"
+                  dominant-baseline="central"
+                  fill="#161512"
+                >
+                  {symbol}
+                </text>
+              </g>
+              <g
+                class="trump-badge-icon"
+                data-testid="trump-badge-bottom-left"
+                data-side="bottom-left"
+                data-inverted="true"
+                data-cx={TRUMP_BADGES.bottomLeft.cx}
+                data-cy={TRUMP_BADGES.bottomLeft.cy}
+                data-r={TRUMP_BADGES.bottomLeft.r}
+                transform={`rotate(180 ${TRUMP_BADGES.bottomLeft.cx} ${TRUMP_BADGES.bottomLeft.cy})`}
+              >
+                <circle
+                  cx={TRUMP_BADGES.bottomLeft.cx}
+                  cy={TRUMP_BADGES.bottomLeft.cy}
+                  r={TRUMP_BADGES.bottomLeft.r}
+                  fill="var(--trump-accent, #f59e0b)"
+                />
+                <text
+                  x={TRUMP_BADGES.bottomLeft.cx}
+                  y={TRUMP_BADGES.bottomLeft.cy}
+                  font-size={8}
+                  text-anchor="middle"
+                  dominant-baseline="central"
+                  fill="#161512"
+                >
+                  {symbol}
+                </text>
+              </g>
+            </g>
           </g>
         ) : null}
 
-        {/* Bottom-right index, rotated 180 degrees by the reading direction. */}
+        {/* T-90-2 ITEM-11: the bottom-right corner is inverted — the rank and
+            suit are rotated 180° around their own anchors, exactly mirroring
+            the upright top-left corner. */}
         <text
           class="card-rank-index"
           data-index="bottom-rank"
           data-testid="card-rank-bottom"
           data-font-style="sans-serif"
+          data-inverted="true"
           x={CARD_INDEX.bottomRank.x}
           y={CARD_INDEX.bottomRank.y}
           font-size={CARD_INDEX.bottomRank.fontSize}
           font-family={CARD_CORNER_FONT_FAMILY}
           font-weight="700"
           text-anchor="middle"
+          transform={`rotate(180 ${CARD_INDEX.bottomRank.x} ${CARD_INDEX.bottomRank.y})`}
           fill={color}
         >
           {label}
@@ -624,10 +685,12 @@ export function Card({
           class="card-suit-index"
           data-index="bottom-suit"
           data-testid="card-suit-bottom"
+          data-inverted="true"
           x={CARD_INDEX.bottomSuit.x}
           y={CARD_INDEX.bottomSuit.y}
           font-size={CARD_INDEX.bottomSuit.fontSize}
           text-anchor="middle"
+          transform={`rotate(180 ${CARD_INDEX.bottomSuit.x} ${CARD_INDEX.bottomSuit.y})`}
           fill={color}
         >
           {symbol}

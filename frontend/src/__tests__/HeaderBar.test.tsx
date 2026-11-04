@@ -627,12 +627,12 @@ describe('T-90-feedback-2 Theme Highlights section', () => {
     return screen.getByTestId('theme-highlights-section');
   };
 
-  it('ITEM-NEW-1a: renders Highlights below Roundness and above the connection tracker', () => {
+  it('ITEM-4 / ITEM-NEW-1a: renders Palettes below Roundness and above the connection tracker', () => {
     const section = openHighlights();
 
     expect(section.classList.contains('theme-highlights-section')).toBe(true);
     const heading = screen.getByTestId('theme-highlights-heading');
-    expect(heading.textContent).toBe('Highlights');
+    expect(heading.textContent).toBe('Palettes');
     expect(heading.classList.contains('submenu-section-title')).toBe(true);
 
     const roundness = screen.getByTestId('roundness-slider');
