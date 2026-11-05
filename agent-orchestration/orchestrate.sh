@@ -1186,8 +1186,8 @@ Format your response in clean Markdown (with NO preamble) and end with \`===END_
 PROMPT_EOF
 
   run_agy_pool "REVIEWER_R1" ".reviews/qa_playbook_prompt.txt" ".reviews/QA_PLAYBOOK.raw.md" "===END_OF_FILES==="
-  sed '/===END_OF_FILES===/d' .reviews/QA_PLAYBOOK.raw.md > .reviews/QA_PLAYBOOK.md
-  cp .reviews/QA_PLAYBOOK.md QA_PLAYBOOK.md 2>/dev/null || true
+  rm -f QA_PLAYBOOK.md
+  python3 "$PROJECT_ROOT/agent-orchestration/qa-assistant.py" --render-playbook >/dev/null 2>&1 || sed '/===END_OF_FILES===/d' .reviews/QA_PLAYBOOK.raw.md > .reviews/QA_PLAYBOOK.md
 }
 
 advance_to_next_milestone() {
@@ -1344,18 +1344,23 @@ ${PLAYBOOK_PREVIEW}"
   echo "=================================================================="
   echo "🏆 ALL WAVES & HOLISTIC SPEC AUDIT COMPLETED, MERGED & SYNCED!"
   echo "=================================================================="
-  if [ -f .reviews/QA_PLAYBOOK.md ]; then
-    echo "📖 STEP-BY-STEP QA PLAYBOOK (Also saved to ./QA_PLAYBOOK.md):"
-    echo "------------------------------------------------------------------"
-    cat .reviews/QA_PLAYBOOK.md
-    echo "------------------------------------------------------------------"
+  if [ -f .reviews/QA_PLAYBOOK.raw.md ] || [ -f .reviews/QA_PLAYBOOK.md ]; then
+    python3 "$PROJECT_ROOT/agent-orchestration/qa-assistant.py" --show-playbook
   fi
   echo "👉 Next Actions:"
   echo "   1. Run './play-local.sh' in Window 4 and follow the QA Playbook above at http://localhost:5173"
-  echo "   2. To request further tweaks (or answer any deferred items), edit 'FEEDBACK.md' and press [ENTER]"
-  echo "   3. To sign off on this milestone and auto-start the next milestone, type 'accept'"
+  echo "   2. Type 'show' and press [ENTER] to re-print the QA Playbook to the terminal at any time"
+  echo "   3. To request further tweaks (or answer any deferred items), edit 'FEEDBACK.md' and press [ENTER]"
+  echo "   4. To sign off on this milestone and auto-start the next milestone, type 'accept'"
   echo "------------------------------------------------------------------"
-  read -r -p "Press [ENTER] after saving FEEDBACK.md, or type 'accept' to advance to the next milestone: " USER_CHOICE
+  while true; do
+    read -r -p "Press [ENTER] after saving FEEDBACK.md, type 'show' to re-print playbook, or type 'accept': " USER_CHOICE
+    if [ "$USER_CHOICE" = "show" ] || [ "$USER_CHOICE" = "playbook" ]; then
+      python3 "$PROJECT_ROOT/agent-orchestration/qa-assistant.py" --show-playbook
+      continue
+    fi
+    break
+  done
 
   reset_alert_latch
 

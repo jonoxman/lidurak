@@ -197,5 +197,117 @@ def run_interactive_triage():
     )
 
 
+
+
+def strip_markdown_to_plain(text: str) -> str:
+    """Strips Markdown symbols (#, **, `, ~~~) into clean human-readable plain text."""
+    lines = []
+    for raw_line in text.splitlines():
+        line = raw_line.rstrip()
+        if line.strip().startswith(("```", "~~~", "===END_OF_FILES===")):
+            continue
+        # Remove backticks and bold/italic markers
+        line = re.sub(r"`([^`]+)`", r"'\1'", line)
+        line = re.sub(r"\*\*([^*]+)\*\*", r"\1", line)
+        line = re.sub(r"__([^_]+)__", r"\1", line)
+        # Convert Markdown headers into clean uppercase section titles
+        h_match = re.match(r"^(#{1,6})\s+(.*)", line)
+        if h_match:
+            level = len(h_match.group(1))
+            title = h_match.group(2).strip()
+            if level <= 2:
+                lines.append("")
+                lines.append(title.upper())
+                lines.append("-" * min(len(title), 72))
+            else:
+                lines.append("")
+                lines.append(f"[{title}]")
+            continue
+        # Normalize unordered bullets
+        line = re.sub(r"^(\s*)[-*+]\s+", r"\1• ", line)
+        lines.append(line)
+    return "\n".join(lines).strip() + "\n"
+
+
+def render_playbook_to_terminal(raw_text: str):
+    """Renders the playbook to stdout with clean terminal colors, indentation, and word wrapping."""
+    import shutil, textwrap
+    width = min(max(shutil.get_terminal_size((90, 24)).columns - 4, 68), 100)
+
+    BOLD = "\033[1m"
+    GREEN = "\033[1;32m"
+    CYAN = "\033[1;36m"
+    YELLOW = "\033[1;33m"
+    DIM = "\033[2m"
+    RESET = "\033[0m"
+
+    print("\n" + GREEN + "═" * width + RESET)
+    print(GREEN + " 🧪 INTERACTIVE QA PLAYBOOK — HOW TO VERIFY RECENT CHANGES" + RESET)
+    print(GREEN + "═" * width + RESET)
+
+    for raw_line in raw_text.splitlines():
+        line = raw_line.rstrip()
+        if not line.strip():
+            print("")
+            continue
+        if line.strip().startswith(("```", "~~~", "===END_OF_FILES===")):
+            continue
+
+        # Highlight inline code/buttons in cyan and bold text in bright white/yellow without symbols
+        def colorize_inline(s: str) -> str:
+            s = re.sub(r"`([^`]+)`", f"{CYAN}\1{RESET}", s)
+            s = re.sub(r"\*\*([^*]+)\*\*", f"{BOLD}\1{RESET}", s)
+            return s
+
+        h_match = re.match(r"^(#{1,6})\s+(.*)", line)
+        if h_match:
+            level = len(h_match.group(1))
+            title = re.sub(r"[*`]", "", h_match.group(2).strip())
+            if level <= 2:
+                print(f"\n{YELLOW}{title.upper()}{RESET}")
+                print(DIM + "─" * min(len(title) + 4, width) + RESET)
+            else:
+                print(f"\n{GREEN}▶ {title}{RESET}")
+            continue
+
+        # Handle bullet points and numbered steps with clean hanging indents
+        bullet_match = re.match(r"^(\s*)(?:[-*+]|•)\s+(.*)", line)
+        num_match = re.match(r"^(\s*)(\d+\.)\s+(.*)", line)
+
+        if bullet_match:
+            indent_len = len(bullet_match.group(1))
+            content = bullet_match.group(2).strip()
+            prefix = "  " * (indent_len // 2) + "  • "
+            sub_indent = " " * len(prefix)
+            wrapped = textwrap.fill(content, width=width, initial_indent=prefix, subsequent_indent=sub_indent)
+            print(colorize_inline(wrapped))
+        elif num_match:
+            indent_len = len(num_match.group(1))
+            num_label = num_match.group(2)
+            content = num_match.group(3).strip()
+            prefix = "  " * (indent_len // 2) + f"    {num_label} "
+            sub_indent = " " * len(prefix)
+            wrapped = textwrap.fill(content, width=width, initial_indent=prefix, subsequent_indent=sub_indent)
+            print(colorize_inline(wrapped))
+        else:
+            wrapped = textwrap.fill(line.strip(), width=width, initial_indent="  ", subsequent_indent="  ")
+            print(colorize_inline(wrapped))
+
+    print(GREEN + "═" * width + RESET + "\n")
+
+
 if __name__ == "__main__":
-    run_interactive_triage()
+    if len(sys.argv) > 1 and sys.argv[1] == "--render-playbook":
+        raw_pb = (REVIEWS_DIR / "QA_PLAYBOOK.raw.md").read_text(encoding="utf-8", errors="replace") if (REVIEWS_DIR / "QA_PLAYBOOK.raw.md").exists() else ""
+        if raw_pb:
+            plain_pb = strip_markdown_to_plain(raw_pb)
+            (REVIEWS_DIR / "QA_PLAYBOOK.md").write_text(plain_pb, encoding="utf-8")
+            render_playbook_to_terminal(raw_pb)
+    elif len(sys.argv) > 1 and sys.argv[1] == "--show-playbook":
+        raw_pb = (REVIEWS_DIR / "QA_PLAYBOOK.raw.md").read_text(encoding="utf-8", errors="replace") if (REVIEWS_DIR / "QA_PLAYBOOK.raw.md").exists() else ((REVIEWS_DIR / "QA_PLAYBOOK.md").read_text(encoding="utf-8", errors="replace") if (REVIEWS_DIR / "QA_PLAYBOOK.md").exists() else "")
+        if raw_pb:
+            render_playbook_to_terminal(raw_pb)
+        else:
+            print("ℹ️  No QA Playbook generated yet.")
+    else:
+        run_interactive_triage()
