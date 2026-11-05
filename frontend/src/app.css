@@ -672,16 +672,31 @@ html[data-theme='light'] .error-banner {
   white-space: nowrap;
 }
 
-/* ITEM-ADD-8b: the last player out wears the DURAK pill. */
-.status-tag.durak-tag {
+/* ITEM-ADD-8b: the last player out wears the DURAK pill — the only status
+   label with a border, in both themes (T-90-2 ITEM-3). */
+.status-tag.durak-tag,
+.status-tag.status-durak,
+.status-badge [data-status='DURAK'] .status-tag {
   color: #161512;
   background: #f59e0b;
+  border: 1px solid #b45309;
 }
 
-.status-tag.passed-tag {
-  color: var(--app-text);
-  border: 1px solid var(--app-border);
-  opacity: 0.85;
+/* T-90-2 ITEM-3: WINNER, OUT and PASSED share ONE uniform, borderless label in
+   Dark mode, exactly like the dark theme this matches. Only DURAK has a border. */
+.status-tag.winner-tag,
+.status-tag.out-tag,
+.status-tag.passed-tag,
+.status-tag.status-out,
+.status-badge [data-status='WINNER'] .status-tag,
+.status-badge [data-status='OUT'] .status-tag,
+.status-badge [data-status='PASSED'] .status-tag {
+  color: #e2e8f0;
+  background: rgba(148, 163, 184, 0.18);
+  border: none;
+  outline: none;
+  font-weight: 700;
+  opacity: 1;
 }
 
 /* ITEM-ADD-2a: the player's name is never outlined, bordered or shadowed inside
@@ -696,20 +711,25 @@ html[data-theme='light'] .error-banner {
    and the defending seat wears the crimson Defender family — the same colours
    as that role's hand glow, target outlines, uncovered pulse and table button.
    A soft, diffused glow is used instead of the old sharp outline. */
+/* T-90-2 ITEM-1a: the aura radii multiply by `--highlight-intensity-scale`
+   (`highlightIntensity / 100`), so the `Glow` slider softens or intensifies the
+   rows live instead of leaving them at a fixed 12px halo. */
 .status-badge[data-role='attacker'] {
   border: 1px solid var(--role-attacker-border);
   outline: none;
   box-shadow:
-    0 0 12px 2px var(--role-attacker-glow),
-    inset 0 0 8px var(--role-attacker-bg);
+    0 0 calc(12px * var(--highlight-intensity-scale, 1))
+      calc(2px * var(--highlight-intensity-scale, 1)) var(--role-attacker-glow),
+    inset 0 0 calc(8px * var(--highlight-intensity-scale, 1)) var(--role-attacker-bg);
 }
 
 .status-badge[data-role='defender'] {
   border: 1px solid var(--role-defender-border);
   outline: none;
   box-shadow:
-    0 0 12px 2px var(--role-defender-glow),
-    inset 0 0 8px var(--role-defender-bg);
+    0 0 calc(12px * var(--highlight-intensity-scale, 1))
+      calc(2px * var(--highlight-intensity-scale, 1)) var(--role-defender-glow),
+    inset 0 0 calc(8px * var(--highlight-intensity-scale, 1)) var(--role-defender-bg);
 }
 
 /* T-90-3 ITEM-1b: the light theme keeps the same diffused shape but uses much
@@ -718,18 +738,21 @@ html[data-theme='light'] .error-banner {
 html[data-theme='light'] .status-badge[data-role='attacker'] {
   border-color: var(--role-attacker-border);
   outline: none;
-  /* T-90-feedback-3: softer spread; the alphas come from the paler tokens. */
+  /* T-90-feedback-3: softer spread; the alphas come from the paler tokens.
+     T-90-2 ITEM-1a: the radii still scale with the `Glow` slider. */
   box-shadow:
-    0 0 10px 2px var(--role-attacker-glow),
-    inset 0 0 8px var(--role-attacker-bg);
+    0 0 calc(10px * var(--highlight-intensity-scale, 1))
+      calc(2px * var(--highlight-intensity-scale, 1)) var(--role-attacker-glow),
+    inset 0 0 calc(8px * var(--highlight-intensity-scale, 1)) var(--role-attacker-bg);
 }
 
 html[data-theme='light'] .status-badge[data-role='defender'] {
   border-color: var(--role-defender-border);
   outline: none;
   box-shadow:
-    0 0 10px 2px var(--role-defender-glow),
-    inset 0 0 8px var(--role-defender-bg);
+    0 0 calc(10px * var(--highlight-intensity-scale, 1))
+      calc(2px * var(--highlight-intensity-scale, 1)) var(--role-defender-glow),
+    inset 0 0 calc(8px * var(--highlight-intensity-scale, 1)) var(--role-defender-bg);
 }
 
 .game-meta {
@@ -1951,37 +1974,37 @@ html[data-theme='light'] .player-tabs a:focus-visible {
 /* ITEM-3: high-contrast light-theme WINNER / OUT / DURAK / PASSED labels in the
    PLAYERS list. Dark theme keeps its own palette. */
 :root[data-theme='light'] .status-tag,
-:root[data-theme='light'] .status-tag.winner-tag,
 :root[data-theme='light'] .status-rank {
   font-weight: 700;
 }
 
+/* T-90-2 ITEM-3: Light mode is now consistent with Dark — WINNER, OUT and
+   PASSED share ONE uniform, borderless label (slightly darker for contrast on
+   the pale row), while DURAK stays the only bordered, crimson label. */
 :root[data-theme='light'] .status-tag.winner-tag,
-:root[data-theme='light'] .status-rank.winner-tag {
-  color: #065f46;
-  background: #d1fae5;
-  border: 1px solid #10b981;
+:root[data-theme='light'] .status-tag.out-tag,
+:root[data-theme='light'] .status-tag.passed-tag,
+:root[data-theme='light'] .status-tag.status-out,
+:root[data-theme='light'] .status-rank.winner-tag,
+:root[data-theme='light'] .status-rank.out-tag,
+:root[data-theme='light'] .status-badge [data-status='WINNER'] .status-tag,
+:root[data-theme='light'] .status-badge [data-status='OUT'] .status-tag,
+:root[data-theme='light'] .status-badge [data-status='PASSED'] .status-tag {
+  color: #1e293b;
+  background: #cbd5e1;
+  border: none;
+  outline: none;
+  font-weight: 700;
+  opacity: 1;
 }
 
 :root[data-theme='light'] .status-tag.durak-tag,
+:root[data-theme='light'] .status-tag.status-durak,
 :root[data-theme='light'] [data-testid^='player-durak-tag-'] {
   color: #991b1b;
-  background: #fee2e2;
-  border: 1px solid #ef4444;
-}
-
-:root[data-theme='light'] .status-tag.out-tag,
-:root[data-theme='light'] .status-rank.out-tag {
-  color: #1e293b;
-  background: #cbd5e1;
-  border: 1px solid #64748b;
-}
-
-:root[data-theme='light'] .status-tag.passed-tag {
-  color: #1e3a8a;
-  background: #dbeafe;
-  border: 1px solid #3b82f6;
-  opacity: 1;
+  background: #fecaca;
+  border: 1px solid #dc2626;
+  font-weight: 700;
 }
 
 /* The light-theme role indicators must not repaint the ` (You)` row green; they

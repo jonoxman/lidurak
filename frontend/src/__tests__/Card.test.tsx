@@ -12,12 +12,12 @@ import {
   PIP_LAYOUT_BOUNDS,
   PIP_ROWS,
   resolveCardFrontTheme,
-  TRUMP_BADGES,
 } from '../components/Card';
 import {
   CARD_BACK_PATTERNS,
   COLORFUL_CARD_BACK_PATTERNS,
   CardBack,
+  DARK_CARD_BACK_OUTLINE,
   DARK_CARD_BACK_PALETTE,
   LIGHT_CARD_BACK_PALETTE,
   resolveCardBackTheme,
@@ -66,18 +66,26 @@ describe('Card', () => {
     expect(container.querySelector('.card-slot')!.getAttribute('data-selected')).toBe('true');
   });
 
-  it('marks a trump card with the golden glow class and a corner badge', () => {
+  it('marks a trump card with the gilded border and no corner badge', () => {
     const { container } = render(<Card suit="spades" rank="ace" trump />);
 
     const slot = container.querySelector('.card-slot')!;
     expect(slot.classList.contains('trump')).toBe(true);
     expect(slot.getAttribute('data-trump')).toBe('true');
 
-    const marker = screen.getByTestId('trump-marker');
-    expect(marker.querySelector('circle')!.getAttribute('fill')).toBe(
-      'var(--trump-accent, #f59e0b)',
+    // T-90-2 ITEM-12: the gilded border alone marks a trump — the old circles
+    // and extra suit symbols are gone, and the card paints no glowing aura.
+    const face = container.querySelector('svg.playing-card')!;
+    expect(face.classList.contains('trump-card')).toBe(true);
+    expect(face.getAttribute('data-trump-glow')).toBe('false');
+    expect(container.querySelector('[data-testid="trump-marker"]')).toBeNull();
+    expect(container.querySelector('[data-testid="trump-badge-top-right"]')).toBeNull();
+    expect(container.querySelector('[data-testid="trump-badge-bottom-left"]')).toBeNull();
+    expect(face.querySelectorAll('circle')).toHaveLength(0);
+    expect(tableCss).toMatch(
+      /\.playing-card\.trump-card\s*{[^}]*border: 2px solid var\(--trump-border, #f59e0b\)/,
     );
-    expect(marker.querySelector('text')!.textContent).toBe('♠');
+    expect(tableCss).toMatch(/\.playing-card\.trump-card\s*{[^}]*box-shadow: none/);
   });
 
   it('leaves a non-trump card unglowed without a badge', () => {
@@ -207,71 +215,7 @@ describe('Card', () => {
     expect(angleOf('spades', 'top-left')).toBe(135);
   });
 
-  it('centers the trump badge symbol exactly inside the golden circle', () => {
-    render(<Card suit="spades" rank="ace" trump />);
 
-    const marker = screen.getByTestId('trump-marker');
-    const circle = marker.querySelector('circle')!;
-    const text = marker.querySelector('text')!;
-
-    expect(text.getAttribute('x')).toBe(circle.getAttribute('cx'));
-    expect(text.getAttribute('y')).toBe(circle.getAttribute('cy'));
-    expect(text.getAttribute('text-anchor')).toBe('middle');
-    expect(text.getAttribute('dominant-baseline')).toBe('central');
-  });
-
-  it('keeps the gold trump badge compact so it never covers a pip', () => {
-    const ranks = [
-      'two',
-      'three',
-      'four',
-      'five',
-      'six',
-      'seven',
-      'eight',
-      'nine',
-      'ten',
-      'ace',
-      'jack',
-      'queen',
-      'king',
-    ];
-
-    for (const rank of ranks) {
-      const { container, unmount } = render(<Card suit="spades" rank={rank} trump />);
-      const circle = screen.getByTestId('trump-marker').querySelector('circle')!;
-      const cx = Number(circle.getAttribute('cx'));
-      const cy = Number(circle.getAttribute('cy'));
-      const r = Number(circle.getAttribute('r'));
-
-      // 70 viewBox units render into an 80px-wide card: a 12-14px badge.
-      const diameterPx = r * 2 * (80 / 70);
-      expect(r, rank).toBeLessThanOrEqual(6.5);
-      expect(diameterPx, rank).toBeGreaterThanOrEqual(12);
-      expect(diameterPx, rank).toBeLessThanOrEqual(14);
-
-      // Still fully inside the card frame.
-      const badge = { left: cx - r, right: cx + r, top: cy - r, bottom: cy + r };
-      expect(badge.left, rank).toBeGreaterThanOrEqual(2);
-      expect(badge.top, rank).toBeGreaterThanOrEqual(2);
-      expect(badge.right, rank).toBeLessThanOrEqual(68);
-      expect(badge.bottom, rank).toBeLessThanOrEqual(20);
-
-      // No pip's painted ink may intersect the badge's box (the shared ink
-      // metrics, so the 40pt ace centrepiece is measured by its glyph and not
-      // by a full-em advance box).
-      for (const pip of Array.from(container.querySelectorAll('[data-pip]'))) {
-        expect(
-          overlaps(textBox(pip), badge),
-          `${rank} pip at ${pip.getAttribute('x')},${pip.getAttribute('y')}`,
-        ).toBe(false);
-      }
-
-      const text = screen.getByTestId('trump-marker').querySelector('text')!;
-      expect(Number(text.getAttribute('font-size')), rank).toBeLessThanOrEqual(9);
-      unmount();
-    }
-  });
 
   it('renders six distinct card back patterns', () => {
     expect(CARD_BACK_PATTERNS).toHaveLength(6);
@@ -454,24 +398,6 @@ describe('card face geometry and theme', () => {
     }
   });
 
-  it('keeps the pips clear of the gold trump badge', () => {
-    for (const rank of ALL_RANKS) {
-      const { container, unmount } = render(<Card suit="clubs" rank={rank} trump />);
-      const circle = screen.getByTestId('trump-marker').querySelector('circle')!;
-      const cx = Number(circle.getAttribute('cx'));
-      const cy = Number(circle.getAttribute('cy'));
-      const r = Number(circle.getAttribute('r'));
-      const badge = { left: cx - r, right: cx + r, top: cy - r, bottom: cy + r };
-
-      for (const pip of cardPips(container)) {
-        expect(overlaps(textBox(pip), badge), `${rank}: pip at ${pip.getAttribute('x')}`).toBe(
-          false,
-        );
-      }
-
-      unmount();
-    }
-  });
 
   it('paints a white card front in the light theme and a grey front in the dark theme', () => {
     setSettings({ theme: 'light' });
@@ -930,25 +856,17 @@ describe('corner pip alignment and face pip sizing (T-90 ITEM-3a / ITEM-3b)', ()
         expect(y, `${rank} y=${y}`).toBeLessThanOrEqual(PIP_LAYOUT_BOUNDS.maxY);
       }
 
-      // No pip collides with a corner rank/suit index or either symmetrical
-      // trump badge, and no two pips collide with each other, even with the
-      // larger glyphs.
-      const badgeBoxes = Array.from(
-        screen.getByTestId('trump-marker').querySelectorAll('circle'),
-      ).map((circle) => {
-        const cx = Number(circle.getAttribute('cx'));
-        const cy = Number(circle.getAttribute('cy'));
-        const r = Number(circle.getAttribute('r'));
-        return { left: cx - r, right: cx + r, top: cy - r, bottom: cy + r };
-      });
-      expect(badgeBoxes, rank).toHaveLength(2);
+      // No pip collides with a corner rank/suit index, and no two pips collide
+      // with each other, even with the larger glyphs. T-90-2 ITEM-12 removed the
+      // trump corner badges, so there is no badge geometry left to clear.
+      expect(
+        container.querySelectorAll('[data-testid="trump-marker"] circle'),
+        rank,
+      ).toHaveLength(0);
       const indices = Array.from(container.querySelectorAll('[data-index]'));
 
       for (const pip of pips) {
         const box = textBox(pip);
-        for (const badgeBox of badgeBoxes) {
-          expect(overlaps(box, badgeBox), `${rank}: badge`).toBe(false);
-        }
         for (const index of indices) {
           expect(
             overlaps(box, renderedBox(index)),
@@ -1213,24 +1131,18 @@ describe('centred card faces with equal margins (T-90-1 ITEM-3a / ITEM-3b)', () 
       expect(topSuit.getAttribute('x'), rank).toBe(topRank.getAttribute('x'));
       expect(bottomSuit.getAttribute('x'), rank).toBe(bottomRank.getAttribute('x'));
 
-      const badges = Array.from(
+      // T-90-2 ITEM-12: a trump card paints no corner badges any more, so the
+      // face geometry is only checked against the corner indices.
+      expect(
         container.querySelectorAll('[data-testid="trump-marker"] circle'),
-      ).map((circle) => ({
-        left: Number(circle.getAttribute('cx')) - Number(circle.getAttribute('r')),
-        right: Number(circle.getAttribute('cx')) + Number(circle.getAttribute('r')),
-        top: Number(circle.getAttribute('cy')) - Number(circle.getAttribute('r')),
-        bottom: Number(circle.getAttribute('cy')) + Number(circle.getAttribute('r')),
-      }));
-      expect(badges, rank).toHaveLength(2);
+        rank,
+      ).toHaveLength(0);
 
-      // Zero overlap against any face pip or either symmetrical trump badge.
+      // Zero overlap against any face pip or either corner index.
       for (const pip of cardPips(container)) {
         const box = textBox(pip);
         expect(overlaps(box, textBox(topSuit)), `${rank} top corner suit`).toBe(false);
         expect(overlaps(box, renderedBox(bottomSuit)), `${rank} bottom corner suit`).toBe(false);
-        for (const badge of badges) {
-          expect(overlaps(box, badge), `${rank} trump badge`).toBe(false);
-        }
       }
 
       unmount();
@@ -1292,7 +1204,7 @@ describe('theme-adaptive card backs', () => {
     }
   });
 
-  it('leaves every colourful card back identical in both themes', () => {
+  it('keeps every colourful gradient identical in both themes but brightens its dark outline', () => {
     setSettings({ theme: 'dark' });
     const darkMarkup: Record<string, string> = {};
 
@@ -1302,7 +1214,19 @@ describe('theme-adaptive card backs', () => {
 
       expect(svg.getAttribute('data-colorful'), pattern).toBe('true');
       expect(svg.getAttribute('data-card-back-theme'), pattern).toBeNull();
-      darkMarkup[pattern] = svg.outerHTML;
+      expect(svg.getAttribute('data-card-back-outline'), pattern).toBe('bright');
+
+      // T-90-2 ITEM-17: the dark outer frame is the bright silver-slate stroke.
+      const frame = Array.from(svg.children).filter(
+        (child) => child.tagName.toLowerCase() === 'rect',
+      )[0];
+      expect(frame.getAttribute('stroke'), pattern).toBe(DARK_CARD_BACK_OUTLINE);
+      expect(frame.getAttribute('stroke-width'), pattern).toBe('2');
+
+      // Everything except that outer outline stays byte-for-byte identical.
+      darkMarkup[pattern] = svg.outerHTML
+        .replace(`stroke="${DARK_CARD_BACK_OUTLINE}"`, 'stroke="__outline__"')
+        .replace('data-card-back-outline="bright"', 'data-card-back-outline="__outline__"');
       unmount();
     }
 
@@ -1312,7 +1236,13 @@ describe('theme-adaptive card backs', () => {
       const { container, unmount } = render(<CardBack pattern={pattern} />);
       const svg = container.querySelector('svg.card-back')!;
 
-      expect(svg.outerHTML, pattern).toBe(darkMarkup[pattern]);
+      expect(svg.getAttribute('data-card-back-outline'), pattern).toBe('crisp');
+      expect(
+        svg.outerHTML
+          .replace(/stroke="#[0-9a-f]{6}"/, 'stroke="__outline__"')
+          .replace('data-card-back-outline="crisp"', 'data-card-back-outline="__outline__"'),
+        pattern,
+      ).toBe(darkMarkup[pattern]);
       unmount();
     }
   });
@@ -1394,57 +1324,74 @@ describe('T-90-2 inverted corner indices and symmetrical trump badges', () => {
     expect(svg.getAttribute('style') ?? '').not.toContain('box-shadow');
   });
 
-  it('ITEM-12a/12b: renders two 180°-symmetrical, mutually inverted trump badges', () => {
+});
+
+/**
+ * T-90-2 ITEM-12: a face-up trump is marked by the gilded border alone, with no
+ * corner badges, and ITEM-17 brightens every Dark-mode face-down outline.
+ */
+describe('T-90-2 gilded trump borders and bright face-down outlines', () => {
+  afterEach(() => {
+    resetSettings();
+  });
+
+  it('ITEM-12: paints no trump badge circles or suit symbols on a trump card', () => {
     for (const suit of ['spades', 'hearts', 'diamonds', 'clubs']) {
-      const { container, unmount } = render(<Card suit={suit} rank="nine" trump />);
+      const { container, unmount } = render(<Card suit={suit} rank="ten" trump />);
 
-      const marker = screen.getByTestId('trump-marker');
-      const badgeSet = screen.getByTestId('trump-badge');
-      const topRight = screen.getByTestId('trump-badge-top-right');
-      const bottomLeft = screen.getByTestId('trump-badge-bottom-left');
-
-      expect(marker.contains(badgeSet)).toBe(true);
-      expect(badgeSet.children).toHaveLength(2);
-      expect(topRight.getAttribute('data-inverted')).toBe('false');
-      expect(bottomLeft.getAttribute('data-inverted')).toBe('true');
-
-      const centreOf = (node: Element): { cx: number; cy: number; r: number } => {
-        const circle = node.querySelector('circle')!;
-        return {
-          cx: Number(circle.getAttribute('cx')),
-          cy: Number(circle.getAttribute('cy')),
-          r: Number(circle.getAttribute('r')),
-        };
-      };
-      const first = centreOf(topRight);
-      const second = centreOf(bottomLeft);
-
-      // Exact 180° rotational symmetry around the (35, 50) card centre.
-      expect(first.cx + second.cx, suit).toBe(70);
-      expect(first.cy + second.cy, suit).toBe(100);
-      expect(first.r, suit).toBe(second.r);
-      expect(first.r, suit).toBe(6);
-      expect(first.cx, suit).toBe(58.5);
-      expect(first.cy, suit).toBe(14);
-      expect(second.cx, suit).toBe(11.5);
-      expect(second.cy, suit).toBe(86);
-
-      // They match the exported geometry and differ only by the inversion.
-      expect(first.cx).toBe(TRUMP_BADGES.topRight.cx);
-      expect(first.cy).toBe(TRUMP_BADGES.topRight.cy);
-      expect(second.cx).toBe(TRUMP_BADGES.bottomLeft.cx);
-      expect(second.cy).toBe(TRUMP_BADGES.bottomLeft.cy);
-      expect(topRight.getAttribute('transform')).toBeNull();
-      expect(bottomLeft.getAttribute('transform')).toBe('rotate(180 11.5 86)');
-      expect(topRight.querySelector('text')!.textContent).toBe(
-        bottomLeft.querySelector('text')!.textContent,
+      const svg = container.querySelector('svg.playing-card') as SVGElement;
+      expect(svg.classList.contains('trump-card'), suit).toBe(true);
+      expect(svg.getAttribute('data-trump-glow'), suit).toBe('false');
+      expect(container.querySelector('[data-testid="trump-marker"]'), suit).toBeNull();
+      expect(container.querySelector('[data-testid="trump-badge"]'), suit).toBeNull();
+      expect(container.querySelector('[data-testid="trump-badge-top-right"]'), suit).toBeNull();
+      expect(container.querySelector('[data-testid="trump-badge-bottom-left"]'), suit).toBeNull();
+      expect(svg.querySelectorAll('circle'), suit).toHaveLength(0);
+      // The only trump cue is the gilded frame stroke defined in table.css.
+      expect(tableCss).toMatch(
+        /\.playing-card\.trump-card\s*{[^}]*border: 2px solid var\(--trump-border, #f59e0b\)/,
       );
-
-      // The bottom-left badge stays inside the always-visible left strip.
-      expect(second.cx - second.r).toBeGreaterThanOrEqual(2);
-      expect(second.cx + second.r).toBeLessThanOrEqual(22);
 
       unmount();
     }
+  });
+
+  it('ITEM-17: brightens the Dark-mode outer frame for monochrome and gradient backs', () => {
+    expect(DARK_CARD_BACK_PALETTE.frameStroke).toBe('#94a3b8');
+    setSettings({ theme: 'dark' });
+
+    const frameOf = (container: HTMLElement): SVGRectElement =>
+      Array.from(container.querySelector('svg.card-back')!.children).filter(
+        (child) => child.tagName.toLowerCase() === 'rect',
+      )[0] as SVGRectElement;
+
+    const mono = render(<CardBack pattern="classic-hatch" />);
+    const monoFrame = frameOf(mono.container);
+    expect(monoFrame.getAttribute('stroke')).toBe('#94a3b8');
+    expect(monoFrame.getAttribute('stroke-width')).toBe('2');
+    mono.unmount();
+
+    const gradient = render(<CardBack pattern="cyber-neon" />);
+    const gradientFrame = frameOf(gradient.container);
+    expect(gradient.container.querySelector('svg.card-back')!.getAttribute('data-card-back-outline')).toBe(
+      'bright',
+    );
+    expect(gradientFrame.getAttribute('stroke')).toBe(DARK_CARD_BACK_OUTLINE);
+    expect(gradientFrame.getAttribute('stroke-width')).toBe('2');
+    gradient.unmount();
+  });
+
+  it('ITEM-17: keeps the Light-mode face-down outline crisp and unchanged', () => {
+    setSettings({ theme: 'light' });
+    const light = render(<CardBack pattern="classic-hatch" />);
+    const frame = Array.from(light.container.querySelector('svg.card-back')!.children).filter(
+      (child) => child.tagName.toLowerCase() === 'rect',
+    )[0] as SVGRectElement;
+
+    expect(light.container.querySelector('svg.card-back')!.getAttribute('data-card-back-outline')).toBe(
+      'crisp',
+    );
+    expect(frame.getAttribute('stroke')).toBe(LIGHT_CARD_BACK_PALETTE.frameStroke);
+    expect(frame.getAttribute('stroke-width')).toBe('2');
   });
 });

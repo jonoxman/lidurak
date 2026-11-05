@@ -19,7 +19,7 @@ export interface CardProps {
   selected?: boolean;
   /** True when this card can legally be played right now; lifts it off the hand. */
   playable?: boolean;
-  /** Draws the golden trump glow and corner badge. */
+  /** Applies the gilded gold trump border (no corner badge, no glow). */
   trump?: boolean;
   onClick?: () => void;
   onDoubleClick?: () => void;
@@ -116,7 +116,7 @@ export const PIP_FONT_SIZE = 13;
  * `left + right = 70` and the left and right margins are identical (`22.5` from
  * either edge). The spacing `12.5` still clears a full 13-unit suit glyph
  * (whose ink is about `10.4` units wide), and the right column ends at `47.5`,
- * clear of the top-right trump badge (`cx = 58.5`, `r = 6`).
+ * clear of the card frame.
  */
 export const PIP_COLUMNS = { left: 22.5, center: 35, right: 47.5 } as const;
 
@@ -159,18 +159,6 @@ export const PIP_LAYOUT_BOUNDS = {
  * out of the 12pt corner suit indices on every side.
  */
 export const ACE_PIP = { x: 35, y: 50, fontSize: 40 } as const;
-
-/**
- * T-90-2 ITEM-12a / ITEM-12b: the two symmetrical trump badges, both `r = 6`.
- * They are exact 180° rotations of one another around the `(35, 50)` card
- * centre (`58.5 + 11.5 = 70`, `14 + 86 = 100`), and the bottom-left badge sits
- * on the `x = 11.5` axis that every overlapped card in a fan keeps visible, so
- * a trump reads as a trump however the hand is stacked.
- */
-export const TRUMP_BADGES = {
-  topRight: { cx: 58.5, cy: 14, r: 6 },
-  bottomLeft: { cx: 11.5, cy: 86, r: 6 },
-} as const;
 
 /**
  * Standard pip arrangements inside the 70x100 viewBox (T-90-1 ITEM-3a): the
@@ -467,6 +455,7 @@ export function Card({
       <svg
         class={trump ? 'playing-card card-face trump-card' : 'playing-card card-face'}
         viewBox="0 0 70 100"
+        draggable={false}
         role="img"
         aria-label={`${rank} of ${suit}`}
         data-card-theme={theme}
@@ -595,69 +584,6 @@ export function Card({
             >
               {label}
             </text>
-          </g>
-        ) : null}
-
-        {trump ? (
-          <g class="trump-marker" data-testid="trump-marker">
-            {/* T-90-2 ITEM-12a/12b: two compact 12-14px badges — top-right and
-                the 180°-symmetric bottom-left — and no glow aura (the card only
-                exposes `data-trump-glow="false"`, it paints no inline shadow). */}
-            <g class="trump-badge-set" data-testid="trump-badge">
-              <g
-                class="trump-badge-icon"
-                data-testid="trump-badge-top-right"
-                data-side="top-right"
-                data-inverted="false"
-                data-cx={TRUMP_BADGES.topRight.cx}
-                data-cy={TRUMP_BADGES.topRight.cy}
-                data-r={TRUMP_BADGES.topRight.r}
-              >
-                <circle
-                  cx={TRUMP_BADGES.topRight.cx}
-                  cy={TRUMP_BADGES.topRight.cy}
-                  r={TRUMP_BADGES.topRight.r}
-                  fill="var(--trump-accent, #f59e0b)"
-                />
-                <text
-                  x={TRUMP_BADGES.topRight.cx}
-                  y={TRUMP_BADGES.topRight.cy}
-                  font-size={8}
-                  text-anchor="middle"
-                  dominant-baseline="central"
-                  fill="#161512"
-                >
-                  {symbol}
-                </text>
-              </g>
-              <g
-                class="trump-badge-icon"
-                data-testid="trump-badge-bottom-left"
-                data-side="bottom-left"
-                data-inverted="true"
-                data-cx={TRUMP_BADGES.bottomLeft.cx}
-                data-cy={TRUMP_BADGES.bottomLeft.cy}
-                data-r={TRUMP_BADGES.bottomLeft.r}
-                transform={`rotate(180 ${TRUMP_BADGES.bottomLeft.cx} ${TRUMP_BADGES.bottomLeft.cy})`}
-              >
-                <circle
-                  cx={TRUMP_BADGES.bottomLeft.cx}
-                  cy={TRUMP_BADGES.bottomLeft.cy}
-                  r={TRUMP_BADGES.bottomLeft.r}
-                  fill="var(--trump-accent, #f59e0b)"
-                />
-                <text
-                  x={TRUMP_BADGES.bottomLeft.cx}
-                  y={TRUMP_BADGES.bottomLeft.cy}
-                  font-size={8}
-                  text-anchor="middle"
-                  dominant-baseline="central"
-                  fill="#161512"
-                >
-                  {symbol}
-                </text>
-              </g>
-            </g>
           </g>
         ) : null}
 

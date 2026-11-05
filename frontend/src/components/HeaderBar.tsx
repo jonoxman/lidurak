@@ -399,7 +399,9 @@ function ThemeSubmenu() {
         </div>
 
         <label class="setting-row">
-          <span class="setting-label">Intensity</span>
+          {/* T-90-2 ITEM-1b / ITEM-4: the visible label is `Glow`; the setting
+              key (`highlightIntensity`) and the test hooks are unchanged. */}
+          <span class="setting-label">Glow</span>
           <input
             type="range"
             min={HIGHLIGHT_INTENSITY_MIN}

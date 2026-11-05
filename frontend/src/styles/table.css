@@ -181,6 +181,27 @@
   overflow: hidden;
 }
 
+/* T-90-2 ITEM-1a: every opponent seat carries its bout role (`attacker` /
+   `defender` / `none`) and the box paints the matching emerald / crimson aura
+   straight from the highlight tokens. The radii multiply by
+   `--highlight-intensity-scale` (`Glow / 100`), so dragging the Glow slider from
+   20% to 200% visibly softens or intensifies the boxes in real time. */
+.opponent-seat[data-role='attacker'] .seat-box {
+  border-color: var(--role-attacker-border);
+  box-shadow:
+    0 0 calc(14px * var(--highlight-intensity-scale, 1))
+      calc(3px * var(--highlight-intensity-scale, 1)) var(--role-attacker-glow),
+    inset 0 0 calc(10px * var(--highlight-intensity-scale, 1)) var(--role-attacker-bg);
+}
+
+.opponent-seat[data-role='defender'] .seat-box {
+  border-color: var(--role-defender-border);
+  box-shadow:
+    0 0 calc(14px * var(--highlight-intensity-scale, 1))
+      calc(3px * var(--highlight-intensity-scale, 1)) var(--role-defender-glow),
+    inset 0 0 calc(10px * var(--highlight-intensity-scale, 1)) var(--role-defender-bg);
+}
+
 /* Item 14: each player's own digital clock lives directly above their box. */
 .seat-clock,
 .hand-clock {
@@ -902,6 +923,15 @@
   border-radius: var(--app-roundness, 8px);
 }
 
+/* T-90-2 ITEM-17: in Dark mode every face-down card carries a bright silver
+   outline, so overlapping backs in an opponent's hand, the talon deck and the
+   face-down discard stack stay distinguishable. Light mode keeps its crisp
+   slate outline unchanged. */
+:root[data-theme='dark'] .playing-card.card-back {
+  border: 1px solid rgba(203, 213, 225, 0.65);
+  box-sizing: border-box;
+}
+
 /* Feedback ITEM-NEW-1b: the card front (where the pips are drawn) is
    theme-dependent. White in the light theme, neutral grey in the dark theme —
    the inline SVG face rect carries the same colours so the two can never
@@ -952,8 +982,9 @@
    a trump reads as a trump both in hand and under the talon. */
 .playing-card.trump-card {
   box-sizing: border-box;
-  border: 1px solid var(--trump-border);
-  /* ITEM-12a: no glowing aura on trump cards in either theme. */
+  border: 2px solid var(--trump-border, #f59e0b);
+  /* T-90-2 ITEM-12: the gilded border is the ONLY trump cue — no glowing aura
+     and no corner badge circles/suit symbols in either theme. */
   box-shadow: none;
 }
 
@@ -1021,10 +1052,10 @@
   align-self: center;
   height: fit-content;
   gap: 0;
-  /* Symmetric, tight padding: exactly 4px of glow room on all four sides. No
-     top/bottom headroom is reserved for lifted cards, so the outline never
-     grows vertically beyond the card bounding box. */
-  padding: 4px;
+  /* T-90-2 ITEM-13a: symmetric 6px padding on all four sides, around the exact
+     100px × 140px card row, so the highlight outline encloses every card
+     without clipping its top or bottom edge. */
+  padding: 6px;
   /* ITEM-NEW-1a: the hand highlight box rounds just past the cards it wraps. */
   border-radius: calc(var(--app-roundness, 8px) + 4px);
   box-sizing: border-box;
@@ -1051,7 +1082,8 @@
 }
 
 .hand-slot:not(:first-child) {
-  margin-left: -8px;
+  /* T-90-2 ITEM-13b: fallback overlap is at least 10% of the 100px card. */
+  margin-left: -10px;
 }
 
 .hand-slot[data-hidden='true'] {
@@ -2146,15 +2178,30 @@ body[data-dragging='true'] * {
 .hand-card-wrapper {
   width: var(--hand-card-width, 100px);
   height: var(--hand-card-height, 140px);
-  transition: transform 150ms ease-out;
+  /* T-90-2 ITEM-6a: opening / closing the insertion gap is smooth, including
+     the compacting margin change when the dragged card leaves its slot. */
+  transition:
+    transform 160ms cubic-bezier(0.22, 1, 0.36, 1),
+    margin-left 160ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 120ms ease;
+}
+
+/* The dragged card's original slot collapses, closing the gap behind it. */
+.hand-card-wrapper[data-collapsed='true'] {
+  flex: 0 0 0;
+  width: 0;
+  margin-left: 0 !important;
+  opacity: 0;
+  pointer-events: none;
+  overflow: visible;
 }
 
 .hand-card-wrapper[data-part-direction='left'] {
-  transform: translateX(-18px);
+  transform: translateX(-22px);
 }
 
 .hand-card-wrapper[data-part-direction='right'] {
-  transform: translateX(18px);
+  transform: translateX(22px);
 }
 
 /* ITEM-8: the dedicated throw-in slot beside the played cards. */
@@ -2236,23 +2283,14 @@ body[data-dragging='true'] * {
   color: #0f172a;
 }
 
-.low-detail-trump {
-  font-size: 7px;
-  line-height: 1;
-  color: #b45309;
-}
-
-.low-detail-trump-top-right {
-  grid-column: 2;
-  grid-row: 1;
-  justify-self: end;
-}
-
-.low-detail-trump-bottom-left {
-  grid-column: 1;
-  grid-row: 3;
-  justify-self: start;
-  transform: rotate(180deg);
+/* T-90-2 ITEM-10: a low-detail trump draws the same gilded gold border as a
+   full-size trump card and carries no corner highlight icons and no glow. */
+.opponent-low-detail-card.trump-card,
+.opponent-low-detail-card.low-detail-trump,
+.opponent-low-detail-card[data-trump='true'] {
+  border: 2px solid var(--trump-border, #f59e0b);
+  stroke: var(--trump-border, #f59e0b);
+  box-shadow: none;
 }
 
 :root[data-theme='light'] .opponent-low-detail-card {

@@ -384,7 +384,7 @@ describe('hand sorting', () => {
 });
 
 describe('trump highlighting', () => {
-  it('gives trump cards the golden glow and corner badge', () => {
+  it('gives trump cards the gilded border and no corner badge', () => {
     renderSortableTable();
 
     const hand = screen.getByLabelText('Your hand');
@@ -392,8 +392,12 @@ describe('trump highlighting', () => {
     expect(trumps).toHaveLength(1);
     expect(trumps[0].getAttribute('data-suit')).toBe('spades');
     expect(trumps[0].getAttribute('data-trump')).toBe('true');
-    expect(trumps[0].querySelector('[data-testid="trump-marker"]')).not.toBeNull();
-    expect(hand.querySelectorAll('[data-testid="trump-marker"]')).toHaveLength(1);
+    // T-90-2 ITEM-12: only the gilded border marks a trump; the corner badges
+    // (circles + extra suit symbols) are gone from every card.
+    expect(trumps[0].querySelector('.playing-card')!.classList.contains('trump-card')).toBe(true);
+    expect(hand.querySelectorAll('[data-testid="trump-marker"]')).toHaveLength(0);
+    expect(hand.querySelectorAll('[data-testid="trump-badge-top-right"]')).toHaveLength(0);
+    expect(hand.querySelectorAll('[data-testid="trump-badge-bottom-left"]')).toHaveLength(0);
   });
 
   it('highlights trump cards on the table too', () => {
@@ -3326,7 +3330,9 @@ describe('T-90 ITEM-1c: distinct gameplay feature colours', () => {
     expect(face.classList.contains('trump-card')).toBe(true);
     expect(face.getAttribute('data-card-face')).not.toBeNull();
 
-    expect(cssRule(tableCss, '.playing-card.trump-card')).toContain('var(--trump-border)');
+    expect(cssRule(tableCss, '.playing-card.trump-card')).toContain(
+      'var(--trump-border, #f59e0b)',
+    );
     expect(cssRule(tableCss, '.card-slot.trump')).toContain('border: 1px solid var(--trump-accent)');
     expect(cssRule(tableCss, '.trump-badge')).toContain('var(--trump-accent)');
   });
@@ -3426,6 +3432,24 @@ describe('T-90-4: larger cards, aura containment, throw-in slot, hand reorder an
     expect(arena.getAttribute('data-aura-contained')).toBe('true');
     expect(container.querySelectorAll('.opponent-seat')).toHaveLength(3);
 
+    // T-90-2 ITEM-1a: every seat carries its bout role, and the seat box paints
+    // an aura whose radii scale with the Glow slider.
+    const seats = Array.from(container.querySelectorAll('.opponent-seat')) as HTMLElement[];
+    const defenderSeat = screen
+      .getByTestId('seat-clock-p1')
+      .closest('.opponent-seat') as HTMLElement;
+    expect(defenderSeat.getAttribute('data-role')).toBe('defender');
+    expect(seats.filter((seat) => seat.getAttribute('data-role') !== 'none')).toHaveLength(1);
+    expect(cssRule(tableCss, ".opponent-seat[data-role='attacker'] .seat-box")).toContain(
+      'var(--highlight-intensity-scale, 1)',
+    );
+    expect(cssRule(tableCss, ".opponent-seat[data-role='attacker'] .seat-box")).toContain(
+      'var(--role-attacker-glow)',
+    );
+    expect(cssRule(tableCss, ".opponent-seat[data-role='defender'] .seat-box")).toContain(
+      'var(--role-defender-border)',
+    );
+
     const arenaRule = cssRule(tableCss, "[data-zone='table-arena']");
     expect(arenaRule).toContain('padding: 24px 28px 28px 28px');
     expect(cssRule(tableCss, '.battlefield-tinted-box')).toContain('clamp(240px, 30vh, 320px)');
@@ -3462,6 +3486,24 @@ describe('T-90-4: larger cards, aura containment, throw-in slot, hand reorder an
     });
     fireEvent.drop(outline, { dataTransfer: { getData: () => '' } });
     expect(onThrowInDrop).toHaveBeenCalledWith({ suit: 'clubs', rank: 'king' });
+  });
+
+  it('ITEM-8: keeps the throw-in outline visible without any legal throw-in card', () => {
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={[fourPlayerOpponents[0]]}
+        tablePairs={[{ attack: { suit: 'spades', rank: 'six' }, defense: null }]}
+        trumpSuit="diamonds"
+        attackerId="p1"
+        defenderId="p1"
+      />,
+    );
+
+    const outline = screen.getByTestId('throw-in-outline');
+    expect(outline.getAttribute('data-throw-in-enabled')).toBe('false');
+    expect(outline.getAttribute('data-drop-zone')).toBe('throw-in');
   });
 
   it('ITEM-6a: parts the hand and reports the reordered sequence', () => {
@@ -3505,6 +3547,11 @@ describe('T-90-4: larger cards, aura containment, throw-in slot, hand reorder an
     const wrappers = Array.from(
       handBox.querySelectorAll('.hand-card-wrapper'),
     ) as HTMLElement[];
+    // T-90-2 ITEM-6: the original slot collapses first, so the remaining cards
+    // close the gap as if the card had been removed from the hand entirely.
+    expect(handBox.getAttribute('data-gap-closed')).toBe('true');
+    expect(wrappers[0].getAttribute('data-collapsed')).toBe('true');
+    expect(wrappers[0].style.marginLeft).toBe('0px');
     // The dragged card itself stays under the cursor; every other card left of
     // the insertion slot parts to the left.
     expect(wrappers.map((node) => node.getAttribute('data-part-direction'))).toEqual([
@@ -3617,9 +3664,20 @@ describe('T-90-4: larger cards, aura containment, throw-in slot, hand reorder an
       '10',
     ]);
     expect(screen.getAllByTestId('low-detail-suit')).toHaveLength(3);
-    // Only the trump Ace carries the two symmetrical corner highlights.
-    expect(screen.getAllByTestId('low-detail-trump-top-right')).toHaveLength(1);
-    expect(screen.getAllByTestId('low-detail-trump-bottom-left')).toHaveLength(1);
+    // T-90-2 ITEM-10: the trump Ace carries only the gilded border — no corner
+    // highlight icons — while the off-suit cards stay plain.
+    expect(screen.queryAllByTestId('low-detail-trump-top-right')).toHaveLength(0);
+    expect(screen.queryAllByTestId('low-detail-trump-bottom-left')).toHaveLength(0);
+    const trumps = cards.filter((card) => card.getAttribute('data-trump') === 'true');
+    expect(trumps).toHaveLength(1);
+    expect(trumps[0].classList.contains('trump-card')).toBe(true);
+    expect(trumps[0].classList.contains('low-detail-trump')).toBe(true);
+    expect(cssRule(tableCss, '.opponent-low-detail-card.trump-card')).toContain(
+      'var(--trump-border, #f59e0b)',
+    );
+    expect(cssRule(tableCss, '.opponent-low-detail-card.trump-card')).toContain(
+      'box-shadow: none',
+    );
     expect(screen.getByTestId('opponent-card-count-p1').textContent).toBe('3');
     // Face-down backs are gone while the hand is revealed.
     expect(document.querySelectorAll('.opponent-card')).toHaveLength(0);
