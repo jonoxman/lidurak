@@ -2274,15 +2274,66 @@ body[data-dragging='true'] *,
   transform: none;
 }
 
-/* ITEM-8: the dedicated throw-in slot beside the played cards. */
+/* ITEM-8: the dedicated throw-in slot beside the played cards. The wrapper owns
+   the row spacing and the vertical alignment offset, so the outline's own
+   border box is never stretched or shrunk by the bout layout. */
+.throw-in-slot {
+  display: grid;
+  flex: 0 0 auto;
+  align-self: flex-start;
+  width: 100px;
+  height: 140px;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* T-90 ITEM-1a/1b: during a surrender the outline is detached from the half-off
+   card row and anchored to the opposite edge of `.battlefield-tinted-box` —
+   below the taken cards for a top-row opponent, above them for the viewer. */
+.surrender-throw-in-anchor {
+  grid-area: 1 / 1;
+  display: grid;
+  justify-self: center;
+  align-self: end;
+  width: 100px;
+  height: 140px;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+.surrender-throw-in-anchor[data-placement='above'] {
+  align-self: start;
+}
+
+.surrender-throw-in-anchor[data-surrender-seat='top-left'] {
+  justify-self: start;
+}
+
+.surrender-throw-in-anchor[data-surrender-seat='top-center'] {
+  justify-self: center;
+}
+
+.surrender-throw-in-anchor[data-surrender-seat='top-right'] {
+  justify-self: end;
+}
+
+/* T-90 ITEM-2: the outline is always exactly one playing card — 100x140 — never
+   shrunk by a full row, never stretched in the above/below column and never
+   grown by the covered-card reserve of `.table-pair`. */
 .throw-in-outline {
   display: grid;
   place-items: center;
-  flex: 0 0 auto;
+  flex: 0 0 100px;
   align-self: flex-start;
-  width: var(--bout-card-width, 100px);
-  height: var(--bout-card-height, 140px);
-  margin: 0 0 var(--bout-card-offset, 18px) 0;
+  width: 100px;
+  height: 140px;
+  min-width: 100px;
+  max-width: 100px;
+  min-height: 140px;
+  max-height: 140px;
+  margin: 0;
   border: 2px dashed var(--role-attacker-border);
   border-radius: var(--app-roundness, 8px);
   background: rgba(34, 197, 94, 0.06);
@@ -2375,4 +2426,24 @@ body[data-dragging='true'] *,
 :root[data-theme='light'] .throw-in-outline {
   border-color: var(--role-attacker-border);
   background: var(--role-attacker-bg);
+}
+
+/* T-90 ITEM-2: below 900px the cards scale to 48x68, so the throw-in outline (and
+   its inline / surrender anchors) scale to the exact same card footprint. */
+@media (max-width: 900px) {
+  .throw-in-outline {
+    flex: 0 0 48px;
+    width: 48px;
+    min-width: 48px;
+    max-width: 48px;
+    height: 68px;
+    min-height: 68px;
+    max-height: 68px;
+  }
+
+  .throw-in-slot,
+  .surrender-throw-in-anchor {
+    width: 48px;
+    height: 68px;
+  }
 }
