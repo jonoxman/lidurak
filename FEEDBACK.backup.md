@@ -1,19 +1,17 @@
 <!-- Write your plain-English UI/UX feedback, bugs, or usability requests below this line. -->
 <!-- Note: Your previous feedback is always backed up in FEEDBACK.backup.md and .reviews/feedback_archive/ -->
-# QA responses
-All is to specification!
-# New
-1. The highlight outline looks a little strange in the 4-player mode since the highlight aura displays even off the game table. Adjust the margins so that there is always enough space between the player box and the game table for the full aura to fit on the game table alone. 
-2. Remove the green outline around the active user in the player list - (You) is sufficient to distinguish the user.
-3. In Light Theme, certain UI elements are not very distinguished, for example the TRUMP label under the deck, and the WINNER (and other) labels in the user list at the end of the game. Adjust the colors to be more visible in Light Theme (Dark Theme is good as is)
-4. Rename the Highlight section in the profile menu to "Palettes"
-5. Set the default Hand Sorting schema to Rank for new users, instead of Suit. 
-6. Implement manual user-end hand reorganization. Clicking and dragging a card should allow the user to move it to any position in their hand. Animate the other cards in hand so they part when the card is dragged through the hand, making it clear which position the card will end up in. This should automatically set the user's Hand Sorting schema to a fourth new option, "Custom" (this should not persist between games). 
-7. The mouse cursor when dragging a card is not correct. It should be the pointer finger that appears when a link is covered throughout the entire dragging process.
-8. Create an outline for the "next" card to be played next to the current played card when an attack is going on. Users should drag cards to this outline specifically to throw in additional cards, rather than just put them anywhere on the game table (the double-click control should remain, however).
-9. Set RandomBot's play delay to be very fast (0.2s) instead of instant. Additionally, when the game first starts, add a 2-second delay to allow time to click the game link and view the game between two RandomBots.
-10. Implement "Transparent Mode". This is a variant of the game in which all players' cards are visible to each user. It should be accessible through a checkbox in the game lobby (along with allowing redirections and chaos mode). Rather than draw the full card sprites in the non-active users' player boxes, display a low-detail version that only shows the suit and rank (and trump-highlight, if necessary). Make sure that this mode is compatible with all all other modes and that no graphical glitches occur.
-11. Invert the rank symbol and suit icon on the bottom-right corner of the card (the top-left corner should stay the same) 
-12. Redesign the trump highlight on the cards as follows: First, remove the glowing aura from trump cards. Second, place the trump highlight icon in the bottom-left of the card as well as the top-right, since the left side of the card is always visible regardless of overlap. The two highlight icons should be symmetrical, but inverted relative to one another (in the same way as the suit icons on the cards are based on #11).
-13. Increase the size of the cards in the play area and the active user's hand to fill the space more - there looks to be enough space for a 25% increase in dimensions. Double-check all overlapping and boundary enforcement to make sure everything still looks correctly.
-14. Move the player list element from the right column to the top of the left column in the UI. Remove the POV element altogether - consolidate all POV element features, such as clicking to choose the player's POV, into the player list element. Set it up so that unless a dev mode variable is active, the user cannot select the POV until the game is over and in review mode. (The dev mode variable should default to active for now, since we are currently testing. Temporarily place a toggle for it in the lobby menu, so I can start a game and see the UI from a normal user's perspective.) Ensure also that the dev mode variable is handled server-side, so the user cannot modify it on their end using techniques such as inspect element.
+# QA Playbook
+1. Sliding the palette intensity slider doesn't seem to affect the glow around player boxes. Fix this - additionally, rename the slider from "Intensity" to "Glow".
+3. In dark mode, all status labels are the same color, while in light mode, they are different colors and have a border (in dark mode, only DURAK has a border). Adjust the light mode version to be consistent with dark mode, keeping the color slightly darker for more contrast.
+4. Rename the slider in this section from "Intensity" to "Glow". 
+5. Restore the dropdown menu that was there before, instead of this new button UI. Keep the new Custom option in this dropdown.
+6. The function works correctly, but the animation is off. Set it up so that when the dragged card is moved away from its original position, the other cards move to close the gap (as if the card has been taken out of the hand entirely). After this, the cards should move apart to create gaps as is currently being done when the card is dragged into their position. 
+7. This is still not correct - with this latest change, the cursor now looks like the standard mouse pointer, instead of the link-hovering pointer finger.
+8. This outline should still display even if players don't have any cards they can legally place into it. 
+10. In the low-detail cards, there is no need to display the trump highlight icons. However, give the low-detail trump cards the same gilded border that the large trump cards have, as in point 12.
+12. Remove the circles and extra suit symbols signifying a trump card altogether, keeping only the gilded border.
+13. The cards look correct, but the card-highlighting outline for the user broke again. Adjust it so that it perfectly encompasses all of the cards. Additionally, in the hand, keep the cards closer together - they should overlap by about 10% of the card width at minimum, to mimic how cards are actually held in a hand. Make this same change also for the cards inside the non active user's player boxes.
+# New Tasks
+15. The highlight glow around incoming cards has a slight glitchy and jerky visual effect to it. Fix this, make sure that the animation is smooth with no bugs. Also double-check that this doesn't happen to other glow elements I didn't notice in testing.
+16. Rename the REPLAY section to REPLAY CONTROLS
+17. Make the card outlines for face-down cards in dark mode brighter, for more visibility. 
