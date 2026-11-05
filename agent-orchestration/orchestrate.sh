@@ -133,7 +133,7 @@ try_agy_call() {
   local PROMPT_FILE=$2
   local OUT_FILE=$3
   local EXPECT_PATTERN=$4
-  local END_SENTINEL=${5:-"VERDICT: (APPROVED|CHANGES_REQUESTED)|===END_OF_TICKETS===|===END_OF_FILES===|===NO_TICKETS_NEEDED===|===AUDIT_PASSED===|===END_OF_QUESTIONS===|===NO_QUESTIONS==="}
+  local END_SENTINEL=${5:-"VERDICT: (APPROVED|CHANGES_REQUESTED)|===END_OF_TICKETS===|===END_OF_FILES===|===NO_TICKETS_NEEDED===|===AUDIT_PASSED===|===VISUAL_QA_PASSED===|===END_OF_QUESTIONS===|===NO_QUESTIONS==="}
   local ERR_LOG="${OUT_FILE}.err"
 
   rm -f "$OUT_FILE" "$ERR_LOG"
@@ -910,6 +910,7 @@ RESET_EOF
   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
   git rev-parse HEAD > .reviews/feedback_base_commit
   echo "0" > .reviews/feedback_audit_passes
+  echo "0" > .reviews/visual_qa_passes
 
   # Preserve the PREVIOUS round's feedback before overwriting FEEDBACK.backup.md!
   if [ -f FEEDBACK.backup.md ]; then
@@ -1141,12 +1142,120 @@ PROMPT_EOF
   fi
 
   echo "✅ Holistic Spec Audit PASSED! 100% of non-deferred FEEDBACK.md items verified live on main."
+  if ! run_visual_ui_qa_gate; then
+    return 1
+  fi
   generate_qa_playbook
   rm -f .reviews/feedback_base_commit .reviews/feedback_audit_passes
   return 0
 }
 
 # === GENERATE NUMBERED HUMAN QA PLAYBOOK (HOW TO SEE EVERY CHANGE IN <15 SECONDS) ===
+
+# === STAGE 3.5: AUTOMATED HEADLESS BROWSER VISUAL & INTERACTIVE QA GATE ===
+run_visual_ui_qa_gate() {
+  local SOURCE_SPEC=".reviews/active_feedback_resolved.md"
+  [ ! -f "$SOURCE_SPEC" ] && SOURCE_SPEC="FEEDBACK.backup.md"
+  [ ! -f "$SOURCE_SPEC" ] && return 0
+
+  local V_PASS
+  V_PASS=$(cat .reviews/visual_qa_passes 2>/dev/null || echo "0")
+  if [ "$V_PASS" -ge 2 ]; then
+    echo "ℹ️  Reached max visual QA remediation passes (2); proceeding to human review."
+    rm -f .reviews/visual_qa_passes
+    return 0
+  fi
+  V_PASS=$(expr "$V_PASS" + 1)
+  echo "$V_PASS" > .reviews/visual_qa_passes
+
+  local TIMESTAMP
+  TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+
+  echo "=================================================================="
+  echo "👁️  Stage 3.5A (Pass ${V_PASS}/2): Generating Playwright Interactive Walkthrough..."
+  echo "=================================================================="
+
+  cat << PROMPT_EOF > .reviews/gen_playwright_steps_prompt.txt
+You are a Senior Frontend QA Automation Engineer. DO NOT use tools or run bash commands.
+Write an ES module exporting \`export async function runCustomSteps(page, captureStep)\` that tests each numbered item in <implemented_feedback> on \`http://localhost:5173\` using Playwright.
+- Call \`await captureStep('item_1_description', 2)\`, \`await captureStep('item_2_description', 3)\`, etc., after triggering each UI state (e.g., clicking presets, opening dropdowns, dragging sliders, hovering/clicking cards) so the geometry scanner and screenshotter inspect that exact visual state.
+- Use defensive locators (\`if (await loc.count() > 0) await loc.first().click({ timeout: 3000 }).catch(() => {})\`) so one missing selector never aborts the whole script.
+
+<implemented_feedback>
+$(cat "$SOURCE_SPEC")
+</implemented_feedback>
+
+<frontend_components>
+$(head -n 180 frontend/src/app.tsx frontend/src/pages/*.tsx frontend/src/components/*.tsx frontend/src/styles/*.css 2>/dev/null | head -c 45000)
+</frontend_components>
+
+Output ONLY valid JavaScript ES module code (no markdown fences) and end with \`// ===END_OF_FILES===\`:
+export async function runCustomSteps(page, captureStep) {
+  // steps here
+}
+// ===END_OF_FILES===
+PROMPT_EOF
+
+  try_agy_call "gemini-3.8-flash-high" ".reviews/gen_playwright_steps_prompt.txt" ".reviews/custom_qa_steps.raw.mjs" "runCustomSteps" "// ===END_OF_FILES===" || true
+  sed '/^```/d; /===END_OF_FILES===/d' .reviews/custom_qa_steps.raw.mjs > .reviews/custom_qa_steps.mjs 2>/dev/null || true
+
+  # Run Headless Chromium inside freebuff_worker
+  ./agent-orchestration/run-visual-qa.sh
+
+  echo "=================================================================="
+  echo "👁️  Stage 3.5B: Auditing Real Browser Geometry, Borders & Screenshots..."
+  echo "=================================================================="
+
+  cat << PROMPT_EOF > .reviews/visual_audit_prompt.txt
+You are a Principal UI/UX & Visual QA Auditor. DO NOT use bash commands to modify files.
+Inspect the real Chromium browser telemetry report in <browser_visual_telemetry> (which includes computed bounding boxes, border-radius/box-shadow conformity checks, row alignment checks, overlap checks, and console/page errors) against <implemented_feedback> and <frontend_styles_and_components>.
+(If your environment supports reading image files, you may also inspect the screenshots listed in <browser_visual_telemetry> under \`.reviews/screenshots/\`.)
+
+<implemented_feedback>
+$(cat "$SOURCE_SPEC")
+</implemented_feedback>
+
+<browser_visual_telemetry>
+$(head -c 45000 .reviews/visual_qa_telemetry.json 2>/dev/null || echo "No telemetry JSON generated.")
+</browser_visual_telemetry>
+
+<frontend_styles_and_components>
+$(head -n 160 frontend/src/styles/*.css frontend/src/pages/*.tsx frontend/src/components/*.tsx 2>/dev/null | head -c 40000)
+</frontend_styles_and_components>
+
+VISUAL AUDIT RULES:
+1. **Objective UI / Layout / Interaction Bugs:**
+   Check for:
+   - Highlight borders or glows (\`box-shadow\`, \`border\`, \`outline\`) that do NOT conform to the shape/radius/size of the inner card, seat box, or button (e.g., \`HIGHLIGHT_SIZE_MISMATCH\`, \`HIGHLIGHT_RADIUS_MISMATCH\`, or inline SVG descender gaps).
+   - Misaligned elements in rows/columns (\`ROW_VERTICAL_MISALIGNMENT\`), unintended element overlaps (\`ELEMENT_OVERLAP\`), or clipped text (\`TEXT_CLIPPED_HORIZONTALLY\`).
+   - Console/runtime errors or interactions from <implemented_feedback> that failed to render on screen.
+2. **Subjective Design Questions:**
+   If the implementation works and has clean geometry, but involves a subjective aesthetic choice for the human product owner, record it under \`===SUBJECTIVE_DESIGN_NOTES===\`.
+3. **Verdict Output:**
+   - If ZERO objective visual or interaction bugs exist, output any optional \`===SUBJECTIVE_DESIGN_NOTES===\` and end with \`===VISUAL_QA_PASSED===\`.
+   - If 1 or more objective visual/interaction bugs exist, output 1 to 2 remediation tickets using this EXACT format and end with \`===END_OF_TICKETS===\`:
+===TICKET:T-96-visual-qa-${TIMESTAMP}-1.md|WAVE:1===
+[Full Markdown ticket specifying the exact CSS/DOM alignment, border conformity, or interaction fix required, exact file paths, and tests]
+===END_OF_TICKETS===
+PROMPT_EOF
+
+  run_agy_pool "REVIEWER_R1" ".reviews/visual_audit_prompt.txt" ".reviews/visual_audit_out.txt" "===VISUAL_QA_PASSED===|===TICKET:"
+
+  if grep -q "===TICKET:" .reviews/visual_audit_out.txt 2>/dev/null; then
+    echo "⚠️  Visual QA Gate caught objective UI/layout/border issues in the live browser! Dispatching remediation wave..."
+    extract_tickets_with_waves ".reviews/visual_audit_out.txt"
+    git checkout main 2>/dev/null || true
+    git add .tickets/ 2>/dev/null || true
+    agent_git commit -m "chore(visual-qa): add remediation tickets for live browser UI issues ${TIMESTAMP}" >/dev/null 2>&1 || true
+    [ "$USE_GITHUB_PRS" -eq 1 ] && (retry_git_push origin main >/dev/null 2>&1 || true)
+    return 1
+  fi
+
+  echo "✅ Headless Browser Visual & Interactive QA PASSED!"
+  rm -f .reviews/visual_qa_passes
+  return 0
+}
+
 generate_qa_playbook() {
   local SOURCE_SPEC=".reviews/active_feedback_resolved.md"
   [ ! -f "$SOURCE_SPEC" ] && SOURCE_SPEC="FEEDBACK.backup.md"

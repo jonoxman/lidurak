@@ -2,7 +2,7 @@ FROM node:22-bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl ca-certificates gnupg tmux python3 build-essential \
-    openjdk-17-jdk-headless \
+    openjdk-17-jdk-headless chromium fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
 RUN echo "deb https://repo.scala-sbt.org/scalasbt/debian all main" | tee /etc/apt/sources.list.d/sbt.list \
@@ -10,10 +10,9 @@ RUN echo "deb https://repo.scala-sbt.org/scalasbt/debian all main" | tee /etc/ap
     && apt-get update && apt-get install -y sbt \
     && rm -rf /var/lib/apt/lists/*
 
-# Prefer IPv4 inside WSL2 Docker bridge networks to prevent OAuth/Session timeouts
 RUN grep -q "precedence ::ffff:0:0/96  100" /etc/gai.conf 2>/dev/null || echo "precedence ::ffff:0:0/96  100" >> /etc/gai.conf
 
-RUN npm install -g freebuff
+RUN npm install -g freebuff playwright-core
 
 RUN mkdir -p /home/node/.config /home/node/.local /home/node/.sbt /home/node/.cache \
     && chown -R node:node /home/node
@@ -21,6 +20,8 @@ RUN mkdir -p /home/node/.config /home/node/.local /home/node/.sbt /home/node/.ca
 USER node
 ENV HOME=/home/node
 ENV NODE_OPTIONS="--dns-result-order=ipv4first"
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+ENV CHROMIUM_PATH=/usr/bin/chromium
 WORKDIR /workspace
 
 CMD ["tail", "-f", "/dev/null"]
