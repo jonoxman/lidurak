@@ -4029,3 +4029,249 @@ describe('T-90-feedback-20261104_195410-2: drag animation, pointer cursor, throw
     expect(view.container.querySelector('.status-badge')).toBe(badge);
   });
 });
+
+describe('T-90-feedback-20261105_183601-1: surrender throw-in outline placement and card size', () => {
+  const makeOpponents = (count: number): OpponentSummary[] =>
+    [
+      { id: 'p1', name: 'Bob', cardCount: 5, hasPassed: false, finishRank: null },
+      { id: 'p2', name: 'Carol', cardCount: 5, hasPassed: false, finishRank: null },
+      { id: 'p3', name: 'Dave', cardCount: 5, hasPassed: false, finishRank: null },
+    ].slice(0, count);
+
+  const surrenderPairs: TablePairData[] = [
+    { attack: { suit: 'spades', rank: 'king' }, defense: { suit: 'hearts', rank: 'ace' } },
+    { attack: { suit: 'clubs', rank: 'king' }, defense: null },
+  ];
+
+  const rule = (selector: string): string => cssRule(tableCss, selector);
+
+  it('ITEM-1b: places the outline above the taken cards when the active user surrenders', () => {
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={makeOpponents(1)}
+        tablePairs={surrenderPairs}
+        trumpSuit="diamonds"
+        attackerId="p1"
+        defenderId="p0"
+        boutPhase="SurrenderThrowIn"
+        canThrowIn
+      />,
+    );
+
+    const outline = screen.getByTestId('throw-in-outline');
+    expect(outline.getAttribute('data-surrender-outline-position')).toBe('above');
+    expect(outline.getAttribute('data-on-table')).toBe('true');
+    // Never a descendant of the half-off `translateY(calc(50% + 12px))` row.
+    expect(outline.closest('.table-pairs-group')).toBeNull();
+    expect(outline.closest('[data-testid="play-area-box"]')).not.toBeNull();
+    expect(screen.getByTestId('table-pairs-group').getAttribute('data-surrender-target')).toBe(
+      'bottom',
+    );
+
+    const anchor = screen.getByTestId('surrender-throw-in-anchor');
+    expect(anchor.getAttribute('data-placement')).toBe('above');
+    expect(anchor.getAttribute('data-surrender-seat')).toBe('bottom');
+    expect(anchor.getAttribute('data-on-table')).toBe('true');
+    expect(anchor.contains(outline)).toBe(true);
+
+    // The anchor hugs the top edge while the cards slide half-off the bottom.
+    expect(rule(".surrender-throw-in-anchor[data-placement='above']")).toContain(
+      'align-self: start',
+    );
+    expect(
+      rule(".table-pairs-group[data-surrendered='true'][data-surrender-target='bottom']"),
+    ).toContain('transform: translateY(calc(50% + 12px))');
+  });
+
+  it('ITEM-1a: places the outline below the taken cards for every top-row opponent', () => {
+    const cases: Array<{ opponents: OpponentSummary[]; defenderId: string; seat: string }> = [
+      { opponents: makeOpponents(1), defenderId: 'p1', seat: 'top-center' },
+      { opponents: makeOpponents(2), defenderId: 'p1', seat: 'top-left' },
+      { opponents: makeOpponents(2), defenderId: 'p2', seat: 'top-right' },
+      { opponents: makeOpponents(3), defenderId: 'p2', seat: 'top-center' },
+      { opponents: makeOpponents(3), defenderId: 'p3', seat: 'top-right' },
+    ];
+
+    for (const scenario of cases) {
+      const view = render(
+        <GameTable
+          myId="p0"
+          myHand={hand}
+          opponents={scenario.opponents}
+          tablePairs={surrenderPairs}
+          trumpSuit="diamonds"
+          attackerId="p1"
+          defenderId={scenario.defenderId}
+          boutPhase="Surrender throw in"
+          canThrowIn
+        />,
+      );
+
+      const outline = screen.getByTestId('throw-in-outline');
+      expect(outline.getAttribute('data-surrender-outline-position')).toBe('below');
+      expect(outline.getAttribute('data-on-table')).toBe('true');
+      expect(outline.closest('.table-pairs-group')).toBeNull();
+      expect(outline.closest('[data-testid="play-area-box"]')).not.toBeNull();
+
+      const group = screen.getByTestId('table-pairs-group');
+      expect(group.getAttribute('data-surrendered')).toBe('true');
+      expect(group.getAttribute('data-surrender-target')).toBe(scenario.seat);
+
+      const anchor = screen.getByTestId('surrender-throw-in-anchor');
+      expect(anchor.getAttribute('data-placement')).toBe('below');
+      expect(anchor.getAttribute('data-surrender-seat')).toBe(scenario.seat);
+      // The anchor stays on the bottom edge of the tinted box, under the seat.
+      expect(rule('.surrender-throw-in-anchor')).toContain('align-self: end');
+      expect(rule(".surrender-throw-in-anchor[data-surrender-seat='top-left']")).toContain(
+        'justify-self: start',
+      );
+      expect(rule(".surrender-throw-in-anchor[data-surrender-seat='top-right']")).toContain(
+        'justify-self: end',
+      );
+      view.unmount();
+    }
+  });
+
+  it('ITEM-1b: keeps the outline inline during a normal bout', () => {
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={makeOpponents(1)}
+        tablePairs={surrenderPairs}
+        trumpSuit="diamonds"
+        attackerId="p1"
+        defenderId="p0"
+        boutPhase="Defending"
+        canThrowIn
+      />,
+    );
+
+    const outline = screen.getByTestId('throw-in-outline');
+    expect(outline.getAttribute('data-surrender-outline-position')).toBe('inline');
+    expect(outline.getAttribute('data-on-table')).toBe('true');
+    expect(outline.getAttribute('data-drop-zone')).toBe('throw-in');
+    expect(outline.closest('.table-pairs-group')).not.toBeNull();
+    expect(screen.queryByTestId('surrender-throw-in-anchor')).toBeNull();
+
+    const slot = screen.getByTestId('throw-in-slot');
+    expect(slot.classList.contains('throw-in-slot')).toBe(true);
+    expect(slot.getAttribute('data-surrender-outline-position')).toBe('inline');
+    expect(slot.children[0]).toBe(outline);
+  });
+
+  it('ITEM-2: keeps the exact 100x140 card size in every phase', () => {
+    // `.throw-in-outline` is also named in the pointer-cursor rule list, so pick
+    // the sizing block itself.
+    const sizeRule =
+      (tableCss.match(/\.throw-in-outline \{[^}]*\}/g) ?? []).find((block) =>
+        block.includes('min-width: 100px'),
+      ) ?? '';
+    expect(sizeRule).not.toBe('');
+    expect(sizeRule).toContain('flex: 0 0 100px');
+    expect(sizeRule).toContain('width: 100px');
+    expect(sizeRule).toContain('height: 140px');
+    expect(sizeRule).toContain('min-width: 100px');
+    expect(sizeRule).toContain('max-width: 100px');
+    expect(sizeRule).toContain('min-height: 140px');
+    expect(sizeRule).toContain('max-height: 140px');
+    expect(sizeRule).toContain('box-sizing: border-box');
+    expect(sizeRule).toContain('margin: 0');
+    expect(tableCss).toMatch(/@media \(max-width: 900px\) \{[^}]*\.throw-in-outline \{[^}]*width: 48px;/);
+
+    const ranks = ['six', 'seven', 'eight', 'nine', 'ten'];
+    for (const count of [1, 2, 3, 4, 5]) {
+      const pairs: TablePairData[] = Array.from({ length: count }, (_, index) => ({
+        attack: { suit: 'spades', rank: ranks[index] },
+        // Mix covered and uncovered pairs; the `.table-pair` cover reserve must
+        // never stretch the outline.
+        defense: index % 2 === 0 ? null : { suit: 'hearts', rank: 'ace' },
+      }));
+      const view = render(
+        <GameTable
+          myId="p0"
+          myHand={hand}
+          opponents={makeOpponents(1)}
+          tablePairs={pairs}
+          trumpSuit="diamonds"
+          attackerId="p1"
+          defenderId="p0"
+          boutPhase="Defending"
+          canThrowIn
+        />,
+      );
+
+      const outline = screen.getByTestId('throw-in-outline');
+      expect(outline.getAttribute('data-card-width')).toBe(String(CARD_WIDTH));
+      expect(outline.getAttribute('data-card-height')).toBe(String(CARD_HEIGHT));
+      expect(CARD_WIDTH).toBe(100);
+      expect(CARD_HEIGHT).toBe(140);
+      expect(outline.parentElement?.classList.contains('throw-in-slot')).toBe(true);
+      expect(document.querySelector('.table-pair')?.getAttribute('data-card-width')).toBe('100');
+      view.unmount();
+    }
+
+    // The same exact footprint survives a surrender in both placements.
+    for (const scenario of [
+      { defenderId: 'p0', placement: 'above' },
+      { defenderId: 'p1', placement: 'below' },
+    ]) {
+      const view = render(
+        <GameTable
+          myId="p0"
+          myHand={hand}
+          opponents={makeOpponents(1)}
+          tablePairs={surrenderPairs}
+          trumpSuit="diamonds"
+          attackerId="p1"
+          defenderId={scenario.defenderId}
+          boutPhase="SurrenderThrowIn"
+          canThrowIn
+        />,
+      );
+      const outline = screen.getByTestId('throw-in-outline');
+      expect(outline.getAttribute('data-surrender-outline-position')).toBe(scenario.placement);
+      expect(outline.getAttribute('data-card-width')).toBe('100');
+      expect(outline.getAttribute('data-card-height')).toBe('140');
+      expect(outline.parentElement?.classList.contains('surrender-throw-in-anchor')).toBe(true);
+      view.unmount();
+    }
+  });
+
+  it('ITEM-1b: a drop on the detached outline still dispatches ThrowInCards', () => {
+    const onThrowInDrop = vi.fn();
+    for (const scenario of [
+      { defenderId: 'p0', placement: 'above' },
+      { defenderId: 'p1', placement: 'below' },
+    ]) {
+      const view = render(
+        <GameTable
+          myId="p0"
+          myHand={hand}
+          opponents={makeOpponents(1)}
+          tablePairs={surrenderPairs}
+          trumpSuit="diamonds"
+          attackerId="p1"
+          defenderId={scenario.defenderId}
+          boutPhase="SurrenderThrowIn"
+          canThrowIn
+          onThrowInDrop={onThrowInDrop}
+        />,
+      );
+
+      const outline = screen.getByTestId('throw-in-outline');
+      expect(outline.getAttribute('data-surrender-outline-position')).toBe(scenario.placement);
+      expect(outline.getAttribute('data-drop-zone')).toBe('throw-in');
+      fireEvent.dragStart(
+        within(screen.getByTestId('hand-turn-highlight')).getByLabelText('king of clubs'),
+        { dataTransfer: { setData: vi.fn() } },
+      );
+      fireEvent.drop(outline, { dataTransfer: { getData: () => '' } });
+      expect(onThrowInDrop).toHaveBeenLastCalledWith({ suit: 'clubs', rank: 'king' });
+      onThrowInDrop.mockClear();
+      view.unmount();
+    }
+  });
+});

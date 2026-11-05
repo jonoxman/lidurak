@@ -21,6 +21,9 @@ export interface TablePairProps {
    * overlap so every card keeps its left rank/suit strip visible.
    */
   marginLeft?: string;
+  /** T-90 ITEM-2: exact card footprint this pair reserves (`100` x `140`). */
+  cardWidth?: number;
+  cardHeight?: number;
   onAttackClick?: () => void;
   onDragOverCard?: (event: DragEvent) => void;
   onDragLeaveCard?: () => void;
@@ -37,6 +40,8 @@ export function TablePair({
   snap = false,
   dropZone,
   marginLeft,
+  cardWidth = 100,
+  cardHeight = 140,
   onAttackClick,
   onDragOverCard,
   onDragLeaveCard,
@@ -58,6 +63,10 @@ export function TablePair({
     <div
       class={classes.join(' ')}
       data-card-align="top"
+      // T-90 ITEM-2: the pair reserves exactly one card; the outline next to it
+      // reports the same 100x140 footprint.
+      data-card-width={cardWidth}
+      data-card-height={cardHeight}
       data-uncovered-highlighted={uncoveredHighlighted ? 'true' : 'false'}
       style={marginLeft ? { marginLeft } : undefined}
     >

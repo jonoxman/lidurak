@@ -1651,6 +1651,42 @@ export function GameTable({
   const boutSlotMargin = (index: number): string | undefined =>
     index === 0 ? undefined : `${boutGeometry.step - boutCardWidth}px`;
 
+  // T-90 (surrender throw-in outline): the outline never rides the half-off
+  // `translateY(calc(±50% ± 12px))` transform of the taken cards. During a
+  // normal bout it stays inline to the right of the played cards; while a bout
+  // is surrendered it is rendered OUTSIDE `.table-pairs-group` — below the
+  // taken cards for a top-row opponent and above them for the viewer's own
+  // bottom edge — so its whole 100x140 box stays on the felt.
+  const throwInOutlinePosition: 'inline' | 'above' | 'below' = !surrendered
+    ? 'inline'
+    : surrenderTarget === 'bottom'
+      ? 'above'
+      : 'below';
+  // Detaching the outline from the pair row is what keeps it fully on the table.
+  const throwInDetached = surrendered;
+  const throwInOutline = (
+    <div
+      class={`target-outline throw-in-outline${
+        snapZone === 'throw-in' ? ' snap-active' : ''
+      }`}
+      data-testid="throw-in-outline"
+      data-drop-zone="throw-in"
+      data-throw-in-enabled={canThrowIn ? 'true' : 'false'}
+      data-surrender-outline-position={throwInOutlinePosition}
+      data-on-table="true"
+      data-card-width={CARD_WIDTH}
+      data-card-height={CARD_HEIGHT}
+      aria-label="Throw in another card"
+      onDragOver={hoverZone('throw-in')}
+      onDragLeave={clearSnap}
+      onDrop={(event) => dropOn('throw-in', event, (card) => onThrowInDrop?.(card))}
+    >
+      <svg class="throw-in-icon" viewBox="0 0 40 40" aria-hidden="true">
+        <path d="M20 8 L20 32 M8 20 L32 20" />
+      </svg>
+    </div>
+  );
+
   // Starts the pointer fallback for any card, at any time; review/bot seats and
   // non-primary buttons are ignored so they keep their read-only behaviour.
   const beginPointerDrag = (card: CardData) => (event: MouseEvent) => {
@@ -1880,6 +1916,8 @@ export function GameTable({
                 defense={pair.defense}
                 trumpSuit={trumpSuit}
                 marginLeft={boutSlotMargin(index)}
+                cardWidth={CARD_WIDTH}
+                cardHeight={CARD_HEIGHT}
                 highlightUncovered={uncoveredHighlight && !pair.defense}
                 snap={snapZone === zone}
                 dropZone={coverable ? zone : undefined}
@@ -1899,26 +1937,17 @@ export function GameTable({
 
           {/* ITEM-8: the dedicated throw-in slot sits immediately right of the
               cards in play. It is the ONLY throw-in drop zone, so a card
-              dropped elsewhere on the felt is not played. */}
-          {throwInSlot > 0 ? (
+              dropped elsewhere on the felt is not played. Its wrapper carries
+              the row spacing, so the outline itself stays exactly 100x140. */}
+          {throwInSlot > 0 && !throwInDetached ? (
             <div
-              class={`target-outline throw-in-outline${
-                snapZone === 'throw-in' ? ' snap-active' : ''
-              }`}
-              data-testid="throw-in-outline"
+              class="throw-in-slot"
+              data-testid="throw-in-slot"
+              data-surrender-outline-position="inline"
+              data-on-table="true"
               style={{ marginLeft: boutSlotMargin(tablePairs.length) }}
-              data-drop-zone="throw-in"
-              data-throw-in-enabled={canThrowIn ? 'true' : 'false'}
-              aria-label="Throw in another card"
-              onDragOver={hoverZone('throw-in')}
-              onDragLeave={clearSnap}
-              onDrop={(event) =>
-                dropOn('throw-in', event, (card) => onThrowInDrop?.(card))
-              }
             >
-              <svg class="throw-in-icon" viewBox="0 0 40 40" aria-hidden="true">
-                <path d="M20 8 L20 32 M8 20 L32 20" />
-              </svg>
+              {throwInOutline}
             </div>
           ) : null}
 
@@ -1948,6 +1977,23 @@ export function GameTable({
             </div>
           ) : null}
         </div>
+
+        {/* T-90 ITEM-1a/1b: under a surrender the throw-in outline is a direct
+            child of the tinted box — below a top-row opponent's taken cards and
+            above the viewer's own taken cards — never inside the half-off
+            `.table-pairs-group` transform, so its border box stays fully on the
+            table at any viewport size. */}
+        {throwInSlot > 0 && throwInDetached ? (
+          <div
+            class="surrender-throw-in-anchor"
+            data-testid="surrender-throw-in-anchor"
+            data-placement={throwInOutlinePosition}
+            data-surrender-seat={surrenderTarget}
+            data-on-table="true"
+          >
+            {throwInOutline}
+          </div>
+        ) : null}
         </div>
       </section>
 
