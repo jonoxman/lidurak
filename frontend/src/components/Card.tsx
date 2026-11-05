@@ -456,6 +456,10 @@ export function Card({
         class={trump ? 'playing-card card-face trump-card' : 'playing-card card-face'}
         viewBox="0 0 70 100"
         draggable={false}
+        // T-90 ITEM-7: no native drag may start on the SVG artwork, so the
+        // pointer finger set by the hand wrapper is never replaced by the
+        // browser's drag / "no drop" cursor.
+        onDragStart={(event: DragEvent) => event.preventDefault()}
         role="img"
         aria-label={`${rank} of ${suit}`}
         data-card-theme={theme}

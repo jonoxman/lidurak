@@ -545,6 +545,9 @@
 
 .drag-ghost {
   cursor: pointer;
+  /* ITEM-7: the ghost never intercepts hit-testing, so it can never paint the
+     browser's default arrow over a live drag. */
+  pointer-events: none;
 }
 
 .table-pair {
@@ -586,6 +589,30 @@
 .table-pair.turn-pulse .card-slot {
   animation: turnPulse 2.4s infinite ease-in-out;
   border-radius: var(--app-roundness, 8px);
+}
+
+/* T-90-feature ITEM-15: card entry runs on the OUTER `.table-pair` wrapper,
+   never on the `.card-slot` that owns the continuous uncovered pulse, so the
+   row can fade/slide in without cancelling the box-shadow keyframes. */
+.table-pair {
+  animation: pairEnter 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes pairEnter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .table-pair {
+    animation: none;
+  }
 }
 
 /* --- Row 3, column 1: talon deck & trump card --- */
@@ -1058,6 +1085,9 @@
   padding: 6px;
   /* ITEM-NEW-1a: the hand highlight box rounds just past the cards it wraps. */
   border-radius: calc(var(--app-roundness, 8px) + 4px);
+  /* T-90-2 ITEM-13a: the box never clips a lifted card's top or bottom edge,
+     so the 6px outline wraps the full 100x140 row on all four sides. */
+  overflow: visible;
   box-sizing: border-box;
 }
 
@@ -1348,6 +1378,27 @@
   50% {
     box-shadow: 0 0 12px 3px var(--defender-hand-glow);
   }
+}
+
+/* T-90-feature ITEM-15: a pulsing glow element only transitions its border
+   colour. A `box-shadow` (or `all`) transition on an element running a
+   `box-shadow` @keyframes animation makes the browser re-sample the animated
+   shadow every frame, which is the visible jerk this fixes. Declared after the
+   animation rules so the animation declaration stays the first match. */
+.table-card-uncovered,
+.table-pair.turn-pulse,
+.hand-cards.attacker-turn,
+.hand-cards.defender-turn,
+.hand-cards.throw-in-turn,
+.hand-cards[data-highlighted='true'][data-highlight-variant='attacker'],
+.hand-cards[data-highlighted='true'][data-highlight-variant='defender'],
+.hand-cards[data-highlighted='true'][data-highlight-variant='throw-in'] {
+  transition: border-color 150ms ease;
+}
+
+.table-card-uncovered .card-slot,
+.table-pair.turn-pulse .card-slot {
+  transition: border-color 150ms ease;
 }
 
 /* --- Small screens: single-column arena --- */
@@ -2159,17 +2210,27 @@
   padding-inline: 8px;
 }
 
-/* ITEM-7: the whole drag gesture keeps the link pointer finger. */
+/* ITEM-7: the link pointer finger is enforced on every node of a hand card —
+   including the SVG `<rect>`, `<g>` and `<text>` inside it — and on every
+   surface of the whole drag gesture, so the browser can never fall back to its
+   default arrow or its "no drop" glyph. */
 .hand-card-wrapper,
+.hand-card-wrapper *,
+[data-zone='player-hand'] .playing-card,
+[data-zone='player-hand'] .playing-card *,
 .hand-slot[draggable='true'],
 .drag-ghost,
+.drag-ghost *,
 .throw-in-outline {
-  cursor: pointer;
+  cursor: pointer !important;
 }
 
-.table-arena[data-dragging='true'] *,
+html[data-dragging='true'],
+html[data-dragging='true'] *,
 body[data-dragging='true'],
-body[data-dragging='true'] * {
+body[data-dragging='true'] *,
+.table-arena[data-dragging='true'],
+.table-arena[data-dragging='true'] * {
   cursor: pointer !important;
 }
 
@@ -2178,6 +2239,10 @@ body[data-dragging='true'] * {
 .hand-card-wrapper {
   width: var(--hand-card-width, 100px);
   height: var(--hand-card-height, 140px);
+  /* ITEM-13a: exactly one card wide, so the highlight box's fit-content width
+     is `100 + (visibleCount - 1) * step`. */
+  flex: 0 0 var(--hand-card-width, 100px);
+  box-sizing: border-box;
   /* T-90-2 ITEM-6a: opening / closing the insertion gap is smooth, including
      the compacting margin change when the dragged card leaves its slot. */
   transition:
@@ -2202,6 +2267,11 @@ body[data-dragging='true'] * {
 
 .hand-card-wrapper[data-part-direction='right'] {
   transform: translateX(22px);
+}
+
+/* ITEM-6a/3: released over the felt, the hand stays closed with no gap. */
+.hand-card-wrapper[data-part-direction='none'] {
+  transform: none;
 }
 
 /* ITEM-8: the dedicated throw-in slot beside the played cards. */

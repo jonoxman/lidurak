@@ -183,8 +183,10 @@ export const CARD_HEIGHT = 140;
 export const HAND_CARD_WIDTH = CARD_WIDTH;
 /** ITEM-13: height of one hand card at desktop scale (+25% from 114). */
 export const HAND_CARD_HEIGHT = CARD_HEIGHT;
+/** ITEM-13b: neighbouring hand cards overlap by at least 10% of the card width. */
+export const HAND_MIN_OVERLAP_RATIO = 0.1;
 /** Neighbouring hand cards always overlap by at least 10% of their 100px width. */
-export const HAND_MIN_OVERLAP = 10;
+export const HAND_MIN_OVERLAP = Math.round(HAND_CARD_WIDTH * HAND_MIN_OVERLAP_RATIO);
 /** Used until the hand has been measured (jsdom reports zero widths). */
 export const HAND_FALLBACK_WIDTH = 720;
 /** Symmetric padding of the turn-highlight box around the rendered hand row. */
@@ -375,11 +377,16 @@ export function opponentOverlap(
 ): number {
   if (count <= 1) return 0;
   const needed = cardWidth - (availableWidth - cardWidth) / (count - 1);
+  // ITEM-13c: adjacent opponent mini-cards never sit flush or apart — they
+  // always overlap by at least 10% of their own width (`>= 10px` on a 100px
+  // card, `>= 4px` on the 22/26px opponent boxes), then tighten further as the
+  // hand grows so the whole row stays centred inside the seat box.
+  const minOverlap = Math.max(OPPONENT_MIN_OVERLAP, Math.round(cardWidth * 0.1));
   const maxOverlap = Math.max(
-    OPPONENT_MIN_OVERLAP,
+    minOverlap,
     cardWidth - Math.max(6, Math.round(cardWidth * 0.28)),
   );
-  return Math.min(maxOverlap, Math.max(OPPONENT_MIN_OVERLAP, needed));
+  return Math.min(maxOverlap, Math.max(minOverlap, needed));
 }
 
 /** Talon deck, revealed trump and TRUMP badge for the right sidebar. */
@@ -1365,13 +1372,34 @@ export function GameTable({
   // including outside the arena where the browser would paint its own cursor.
   useEffect(() => {
     if (typeof document === 'undefined') return undefined;
-    if (dragCard) {
-      document.body.dataset.dragging = 'true';
-    } else {
-      delete document.body.dataset.dragging;
-    }
+    const root = document.documentElement;
+    const body = document.body;
+    const setDragging = (active: boolean) => {
+      if (active) {
+        root.dataset.dragging = 'true';
+        body.dataset.dragging = 'true';
+      } else {
+        delete root.dataset.dragging;
+        delete body.dataset.dragging;
+      }
+    };
+    setDragging(Boolean(dragCard));
+    // ITEM-7: every way a gesture can end — pointer release, a cancelled touch
+    // drag, a native dragend or the window losing focus — clears the page-wide
+    // pointer state so the arrow cursor can come back.
+    const clear = () => setDragging(false);
+    document.addEventListener('pointerup', clear);
+    document.addEventListener('pointercancel', clear);
+    document.addEventListener('mouseup', clear);
+    document.addEventListener('dragend', clear);
+    if (typeof window !== 'undefined') window.addEventListener('blur', clear);
     return () => {
-      delete document.body.dataset.dragging;
+      setDragging(false);
+      document.removeEventListener('pointerup', clear);
+      document.removeEventListener('pointercancel', clear);
+      document.removeEventListener('mouseup', clear);
+      document.removeEventListener('dragend', clear);
+      if (typeof window !== 'undefined') window.removeEventListener('blur', clear);
     };
   }, [dragCard]);
 
@@ -1391,10 +1419,45 @@ export function GameTable({
     );
   };
 
+  /**
+   * ITEM-7/8: hand cards are dragged with pointer events (never a native HTML5
+   * drag, which is what repaints the arrow / "no drop" cursor), so the play
+   * drop is resolved from the `[data-drop-zone]` surface under the pointer.
+   * Unknown or illegal zones do nothing, which returns the card to the hand.
+   */
+  const resolvePointerDrop = (
+    card: CardData,
+    clientX: number,
+    clientY: number,
+  ): boolean => {
+    if (typeof document.elementFromPoint !== 'function') return false;
+    const hit = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
+    const zoneNode = hit?.closest?.('[data-drop-zone]') as HTMLElement | null;
+    const zone = zoneNode?.getAttribute('data-drop-zone') ?? '';
+    if (!zone) return false;
+    if (zone.startsWith('target:') && onAttackDrop) {
+      onAttackDrop(card, zone.slice('target:'.length));
+      return true;
+    }
+    if (zone.startsWith('cover:') && onCoverDrop) {
+      onCoverDrop(card, Number(zone.slice('cover:'.length)));
+      return true;
+    }
+    if (zone === 'throw-in' && onThrowInDrop) {
+      onThrowInDrop(card);
+      return true;
+    }
+    if (zone === 'redirect' && onRedirectDrop) {
+      onRedirectDrop(card);
+      return true;
+    }
+    return false;
+  };
+
   // ITEM-6a/7: pointer/mouse dragging works for ANY hand card, even when it is
-  // not the viewer's turn and no table drop is legal. Native HTML5 drag handles
-  // play drops; this path guarantees the live parting animation and the
-  // drop-to-reorder gesture with a plain mouse press + move.
+  // not the viewer's turn and no table drop is legal. This path guarantees the
+  // live parting animation and the drop-to-reorder gesture with a plain mouse
+  // press + move.
   useEffect(() => {
     if (typeof document === 'undefined') return undefined;
     const move = (event: MouseEvent) => {
@@ -1421,21 +1484,28 @@ export function GameTable({
         event.clientY <= rect.bottom + 60;
       setReorderIndex(nearHand ? reorderIndexFromClientX(event.clientX, box) : null);
     };
-    const up = () => {
+    const up = (event: MouseEvent) => {
       const pointer = pointerDragRef.current;
       pointerDragRef.current = null;
       if (!pointer?.active) return;
       const targetIndex = reorderIndexRef.current;
-      if (targetIndex !== null && onReorderHand) {
-        const from = hand.findIndex(
-          (candidate) => cardKey(candidate) === cardKey(pointer.card),
-        );
-        if (from >= 0) {
-          const next = hand.filter((_, position) => position !== from);
-          const insertAt = Math.max(0, Math.min(next.length, targetIndex));
-          next.splice(insertAt, 0, pointer.card);
-          onReorderHand(next);
+      if (targetIndex !== null) {
+        if (onReorderHand) {
+          const from = hand.findIndex(
+            (candidate) => cardKey(candidate) === cardKey(pointer.card),
+          );
+          if (from >= 0) {
+            const next = hand.filter((_, position) => position !== from);
+            const insertAt = Math.max(0, Math.min(next.length, targetIndex));
+            next.splice(insertAt, 0, pointer.card);
+            onReorderHand(next);
+          }
         }
+      } else {
+        // ITEM-7/8: released outside the hand, so play the card on whichever
+        // drop surface (attack target, cover slot, throw-in, redirect) is under
+        // the pointer. Dropping it anywhere else just returns it to the hand.
+        resolvePointerDrop(pointer.card, event.clientX, event.clientY);
       }
       // Stop the click that follows a completed drag from selecting the card.
       suppressClickRef.current = true;
@@ -1660,7 +1730,25 @@ export function GameTable({
                 >
                   {opponent.cardCount}
                 </span>
-                <div class="opponent-cards" aria-label={`${opponent.name}'s cards`}>
+                <div
+                  class="opponent-cards"
+                  aria-label={`${opponent.name}'s cards`}
+                  data-card-width={
+                    opponent.cards && opponent.cards.length > 0
+                      ? LOW_DETAIL_CARD_WIDTH
+                      : OPPONENT_CARD_WIDTH
+                  }
+                  data-min-overlap-ratio="0.10"
+                  data-overlap={opponentOverlap(
+                    opponent.cards && opponent.cards.length > 0
+                      ? opponent.cards.length
+                      : opponent.cardCount,
+                    OPPONENT_CARDS_WIDTH,
+                    opponent.cards && opponent.cards.length > 0
+                      ? LOW_DETAIL_CARD_WIDTH
+                      : OPPONENT_CARD_WIDTH,
+                  )}
+                >
                   {opponent.cards && opponent.cards.length > 0
                     ? opponent.cards.map((card, index) => (
                         <span
@@ -1901,6 +1989,13 @@ export function GameTable({
           // the hand closes over it before the insertion gap parts again.
           data-gap-closed={gapClosed ? 'true' : 'false'}
           data-dragged-index={gapClosed ? draggedCardIndex : undefined}
+          // ITEM-6a: `none` once the dragged card leaves the hand, so every
+          // remaining card sits closed with no insertion gap on the felt.
+          data-part-direction={
+            dragCard !== null && reorderIndex === null ? 'none' : undefined
+          }
+          data-min-overlap-ratio="0.10"
+          data-min-overlap={HAND_MIN_OVERLAP}
           data-overlap={activeHandLayoutState.overlap}
           data-hidden-left={handLayoutState.hiddenLeft}
           data-hidden-right={handLayoutState.hiddenRight}
@@ -1934,11 +2029,13 @@ export function GameTable({
           const effectiveIndex =
             draggedIndex >= 0 && index > draggedIndex ? index - 1 : index;
           const partDirection =
-            reorderIndex !== null && dragCard !== null && index !== draggedIndex
-              ? effectiveIndex < reorderIndex
-                ? 'left'
-                : 'right'
-              : undefined;
+            dragCard === null || index === draggedIndex
+              ? undefined
+              : reorderIndex === null
+                ? 'none'
+                : effectiveIndex < reorderIndex
+                  ? 'left'
+                  : 'right';
           return (
             <div
               key={`${cardKey(card)}-${index}`}
@@ -1948,9 +2045,13 @@ export function GameTable({
               data-part-direction={partDirection}
               data-collapsed={index === draggedCardIndex ? 'true' : 'false'}
               data-draggable={draggable ? 'true' : 'false'}
+              // ITEM-7: the wrapper never starts a native HTML5 drag, so the
+              // browser can never swap the pointer finger for its arrow.
+              draggable={false}
               aria-hidden={hidden ? 'true' : undefined}
               style={{ marginLeft: handSlotMargin(index) }}
               onMouseDown={beginPointerDrag(card)}
+              onDragStart={(event) => event.preventDefault()}
               onClickCapture={(event) => {
                 if (!suppressClickRef.current) return;
                 suppressClickRef.current = false;
@@ -1981,9 +2082,12 @@ export function GameTable({
                       }
                     : undefined
                 }
-                draggable={draggable}
+                draggable={false}
                 onDragStart={(event) => {
-                  // Native HTML5 drag takes over from the pointer fallback.
+                  // ITEM-7: block the native drag image and its cursor swap; the
+                  // pointer gesture drives the drag, and this keeps the
+                  // programmatic drop path working for tests and automation.
+                  event.preventDefault();
                   pointerDragRef.current = null;
                   setDragCard(card);
                   if (event.dataTransfer) {

@@ -2013,3 +2013,31 @@ html[data-theme='light'] .player-tabs a:focus-visible {
   border-color: var(--app-border);
   box-shadow: none;
 }
+
+/* ==========================================================================
+   T-90 feedback ITEM-7: the link-hovering pointer finger owns the whole hand
+   drag gesture. Every node of a hand card (including the SVG <rect>, <g> and
+   <text> artwork) shows `pointer`, and while a drag is live the flag on
+   <html> / <body> / the arena overrides every descendant — felt table,
+   battlefield, opponent boxes and both sidebars — so the browser can never
+   paint its default arrow or its "no drop" glyph mid-gesture.
+   The same block lives in table.css; both sheets are loaded on every page.
+   ========================================================================== */
+.hand-card-wrapper,
+.hand-card-wrapper *,
+[data-zone='player-hand'] .playing-card,
+[data-zone='player-hand'] .playing-card *,
+.drag-ghost,
+.drag-ghost *,
+.throw-in-outline {
+  cursor: pointer !important;
+}
+
+html[data-dragging='true'],
+html[data-dragging='true'] *,
+body[data-dragging='true'],
+body[data-dragging='true'] *,
+.table-arena[data-dragging='true'],
+.table-arena[data-dragging='true'] * {
+  cursor: pointer !important;
+}

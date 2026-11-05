@@ -16,6 +16,9 @@ import {
   HAND_CARD_HEIGHT,
   HAND_CARD_WIDTH,
   HAND_MIN_OVERLAP,
+  HAND_MIN_OVERLAP_RATIO,
+  LOW_DETAIL_CARD_WIDTH,
+  OPPONENT_CARD_WIDTH,
   OPPONENT_MIN_OVERLAP,
   SEAT_BOX,
   TableDeck,
@@ -42,6 +45,7 @@ import { ActionBar } from '../components/ActionBar';
 import { DEFAULT_SETTINGS, setSettings } from '../state/settings';
 import type { CardData } from '../components/Card';
 import tableCss from '../styles/table.css?raw';
+import appCss from '../app.css?raw';
 
 /** Declarations of the first rule whose selector text contains `selector`. */
 function cssRule(css: string, selector: string): string {
@@ -3681,5 +3685,347 @@ describe('T-90-4: larger cards, aura containment, throw-in slot, hand reorder an
     expect(screen.getByTestId('opponent-card-count-p1').textContent).toBe('3');
     // Face-down backs are gone while the hand is revealed.
     expect(document.querySelectorAll('.opponent-card')).toHaveLength(0);
+  });
+});
+
+/**
+ * T-90 feedback batch `20261104_195410-2`: items #6, #7, #8, #13a/b/c and #15.
+ * These cover the live wiring, not just the helper functions.
+ */
+describe('T-90-feedback-20261104_195410-2: drag animation, pointer cursor, throw-in outline, overlap and glows', () => {
+  const bobSeat: OpponentSummary[] = [
+    { id: 'p1', name: 'Bob', cardCount: 6, hasPassed: false, finishRank: null },
+  ];
+
+  const fakeRect = (width: number): DOMRect =>
+    ({
+      left: 0,
+      top: 0,
+      right: width,
+      bottom: 140,
+      width,
+      height: 140,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    }) as DOMRect;
+
+  const renderDragHand = (onReorderHand = vi.fn()) => {
+    const view = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={bobSeat}
+        tablePairs={[]}
+        trumpSuit="diamonds"
+        defenderId="p1"
+        onReorderHand={onReorderHand}
+      />,
+    );
+    const box = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+    vi.spyOn(box, 'getBoundingClientRect').mockReturnValue(fakeRect(300));
+    return { ...view, box, onReorderHand };
+  };
+
+  it('ITEM-6: closes the original gap first and reports "none" once the pointer leaves the hand', () => {
+    const { box } = renderDragHand();
+
+    fireEvent.mouseDown(screen.getByLabelText('six of spades'), {
+      button: 0,
+      clientX: 10,
+      clientY: 20,
+    });
+    fireEvent.mouseMove(document, { clientX: 120, clientY: 22 });
+    // Stage 1: the dragged card's own slot is gone and the row is compacted.
+    expect(box.getAttribute('data-gap-closed')).toBe('true');
+    expect(box.getAttribute('data-reorder-target-index')).toBe('1');
+
+    // Stage 2: parted at the insertion slot.
+    expect(
+      Array.from(box.querySelectorAll('.hand-card-wrapper')).map((node) =>
+        node.getAttribute('data-part-direction'),
+      ),
+    ).toEqual([null, 'left', 'right']);
+
+    // Off the hand and onto the felt: still closed, with no insertion gap.
+    fireEvent.mouseMove(document, { clientX: 400, clientY: 900 });
+    expect(box.getAttribute('data-reorder-target-index')).toBeNull();
+    const wrappers = Array.from(box.querySelectorAll('.hand-card-wrapper')) as HTMLElement[];
+    expect(wrappers[0].getAttribute('data-collapsed')).toBe('true');
+    expect(wrappers.slice(1).map((node) => node.getAttribute('data-part-direction'))).toEqual([
+      'none',
+      'none',
+    ]);
+    fireEvent.mouseUp(document, { clientX: 400, clientY: 900 });
+    expect(box.getAttribute('data-gap-closed')).toBe('false');
+  });
+
+  it('ITEM-7: keeps data-dragging on html+body and never starts a native drag', () => {
+    const { box } = renderDragHand();
+    const labeled = screen.getByLabelText('six of spades');
+    const slot = labeled.closest('.card-slot') as HTMLElement;
+    const wrapper = labeled.closest('.hand-card-wrapper') as HTMLElement;
+
+    // `fireEvent` returns false when the handler called `preventDefault()`.
+    expect(fireEvent.dragStart(slot, { dataTransfer: { setData: vi.fn() } })).toBe(false);
+    expect(document.documentElement.getAttribute('data-dragging')).toBe('true');
+    expect(document.body.getAttribute('data-dragging')).toBe('true');
+    expect(box.closest('[data-zone="table-arena"]')?.getAttribute('data-dragging')).toBe('true');
+
+    // No element of the hand card can be grabbed by the native HTML5 drag.
+    expect(wrapper.draggable).toBe(false);
+    expect(slot.draggable).toBe(false);
+    expect(fireEvent.dragStart(labeled)).toBe(false);
+
+    // Both stylesheets force the pointer finger on every card node and during
+    // the whole gesture (hand, table, battlefield, opponent boxes, sidebars).
+    for (const css of [tableCss, appCss]) {
+      expect(css).toContain('.hand-card-wrapper *');
+      expect(css).toContain("[data-zone='player-hand'] .playing-card *");
+      expect(css).toMatch(
+        /\.hand-card-wrapper,\s*\.hand-card-wrapper \*,[\s\S]*?cursor: pointer !important;/,
+      );
+      expect(css).toMatch(/html\[data-dragging='true'\],[\s\S]*?cursor: pointer !important;/);
+      expect(css).toMatch(/body\[data-dragging='true'\],[\s\S]*?cursor: pointer !important;/);
+    }
+
+    fireEvent.dragEnd(slot, { dataTransfer: { setData: vi.fn() } });
+    expect(document.body.hasAttribute('data-dragging')).toBe(false);
+    expect(document.documentElement.hasAttribute('data-dragging')).toBe(false);
+  });
+
+  it('ITEM-7/8: releasing a pointer drag over the throw-in outline plays the card', () => {
+    const onThrowInDrop = vi.fn();
+    const view = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={bobSeat}
+        tablePairs={[{ attack: { suit: 'spades', rank: 'six' }, defense: null }]}
+        trumpSuit="diamonds"
+        attackerId="p1"
+        defenderId="p1"
+        onThrowInDrop={onThrowInDrop}
+      />,
+    );
+    const box = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+    vi.spyOn(box, 'getBoundingClientRect').mockReturnValue(fakeRect(300));
+    const outline = screen.getByTestId('throw-in-outline');
+    const original = (document as unknown as { elementFromPoint?: unknown }).elementFromPoint;
+    (document as unknown as { elementFromPoint: unknown }).elementFromPoint = vi.fn(() => outline);
+
+    try {
+      fireEvent.mouseDown(within(box).getByLabelText('six of spades'), {
+        button: 0,
+        clientX: 10,
+        clientY: 20,
+      });
+      fireEvent.mouseMove(document, { clientX: 400, clientY: 900 });
+      expect(box.getAttribute('data-reorder-target-index')).toBeNull();
+      fireEvent.mouseUp(document, { clientX: 400, clientY: 900 });
+      expect(onThrowInDrop).toHaveBeenCalledWith({ suit: 'spades', rank: 'six' });
+    } finally {
+      (document as unknown as { elementFromPoint: unknown }).elementFromPoint = original;
+      view.unmount();
+    }
+  });
+
+  it('ITEM-8: keeps the throw-in outline for an ongoing attack with no legal cards, drops it at GameOver', () => {
+    const pairs: TablePairData[] = [{ attack: { suit: 'spades', rank: 'six' }, defense: null }];
+    const props = {
+      myId: 'p0',
+      myHand: hand,
+      opponents: bobSeat,
+      tablePairs: pairs,
+      trumpSuit: 'diamonds',
+      attackerId: 'p1',
+      defenderId: 'p0',
+    } as const;
+
+    const view = render(<GameTable {...props} boutPhase="Defense" />);
+    const outline = screen.getByTestId('throw-in-outline');
+    // Nobody holds a legal throw-in card (the viewer is even the defender), yet
+    // the next-card slot is still on the felt.
+    expect(outline.getAttribute('data-throw-in-enabled')).toBe('false');
+    expect(outline.getAttribute('data-drop-zone')).toBe('throw-in');
+
+    view.rerender(<GameTable {...props} boutPhase="GameOver" />);
+    expect(screen.queryByTestId('throw-in-outline')).toBeNull();
+  });
+
+  it('ITEM-13a/13b: the hand box wraps the 100x140 row with at least 10% overlap', () => {
+    renderTable();
+    const box = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+
+    expect(HAND_MIN_OVERLAP_RATIO).toBe(0.1);
+    expect(HAND_MIN_OVERLAP).toBe(Math.round(HAND_CARD_WIDTH * 0.1));
+    expect(box.getAttribute('data-min-overlap-ratio')).toBe('0.10');
+    expect(Number(box.getAttribute('data-overlap'))).toBeGreaterThanOrEqual(HAND_MIN_OVERLAP);
+
+    const wrappers = Array.from(box.querySelectorAll('.hand-card-wrapper')) as HTMLElement[];
+    expect(wrappers).toHaveLength(3);
+    for (const wrapper of wrappers.slice(1)) {
+      expect(parseFloat(wrapper.style.marginLeft)).toBeLessThanOrEqual(
+        -Math.round(HAND_CARD_WIDTH * 0.1),
+      );
+    }
+
+    const boxRule = (tableCss.match(/\.hand-cards\s*{[^}]*}/) ?? [''])[0];
+    expect(boxRule).toContain('display: inline-flex');
+    expect(boxRule).toContain('padding: 6px');
+    expect(boxRule).toContain('overflow: visible');
+    expect(boxRule).not.toMatch(/height:\s*(112|120)px/);
+    expect(tableCss).toMatch(
+      /\.hand-card-wrapper\s*{[^}]*width: var\(--hand-card-width, 100px\);[^}]*height: var\(--hand-card-height, 140px\);[^}]*flex: 0 0 var\(--hand-card-width, 100px\);/,
+    );
+
+    // The box width is exactly `100 + (visibleCount - 1) * step`.
+    const layout = handLayout(3, 720, 0.5, HAND_CARD_WIDTH);
+    expect(layout.overlap).toBe(HAND_MIN_OVERLAP);
+    expect(rowWidth(layout, HAND_CARD_WIDTH)).toBe(
+      HAND_CARD_WIDTH + (layout.visibleCount - 1) * (HAND_CARD_WIDTH - layout.overlap),
+    );
+  });
+
+  it('ITEM-13c: opponent mini-cards overlap by at least 10% of their own width', () => {
+    const { container } = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={bobSeat}
+        tablePairs={[]}
+        trumpSuit="diamonds"
+        defenderId="p1"
+      />,
+    );
+    const backs = Array.from(container.querySelectorAll('.opponent-card')) as HTMLElement[];
+    expect(backs).toHaveLength(6);
+    for (const back of backs.slice(1)) {
+      expect(parseFloat(back.style.marginLeft)).toBeLessThanOrEqual(
+        -Math.round(OPPONENT_CARD_WIDTH * 0.1),
+      );
+    }
+    const row = container.querySelector('.opponent-cards') as HTMLElement;
+    expect(row.getAttribute('data-min-overlap-ratio')).toBe('0.10');
+    expect(Number(row.getAttribute('data-overlap'))).toBeGreaterThanOrEqual(
+      Math.round(OPPONENT_CARD_WIDTH * 0.1),
+    );
+
+    const revealed = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={[
+          {
+            ...bobSeat[0],
+            cardCount: 3,
+            cards: [
+              { suit: 'diamonds', rank: 'ace' },
+              { suit: 'spades', rank: 'king' },
+              { suit: 'hearts', rank: 'ten' },
+            ],
+          },
+        ]}
+        tablePairs={[]}
+        trumpSuit="diamonds"
+        defenderId="p1"
+        transparentMode
+      />,
+    );
+    const miniCards = screen.getAllByTestId('opponent-low-detail-card');
+    expect(miniCards).toHaveLength(3);
+    for (const card of miniCards.slice(1)) {
+      expect(parseFloat(card.style.marginLeft)).toBeLessThanOrEqual(
+        -Math.round(LOW_DETAIL_CARD_WIDTH * 0.1),
+      );
+    }
+    for (const card of miniCards.slice(1)) {
+      const overlap = Math.abs(parseFloat(card.style.marginLeft));
+      expect(overlap).toBeGreaterThanOrEqual(LOW_DETAIL_CARD_WIDTH * 0.1);
+    }
+    revealed.unmount();
+  });
+
+  const keyframeBody = (css: string, name: string): string => {
+    const start = css.indexOf(`@keyframes ${name}`);
+    if (start < 0) return '';
+    const open = css.indexOf('{', start);
+    let depth = 0;
+    for (let index = open; index < css.length; index += 1) {
+      if (css[index] === '{') depth += 1;
+      else if (css[index] === '}') {
+        depth -= 1;
+        if (depth === 0) return css.slice(open + 1, index);
+      }
+    }
+    return '';
+  };
+
+  it('ITEM-15: every glow pulse interpolates matched shadow layers with no box-shadow transition', () => {
+    const glowKeyframes = [
+      'turnPulse',
+      'throwInPulse',
+      'attackerPulse',
+      'defenderHandPulse',
+      'lightAttackerHandPulse',
+      'lightDefenderHandPulse',
+      'lightUncoveredPulse',
+    ];
+    for (const name of glowKeyframes) {
+      const body = keyframeBody(tableCss, name);
+      expect(body, name).not.toBe('');
+      const declarations = body.match(/box-shadow:[^;]+;/g) ?? [];
+      expect(declarations, name).toHaveLength(2);
+      // `0%, 100%` and `50%` must list the same number of shadow layers, with
+      // `inset` layers in the same positions, or the browser snaps discretely.
+      const layerCounts = declarations.map((declaration) => declaration.split(',').length);
+      expect(layerCounts[0], name).toBe(layerCounts[1]);
+      const insetCounts = declarations.map(
+        (declaration) => (declaration.match(/inset/g) ?? []).length,
+      );
+      expect(insetCounts[0], name).toBe(insetCounts[1]);
+    }
+
+    // Entry lives on the wrapper; the pulsing slot only transitions border colour.
+    expect(tableCss).toContain('@keyframes pairEnter');
+    expect(tableCss).toMatch(/\.table-pair\s*{[^}]*animation: pairEnter/);
+    expect(tableCss).toMatch(
+      /\.table-card-uncovered \.card-slot[^{]*{[^}]*transition: border-color 150ms ease;/,
+    );
+    expect(tableCss).not.toMatch(/\.table-card-uncovered[^{]*{[^}]*transition: all/);
+    expect(tableCss).not.toMatch(/\.hand-cards[^{]*{[^}]*transition: box-shadow/);
+  });
+
+  it('ITEM-15: clock ticks and projection refreshes never remount the glowing nodes', () => {
+    const pairs: TablePairData[] = [
+      { attack: { suit: 'spades', rank: 'six' }, defense: null },
+      { attack: { suit: 'spades', rank: 'seven' }, defense: null },
+    ];
+    const props = {
+      myId: 'p0',
+      myHand: hand,
+      opponents: bobSeat,
+      tablePairs: pairs,
+      trumpSuit: 'diamonds',
+      attackerId: 'p1',
+      defenderId: 'p0',
+      boutPhase: 'Defense',
+      defending: true,
+      turnPlayerId: 'p0',
+    } as const;
+
+    const view = render(<GameTable {...props} turnSecondsRemaining={15} />);
+    const firstGlow = view.container.querySelector('.table-card-uncovered') as HTMLElement;
+    const handBox = view.container.querySelector('.hand-cards') as HTMLElement;
+    const seat = view.container.querySelector('.opponent-seat') as HTMLElement;
+    const badge = view.container.querySelector('.status-badge');
+    expect(firstGlow).not.toBeNull();
+
+    view.rerender(<GameTable {...props} turnSecondsRemaining={9} />);
+    expect(view.container.querySelectorAll('.table-card-uncovered')).toHaveLength(2);
+    expect(view.container.querySelector('.table-card-uncovered')).toBe(firstGlow);
+    expect(view.container.querySelector('.hand-cards')).toBe(handBox);
+    expect(view.container.querySelector('.opponent-seat')).toBe(seat);
+    expect(view.container.querySelector('.status-badge')).toBe(badge);
   });
 });
