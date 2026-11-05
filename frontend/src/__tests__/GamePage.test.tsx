@@ -269,11 +269,13 @@ describe('GamePage', () => {
       'suit',
       'pairs',
       'rank',
+      'custom',
     ]);
     expect(Array.from(select.options).map((option) => option.textContent)).toEqual([
       'Suit',
       'Pairs',
       'Rank',
+      'Custom',
     ]);
     // ITEM-5: new users open on Rank, not Suit.
     expect(select.value).toBe('rank');
@@ -2028,7 +2030,7 @@ describe('GamePage', () => {
       /\.status-badge\[data-role='attacker'\]\s*{[^}]*box-shadow:[^}]*var\(--role-attacker-glow\)/,
     );
     expect(appCss).toMatch(
-      /\.status-badge\[data-role='attacker'\]\s*{[^}]*inset 0 0 8px var\(--role-attacker-bg\)/,
+      /\.status-badge\[data-role='attacker'\]\s*{[^}]*inset 0 0 calc\(8px \* var\(--highlight-intensity-scale, 1\)\) var\(--role-attacker-bg\)/,
     );
     expect(appCss).toMatch(
       /\.status-badge\[data-role='attacker'\]\s*{[^}]*border: 1px solid var\(--role-attacker-border\)/,
@@ -2038,7 +2040,7 @@ describe('GamePage', () => {
       /\.status-badge\[data-role='defender'\]\s*{[^}]*box-shadow:[^}]*var\(--role-defender-glow\)/,
     );
     expect(appCss).toMatch(
-      /\.status-badge\[data-role='defender'\]\s*{[^}]*inset 0 0 8px var\(--role-defender-bg\)/,
+      /\.status-badge\[data-role='defender'\]\s*{[^}]*inset 0 0 calc\(8px \* var\(--highlight-intensity-scale, 1\)\) var\(--role-defender-bg\)/,
     );
     expect(appCss).toMatch(
       /\.status-badge\[data-role='defender'\]\s*{[^}]*border: 1px solid var\(--role-defender-border\)/,
@@ -2052,19 +2054,19 @@ describe('GamePage', () => {
       /html\[data-theme='light'\] \.status-badge\[data-role='attacker'\]\s*{[^}]*border-color: var\(--role-attacker-border\)/,
     );
     expect(appCss).toMatch(
-      /html\[data-theme='light'\] \.status-badge\[data-role='attacker'\]\s*{[^}]*0 0 10px 2px var\(--role-attacker-glow\)/,
+      /html\[data-theme='light'\] \.status-badge\[data-role='attacker'\]\s*{[^}]*0 0 calc\(10px \* var\(--highlight-intensity-scale, 1\)\)/,
     );
     expect(appCss).toMatch(
-      /html\[data-theme='light'\] \.status-badge\[data-role='attacker'\]\s*{[^}]*inset 0 0 8px var\(--role-attacker-bg\)/,
+      /html\[data-theme='light'\] \.status-badge\[data-role='attacker'\]\s*{[^}]*inset 0 0 calc\(8px \* var\(--highlight-intensity-scale, 1\)\) var\(--role-attacker-bg\)/,
     );
     expect(appCss).toMatch(
       /html\[data-theme='light'\] \.status-badge\[data-role='defender'\]\s*{[^}]*border-color: var\(--role-defender-border\)/,
     );
     expect(appCss).toMatch(
-      /html\[data-theme='light'\] \.status-badge\[data-role='defender'\]\s*{[^}]*0 0 10px 2px var\(--role-defender-glow\)/,
+      /html\[data-theme='light'\] \.status-badge\[data-role='defender'\]\s*{[^}]*0 0 calc\(10px \* var\(--highlight-intensity-scale, 1\)\)/,
     );
     expect(appCss).toMatch(
-      /html\[data-theme='light'\] \.status-badge\[data-role='defender'\]\s*{[^}]*inset 0 0 8px var\(--role-defender-bg\)/,
+      /html\[data-theme='light'\] \.status-badge\[data-role='defender'\]\s*{[^}]*inset 0 0 calc\(8px \* var\(--highlight-intensity-scale, 1\)\) var\(--role-defender-bg\)/,
     );
 
     // ITEM-ADD-8a: every row has a name track, a centred count track and a
@@ -2121,7 +2123,10 @@ describe('GamePage', () => {
     // Left sidebar: QA buttons and replay controls stay blue; the PLAYERS
     // rows use the new high-contrast status tag palette instead of a POV tab.
     expect(cssRule(appCss, ":root[data-theme='light'] .status-tag.passed-tag")).toContain(
-      'background: #dbeafe',
+      'background: #cbd5e1',
+    );
+    expect(cssRule(appCss, ":root[data-theme='light'] .status-tag.passed-tag")).toContain(
+      'border: none',
     );
     expect(
       cssRule(appCss, "html[data-theme='light'] .qa-scenario-button:hover"),
@@ -2885,11 +2890,10 @@ describe('GamePage client auto-surrender and auto-pass delays', () => {
     expect(container.querySelectorAll('.split-clock-half')).toHaveLength(2);
 
     // HAND SORTING: the live selector is the active sort control.
-    const sort = container.querySelector('[data-testid="sort-bar"] select') as HTMLElement;
-    expect(sort).not.toBeNull();
-    expect(sort.classList.contains('sort-btn')).toBe(true);
-    expect(sort.classList.contains('active')).toBe(true);
-    expect(sort.getAttribute('data-sort-mode')).toMatch(/^(suit|pairs|rank)$/);
+    const sort = screen.getByTestId('sort-select') as HTMLSelectElement;
+    expect(sort.tagName.toLowerCase()).toBe('select');
+    expect(sort.classList.contains('sort-select')).toBe(true);
+    expect(sort.getAttribute('data-sort-mode')).toMatch(/^(suit|pairs|rank|custom)$/);
 
     // Cobalt chrome, cyan clock, emerald attacker, crimson defender.
     expect(cssRule(appCss, ".status-badge[data-pov-clickable='true']")).toContain(
@@ -3084,9 +3088,9 @@ describe('T-90-4: Transparent Mode, POV gating and custom hand order', () => {
       <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
     );
 
-    await waitFor(() => expect(screen.getByTestId('sort-rank')).toBeTruthy());
-    // ITEM-5: the default schema is Rank for a new user.
-    expect(screen.getByTestId('sort-rank').getAttribute('aria-pressed')).toBe('true');
+    await waitFor(() => expect(screen.getByTestId('sort-select')).toBeTruthy());
+    // ITEM-5: the dropdown defaults to Rank for a new user.
+    expect((screen.getByTestId('sort-select') as HTMLSelectElement).value).toBe('rank');
 
     const handOrder = (): string[] =>
       Array.from(
@@ -3119,7 +3123,7 @@ describe('T-90-4: Transparent Mode, POV gating and custom hand order', () => {
     fireEvent(handBox, new MouseEvent('drop', { bubbles: true, cancelable: true, clientX: 300 }));
 
     await waitFor(() =>
-      expect(screen.getByTestId('sort-custom').getAttribute('aria-pressed')).toBe('true'),
+      expect((screen.getByTestId('sort-select') as HTMLSelectElement).value).toBe('custom'),
     );
     expect(handOrder()).toEqual(['clubs:ace', 'spades:king', 'hearts:six']);
 
@@ -3136,5 +3140,77 @@ describe('T-90-4: Transparent Mode, POV gating and custom hand order', () => {
       }),
     );
     await waitFor(() => expect(handOrder()).toEqual(['clubs:ace', 'hearts:six', 'diamonds:two']));
+  });
+});
+
+/**
+ * T-90-2: the Wave-1 human QA feedback — replay heading, uniform status labels
+ * and the brighter Dark-mode face-down card outline.
+ */
+describe('T-90-2 theme, controls and status labels', () => {
+  it('ITEM-16: titles the replay panel REPLAY CONTROLS', async () => {
+    getGameView.mockResolvedValue(finishedFrameView('p0'));
+    getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
+
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    const nav = await screen.findByTestId('review-nav');
+    expect(within(nav).getByRole('heading', { name: 'REPLAY CONTROLS' })).toBeTruthy();
+    expect(within(nav).queryByRole('heading', { name: 'Replay' })).toBeNull();
+  });
+
+  it('ITEM-3: shares one borderless WINNER / OUT / PASSED label and borders only DURAK', async () => {
+    // A live seat that passed wears the same uniform label as WINNER / OUT.
+    getGameView.mockResolvedValue({ ...view, myHasPassed: true });
+    getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
+    const live = render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    const passedSlot = await screen.findByTestId('player-status-tag-p0');
+    expect(passedSlot.textContent).toBe('PASSED');
+    const passedTag = passedSlot.querySelector('.status-tag')!;
+    expect(passedTag.classList.contains('status-out')).toBe(true);
+    expect(passedTag.getAttribute('data-status')).toBe('PASSED');
+    live.unmount();
+
+    // A finished match shows WINNER and DURAK: only DURAK is bordered.
+    getGameView.mockResolvedValue(finishedFrameView('p0'));
+    const finished = render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    const winnerSlot = await screen.findByTestId('player-status-tag-p1');
+    expect(winnerSlot.textContent).toBe('WINNER');
+    expect(winnerSlot.querySelector('.status-tag')!.classList.contains('status-out')).toBe(true);
+    const durakSlot = screen.getByTestId('player-status-tag-p0');
+    expect(durakSlot.textContent).toBe('DURAK');
+    expect(durakSlot.querySelector('.status-tag')!.classList.contains('status-durak')).toBe(true);
+    finished.unmount();
+
+    // Light mode: WINNER / OUT / PASSED share one darker, borderless palette.
+    const lightOut = cssRule(appCss, ":root[data-theme='light'] .status-tag.winner-tag");
+    expect(lightOut).toContain('background: #cbd5e1');
+    expect(lightOut).toContain('color: #1e293b');
+    expect(lightOut).toContain('border: none');
+    expect(lightOut).toContain('font-weight: 700');
+    // The one rule lists all three, so they can never diverge in colour again.
+    expect(appCss).toMatch(
+      /:root\[data-theme='light'\] \.status-tag\.out-tag,[\s\S]*?:root\[data-theme='light'\] \.status-tag\.passed-tag/,
+    );
+    // DURAK is the only label in Light mode with a visible border.
+    const lightDurak = cssRule(appCss, ":root[data-theme='light'] .status-tag.durak-tag");
+    expect(lightDurak).toContain('border: 1px solid #dc2626');
+    expect(lightDurak).toContain('color: #991b1b');
+    // Dark mode keeps the same uniform, borderless trio.
+    const darkOut = cssRule(appCss, '.status-tag.passed-tag');
+    expect(darkOut).toContain('border: none');
+    expect(cssRule(appCss, '.status-tag.durak-tag')).toContain('border: 1px solid #b45309');
+  });
+
+  it('ITEM-17: brightens the Dark-mode face-down card outline only', () => {
+    expect(tableCss).toMatch(
+      /:root\[data-theme='dark'\] \.playing-card\.card-back\s*{[^}]*border: 1px solid rgba\(203, 213, 225, 0\.65\)/,
+    );
+    // Light mode keeps its own crisp outline and no extra dark-theme border.
+    expect(tableCss).not.toMatch(
+      /:root\[data-theme='light'\] \.playing-card\.card-back\s*{[^}]*rgba\(203, 213, 225/,
+    );
   });
 });

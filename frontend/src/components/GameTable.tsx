@@ -183,12 +183,12 @@ export const CARD_HEIGHT = 140;
 export const HAND_CARD_WIDTH = CARD_WIDTH;
 /** ITEM-13: height of one hand card at desktop scale (+25% from 114). */
 export const HAND_CARD_HEIGHT = CARD_HEIGHT;
-/** Neighbouring hand cards never sit farther apart than this overlap. */
-export const HAND_MIN_OVERLAP = 8;
+/** Neighbouring hand cards always overlap by at least 10% of their 100px width. */
+export const HAND_MIN_OVERLAP = 10;
 /** Used until the hand has been measured (jsdom reports zero widths). */
 export const HAND_FALLBACK_WIDTH = 720;
 /** Symmetric padding of the turn-highlight box around the rendered hand row. */
-export const HAND_BOX_PADDING = 4;
+export const HAND_BOX_PADDING = 6;
 /** Width of one talon deck card; the discard pile reuses the exact same size. */
 export const DECK_CARD_WIDTH = 80;
 /** Height of one talon deck card; the discard pile reuses the exact same size. */
@@ -286,10 +286,10 @@ export interface HandLayout {
 }
 
 /**
- * Single-row hand layout. Cards start at an 8px overlap and tighten up to the
- * readable limit; beyond that the surplus cards are stacked at 100% overlap on
- * the ends, and `cursorFraction` (0 = left edge, 1 = right edge) slides them
- * between the two hidden stacks.
+ * Single-row hand layout. Cards start at a 10px (10% of the 100px card)
+ * overlap and tighten up to the readable limit; beyond that the surplus cards
+ * are stacked at 100% overlap on the ends, and `cursorFraction` (0 = left edge,
+ * 1 = right edge) slides them between the two hidden stacks.
  */
 export function handLayout(
   count: number,
@@ -1168,6 +1168,36 @@ export function GameTable({
   const handMarginList = handMargins(handLayoutState, hand.length, cardWidth);
   const hiddenCards = handLayoutState.hiddenLeft + handLayoutState.hiddenRight;
 
+  // T-90-2 ITEM-6a: while a card is dragged out of the hand, the remaining
+  // N - 1 cards compact into the sequence without it, so the original slot
+  // closes exactly as if the card had been removed. The insertion gap is then
+  // opened by the `data-part-direction` transforms on top of this live row.
+  const draggedCardIndex =
+    dragCard !== null
+      ? hand.findIndex((candidate) => cardKey(candidate) === cardKey(dragCard))
+      : -1;
+  const gapClosed = draggedCardIndex >= 0;
+  const compactHandLayoutState = gapClosed
+    ? handLayout(
+        Math.max(0, hand.length - 1),
+        handWidth > 0 ? handWidth : HAND_FALLBACK_WIDTH,
+        cursorFraction,
+        cardWidth,
+      )
+    : handLayoutState;
+  const compactHandMargins = handMargins(
+    compactHandLayoutState,
+    Math.max(0, hand.length - 1),
+    cardWidth,
+  );
+  const activeHandLayoutState = gapClosed ? compactHandLayoutState : handLayoutState;
+  const handSlotMargin = (index: number): string => {
+    if (!gapClosed) return `${handMarginList[index]}px`;
+    if (index === draggedCardIndex) return '0px';
+    const compactIndex = index > draggedCardIndex ? index - 1 : index;
+    return `${compactIndex === 0 ? 0 : compactHandMargins[compactIndex]}px`;
+  };
+
   // Rhythm nudges go only to the client that has to act: uncovered attacks for
   // the defender, the whole hand for the attacker who owes a play. The pulse
   // sits on the cards container so the highlight hugs the cards tightly.
@@ -1534,7 +1564,15 @@ export function GameTable({
   // ITEM-8: the throw-in outline takes the next slot right after the cards in
   // play, so the single compact row still never wraps with six pairs + both
   // outlines.
-  const throwInSlot = throwInEnabled && tablePairs.length > 0 ? 1 : 0;
+  // T-90-2 ITEM-8: an ongoing attack ALWAYS shows the next-card throw-in slot,
+  // even when nobody holds a legal throw-in card (or the viewer is the
+  // defender / a spectator). The drop itself is still validated on play.
+  const gameOverPhase =
+    (boutPhase ?? '').replace(/[^a-z]/gi, '').toLowerCase() === 'gameover';
+  const throwInSlot =
+    !reviewMode && !gameOverPhase && tablePairs.length > 0 && tablePairs.length < 6
+      ? 1
+      : 0;
   const boutGeometry = boutLayout(
     tablePairs.length + throwInSlot + redirectSlot,
     boutWidth > 0 ? boutWidth : BOUT_FALLBACK_WIDTH,
@@ -1585,6 +1623,13 @@ export function GameTable({
             class={classes.join(' ')}
             data-seat={position}
             data-offset={offset}
+            data-role={
+              opponent.id === attackerId
+                ? 'attacker'
+                : opponent.id === defenderId
+                  ? 'defender'
+                  : 'none'
+            }
             data-testid="opponent"
             style={{
               '--seat-width': `${SEAT_BOX.width}px`,
@@ -1620,7 +1665,9 @@ export function GameTable({
                     ? opponent.cards.map((card, index) => (
                         <span
                           key={`${card.suit}-${card.rank}-${index}`}
-                          class="opponent-low-detail-card"
+                          class={`opponent-low-detail-card${
+                            isTrumpCard(card, trumpSuit) ? ' trump-card low-detail-trump' : ''
+                          }`}
                           data-testid="opponent-low-detail-card"
                           data-suit={card.suit.toLowerCase()}
                           data-rank={card.rank.toLowerCase()}
@@ -1649,24 +1696,6 @@ export function GameTable({
                               {suitSymbol(card.suit)}
                             </span>
                           </span>
-                          {isTrumpCard(card, trumpSuit) ? (
-                            <>
-                              <span
-                                class="low-detail-trump low-detail-trump-top-right"
-                                data-testid="low-detail-trump-top-right"
-                                aria-hidden="true"
-                              >
-                                {suitSymbol(card.suit)}
-                              </span>
-                              <span
-                                class="low-detail-trump low-detail-trump-bottom-left"
-                                data-testid="low-detail-trump-bottom-left"
-                                aria-hidden="true"
-                              >
-                                {suitSymbol(card.suit)}
-                              </span>
-                            </>
-                          ) : null}
                         </span>
                       ))
                     : Array.from({ length: opponent.cardCount }, (_, index) => (
@@ -1758,7 +1787,7 @@ export function GameTable({
             const coverable = !reviewMode && !pair.defense && Boolean(onCoverDrop);
             return (
               <TablePair
-                key={index}
+                key={`${pair.attack.suit.toLowerCase()}:${pair.attack.rank.toLowerCase()}`}
                 attack={pair.attack}
                 defense={pair.defense}
                 trumpSuit={trumpSuit}
@@ -1791,6 +1820,7 @@ export function GameTable({
               data-testid="throw-in-outline"
               style={{ marginLeft: boutSlotMargin(tablePairs.length) }}
               data-drop-zone="throw-in"
+              data-throw-in-enabled={canThrowIn ? 'true' : 'false'}
               aria-label="Throw in another card"
               onDragOver={hoverZone('throw-in')}
               onDragLeave={clearSnap}
@@ -1867,7 +1897,11 @@ export function GameTable({
           data-defenseless={defenderDefenseless ? 'true' : 'false'}
           data-turn-action={handTurnAction}
           data-all-legal={allCardsLegal ? 'true' : 'false'}
-          data-overlap={handLayoutState.overlap}
+          // T-90-2 ITEM-6a: the dragged card's slot collapses and the rest of
+          // the hand closes over it before the insertion gap parts again.
+          data-gap-closed={gapClosed ? 'true' : 'false'}
+          data-dragged-index={gapClosed ? draggedCardIndex : undefined}
+          data-overlap={activeHandLayoutState.overlap}
           data-hidden-left={handLayoutState.hiddenLeft}
           data-hidden-right={handLayoutState.hiddenRight}
           data-reorder-target-index={reorderIndex === null ? undefined : reorderIndex}
@@ -1912,9 +1946,10 @@ export function GameTable({
               data-hidden={hidden ? 'true' : 'false'}
               data-index={index}
               data-part-direction={partDirection}
+              data-collapsed={index === draggedCardIndex ? 'true' : 'false'}
               data-draggable={draggable ? 'true' : 'false'}
               aria-hidden={hidden ? 'true' : undefined}
-              style={{ marginLeft: `${handMarginList[index]}px` }}
+              style={{ marginLeft: handSlotMargin(index) }}
               onMouseDown={beginPointerDrag(card)}
               onClickCapture={(event) => {
                 if (!suppressClickRef.current) return;

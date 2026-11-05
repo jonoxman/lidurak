@@ -1397,18 +1397,22 @@ export function GamePage({
                   >
                     {statusTag === 'DURAK' ? (
                       <span
-                        class="status-tag durak-tag"
+                        class="status-tag durak-tag status-durak"
+                        data-status="DURAK"
                         data-testid={`player-durak-tag-${player.id}`}
                       >
                         DURAK
                       </span>
                     ) : statusTag === 'PASSED' ? (
-                      <span class="status-tag passed-tag">PASSED</span>
+                      <span class="status-tag passed-tag status-out" data-status="PASSED">
+                        PASSED
+                      </span>
                     ) : (
                       <span
                         class={`status-tag ${
                           statusTag === 'WINNER' ? 'winner-tag' : 'out-tag'
-                        } status-rank`}
+                        } status-rank status-out`}
+                        data-status={statusTag}
                       >
                         {statusTag}
                       </span>
@@ -1636,9 +1640,10 @@ export function GamePage({
             <section
               class="panel review-nav-panel"
               data-testid="review-nav"
-              aria-label="Replay navigation"
+              aria-label="Replay controls"
             >
-              <h2>Replay</h2>
+              {/* T-90-2 ITEM-16: the section heading reads REPLAY CONTROLS. */}
+              <h2>REPLAY CONTROLS</h2>
               <div class="review-nav-controls">
                 <button
                   type="button"

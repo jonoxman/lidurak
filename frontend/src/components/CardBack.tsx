@@ -102,15 +102,24 @@ export interface CardBackPalette {
   inkSoft: string;
 }
 
-/** The original dark-theme look, unchanged. */
+/**
+ * T-90-2 ITEM-17: the dark-theme frame stroke is a bright silver-slate instead
+ * of the old near-black `#3a3733`, so overlapping face-down cards in an
+ * opponent's hand, the talon deck and the face-down discard stack have crisp,
+ * clearly visible outlines on the dark shell. The interior motif stays as it
+ * was, so the back still reads as a back.
+ */
 export const DARK_CARD_BACK_PALETTE: CardBackPalette = {
   frame: '#262421',
-  frameStroke: '#3a3733',
+  frameStroke: '#94a3b8',
   base: '#262421',
   border: '#3a3733',
   ink: '#3a3733',
   inkSoft: '#3a3733',
 };
+
+/** Bright outer-frame stroke for the vibrant gradient backs in Dark mode. */
+export const DARK_CARD_BACK_OUTLINE = '#cbd5e1';
 
 /** Crisp slate-on-ivory look so the monochrome backs read on a light theme. */
 export const LIGHT_CARD_BACK_PALETTE: CardBackPalette = {
@@ -413,7 +422,14 @@ export function CardBack({ class: className, pattern }: CardBackProps) {
   const theme = useCardBackTheme(settings.theme);
   const palette = cardBackPalette(theme);
   const frame = design ? design.frame : palette.frame;
-  const ink = design ? design.accent : palette.frameStroke;
+  // T-90-2 ITEM-17: in Dark mode every back — monochrome and gradient alike —
+  // paints its outer frame with a bright silver-slate stroke. Light mode keeps
+  // the existing crisp design accent / slate palette.
+  const ink = design
+    ? theme === 'dark'
+      ? DARK_CARD_BACK_OUTLINE
+      : design.accent
+    : palette.frameStroke;
 
   return (
     <svg
@@ -424,6 +440,7 @@ export function CardBack({ class: className, pattern }: CardBackProps) {
       data-pattern={activePattern}
       data-colorful={design ? 'true' : 'false'}
       data-card-back-theme={design ? undefined : theme}
+      data-card-back-outline={theme === 'dark' ? 'bright' : 'crisp'}
       data-roundness={roundness}
       style={{ borderRadius: 'var(--app-roundness, 8px)' }}
     >

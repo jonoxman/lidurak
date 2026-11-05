@@ -507,6 +507,9 @@ function shadeTowardBlack(hex: string, amount: number): string {
  * `intensity / 100`, so menu selections, hand glows, table outlines, trump
  * rings, reflection outlines and the urgent clock all change together. Light
  * mode uses the paler `LIGHT_SLOT_ALPHA` calibration; Dark is unchanged.
+ * `--highlight-intensity` (legacy) and `--highlight-intensity-scale` carry the
+ * same `intensity / 100` factor, so every aura (including the player boxes and
+ * the `PLAYERS` rows) scales live off one number.
  */
 export function applyHighlightTokens(
   settings: AppSettings,
@@ -521,6 +524,9 @@ export function applyHighlightTokens(
   target.setAttribute('data-highlight-preset', preset.id);
   target.setAttribute('data-highlight-intensity', String(intensity));
   target.style.setProperty('--highlight-intensity', String(scale));
+  // T-90-2 ITEM-1a: the same factor under the explicit `-scale` name the
+  // player-box / PLAYERS-row glow rules multiply their radii by.
+  target.style.setProperty('--highlight-intensity-scale', String(scale));
 
   for (const { slot, prefix } of HIGHLIGHT_SLOTS) {
     const accent = palette[slot];

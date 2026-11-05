@@ -1027,3 +1027,34 @@ describe('T-90-feedback-4 light page background & inverse header gradient', () =
     expect(screen.getByRole('banner').getAttribute('data-header-gradient')).toBe('darkening');
   });
 });
+
+/**
+ * T-90-2 ITEM-1b / ITEM-4: the palette slider is labelled `Glow` and its live
+ * value reaches the player-box / PLAYERS-row aura token.
+ */
+describe('T-90-2 Glow slider label and live scale', () => {
+  afterEach(() => {
+    resetSettings();
+  });
+
+  it('ITEM-1b/4: labels the slider Glow inside Palettes and updates the scale token', () => {
+    render(<HeaderBar />);
+    openSubmenu('Theme');
+
+    const section = screen.getByTestId('theme-highlights-section');
+    expect(section.textContent).toContain('Palettes');
+    expect(section.textContent).toContain('Glow');
+    expect(section.textContent).not.toContain('Intensity');
+
+    const slider = screen.getByTestId('highlight-intensity-slider') as HTMLInputElement;
+    fireEvent.input(slider, { target: { value: '200' } });
+    expect(document.documentElement.style.getPropertyValue('--highlight-intensity-scale')).toBe('2');
+    expect(document.documentElement.style.getPropertyValue('--highlight-intensity')).toBe('2');
+
+    fireEvent.input(slider, { target: { value: '20' } });
+    expect(document.documentElement.style.getPropertyValue('--highlight-intensity-scale')).toBe('0.2');
+
+    fireEvent.input(slider, { target: { value: '100' } });
+    expect(document.documentElement.style.getPropertyValue('--highlight-intensity-scale')).toBe('1');
+  });
+});
