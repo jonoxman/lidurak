@@ -186,7 +186,7 @@ async function main() {
   const browser = await chromium.launch({
     executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium',
     headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--disable-software-rasterizer', '--disable-extensions', '--renderer-process-limit=2', '--js-flags=--max-old-space-size=256']
   });
 
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
@@ -277,6 +277,6 @@ echo "📸 Running Headless Chromium across QA steps and scanning CSS geometry/b
 docker exec freebuff_worker node /workspace/.reviews/visual_qa_harness.mjs > .reviews/visual_qa_runner.log 2>&1 || true
 
 # 5. Stop the temporary servers inside freebuff_worker so ports :8080 and :5173 are free for ./play-local.sh
-docker exec freebuff_worker bash -c "pkill -f 'sbt.*run' 2>/dev/null || true; pkill -f 'vite' 2>/dev/null || true" 2>/dev/null || true
+docker exec freebuff_worker bash -c "pkill -9 -f 'sbt|java|chromium|vite|esbuild' 2>/dev/null || true" 2>/dev/null || true
 
 echo "✅ Visual QA telemetry written to .reviews/visual_qa_telemetry.json and screenshots saved to .reviews/screenshots/!"

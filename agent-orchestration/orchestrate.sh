@@ -566,7 +566,8 @@ REPORT_EOF
     fi
   fi
 
-  echo "[Worker ${WORKER_ID}] ✅ Local test gate PASSED!"
+  docker exec "$CONTAINER" bash -c "pkill -9 -f 'sbt|java|vitest' 2>/dev/null || true" 2>/dev/null || true
+  echo "[Worker ${WORKER_ID}] ✅ Local test gate PASSED (freed test runner RAM)!"
   return 0
 }
 

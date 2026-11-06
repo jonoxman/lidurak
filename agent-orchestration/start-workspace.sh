@@ -16,14 +16,12 @@ fi
 touch "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 
-# Extract FREEBUFF_AUTH_B64 without exporting it into the process environment
 AUTH_B64=$(grep '^FREEBUFF_AUTH_B64=' "$ENV_FILE" 2>/dev/null | head -n 1 | cut -d= -f2- | tr -d '"' || true)
 if [ -n "$AUTH_B64" ]; then
   printf '%s' "$AUTH_B64" | base64 -d | tar -xzf - -C "$RUNTIME_HOME" 2>/dev/null || true
 fi
 unset AUTH_B64
 
-# Create a clean container env file excluding FREEBUFF_AUTH_B64
 grep -v '^FREEBUFF_AUTH_B64=' "$ENV_FILE" > "$CONTAINER_ENV_FILE" 2>/dev/null || true
 chmod 600 "$CONTAINER_ENV_FILE"
 
@@ -41,25 +39,33 @@ if ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
   docker build -t "$IMAGE_NAME" -f agent-orchestration/Dockerfile.sandbox .
 fi
 
-# Ensure RUNTIME_HOME is owned by UID 1000 (node:node)
 docker run --rm --user root -v "${RUNTIME_HOME}:/mnt/fbhome" "$IMAGE_NAME" \
   chown -R 1000:1000 /mnt/fbhome 2>/dev/null || true
 
-# Boot base container for ./play-local.sh (:8080 and :5173)
+# Memory-constraining flags for JVM/sbt and Node so containers stay lean inside the 8GB WSL cap
+JVM_MEM_OPTS="-Xms128m -Xmx768m -XX:MaxMetaspaceSize=256m -XX:+UseSerialGC -Dsbt.server.autostart=false"
+NODE_MEM_OPTS="--dns-result-order=ipv4first --max-old-space-size=512"
+
+# Boot base container for ./play-local.sh and Visual QA (capped at 2.2 GB RAM)
 if [ "$(docker inspect -f '{{.State.Running}}' freebuff_worker 2>/dev/null || true)" != "true" ]; then
   docker rm -f freebuff_worker 2>/dev/null || true
   docker run -d --name freebuff_worker \
+    --memory="2200m" --memory-swap="3g" --shm-size="256m" \
     --cap-drop=ALL --cap-add=CHOWN --cap-add=SETUID --cap-add=SETGID --cap-add=DAC_OVERRIDE \
     --security-opt no-new-privileges:true \
     --env-file "$CONTAINER_ENV_FILE" \
     -e HOME=/home/node \
-    -e NODE_OPTIONS="--dns-result-order=ipv4first" \
+    -e SBT_OPTS="$JVM_MEM_OPTS" \
+    -e JAVA_TOOL_OPTIONS="$JVM_MEM_OPTS" \
+    -e NODE_OPTIONS="$NODE_MEM_OPTS" \
     -p 8080:8080 -p 5173:5173 \
     -v "${PROJECT_ROOT}:/workspace" \
     -v "${RUNTIME_HOME}/.config:/home/node/.config" \
     -v "${RUNTIME_HOME}/.local:/home/node/.local" \
     --mount type=tmpfs,destination=/workspace/agent-orchestration,ro \
     -w /workspace "$IMAGE_NAME" tail -f /dev/null >/dev/null
+else
+  docker update --memory="2200m" --memory-swap="3g" freebuff_worker >/dev/null 2>&1 || true
 fi
 
 mkdir -p .worktrees
@@ -80,13 +86,16 @@ for w in $(seq 1 "$NUM_WORKERS"); do
 
   if ! docker inspect "$C_NAME" >/dev/null 2>&1; then
     docker run --rm --user root -v "${SBT_VOL}:/mnt/sbt" "$IMAGE_NAME" chown -R 1000:1000 /mnt/sbt 2>/dev/null || true
-    echo "🐳 Creating $C_NAME (mounted to shared /home/node/.config auth)..."
+    echo "🐳 Creating $C_NAME (RAM cap: 1600MB, JVM heap cap: 768MB)..."
     docker run -d --name "$C_NAME" \
+      --memory="1600m" --memory-swap="2400m" \
       --cap-drop=ALL --cap-add=CHOWN --cap-add=SETUID --cap-add=SETGID --cap-add=DAC_OVERRIDE \
       --security-opt no-new-privileges:true \
       --env-file "$CONTAINER_ENV_FILE" \
       -e HOME=/home/node \
-      -e NODE_OPTIONS="--dns-result-order=ipv4first" \
+      -e SBT_OPTS="$JVM_MEM_OPTS" \
+      -e JAVA_TOOL_OPTIONS="$JVM_MEM_OPTS" \
+      -e NODE_OPTIONS="$NODE_MEM_OPTS" \
       -v "${WT_DIR}:/workspace" \
       -v "${RUNTIME_HOME}/.config:/home/node/.config" \
       -v "${RUNTIME_HOME}/.local:/home/node/.local" \
@@ -95,7 +104,10 @@ for w in $(seq 1 "$NUM_WORKERS"); do
       -w /workspace "$IMAGE_NAME" tail -f /dev/null >/dev/null
   elif [ "$(docker inspect -f '{{.State.Running}}' "$C_NAME" 2>/dev/null || true)" != "true" ]; then
     docker start "$C_NAME" >/dev/null
+    docker update --memory="1600m" --memory-swap="2400m" "$C_NAME" >/dev/null 2>&1 || true
+  else
+    docker update --memory="1600m" --memory-swap="2400m" "$C_NAME" >/dev/null 2>&1 || true
   fi
 done
 
-echo "✅ Workspace ready (${NUM_WORKERS} worker containers mounted to shared /home/node/.config)."
+echo "✅ Workspace ready (${NUM_WORKERS} workers active with strict RAM & JVM heap caps)."
