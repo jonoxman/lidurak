@@ -2648,11 +2648,16 @@ body[data-dragging='true'] *,
 
 /* The countdown badge stacks in the button's single grid cell instead of
    widening the square or shifting the layout. */
+/* ITEM-6/7 (review round 2): the badge explicitly resets the button's
+   `font-size: 0; line-height: 0`, so the 3 → 2 → 1 digit and the pass countdown
+   stay readable instead of being inherited down to zero. */
 .action-button.action-icon-btn .surrender-countdown {
   grid-area: icon;
   align-self: start;
   justify-self: end;
   margin-left: 0;
+  font-size: 11px;
+  line-height: 1;
 }
 
 /* ITEM-6/7 (review round 1): the countdown number is drawn from the attribute,

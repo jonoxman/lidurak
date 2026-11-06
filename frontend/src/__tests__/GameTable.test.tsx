@@ -3424,6 +3424,15 @@ describe('T-90 ITEM-1c: distinct gameplay feature colours', () => {
     expect(tableCss).toMatch(/border: 1px solid var\(--border-subtle, rgba\(255, 255, 255, 0\.18\)\)/);
     expect(tableCss).toMatch(/border-radius: var\(--ui-radius, 10px\)/);
     expect(tableCss).toMatch(/backdrop-filter: blur\(6px\)/);
+    // ITEM-6/7 (review round 2): the digit must not inherit the button's
+    // `font-size: 0; line-height: 0`, or the countdown is drawn at 0px.
+    expect(tableCss).toMatch(
+      /\.action-button\.action-icon-btn \.surrender-countdown \{[^}]*font-size: 11px;[^}]*line-height: 1;/,
+    );
+    // The hand glyphs are outlined palms with fingers and a thumb, not comb
+    // strokes: two palms + fingers + thumb per raised hand, one waving hand.
+    expect(surrenderIcon.querySelectorAll('[data-icon-part="raised-hands"] path')).toHaveLength(6);
+    expect(passIcon.querySelectorAll('[data-icon-part="pass-hand"] path')).toHaveLength(3);
   });
 
   it('defines all six non-overlapping families with the ticket values', () => {

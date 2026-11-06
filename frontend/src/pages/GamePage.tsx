@@ -978,13 +978,20 @@ export function GamePage({
   const handMatchesTableRank = view.myHand.some((card) =>
     tableRanks.has(card.rank.toLowerCase()),
   );
+  // ITEM-1a (review round 2): a live server view always projects
+  // `legalActions`, and an EMPTY list means "this seat has no legal action" —
+  // it is authoritative, not an omission. Only a fixture that leaves the field
+  // out entirely may rely on the client-side rank/capacity check alone.
+  const projectedLegalActions = view.legalActions as string[] | undefined;
+  const serverAllowsThrowIn =
+    projectedLegalActions == null || hasLegalAction(projectedLegalActions, 'throwIn');
   // ITEM-1a: the throw-in outline is ONLY for a seat that can legally play into
   // it — never the defender, never a player who already passed or has no
-  // matching rank, and never when the bout or the defender has no room left.
-  // The server's `legalActions` is authoritative when it is populated; minimal
-  // fixtures that omit it fall back to the rank + capacity check above.
+  // matching rank, never a bot-locked seat a human cannot act for, and never
+  // when the bout or the defender has no room left.
   const canCurrentPlayerThrowIn =
     !reviewMode &&
+    !isBotViewer &&
     (boutPhaseToken === 'defense' || boutPhaseToken === 'surrenderthrowin') &&
     view.tablePairs.length > 0 &&
     !isDefender &&
@@ -992,7 +999,7 @@ export function GamePage({
     view.myFinishRank == null &&
     maxThrowInCount >= 1 &&
     handMatchesTableRank &&
-    (view.legalActions.length === 0 || hasLegalAction(view.legalActions, 'throwIn'));
+    serverAllowsThrowIn;
 
   const isAttackerTurn =
     isInitialAttackPhase(view.boutPhase) && hasLegalAction(view.legalActions, 'attack');

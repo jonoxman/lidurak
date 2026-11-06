@@ -42,23 +42,26 @@ export function SurrenderIcon() {
       class="action-icon"
       data-testid="surrender-icon"
       viewBox="0 0 24 24"
-      role="img"
       aria-hidden="true"
       focusable="false"
     >
       <g data-icon-part="cards">
-        <rect x="8.6" y="1.8" width="5.4" height="7.4" rx="1.1" transform="rotate(-12 11.3 5.5)" />
-        <rect x="10.4" y="1.8" width="5.4" height="7.4" rx="1.1" transform="rotate(10 13.1 5.5)" />
+        <rect x="9.2" y="1.2" width="4.6" height="6.6" rx="1" transform="rotate(-14 11.5 4.5)" />
+        <rect x="10.6" y="1.2" width="4.6" height="6.6" rx="1" transform="rotate(8 12.9 4.5)" />
       </g>
       <g data-icon-part="arrow-down">
-        <path d="M12 9.6 V13.8" />
-        <path d="M9.9 11.8 L12 13.9 L14.1 11.8" />
+        <path d="M12 8.4 V12.6" />
+        <path d="M10.1 10.8 L12 12.7 L13.9 10.8" />
       </g>
+      {/* Two raised open palms: an outlined palm with four fingers and a
+          thumb per hand, so the gesture reads as surrender at 22px. */}
       <g data-icon-part="raised-hands">
-        <path d="M3.4 21.8 H9.4" />
-        <path d="M4.4 21.4 V17.6 M6.4 21.4 V16.4 M8.4 21.4 V17.6" />
-        <path d="M14.6 21.8 H20.6" />
-        <path d="M15.6 21.4 V17.6 M17.6 21.4 V16.4 M19.6 21.4 V17.6" />
+        <path d="M2.7 18.5 v2.1 a1.7 1.7 0 0 0 1.7 1.7 h3.1 a1.7 1.7 0 0 0 1.7-1.7 v-2.1" />
+        <path d="M3.8 18.4 v-4.1 M5.2 18.4 v-5.3 M6.6 18.4 v-4.7 M8 18.4 v-3.5" />
+        <path d="M2.7 19.3 l-1.4 -1.1" />
+        <path d="M14.8 18.5 v2.1 a1.7 1.7 0 0 0 1.7 1.7 h3.1 a1.7 1.7 0 0 0 1.7-1.7 v-2.1" />
+        <path d="M16 18.4 v-3.5 M17.4 18.4 v-4.7 M18.8 18.4 v-5.3 M20.2 18.4 v-4.1" />
+        <path d="M21.3 19.3 l1.4 -1.1" />
       </g>
     </svg>
   );
@@ -75,22 +78,26 @@ export function PassIcon() {
       class="action-icon"
       data-testid="pass-icon"
       viewBox="0 0 24 24"
-      role="img"
       aria-hidden="true"
       focusable="false"
     >
       <g data-icon-part="cards">
-        <rect x="2.4" y="2.6" width="5.4" height="7.4" rx="1.1" transform="rotate(-10 5.1 6.3)" />
-        <rect x="5.6" y="2.6" width="5.4" height="7.4" rx="1.1" transform="rotate(6 8.3 6.3)" />
+        <rect x="2.2" y="2" width="4.6" height="6.6" rx="1" transform="rotate(-12 4.5 5.3)" />
+        <rect x="4.6" y="2" width="4.6" height="6.6" rx="1" transform="rotate(6 6.9 5.3)" />
       </g>
+      {/* A waving open hand: outlined palm, four fingers and a thumb, tilted as
+          if it is being waved past the cards. */}
       <g data-icon-part="pass-hand">
-        <path d="M9.2 21.6 V17.2" />
-        <path d="M7.2 21.4 H11.4" />
-        <path d="M9.2 17.4 L7.6 15.9" />
+        <g transform="rotate(-20 8.7 16.4)">
+          <path d="M5.2 18.9 v1.4 a1.5 1.5 0 0 0 1.5 1.5 h2.7 a1.5 1.5 0 0 0 1.5-1.5 v-1.4" />
+          <path d="M6.1 18.8 v-3.3 M7.3 18.8 v-4.2 M8.5 18.8 v-3.7 M9.7 18.8 v-2.8" />
+          <path d="M5.2 19.7 l-1.3 -1" />
+        </g>
       </g>
+      {/* The pass arrow sweeps up from the hand and arcs past the cards. */}
       <g data-icon-part="arrow-pass">
-        <path d="M11.4 14.4 a5.6 5.6 0 0 0 7.4-1.6" />
-        <path d="M16.4 11.4 L19.1 12.5 L18.5 15.2" />
+        <path d="M11.2 20.6 C18.6 19.4 21.4 10.4 16.4 5.2" />
+        <path d="M13.9 6.3 L16.6 5.1 L17.2 8" />
       </g>
     </svg>
   );

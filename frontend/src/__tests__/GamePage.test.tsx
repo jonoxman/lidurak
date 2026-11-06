@@ -3533,3 +3533,71 @@ describe('T-90-feedback-20261105_221105-3: throw-in gate, multi-card throw-in an
     await waitFor(() => expect(createPresetGameMock).toHaveBeenCalledWith('full-hand-pickup'));
   });
 });
+
+/**
+ * T-90-feedback-20261105_221105-3 (review round 2): the throw-in gate must not
+ * trust an empty server `legalActions` list and must never point at a
+ * bot-locked seat a human cannot act for.
+ */
+describe('T-90-feedback-20261105_221105-3 round 2: throw-in gate precision', () => {
+  beforeEach(() => {
+    getGameView.mockReset();
+    getGameReplay.mockReset();
+    sendAction.mockReset();
+    createPresetGameMock.mockReset();
+    wsState.onUpdate = null;
+    getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
+  });
+
+  const baseView: PlayerGameView = {
+    ...view,
+    myId: 'p0',
+    myName: 'Alice',
+    myHand: [
+      { suit: 'hearts', rank: 'seven' },
+      { suit: 'clubs', rank: 'seven' },
+    ],
+    opponents: [{ id: 'p1', name: 'Bob', cardCount: 6, hasPassed: false, finishRank: null }],
+    tablePairs: [{ attack: { suit: 'spades', rank: 'seven' }, defense: null }],
+    trumpSuit: 'clubs',
+    attackerIdx: 0,
+    defenderIdx: 1,
+    boutPhase: 'Defense',
+    legalActions: ['throwIn', 'pass'],
+    maxBoutAttacks: 6,
+  };
+
+  it('ITEM-1a: draws no outline on a bot-locked seat, even with a matching card', async () => {
+    getGameView.mockResolvedValue({ ...baseView, isBot: true });
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    await screen.findByTestId('hand-turn-highlight');
+    expect(
+      document.querySelector('[data-zone="table-arena"]')?.getAttribute('data-bot-locked'),
+    ).toBe('true');
+    expect(screen.queryByTestId('throw-in-outline')).toBeNull();
+    expect(screen.queryByTestId('throw-in-slot')).toBeNull();
+    expect(screen.queryByTestId('surrender-throw-in-anchor')).toBeNull();
+  });
+
+  it('ITEM-1a: an empty server legalActions list forbids the outline', async () => {
+    getGameView.mockResolvedValue({ ...baseView, legalActions: [] });
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    await screen.findByTestId('hand-turn-highlight');
+    // A matching rank in hand is not enough: the server listed no legal action.
+    expect(screen.queryByTestId('throw-in-outline')).toBeNull();
+    expect(screen.queryByTestId('throw-in-slot')).toBeNull();
+    expect(
+      screen.getByTestId('hand-turn-highlight').getAttribute('data-highlighted'),
+    ).toBe('false');
+  });
+
+  it('ITEM-1a: still shows the outline when the server lists the throw-in', async () => {
+    getGameView.mockResolvedValue(baseView);
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    const outline = await screen.findByTestId('throw-in-outline');
+    expect(outline.getAttribute('data-throw-in-enabled')).toBe('true');
+  });
+});
