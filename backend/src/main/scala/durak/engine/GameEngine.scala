@@ -210,7 +210,14 @@ object GameEngine:
                 List(GameAction.DeclareSurrender(playerId))
               else Nil
             covers ++ redirects ++ surrenders
-          case BoutPhase.Defense | BoutPhase.SurrenderThrowIn =>
+          // Throw-ins stay open to every active non-defender while cards sit on
+          // the table. A seat that already passed gets no action at all — not a
+          // second pass and not a throw-in — until another throw-in reopens the
+          // window (ITEM-1a).
+          case BoutPhase.Defense | BoutPhase.SurrenderThrowIn
+              if playerIdx != state.defenderIdx &&
+                state.tablePairs.nonEmpty &&
+                !player.hasPassed =>
             val tableRanks = state.tablePairs
               .flatMap(pair => pair.attack.rank :: pair.defense.map(_.rank).toList)
               .toSet
@@ -458,9 +465,14 @@ object GameEngine:
 
   /**
    * True when `seatIdx` still has a legitimate throw-in: it is an active
-   * non-defender holding a card whose rank is on the table, the bout still has
-   * room for another attacking card, and — while the defender is still
-   * answering — the defender could cover it.
+   * non-defender that has not passed, the table still holds attacking cards,
+   * it holds a card whose rank is on the table, the bout still has room for
+   * another attacking card, and — while the defender is still answering — the
+   * defender could cover it.
+   *
+   * This is the single definition the projection, the UI outline and the
+   * server's auto-pass all read, so a seat that is the defender, already passed
+   * or holds no matching rank never sees a throw-in outline (ITEM-1a).
    */
   def canPlayerThrowIn(state: GameState, seatIdx: Int): Boolean =
     if seatIdx == state.defenderIdx then false
@@ -470,6 +482,8 @@ object GameEngine:
         val defenderHand = state.players.lift(state.defenderIdx).map(_.hand.size).getOrElse(0)
         player.isActive &&
           player.hand.nonEmpty &&
+          !player.hasPassed &&
+          state.tablePairs.nonEmpty &&
           state.tablePairs.size < state.maxBoutAttacks &&
           (surrendered || state.uncoveredCount < defenderHand) &&
           player.hand.exists(card => state.tableRanks.contains(card.rank))
@@ -528,6 +542,10 @@ object GameEngine:
   /**
    * Any active non-defending player adds cards matching a rank already on the
    * table. During the defense phase this reopens passing for everyone else.
+   *
+   * One call deploys 1..n cards at once, so a client can multi-select matching
+   * cards and throw them in as a single move (ITEM-5). A seat that already
+   * passed cannot throw in until a throw-in by somebody else reopens passing.
    */
   private def applyThrowInCards(
       state: GameState,
@@ -548,6 +566,7 @@ object GameEngine:
       thrower = state.players(throwerIdx)
       _ <- check(defender.id != playerId, "The defender cannot throw in cards")
       _ <- check(thrower.finishRank.isEmpty, s"$playerId has already finished the game")
+      _ <- check(!thrower.hasPassed, s"$playerId has already passed")
       _ <- check(cards.nonEmpty, "A throw-in must contain at least one card")
       remainingHand <- removeCards(thrower.hand, cards)
         .toRight("Throw-in contains cards that are not in the player's hand")

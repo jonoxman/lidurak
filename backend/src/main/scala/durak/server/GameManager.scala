@@ -124,7 +124,8 @@ object GameManager:
     SurrenderHalfOff,
     DefenselessSurrender,
     DiscardAndEndgame,
-    TransparentMode
+    TransparentMode,
+    FullHandPickup
   )
 
   /** Three-player deflection: Alice attacked, Bob holds the matching six. */
@@ -148,6 +149,12 @@ object GameManager:
    */
   val TransparentMode: String = "transparent-mode"
 
+  /**
+   * A two-player table where Alice holds 29 of the 36 cards, so the reviewer can
+   * check that a near-full-deck hand still fits the felt (T-90 ITEM-4).
+   */
+  val FullHandPickup: String = "full-hand-pickup"
+
   /** The scripted position called `presetId`, or an error naming the unknown one. */
   def preset(presetId: String): Either[String, PresetGame] =
     Option(presetId).map(_.trim.toLowerCase).getOrElse("") match
@@ -157,6 +164,7 @@ object GameManager:
       case DefenselessSurrender => Right(defenselessSurrenderPreset)
       case DiscardAndEndgame  => Right(discardAndEndgamePreset)
       case TransparentMode    => Right(transparentModePreset)
+      case FullHandPickup     => Right(fullHandPickupPreset)
       case other =>
         Left(
           s"Unknown preset: $other (expected one of ${Presets.mkString(", ")})"
@@ -356,9 +364,13 @@ object GameManager:
    *
    * Carol (`p2`) holds no `6`, `7`, `8`, `9` or `J` at all, so she has no legal
    * throw-in and is auto-passed by the server one second after the surrender,
-   * while Alice (`p0`) keeps `7♥` — a rank on the table — so the bout stays in
-   * [[BoutPhase.SurrenderThrowIn]] on her 15-second clock, with the cards
-   * straddling the felt border 50% on / 50% off.
+   * while Alice (`p0`) keeps `7♥` and `7♦` — both a rank on the table — so the
+   * bout stays in [[BoutPhase.SurrenderThrowIn]] on her 15-second clock, with the
+   * cards straddling the felt border 50% on / 50% off.
+   *
+   * T-90 ITEM-5: Alice holding two rank-7 cards lets the reviewer click-select
+   * both and double-click to deploy them in one `ThrowInCards` action (or throw
+   * one in and still see the outline until she runs out of legal cards).
    */
   private def surrenderHalfOffPreset: PresetGame =
     PresetGame(
@@ -366,12 +378,13 @@ object GameManager:
         names = Vector("Alice", "Bob", "Carol"),
         hands = Vector(
           Vector(
+            // Two rank-7 cards: a multi-card throw-in can deploy both at once.
             card(Rank.Seven, Suit.Hearts),
+            card(Rank.Seven, Suit.Diamonds),
             card(Rank.Six, Suit.Hearts),
             card(Rank.Nine, Suit.Hearts),
             card(Rank.Ace, Suit.Hearts),
-            card(Rank.Six, Suit.Spades),
-            card(Rank.Queen, Suit.Spades)
+            card(Rank.Six, Suit.Spades)
           ),
           // No trump and no spade above the uncovered 7♠: no cover, no redirect.
           Vector(
@@ -415,7 +428,9 @@ object GameManager:
         defenderInitialHandSize = 6,
         discardPile = Vector(
           card(Rank.Six, Suit.Diamonds),
-          card(Rank.Seven, Suit.Diamonds),
+          // The `7♦` now sits in Alice's hand, so `Q♠` takes its place here and
+          // all 36 cards stay unique.
+          card(Rank.Queen, Suit.Spades),
           card(Rank.Eight, Suit.Spades),
           card(Rank.Nine, Suit.Spades),
           card(Rank.Jack, Suit.Spades),
@@ -608,6 +623,44 @@ object GameManager:
         lastDiscardCards = discardPile.takeRight(4),
         finishOrder = Vector("p2"),
         finishRanks = Vector(None, None, Some(1))
+      ),
+      defaultPlayerId = "p0"
+    )
+
+  /**
+   * `full-hand-pickup` (T-90 ITEM-4): Alice (`p0`, `defaultPlayerId`) has picked
+   * up almost the whole deck — 29 of the 36 cards — against Bob's (`p1`) 7, with
+   * an empty talon and no bottom trump left to show. The table opens on Alice's
+   * initial attack, so every card in that enormous hand is playable and the
+   * reviewer can check in one click that the hand fan keeps each card's
+   * left-side rank and suit visible without running off screen.
+   *
+   * The position is deterministic and card-conserving: `Deck.forPlayerCount(2)`
+   * minus Bob's seven cards is exactly Alice's twenty-nine.
+   */
+  private def fullHandPickupPreset: PresetGame =
+    val bobHand = Vector(
+      card(Rank.Six, Suit.Hearts),
+      card(Rank.Seven, Suit.Hearts),
+      card(Rank.Eight, Suit.Diamonds),
+      card(Rank.Nine, Suit.Diamonds),
+      card(Rank.Ten, Suit.Spades),
+      card(Rank.Jack, Suit.Spades),
+      card(Rank.Queen, Suit.Clubs)
+    )
+    val aliceHand = Deck.forPlayerCount(2).filterNot(bobHand.contains)
+    PresetGame(
+      state = presetState(
+        names = Vector("Alice", "Bob"),
+        hands = Vector(aliceHand, bobHand),
+        talon = Vector.empty,
+        trumpSuit = Suit.Hearts,
+        bottomTrumpCard = None,
+        tablePairs = Vector.empty,
+        attackerIdx = 0,
+        defenderIdx = 1,
+        boutPhase = BoutPhase.InitialAttack,
+        defenderInitialHandSize = bobHand.size
       ),
       defaultPlayerId = "p0"
     )

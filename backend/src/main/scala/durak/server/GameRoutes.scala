@@ -102,6 +102,15 @@ object GameRoutes:
     case req @ POST -> Root / "api" / "games" / "preset" =>
       createPresetRoom(manager, req)
 
+    // Documented path form (T-90 ITEM-4): the preset id in the URL, no body at
+    // all, so a QA scenario is one plain `curl`/anchor away.
+    case POST -> Root / "api" / "games" / "preset" / presetId =>
+      startPreset(manager, presetId)
+
+    // Debug aliases for the very same preset rooms.
+    case POST -> Root / "api" / "debug" / "preset" / presetId =>
+      startPreset(manager, presetId)
+
     case req @ POST -> Root / "api" / "game" / "create" =>
       createRoom(manager, req)
 
@@ -187,15 +196,24 @@ object GameRoutes:
           case Left(error) =>
             BadRequest(errorBody(s"Invalid preset request: ${error.getMessage}"))
           case Right(request) =>
-            manager
-              .createPreset(request.preset)
-              .flatMap {
-                case Left(error) => BadRequest(errorBody(error))
-                case Right(room) =>
-                  room.stateRef.get.flatMap(state => Ok(presetResponse(room, state)))
-              }
-              .handleErrorWith(failure => errorResponse(failure))
+            startPreset(manager, request.preset)
     }
+
+  /**
+   * Starts the scripted QA position `presetId` and answers with the new room and
+   * its opening seat. Shared by the body form (`POST /api/games/preset`), the
+   * path form (`POST /api/games/preset/:presetId`) and its debug alias
+   * (`POST /api/debug/preset/:presetId`), so all three behave identically.
+   */
+  private def startPreset(manager: GameManager, presetId: String): IO[Response[IO]] =
+    manager
+      .createPreset(presetId)
+      .flatMap {
+        case Left(error) => BadRequest(errorBody(error))
+        case Right(room) =>
+          room.stateRef.get.flatMap(state => Ok(presetResponse(room, state)))
+      }
+      .handleErrorWith(failure => errorResponse(failure))
 
   /** The preset's room plus the seat the table should open on. */
   private def presetResponse(room: GameRoom, state: GameState): Json =
