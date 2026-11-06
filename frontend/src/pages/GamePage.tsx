@@ -274,6 +274,7 @@ export const QA_SCENARIOS: { id: string; label: string }[] = [
   { id: '3p-redirect-bob', label: '3P Redirect (Bob POV)' },
   { id: 'chaos-4p', label: '4P Chaos Targets' },
   { id: 'surrender-half-off', label: 'Surrender Half-Off' },
+  { id: 'full-hand-pickup', label: 'Full Hand Pickup (30 Cards)' },
   { id: 'defenseless-surrender', label: 'Defenseless Auto-Surrender' },
   { id: 'discard-and-endgame', label: 'Discard & Endgame Durak' },
   { id: 'transparent-mode', label: 'Transparent Mode' },
@@ -946,6 +947,45 @@ export function GamePage({
   const viewerIndex = viewerSeatIndex(view);
   const isDefender = view.defenderIdx === viewerIndex;
 
+  // ITEM-1a: the bout phase, the defender's own capacity and the viewer's pass
+  // flag all decide whether a throw-in is possible at all.
+  const boutPhaseToken = normalizeToken(view.boutPhase);
+  const liveDefenderSeatId = seatIdFor(view, view.defenderIdx);
+  const defenderCardCount = isDefender
+    ? view.myHand.length
+    : (view.opponents.find((opponent) => opponent.id === liveDefenderSeatId)?.cardCount ?? 0);
+  const uncoveredCount = view.tablePairs.filter((pair) => !pair.defense).length;
+  const remainingBoutCapacity = view.maxBoutAttacks - view.tablePairs.length;
+  // ITEM-5: a throw-in never exceeds the bout capacity, and during `Defense`
+  // every added uncovered card must still be coverable by the defender.
+  const maxThrowInCount = Math.max(
+    0,
+    Math.min(
+      remainingBoutCapacity,
+      boutPhaseToken === 'defense'
+        ? defenderCardCount - uncoveredCount
+        : remainingBoutCapacity,
+    ),
+  );
+  const handMatchesTableRank = view.myHand.some((card) =>
+    tableRanks.has(card.rank.toLowerCase()),
+  );
+  // ITEM-1a: the throw-in outline is ONLY for a seat that can legally play into
+  // it — never the defender, never a player who already passed or has no
+  // matching rank, and never when the bout or the defender has no room left.
+  // The server's `legalActions` is authoritative when it is populated; minimal
+  // fixtures that omit it fall back to the rank + capacity check above.
+  const canCurrentPlayerThrowIn =
+    !reviewMode &&
+    (boutPhaseToken === 'defense' || boutPhaseToken === 'surrenderthrowin') &&
+    view.tablePairs.length > 0 &&
+    !isDefender &&
+    view.myHasPassed !== true &&
+    view.myFinishRank == null &&
+    maxThrowInCount >= 1 &&
+    handMatchesTableRank &&
+    (view.legalActions.length === 0 || hasLegalAction(view.legalActions, 'throwIn'));
+
   const isAttackerTurn =
     isInitialAttackPhase(view.boutPhase) && hasLegalAction(view.legalActions, 'attack');
   const canAttack =
@@ -953,11 +993,6 @@ export function GamePage({
     selectedCards.length > 0 &&
     selectedCards.length <= view.maxBoutAttacks &&
     selectedCards.every((card) => card.rank === selectedCards[0].rank);
-  const canThrowIn =
-    hasLegalAction(view.legalActions, 'throwIn') &&
-    selectedCards.length > 0 &&
-    view.tablePairs.length + selectedCards.length <= view.maxBoutAttacks &&
-    selectedCards.every((card) => tableRanks.has(card.rank.toLowerCase()));
 
   // Item 12: every hand card the player could legally play right now lifts up.
   const uncoveredAttacks = view.tablePairs
@@ -977,7 +1012,7 @@ export function GamePage({
         .filter((card) => tableRanks.has(card.rank.toLowerCase()))
         .map(cardKey);
     }
-    if (hasLegalAction(view.legalActions, 'throwIn')) {
+    if (canCurrentPlayerThrowIn) {
       return view.myHand
         .filter((card) => tableRanks.has(card.rank.toLowerCase()))
         .map(cardKey);
@@ -1047,8 +1082,18 @@ export function GamePage({
     );
     if (index < 0) return;
     const next = new Set(selected);
-    if (next.has(index)) next.delete(index);
-    else next.add(index);
+    if (next.has(index)) {
+      next.delete(index);
+      selectIndices(next);
+      return;
+    }
+    // ITEM-5: only cards that match a rank on the table may join a throw-in
+    // selection, and never more cards than the bout can still accept.
+    if (canCurrentPlayerThrowIn) {
+      if (!tableRanks.has(card.rank.toLowerCase())) return;
+      if (next.size >= maxThrowInCount) return;
+    }
+    next.add(index);
     selectIndices(next);
   };
 
@@ -1056,9 +1101,31 @@ export function GamePage({
     if (canAttack) dispatch(buildInitialAttack(playerId, selectedCards));
   };
 
-  const throwIn = () => {
-    if (canThrowIn) dispatch(buildThrowInCards(playerId, selectedCards));
+  /** ITEM-5: the clicked card plus every already-selected card of its rank. */
+  const sameRankGroup = (card: GameCard): GameCard[] => {
+    const chosen: GameCard[] = [card];
+    selectedCards.forEach((candidate) => {
+      if (candidate.rank !== card.rank) return;
+      if (chosen.some((entry) => cardKey(entry) === cardKey(candidate))) return;
+      chosen.push(candidate);
+    });
+    return chosen.slice(0, Math.max(1, view.maxBoutAttacks));
   };
+
+  /** ITEM-5: the clicked card plus every selected legal throw-in card. */
+  const throwInGroup = (card: GameCard): GameCard[] => {
+    const chosen: GameCard[] = [card];
+    selectedCards.forEach((candidate) => {
+      if (!tableRanks.has(candidate.rank.toLowerCase())) return;
+      if (chosen.some((entry) => cardKey(entry) === cardKey(candidate))) return;
+      chosen.push(candidate);
+    });
+    return chosen.slice(0, Math.max(1, maxThrowInCount));
+  };
+
+  /** True when this exact card is one of the click-selected hand cards. */
+  const isSelectedCard = (card: GameCard): boolean =>
+    selectedCards.some((candidate) => cardKey(candidate) === cardKey(card));
 
   const coverAttack = (attackIndex: number) => {
     if (!hasLegalAction(view.legalActions, 'cover')) return;
@@ -1072,28 +1139,41 @@ export function GamePage({
    */
   const playCard = (card: GameCard) => {
     if (isAttackerTurn) {
+      // ITEM-5: same-rank cards selected together are deployed as one attack.
+      const cards = sameRankGroup(card);
       if (view.chaosMode) {
         const legalTargets = view.opponents.filter(
           (opponent) => opponent.finishRank == null && opponent.cardCount > 0,
         );
         if (legalTargets.length !== 1) return;
-        dispatch(buildInitialAttack(playerId, [card], legalTargets[0].id));
+        dispatch(buildInitialAttack(playerId, cards, legalTargets[0].id));
       } else {
-        dispatch(buildInitialAttack(playerId, [card]));
+        dispatch(buildInitialAttack(playerId, cards));
       }
       return;
     }
 
-    if (
-      !isDefender &&
-      hasLegalAction(view.legalActions, 'throwIn') &&
-      tableRanks.has(card.rank.toLowerCase())
-    ) {
-      dispatch(buildThrowInCards(playerId, [card]));
+    // ITEM-5: a double-click throws in the clicked card together with every
+    // other selected legal throw-in card, in one single command.
+    if (canCurrentPlayerThrowIn && tableRanks.has(card.rank.toLowerCase())) {
+      const cards = throwInGroup(card);
+      dispatch(buildThrowInCards(playerId, cards.length > 1 ? cards : [card]));
       return;
     }
 
     if (isDefender) {
+      // ITEM-5: double-clicking one of several selected same-rank cards reflects
+      // every one of them in a single RedirectAttack, exactly like the drop path.
+      const reflectGroup = sameRankGroup(card);
+      if (
+        hasLegalAction(view.legalActions, 'redirect') &&
+        isSelectedCard(card) &&
+        reflectGroup.length > 1 &&
+        reflectGroup.every((candidate) => tableRanks.has(candidate.rank.toLowerCase()))
+      ) {
+        dispatch(buildRedirectAttack(playerId, reflectGroup));
+        return;
+      }
       const beatable = view.tablePairs.reduce<number[]>((indices, pair, index) => {
         if (!pair.defense && isLegalCover(pair.attack, card, view.trumpSuit)) {
           indices.push(index);
@@ -1143,7 +1223,10 @@ export function GamePage({
       console.warn('Ignored attack drop: it is not this player’s attack');
       return;
     }
-    dispatch(buildInitialAttack(playerId, [card], view.chaosMode ? targetDefender : undefined));
+    // ITEM-5: dropping one of several selected same-rank cards plays them all.
+    const group = sameRankGroup(card);
+    const cards = isSelectedCard(card) && group.length > 1 ? group : [card];
+    dispatch(buildInitialAttack(playerId, cards, view.chaosMode ? targetDefender : undefined));
   };
 
   const playCoverDrop = (card: GameCard, attackIndex: number) => {
@@ -1155,11 +1238,15 @@ export function GamePage({
   };
 
   const playThrowInDrop = (card: GameCard) => {
-    if (!hasLegalAction(view.legalActions, 'throwIn')) {
+    if (!canCurrentPlayerThrowIn) {
       console.warn('Ignored throw-in drop: throwing in is not legal');
       return;
     }
-    dispatch(buildThrowInCards(playerId, [card]));
+    // ITEM-5: a dragged card that belongs to a multi-card legal throw-in
+    // selection deploys the whole selection; any other card plays alone.
+    const group = throwInGroup(card);
+    const cards = isSelectedCard(card) && group.length > 1 ? group : [card];
+    dispatch(buildThrowInCards(playerId, cards));
   };
 
   const playRedirectDrop = (card: GameCard) => {
@@ -1167,7 +1254,10 @@ export function GamePage({
       console.warn('Ignored redirect drop: redirection is not legal');
       return;
     }
-    dispatch(buildRedirectAttack(playerId, [card]));
+    // ITEM-5: reflecting one of several selected same-rank cards reflects them all.
+    const group = sameRankGroup(card);
+    const cards = isSelectedCard(card) && group.length > 1 ? group : [card];
+    dispatch(buildRedirectAttack(playerId, cards));
   };
 
   // Item 12: a finished game is reviewed read-only against the selected replay
@@ -1611,7 +1701,7 @@ export function GamePage({
                   type="button"
                   class="qa-scenario-button"
                   data-preset={scenario.id}
-                  data-testid={`qa-preset-${scenario.id}`}
+                  data-testid={`preset-btn-${scenario.id}`}
                   disabled={presetPending}
                   onClick={() => startPreset(scenario.id)}
                 >
@@ -1705,7 +1795,8 @@ export function GamePage({
           surrenderTriggered={surrenderLatchActive}
           defenderDefenseless={defenderDefenseless}
           canRedirect={!reviewMode && hasLegalAction(displayedView.legalActions, 'redirect')}
-          canThrowIn={!reviewMode && hasLegalAction(displayedView.legalActions, 'throwIn')}
+          canThrowIn={canCurrentPlayerThrowIn}
+          throwInVisible={canCurrentPlayerThrowIn}
           isReviewMode={reviewMode}
           isBot={isBotViewer}
           turnPlayerId={turnPlayerIdFor(displayedView)}
@@ -1735,16 +1826,6 @@ export function GamePage({
                   onClick={attack}
                 >
                   Attack
-                </button>
-              ) : null}
-              {hasLegalAction(view.legalActions, 'throwIn') ? (
-                <button
-                  type="button"
-                  class="action-button green"
-                  disabled={!canThrowIn}
-                  onClick={throwIn}
-                >
-                  Throw In
                 </button>
               ) : null}
               <ActionBar

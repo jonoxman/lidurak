@@ -100,6 +100,13 @@ export interface GameTableProps {
   canRedirect?: boolean;
   /** True while the viewer may throw in a matching card. */
   canThrowIn?: boolean;
+  /**
+   * T-90-feedback-20261105_221105-3 ITEM-1a: GamePage's authoritative "the
+   * viewer can legally play into the throw-in outline right now" decision. The
+   * outline is rendered only when this is true; when the prop is omitted the
+   * legacy `canThrowIn` flag is the fallback gate.
+   */
+  throwInVisible?: boolean;
   /** Id of the player whose turn clock is running. */
   turnPlayerId?: string;
   /** Seconds left on the active turn clock (0..15). */
@@ -1329,6 +1336,7 @@ export function GameTable({
   boutPhase,
   canRedirect = false,
   canThrowIn = false,
+  throwInVisible,
   turnPlayerId,
   turnSecondsRemaining = 15,
   sortMode = 'rank',
@@ -1715,6 +1723,8 @@ export function GameTable({
     !reviewMode &&
     Boolean(onAttackDrop || onCoverDrop || onThrowInDrop || onRedirectDrop || onReorderHand);
   const throwInEnabled = !reviewMode && canThrowIn;
+  // ITEM-1a: never render the throw-in surface for a seat that cannot use it.
+  const showThrowInOutline = !reviewMode && (throwInVisible ?? canThrowIn);
 
   // ITEM-7: the whole page keeps the link pointer finger for the entire drag,
   // including outside the arena where the browser would paint its own cursor.
@@ -1997,7 +2007,7 @@ export function GameTable({
   const gameOverPhase =
     (boutPhase ?? '').replace(/[^a-z]/gi, '').toLowerCase() === 'gameover';
   const throwInSlot =
-    !reviewMode && !gameOverPhase && tablePairs.length > 0 && tablePairs.length < 6
+    showThrowInOutline && !gameOverPhase && tablePairs.length > 0 && tablePairs.length < 6
       ? 1
       : 0;
   const boutGeometry = boutLayout(
@@ -2028,7 +2038,7 @@ export function GameTable({
       }`}
       data-testid="throw-in-outline"
       data-drop-zone="throw-in"
-      data-throw-in-enabled={canThrowIn ? 'true' : 'false'}
+      data-throw-in-enabled={showThrowInOutline ? 'true' : 'false'}
       data-surrender-outline-position={throwInOutlinePosition}
       data-on-table="true"
       data-card-width={boutCardWidth}
@@ -2495,6 +2505,9 @@ export function GameTable({
               data-card-y={handCardPositions[index].y}
               data-part-direction={partDirection}
               data-collapsed={index === draggedCardIndex ? 'true' : 'false'}
+              // ITEM-5: the click-selected throw-in / attack cards are marked
+              // on the wrapper as well as on the card itself.
+              data-selected={selectedKeys.includes(cardKey(card)) ? 'true' : 'false'}
               // T-90-feedback-2 ITEM-3: the dragged wrapper keeps `data-dragging`
               // and a live `translate3d`; it is never hidden or clipped.
               data-dragging={index === draggedCardIndex ? 'true' : 'false'}
@@ -2531,7 +2544,16 @@ export function GameTable({
                 trump={isTrumpCard(card, trumpSuit)}
                 selected={selectedKeys.includes(cardKey(card))}
                 playable={activePlayableKeys.includes(cardKey(card))}
-                onClick={onCardClick ? () => onCardClick(card) : undefined}
+                onClick={
+                  onCardClick
+                    ? (event: MouseEvent) => {
+                        // ITEM-5: the second click of a double-click must never
+                        // toggle the card back off before `onDoubleClick` fires.
+                        if (event.detail >= 2) return;
+                        onCardClick(card);
+                      }
+                    : undefined
+                }
                 onDoubleClick={
                   !reviewMode && onCardDoubleClick
                     ? () => {

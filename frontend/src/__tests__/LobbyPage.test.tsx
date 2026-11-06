@@ -312,7 +312,7 @@ describe('LobbyPage', () => {
     render(<LobbyPage initialServerReady />);
 
     const panel = screen.getByTestId('qa-scenarios');
-    const button = within(panel).getByTestId('qa-preset-transparent-mode');
+    const button = within(panel).getByTestId('preset-btn-transparent-mode');
     expect(button.getAttribute('data-preset')).toBe('transparent-mode');
     expect(button.textContent).toBe('Transparent Mode');
 
@@ -507,5 +507,35 @@ describe('LobbyPage', () => {
     ]) {
       expect(cssRule(appCss, selector), selector).not.toMatch(/#4ade80|#22c55e|#15803d/);
     }
+  });
+});
+
+/** T-90-feedback-20261105_221105-3: the 30-card pickup preset sits beside the
+ *  surrender scenario so both new UI states are one click away. */
+describe('LobbyPage QA presets (T-90-feedback-20261105_221105-3)', () => {
+  beforeEach(() => {
+    createPresetGame.mockReset();
+    window.location.hash = '';
+  });
+
+  it('offers full-hand-pickup next to surrender-half-off in the QA panel', async () => {
+    createPresetGame.mockResolvedValue({
+      gameId: 'preset-f',
+      players: ['p0', 'p1'],
+      playerTypes: ['human', 'human'],
+      defaultPlayerId: 'p0',
+    });
+    render(<LobbyPage initialServerReady />);
+
+    const panel = screen.getByTestId('qa-scenarios');
+    expect(within(panel).getByTestId('preset-btn-surrender-half-off')).toBeTruthy();
+    const pickup = within(panel).getByTestId('preset-btn-full-hand-pickup');
+    expect(pickup.getAttribute('data-preset')).toBe('full-hand-pickup');
+    expect(pickup.textContent).toBe('Full Hand Pickup (30 Cards)');
+
+    fireEvent.click(pickup);
+
+    await waitFor(() => expect(createPresetGame).toHaveBeenCalledWith('full-hand-pickup'));
+    await waitFor(() => expect(window.location.hash).toBe('#/g/preset-f?player=p0'));
   });
 });
