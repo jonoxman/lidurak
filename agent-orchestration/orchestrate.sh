@@ -89,10 +89,10 @@ trap cleanup_on_interrupt INT TERM
 ./agent-orchestration/start-workspace.sh "$INITIAL_WORKERS"
 
 # === THREE-POOL ANTIGRAVITY MODEL ROUTING ===
-ARCHITECT_CHAIN=("gemini-4-argon-high" "claude-opus-5-5-high" "claude-sonnet-5-5-high" "gemini-3.8-flash-high")
-REVIEWER_R1_CHAIN=("gemini-3.8-flash-high" "gemini-4-argon-medium" "claude-sonnet-5-5-high" "gemini-4-argon-high")
-REVIEWER_ESCALATED_CHAIN=("gemini-4-argon-high" "claude-opus-5-5-high" "claude-sonnet-5-5-high" "gemini-3.8-flash-high")
-FLASH_PRIMARY_CHAIN=("gemini-3.8-flash-high" "gemini-4-argon-medium" "gemini-4-argon-high" "claude-sonnet-5-5-high")
+ARCHITECT_CHAIN=("gemini-4-argon-high" "claude-opus-5-5-high" "claude-sonnet-5-5-high")
+REVIEWER_R1_CHAIN=("gemini-4-argon-high" "claude-sonnet-5-5-high" "claude-opus-5-5-high")
+REVIEWER_ESCALATED_CHAIN=("gemini-4-argon-high" "claude-opus-5-5-high" "claude-sonnet-5-5-high")
+FLASH_PRIMARY_CHAIN=("gemini-3.8-flash-high")
 
 AGY_TIMEOUT_SEC=600
 SESSION_TIMEOUT_SEC=3300
@@ -240,18 +240,20 @@ run_agy_pool() {
       ;;
   esac
 
-  while true; do
-    for MODEL in "${CHAIN[@]}"; do
-      if try_agy_call "$MODEL" "$PROMPT_FILE" "$OUT_FILE" "$EXPECT_PATTERN"; then
-        ACTIVE_MODEL_USED="$MODEL"
-        return 0
-      fi
-      echo "🔀 [${ROLE}] Model ${MODEL} unavailable or rate-limited; advancing to next pool model..."
-    done
-    echo "💤 All 3 model pools exhausted or offline. Sending single notification (if not already sent) and sleeping 5 minutes..."
-    send_alert "Antigravity Quota Exhausted or Offline (${ROLE})" "All models across all 3 Antigravity pools (${CHAIN[*]}) failed or hit quota limits during role ${ROLE}. The orchestrator is sleeping and retrying every 5 minutes. Please check 'agy' login or quota status."
-    sleep 300
+  for MODEL in "${CHAIN[@]}"; do
+    if try_agy_call "$MODEL" "$PROMPT_FILE" "$OUT_FILE" "$EXPECT_PATTERN"; then
+      ACTIVE_MODEL_USED="$MODEL"
+      return 0
+    fi
+    echo "🔀 [${ROLE}] Model ${MODEL} unavailable or rate-limited; advancing to next pool model..."
   done
+  echo "🛑 All models in pool ${ROLE} exhausted. Sending notification and exiting gracefully..."
+  send_alert "Antigravity Quota Exhausted (${ROLE})" "All main decision-making models across the ${ROLE} pool (${CHAIN[*]}) failed or hit quota limits. The orchestrator is gracefully shutting down the pipeline."
+  
+  # Send a TERM signal to the main orchestrator script to trigger the cleanup_on_interrupt trap safely
+  kill -TERM $$
+  sleep 5
+  exit 1
 }
 
 # Helper to dump full current source files (up to ~150KB) so Architect & Auditor never miss lines > 160
