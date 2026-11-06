@@ -1395,3 +1395,30 @@ describe('T-90-2 gilded trump borders and bright face-down outlines', () => {
     expect(frame.getAttribute('stroke-width')).toBe('2');
   });
 });
+
+describe('T-90-feedback-20261105_221105-2: card footprint', () => {
+  it('ITEM-1b: defaults to the 100x140 footprint shared with the outlines', () => {
+    const { container, unmount } = render(<Card suit="spades" rank="six" />);
+    const slot = container.querySelector('.card-slot') as HTMLElement;
+
+    expect(slot.getAttribute('data-card-width')).toBe('100');
+    expect(slot.getAttribute('data-card-height')).toBe('140');
+    // The default size is CSS-driven, so the 900px breakpoint can shrink it.
+    expect(slot.style.width).toBe('');
+    expect(slot.style.height).toBe('');
+    expect(tableCss).toMatch(/\.card-slot\s*{[^}]*width: 100px;[^}]*height: 140px;/);
+    expect(tableCss).toMatch(/\.card-slot\s*{[^}]*min-width: 100px;[^}]*min-height: 140px;/);
+    expect(tableCss).toMatch(
+      /@media \(max-width: 900px\)[\s\S]*?\.card-slot\s*{[^}]*width: 48px;[^}]*height: 68px;/,
+    );
+    unmount();
+
+    // A compact caller (the sidebar bottom trump) pins its own smaller box.
+    const compact = render(<Card suit="spades" rank="six" width={80} height={114} />);
+    const compactSlot = compact.container.querySelector('.card-slot') as HTMLElement;
+    expect(compactSlot.getAttribute('data-card-width')).toBe('80');
+    expect(compactSlot.getAttribute('data-card-height')).toBe('114');
+    expect(compactSlot.style.width).toBe('80px');
+    expect(compactSlot.style.height).toBe('114px');
+  });
+});

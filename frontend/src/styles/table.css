@@ -902,10 +902,14 @@
 
 .card-slot {
   position: relative;
-  flex: 0 0 auto;
-  /* Item 5: 80x114 base size, scaled by the SVG's 70x100 viewBox. */
-  width: 80px;
-  height: 114px;
+  /* T-90-feedback-2 ITEM-1b: every playing card matches the 100x140 throw-in /
+     redirect / target outlines (the `900px` breakpoint below scales both to
+     48x68). The card never shrinks below that box. */
+  flex: 0 0 100px;
+  width: 100px;
+  height: 140px;
+  min-width: 100px;
+  min-height: 140px;
   /* ITEM-NEW-1a: every card in play or in hand follows the roundness slider. */
   border-radius: var(--app-roundness, 8px);
   /* The trump border paints inside the card box, so a bordered card is never
@@ -1071,24 +1075,73 @@
   flex-wrap: nowrap;
   align-items: center;
   justify-content: center;
+  /* T-90-feedback-2 ITEM-2: the box is sized inline to the exact overlapped
+     footprint (`width: totalHandWidth; height: cardHeight`) and no longer pads
+     the row. `position: relative` anchors the SVG contour. */
   width: fit-content;
   max-width: 100%;
   min-width: 0;
-  /* T-90 ITEM-PREV-4a: the box is never stretched by the grid/flex row, so its
-     outline always hugs the cards it wraps instead of the reserved column. */
   align-self: center;
   height: fit-content;
   gap: 0;
-  /* T-90-2 ITEM-13a: symmetric 6px padding on all four sides, around the exact
-     100px × 140px card row, so the highlight outline encloses every card
-     without clipping its top or bottom edge. */
-  padding: 6px;
-  /* ITEM-NEW-1a: the hand highlight box rounds just past the cards it wraps. */
+  padding: 0;
+  position: relative;
   border-radius: calc(var(--app-roundness, 8px) + 4px);
-  /* T-90-2 ITEM-13a: the box never clips a lifted card's top or bottom edge,
-     so the 6px outline wraps the full 100x140 row on all four sides. */
+  /* The box never clips a lifted card or the dragged card on the felt. */
   overflow: visible;
   box-sizing: border-box;
+}
+
+/* --- T-90-feedback-2 ITEM-2: tight hand highlight contour ------------------ */
+
+:root {
+  --hl-attacker-border: var(--role-attacker-border);
+  --hl-attacker-glow: var(--role-attacker-glow);
+  --hl-defender-border: var(--role-defender-border);
+  --hl-defender-glow: var(--role-defender-glow);
+  --hl-neutral-border: rgba(186, 186, 186, 0.4);
+  --hl-neutral-glow: transparent;
+}
+
+/* The contour is an SVG overlay anchored to `.hand-cards`; it never takes part
+   in the card row's layout and never paints a rectangle of its own. */
+.hand-highlight-contour {
+  position: absolute;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.hand-highlight-path {
+  fill: none;
+  stroke: var(--hl-neutral-border, rgba(186, 186, 186, 0.4));
+  stroke-width: 2.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  filter: drop-shadow(
+    0 0 calc(5px * var(--highlight-intensity, 1)) var(--hl-neutral-glow, transparent)
+  );
+  transition: stroke 160ms ease, filter 160ms ease;
+}
+
+@keyframes handContourAttacker {
+  0%,
+  100% {
+    stroke-opacity: 0.8;
+  }
+  50% {
+    stroke-opacity: 1;
+  }
+}
+
+@keyframes handContourDefender {
+  0%,
+  100% {
+    stroke-opacity: 0.8;
+  }
+  50% {
+    stroke-opacity: 1;
+  }
 }
 
 /* Feedback #9: every slot is exactly the size of the card it holds, and all
@@ -1124,25 +1177,43 @@
 /* T-90 ITEM-PREV-4a: every visual hand glow is scoped to `.hand-cards` — the
    opening-attacker glow is addressable through its class and its data
    attributes, and the outer `[data-zone='player-hand']` column never glows. */
-.hand-cards.attacker-turn,
-.hand-cards[data-highlighted='true'][data-highlight-variant='attacker'] {
-  animation: attackerPulse 2.4s infinite ease-in-out;
+.hand-cards.attacker-turn .hand-highlight-path,
+.hand-cards[data-highlighted='true'][data-highlight-variant='attacker'] .hand-highlight-path {
+  stroke: var(--hl-attacker-border);
+  filter: drop-shadow(
+    0 0 calc(7px * var(--highlight-intensity, 1)) var(--hl-attacker-glow)
+  );
+  animation:
+    attackerPulse 2.4s infinite ease-in-out,
+    handContourAttacker 2.4s infinite ease-in-out;
 }
 
 /* T-90-2 ITEM-PREV-4: while the defender still has to decide, the hand carries
    a pulsing crimson glow — including a defenceless defender whose only legal
    action is `surrender` and whose `3 → 2 → 1` countdown is running. The glow is
    removed the moment `Surrender` is pressed or fires by itself. */
-.hand-cards.defender-turn,
-.hand-cards[data-highlighted='true'][data-highlight-variant='defender'] {
-  animation: defenderHandPulse 2.4s infinite ease-in-out;
+.hand-cards.defender-turn .hand-highlight-path,
+.hand-cards[data-highlighted='true'][data-highlight-variant='defender'] .hand-highlight-path {
+  stroke: var(--hl-defender-border);
+  filter: drop-shadow(
+    0 0 calc(7px * var(--highlight-intensity, 1)) var(--hl-defender-glow)
+  );
+  animation:
+    defenderHandPulse 2.4s infinite ease-in-out,
+    handContourDefender 2.4s infinite ease-in-out;
 }
 
 /* Item 3b: a thrower who may add cards to the bout glows exactly like the
    opening attacker, so the seat that owes a throw-in is never missed. */
-.hand-cards.throw-in-turn,
-.hand-cards[data-highlighted='true'][data-highlight-variant='throw-in'] {
-  animation: throwInPulse 2.4s infinite ease-in-out;
+.hand-cards.throw-in-turn .hand-highlight-path,
+.hand-cards[data-highlighted='true'][data-highlight-variant='throw-in'] .hand-highlight-path {
+  stroke: var(--hl-attacker-border);
+  filter: drop-shadow(
+    0 0 calc(7px * var(--highlight-intensity, 1)) var(--hl-attacker-glow)
+  );
+  animation:
+    throwInPulse 2.4s infinite ease-in-out,
+    handContourAttacker 2.4s infinite ease-in-out;
 }
 
 /* T-90-2 ITEM-PREV-4: once the surrender is made — pressed manually or fired by
@@ -1154,6 +1225,13 @@
   box-shadow: none;
   border-color: transparent;
   outline: none;
+}
+
+.hand-cards[data-surrendering='true'] .hand-highlight-path,
+.hand-cards[data-highlighted='false'] .hand-highlight-path {
+  stroke: var(--hl-neutral-border, rgba(186, 186, 186, 0.4));
+  filter: none;
+  animation: none;
 }
 
 /* Item 17/22: the pulse lives on the tight card container, not the column. */
@@ -1471,8 +1549,11 @@
   }
 
   .card-slot {
+    flex: 0 0 48px;
     width: 48px;
     height: 68px;
+    min-width: 48px;
+    min-height: 68px;
   }
 
   .seat {
@@ -1494,7 +1575,7 @@
   }
 
   .hand-cards {
-    padding: 4px;
+    padding: 0;
   }
 
   [data-zone='table-deck'] {
@@ -1824,31 +1905,19 @@
 
 /* --- Interaction polish (Items 11, 12, 18, 19) --- */
 
-/* Item 12: hand cards that are legal right now lift off the baseline. */
+/* T-90-feedback-2 ITEM-2: a playable / selected card lifts by the same 14px
+   the SVG contour uses, so the tight outline steps up over exactly the cards
+   that are raised. */
 .hand-cards .card-slot.legal-playable {
-  transform: translateY(-8px);
+  transform: translateY(-14px);
 }
 
 .hand-cards .card-slot.legal-playable:hover {
-  transform: translateY(-10px);
+  transform: translateY(-16px);
 }
 
-/* T-90-3 ITEM-PB-3: when EVERY card in hand is legal (for example the opening
-   attack), the whole turn-highlight outline travels up with the lifted cards.
-   The slots stay at zero offset inside the shifted outline, so the glow wraps
-   the row symmetrically on all four sides. As soon as one card is not legal,
-   `data-all-legal` is `false` and the outline stays at its baseline while only
-   the individual legal cards lift. */
-.hand-cards[data-all-legal='true'][data-active='true'] {
-  transform: translateY(-8px);
-}
-
-.hand-cards[data-all-legal='true'][data-active='true'] .card-slot.legal-playable {
-  transform: none;
-}
-
-.hand-cards[data-all-legal='true'][data-active='true'] .card-slot.legal-playable:hover {
-  transform: translateY(-2px);
+.hand-cards .card-slot.selected {
+  transform: translateY(-14px);
 }
 
 /* Item 19: the whole gesture keeps the pointer finger, never the slashed
@@ -2000,24 +2069,32 @@
 /* --- 1. Player-hand turn prompts -------------------------------------------
    Default attack / throw-in prompt: deep forest-emerald border and a
    multi-layer glow instead of the washed-out amber halo. */
-:root[data-theme='light'] .hand-cards.attacker-turn,
-:root[data-theme='light'] .hand-cards.throw-in-turn,
-:root[data-theme='light'] .hand-cards[data-highlighted='true'][data-highlight-variant='attacker'],
-:root[data-theme='light'] .hand-cards[data-highlighted='true'][data-highlight-variant='throw-in'],
-[data-table-theme='light'] .hand-cards.attacker-turn,
-[data-table-theme='light'] .hand-cards.throw-in-turn {
+:root[data-theme='light'] .hand-cards.attacker-turn .hand-highlight-path,
+:root[data-theme='light'] .hand-cards.throw-in-turn .hand-highlight-path,
+:root[data-theme='light'] .hand-cards[data-highlighted='true'][data-highlight-variant='attacker'] .hand-highlight-path,
+:root[data-theme='light'] .hand-cards[data-highlighted='true'][data-highlight-variant='throw-in'] .hand-highlight-path,
+[data-table-theme='light'] .hand-cards.attacker-turn .hand-highlight-path,
+[data-table-theme='light'] .hand-cards.throw-in-turn .hand-highlight-path {
   border: 1px solid var(--role-attacker-border);
-  animation: lightAttackerHandPulse 2.4s infinite ease-in-out;
+  stroke: var(--hl-attacker-border);
+  filter: drop-shadow(0 0 6px var(--hl-attacker-glow));
+  animation:
+    lightAttackerHandPulse 2.4s infinite ease-in-out,
+    handContourAttacker 2.4s infinite ease-in-out;
 }
 
 /* Pre-surrender defender prompt: dark crimson border and glow, so it can never
    be confused with the green attack / throw-in prompt on light felt. */
-:root[data-theme='light'] .hand-cards.defender-turn,
-:root[data-theme='light'] .hand-cards[data-highlighted='true'][data-highlight-variant='defender'],
-[data-table-theme='light'] .hand-cards.defender-turn,
-[data-table-theme='light'] .hand-cards[data-highlighted='true'][data-highlight-variant='defender'] {
+:root[data-theme='light'] .hand-cards.defender-turn .hand-highlight-path,
+:root[data-theme='light'] .hand-cards[data-highlighted='true'][data-highlight-variant='defender'] .hand-highlight-path,
+[data-table-theme='light'] .hand-cards.defender-turn .hand-highlight-path,
+[data-table-theme='light'] .hand-cards[data-highlighted='true'][data-highlight-variant='defender'] .hand-highlight-path {
   border: 1px solid var(--role-defender-border);
-  animation: lightDefenderHandPulse 2.4s infinite ease-in-out;
+  stroke: var(--hl-defender-border);
+  filter: drop-shadow(0 0 6px var(--hl-defender-glow));
+  animation:
+    lightDefenderHandPulse 2.4s infinite ease-in-out,
+    handContourDefender 2.4s infinite ease-in-out;
 }
 
 /* T-90-feedback-20261103_172808-1 ITEM-PREV-4a: the outer hand column stays
@@ -2045,13 +2122,13 @@
   animation: none;
 }
 
-:root[data-theme='light'] .hand-cards[data-highlighted='true'][data-highlight-variant='defender'] {
-  animation-name: lightDefenderHandPulse;
+:root[data-theme='light'] .hand-cards[data-highlighted='true'][data-highlight-variant='defender'] .hand-highlight-path {
+  animation-name: lightDefenderHandPulse, handContourDefender;
 }
 
-:root[data-theme='light'] .hand-cards[data-highlighted='true'][data-highlight-variant='attacker'],
-:root[data-theme='light'] .hand-cards[data-highlighted='true'][data-highlight-variant='throw-in'] {
-  animation-name: lightAttackerHandPulse;
+:root[data-theme='light'] .hand-cards[data-highlighted='true'][data-highlight-variant='attacker'] .hand-highlight-path,
+:root[data-theme='light'] .hand-cards[data-highlighted='true'][data-highlight-variant='throw-in'] .hand-highlight-path {
+  animation-name: lightAttackerHandPulse, handContourAttacker;
 }
 
 /* --- 2. Players' cards on the felt and in hand ------------------------------
@@ -2239,6 +2316,9 @@ body[data-dragging='true'] *,
 .hand-card-wrapper {
   width: var(--hand-card-width, 100px);
   height: var(--hand-card-height, 140px);
+  /* T-90-feedback-2 ITEM-3: a dragged card may overhang the row while staying
+     fully painted. */
+  overflow: visible;
   /* ITEM-13a: exactly one card wide, so the highlight box's fit-content width
      is `100 + (visibleCount - 1) * step`. */
   flex: 0 0 var(--hand-card-width, 100px);
@@ -2251,14 +2331,26 @@ body[data-dragging='true'] *,
     opacity 120ms ease;
 }
 
-/* The dragged card's original slot collapses, closing the gap behind it. */
+/* T-90-feedback-2 ITEM-3: the dragged card's original slot collapses its
+   layout footprint, but the card itself is NEVER hidden or clipped — no
+   `opacity: 0`, no `visibility: hidden`, no `display: none`. The card keeps its
+   full 100x140 box and is moved with `translate3d` by the inline style. */
 .hand-card-wrapper[data-collapsed='true'] {
   flex: 0 0 0;
   width: 0;
+  min-width: 0;
   margin-left: 0 !important;
-  opacity: 0;
   pointer-events: none;
   overflow: visible;
+  opacity: 1;
+  visibility: visible;
+}
+
+.hand-card-wrapper[data-dragging='true'] {
+  opacity: 1;
+  visibility: visible;
+  overflow: visible;
+  z-index: 1000;
 }
 
 .hand-card-wrapper[data-part-direction='left'] {

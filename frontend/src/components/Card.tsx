@@ -12,11 +12,27 @@ export interface CardData {
   rank: string;
 }
 
+/**
+ * T-90-feedback-20261105_221105-2 ITEM-1b: the standard playing-card footprint.
+ * Every card on the table and in hand matches the throw-in / redirect / target
+ * outlines at `100px × 140px`; CSS scales the same box to `48px × 68px` below
+ * the `900px` mobile breakpoint.
+ */
+export const CARD_DEFAULT_WIDTH = 100;
+export const CARD_DEFAULT_HEIGHT = 140;
+
 export interface CardProps {
   suit: string;
   rank: string;
   faceUp?: boolean;
   selected?: boolean;
+  /**
+   * T-90-feedback-20261105_221105-2 ITEM-1b: explicit compact footprint (for
+   * example the rotated bottom-trump card in the sidebar). The default
+   * `100 × 140` is left to CSS so the `900px` breakpoint can deliver `48 × 68`.
+   */
+  width?: number;
+  height?: number;
   /** True when this card can legally be played right now; lifts it off the hand. */
   playable?: boolean;
   /** Applies the gilded gold trump border (no corner badge, no glow). */
@@ -388,12 +404,27 @@ export function Card({
   selected = false,
   playable = false,
   trump = false,
+  width = CARD_DEFAULT_WIDTH,
+  height = CARD_DEFAULT_HEIGHT,
   onClick,
   onDoubleClick,
   draggable = false,
   onDragStart,
   onDragEnd,
 }: CardProps) {
+  // A compact caller pins its own footprint inline; the standard card keeps
+  // only the theme radius so the responsive CSS owns the `100->48` sizing.
+  const explicitSize = width !== CARD_DEFAULT_WIDTH || height !== CARD_DEFAULT_HEIGHT;
+  const cardStyle = explicitSize
+    ? {
+        borderRadius: CARD_BORDER_RADIUS,
+        width: `${width}px`,
+        height: `${height}px`,
+        minWidth: `${width}px`,
+        minHeight: `${height}px`,
+        flex: `0 0 ${width}px`,
+      }
+    : { borderRadius: CARD_BORDER_RADIUS };
   // The face where the pips are drawn is theme-dependent: white on the light
   // theme, grey on the dark theme.
   const settings = useSettings();
@@ -416,7 +447,9 @@ export function Card({
         class={classes.join(' ')}
         data-selected={selected ? 'true' : 'false'}
         data-roundness={roundness}
-        style={{ borderRadius: CARD_BORDER_RADIUS }}
+        data-card-width={width}
+        data-card-height={height}
+        style={cardStyle}
         onClick={onClick}
         onDblClick={onDoubleClick}
       >
@@ -445,7 +478,9 @@ export function Card({
       data-card-theme={theme}
       data-roundness={roundness}
       data-trump-glow="false"
-      style={{ borderRadius: CARD_BORDER_RADIUS }}
+      data-card-width={width}
+      data-card-height={height}
+      style={cardStyle}
       onClick={onClick}
       onDblClick={onDoubleClick}
       draggable={draggable}
