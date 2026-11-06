@@ -179,6 +179,25 @@ export const SEAT_BOX = { width: 240, height: 140 } as const;
 /** ITEM-13: the single card size shared by the hand, the play area and the outlines. */
 export const CARD_WIDTH = 100;
 export const CARD_HEIGHT = 140;
+/** T-90-feedback-2 ITEM-1b: the `@media (max-width: 900px)` card size. */
+export const MOBILE_BREAKPOINT_PX = 900;
+export const MOBILE_CARD_WIDTH = 48;
+export const MOBILE_CARD_HEIGHT = 68;
+
+/**
+ * The footprint every card should be rendered at for a given viewport. The
+ * measured hand / play-area slot wins once it exists; this is the initial and
+ * fallback size, and it is what makes the 48x68 mobile constant live rather
+ * than CSS-only.
+ */
+export function cardSizeForViewport(viewportWidth: number): {
+  width: number;
+  height: number;
+} {
+  return viewportWidth > 0 && viewportWidth <= MOBILE_BREAKPOINT_PX
+    ? { width: MOBILE_CARD_WIDTH, height: MOBILE_CARD_HEIGHT }
+    : { width: CARD_WIDTH, height: CARD_HEIGHT };
+}
 /** ITEM-13: width of one hand card at desktop scale (+25% from 80). */
 export const HAND_CARD_WIDTH = CARD_WIDTH;
 /** ITEM-13: height of one hand card at desktop scale (+25% from 114). */
@@ -832,6 +851,10 @@ export function TableDeck({
                       <Card
                         suit={card.suit}
                         rank={card.rank}
+                        width={deckCardWidth}
+                        height={Math.round(
+                          (deckCardWidth * DECK_CARD_HEIGHT) / DECK_CARD_WIDTH,
+                        )}
                         trump={isTrumpCard(card, trumpSuit)}
                       />
                     </span>
@@ -1318,13 +1341,22 @@ export function GameTable({
   } | null>(null);
   const suppressClickRef = useRef(false);
   const [handWidth, setHandWidth] = useState(0);
-  const [cardWidth, setCardWidth] = useState(HAND_CARD_WIDTH);
-  const [cardHeight, setCardHeight] = useState(HAND_CARD_HEIGHT);
+  const [cardWidth, setCardWidth] = useState(
+    () => cardSizeForViewport(typeof window === 'undefined' ? 0 : window.innerWidth).width,
+  );
+  const [cardHeight, setCardHeight] = useState(
+    () => cardSizeForViewport(typeof window === 'undefined' ? 0 : window.innerWidth).height,
+  );
   // T-90-feedback-2 ITEM-3: the dragged card's pointer offset. It is applied as
   // a `translate3d` on the card's own wrapper, which stays fully visible.
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [boutWidth, setBoutWidth] = useState(0);
-  const [boutCardWidth, setBoutCardWidth] = useState(BOUT_CARD_WIDTH);
+  const [boutCardWidth, setBoutCardWidth] = useState(
+    () => cardSizeForViewport(typeof window === 'undefined' ? 0 : window.innerWidth).width,
+  );
+  const [boutCardHeight, setBoutCardHeight] = useState(
+    () => cardSizeForViewport(typeof window === 'undefined' ? 0 : window.innerWidth).height,
+  );
   const arenaRef = useRef<HTMLDivElement>(null);
   const handRef = useRef<HTMLDivElement>(null);
   const handZoneRef = useRef<HTMLElement>(null);
@@ -1350,10 +1382,13 @@ export function GameTable({
       const zone = handZoneRef.current ?? node.parentElement;
       const available = zone?.clientWidth ?? node.clientWidth;
       setHandWidth(available > 0 ? Math.max(0, available - HAND_BOX_PADDING * 2) : available);
-      const card = node.querySelector('.card-slot') as HTMLElement | null;
-      const measured = card?.offsetWidth ?? 0;
+      // Measure the CSS-sized slot (`.hand-slot`), never the inline-sized card:
+      // the slot carries `--hand-card-width/height` (100x140 desktop, 48x68
+      // mobile), so the card is re-rendered at exactly the responsive size.
+      const slot = node.querySelector('.hand-slot') as HTMLElement | null;
+      const measured = slot?.offsetWidth ?? 0;
       if (measured > 0) setCardWidth(measured);
-      const measuredHeight = card?.offsetHeight ?? 0;
+      const measuredHeight = slot?.offsetHeight ?? 0;
       if (measuredHeight > 0) setCardHeight(measuredHeight);
     };
     measure();
@@ -1385,9 +1420,13 @@ export function GameTable({
           (parseFloat(styles.paddingRight || '0') || 0)
         : 0;
       if (box.clientWidth > 0) setBoutWidth(Math.max(0, box.clientWidth - padding));
-      const card = box.querySelector('.table-pair .card-slot') as HTMLElement | null;
-      const measured = card?.offsetWidth ?? 0;
+      // The pair's grid track is 100x140 desktop and 48x68 mobile, so measuring
+      // the pair (not the inline-sized card) keeps the play area responsive.
+      const pair = box.querySelector('.table-pair') as HTMLElement | null;
+      const measured = pair?.offsetWidth ?? 0;
       if (measured > 0) setBoutCardWidth(measured);
+      const measuredHeight = pair?.offsetHeight ?? 0;
+      if (measuredHeight > 0) setBoutCardHeight(measuredHeight);
     };
     measure();
     if (typeof ResizeObserver !== 'undefined' && battlefieldRef.current) {
@@ -1457,16 +1496,27 @@ export function GameTable({
   // that is raised because it is playable or selected. The SVG contour below is
   // built from these rectangles, so it always wraps the real cards tightly and
   // distorts non-rectangularly when only some of them are raised.
-  const handCardPositions: HandCardPosition[] = hand.map((card, index) => {
+  // The x of every card is accumulated from the SAME inline margins the row
+  // renders, so the contour matches the compacted N-1 layout while a card is
+  // dragged out of the hand (its collapsed slot contributes zero width).
+  const handCardPositions: HandCardPosition[] = [];
+  let runningX = 0;
+  hand.forEach((card, index) => {
+    if (index > 0) {
+      const previousWidth = gapClosed && index - 1 === draggedCardIndex ? 0 : cardWidth;
+      runningX += previousWidth + (parseFloat(handSlotMargin(index)) || 0);
+    }
     const key = cardKey(card);
     const raised =
       !reviewMode && (activePlayableKeys.includes(key) || selectedKeys.includes(key));
-    return {
-      x: index * activeHandLayoutState.stride,
-      y: raised ? HAND_RAISED_OFFSET : 0,
-    };
+    handCardPositions.push({ x: runningX, y: raised ? HAND_RAISED_OFFSET : 0 });
   });
-  const handContour = computeHandContour(handCardPositions, cardWidth, cardHeight);
+  // The dragged card floats under the pointer, so it is not part of the hand
+  // contour; the outline wraps the real, remaining row.
+  const contourCards = gapClosed
+    ? handCardPositions.filter((_, index) => index !== draggedCardIndex)
+    : handCardPositions;
+  const handContour = computeHandContour(contourCards, cardWidth, cardHeight);
   const totalHandWidth = activeHandLayoutState.totalWidth;
   const handFitScale = activeHandLayoutState.scale;
   const handRenderedWidth = Math.max(0, Math.round(totalHandWidth * handFitScale));
@@ -2178,8 +2228,8 @@ export function GameTable({
                 defense={pair.defense}
                 trumpSuit={trumpSuit}
                 marginLeft={boutSlotMargin(index)}
-                cardWidth={CARD_WIDTH}
-                cardHeight={CARD_HEIGHT}
+                cardWidth={boutCardWidth}
+                cardHeight={boutCardHeight}
                 highlightUncovered={uncoveredHighlight && !pair.defense}
                 snap={snapZone === zone}
                 dropZone={coverable ? zone : undefined}
@@ -2312,7 +2362,10 @@ export function GameTable({
           data-overlap-px={activeHandLayoutState.overlap}
           data-overlap-ratio={activeHandLayoutState.overlapRatio}
           data-stride-px={activeHandLayoutState.stride}
-          data-hand-width={handRenderedWidth}
+          // Both widths below are reported in the SAME unscaled row coordinate
+          // space as the contour; the on-screen width is `data-rendered-hand-width`.
+          data-hand-width={Math.round(totalHandWidth)}
+          data-rendered-hand-width={handRenderedWidth}
           data-fit-scale={handFitScale}
           data-hidden-left={handLayoutState.hiddenLeft}
           data-hidden-right={handLayoutState.hiddenRight}
@@ -2320,9 +2373,15 @@ export function GameTable({
           // T-90-feedback-2 ITEM-2: `.hand-cards` is exactly the overlapped card
           // footprint; the contour SVG is anchored to this box.
           style={{
+            // The row lays out at its natural `totalWidth`; when the fit scale
+            // is below 1 the box is the scaled width and the whole row is
+            // scaled from its LEFT edge, so the cards and the contour SVG (a
+            // child of this same box) scale together into exactly that width.
             width: `${handRenderedWidth}px`,
-            height: `${Math.round(cardHeight)}px`,
+            height: `${Math.round(cardHeight * handFitScale)}px`,
+            justifyContent: handFitScale < 1 ? 'flex-start' : undefined,
             transform: handFitScale < 1 ? `scale(${handFitScale})` : undefined,
+            transformOrigin: handFitScale < 1 ? 'left center' : undefined,
           }}
           ref={handRef}
           onDragOver={draggable && onReorderHand ? hoverHandZone : undefined}
@@ -2338,6 +2397,7 @@ export function GameTable({
           data-testid="hand-highlight-contour"
           data-non-rectangular={handContour.nonRectangular ? 'true' : 'false'}
           data-contour-width={Math.round(totalHandWidth)}
+          data-contour-rendered-width={Math.round(totalHandWidth * handFitScale)}
           width={handContour.width}
           height={handContour.height}
           viewBox={`0 0 ${handContour.width} ${handContour.height}`}
@@ -2417,6 +2477,8 @@ export function GameTable({
               <Card
                 suit={card.suit}
                 rank={card.rank}
+                width={cardWidth}
+                height={cardHeight}
                 trump={isTrumpCard(card, trumpSuit)}
                 selected={selectedKeys.includes(cardKey(card))}
                 playable={activePlayableKeys.includes(cardKey(card))}

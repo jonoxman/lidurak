@@ -3,6 +3,8 @@ import { act, fireEvent, render, screen } from '@testing-library/preact';
 import {
   ACE_PIP,
   CARD_CORNER_FONT_FAMILY,
+  CARD_DEFAULT_HEIGHT,
+  CARD_DEFAULT_WIDTH,
   CARD_INDEX,
   CARD_SERIF_FONT_FAMILY,
   Card,
@@ -611,7 +613,7 @@ describe('card sprite serif typography and Roundness (T-90-2)', () => {
 
     const topRank = container.querySelector('[data-index="top-rank"]')!;
     const topSuit = container.querySelector('[data-index="top-suit"]')!;
-    expect(topRank.getAttribute('x')).toBe('11.5');
+    expect(topRank.getAttribute('x')).toBe('7.5');
     expect(topRank.getAttribute('y')).toBe('21');
     expect(topSuit.getAttribute('y')).toBe('34');
     expect(container.querySelector('[data-pip="rank"]')!.getAttribute('y')).toBe(
@@ -1109,7 +1111,7 @@ describe('centred card faces with equal margins (T-90-1 ITEM-3a / ITEM-3b)', () 
     }
   });
 
-  it('ITEM-3a: keeps the corner pip columns at 11.5 / 58.5 in size 12, clear of the face', () => {
+  it('ITEM-3a/ITEM-4: keeps the corner pip columns at 7.5 / 62.5 in size 12, clear of the face', () => {
     for (const rank of ALL_RANKS) {
       const { container, unmount } = render(<Card suit="spades" rank={rank} trump />);
 
@@ -1118,10 +1120,10 @@ describe('centred card faces with equal margins (T-90-1 ITEM-3a / ITEM-3b)', () 
       const topSuit = container.querySelector('[data-testid="card-suit-top"]')!;
       const bottomSuit = container.querySelector('[data-testid="card-suit-bottom"]')!;
 
-      expect(Number(topRank.getAttribute('x')), rank).toBe(11.5);
-      expect(Number(bottomRank.getAttribute('x')), rank).toBe(58.5);
-      expect(Number(topSuit.getAttribute('x')), rank).toBe(11.5);
-      expect(Number(bottomSuit.getAttribute('x')), rank).toBe(58.5);
+      expect(Number(topRank.getAttribute('x')), rank).toBe(7.5);
+      expect(Number(bottomRank.getAttribute('x')), rank).toBe(62.5);
+      expect(Number(topSuit.getAttribute('x')), rank).toBe(7.5);
+      expect(Number(bottomSuit.getAttribute('x')), rank).toBe(62.5);
       expect(Number(topSuit.getAttribute('x')) + Number(bottomSuit.getAttribute('x'))).toBe(
         CARD_WIDTH,
       );
@@ -1285,9 +1287,9 @@ describe('T-90-2 inverted corner indices and symmetrical trump badges', () => {
       // Top-left: upright, unchanged and explicitly not inverted.
       expect(topRank.getAttribute('data-inverted'), rank).toBe('false');
       expect(topSuit.getAttribute('data-inverted'), rank).toBe('false');
-      expect(Number(topRank.getAttribute('x')), rank).toBe(11.5);
+      expect(Number(topRank.getAttribute('x')), rank).toBe(7.5);
       expect(Number(topRank.getAttribute('y')), rank).toBe(21);
-      expect(Number(topSuit.getAttribute('x')), rank).toBe(11.5);
+      expect(Number(topSuit.getAttribute('x')), rank).toBe(7.5);
       expect(Number(topSuit.getAttribute('y')), rank).toBe(34);
       expect(topRank.getAttribute('transform'), rank).toBeNull();
       expect(topSuit.getAttribute('transform'), rank).toBeNull();
@@ -1295,12 +1297,12 @@ describe('T-90-2 inverted corner indices and symmetrical trump badges', () => {
       // Bottom-right: the exact 180° rotation around the (35, 50) card centre.
       expect(bottomRank.getAttribute('data-inverted'), rank).toBe('true');
       expect(bottomSuit.getAttribute('data-inverted'), rank).toBe('true');
-      expect(Number(bottomRank.getAttribute('x')), rank).toBe(70 - 11.5);
+      expect(Number(bottomRank.getAttribute('x')), rank).toBe(70 - 7.5);
       expect(Number(bottomRank.getAttribute('y')), rank).toBe(100 - 21);
-      expect(Number(bottomSuit.getAttribute('x')), rank).toBe(70 - 11.5);
+      expect(Number(bottomSuit.getAttribute('x')), rank).toBe(70 - 7.5);
       expect(Number(bottomSuit.getAttribute('y')), rank).toBe(100 - 34);
-      expect(bottomRank.getAttribute('transform'), rank).toBe('rotate(180 58.5 79)');
-      expect(bottomSuit.getAttribute('transform'), rank).toBe('rotate(180 58.5 66)');
+      expect(bottomRank.getAttribute('transform'), rank).toBe('rotate(180 62.5 79)');
+      expect(bottomSuit.getAttribute('transform'), rank).toBe('rotate(180 62.5 66)');
       // The upside-down rank sits nearest the corner, the suit above it.
       expect(Number(bottomRank.getAttribute('y')), rank).toBeGreaterThan(
         Number(bottomSuit.getAttribute('y')),
@@ -1360,7 +1362,7 @@ describe('T-90-2 gilded trump borders and bright face-down outlines', () => {
     expect(DARK_CARD_BACK_PALETTE.frameStroke).toBe('#94a3b8');
     setSettings({ theme: 'dark' });
 
-    const frameOf = (container: HTMLElement): SVGRectElement =>
+    const frameOf = (container: Element): SVGRectElement =>
       Array.from(container.querySelector('svg.card-back')!.children).filter(
         (child) => child.tagName.toLowerCase() === 'rect',
       )[0] as SVGRectElement;
@@ -1403,9 +1405,11 @@ describe('T-90-feedback-20261105_221105-2: card footprint', () => {
 
     expect(slot.getAttribute('data-card-width')).toBe('100');
     expect(slot.getAttribute('data-card-height')).toBe('140');
-    // The default size is CSS-driven, so the 900px breakpoint can shrink it.
-    expect(slot.style.width).toBe('');
-    expect(slot.style.height).toBe('');
+    // The footprint is inline, exactly as the ticket asks.
+    expect(slot.style.width).toBe('100px');
+    expect(slot.style.height).toBe('140px');
+    expect(slot.style.minWidth).toBe('100px');
+    expect(slot.style.minHeight).toBe('140px');
     expect(tableCss).toMatch(/\.card-slot\s*{[^}]*width: 100px;[^}]*height: 140px;/);
     expect(tableCss).toMatch(/\.card-slot\s*{[^}]*min-width: 100px;[^}]*min-height: 140px;/);
     expect(tableCss).toMatch(
@@ -1420,5 +1424,30 @@ describe('T-90-feedback-20261105_221105-2: card footprint', () => {
     expect(compactSlot.getAttribute('data-card-height')).toBe('114');
     expect(compactSlot.style.width).toBe('80px');
     expect(compactSlot.style.height).toBe('114px');
+  });
+
+  it('ITEM-4: keeps the top-left index inside the 20px strip left at 80% overlap', () => {
+    const ranks = ['two', 'six', 'nine', 'ten', 'jack', 'queen', 'king', 'ace'];
+
+    ranks.forEach((rank) => {
+      const { container, unmount } = render(<Card suit="spades" rank={rank} />);
+      const rankNode = container.querySelector('[data-testid="card-rank-top"]')!;
+      const suitNode = container.querySelector('[data-testid="card-suit-top"]')!;
+
+      // T-90-feedback-2 ITEM-4: the rank and suit share the `x = 7.5` axis.
+      expect(Number(rankNode.getAttribute('x')), rank).toBe(7.5);
+      expect(Number(suitNode.getAttribute('x')), rank).toBe(7.5);
+
+      // At 100px card width the whole index ink stays inside the leftmost 20px
+      // (the strip an 80% overlap always leaves uncovered).
+      for (const node of [rankNode, suitNode]) {
+        const box = textBox(node);
+        const leftPx = (box.left * CARD_DEFAULT_WIDTH) / 70;
+        const rightPx = (box.right * CARD_DEFAULT_WIDTH) / 70;
+        expect(leftPx, `${rank} left`).toBeGreaterThanOrEqual(0);
+        expect(rightPx, `${rank} right`).toBeLessThanOrEqual(20);
+      }
+      unmount();
+    });
   });
 });

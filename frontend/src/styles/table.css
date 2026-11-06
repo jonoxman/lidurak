@@ -123,6 +123,8 @@
   box-sizing: border-box;
   position: relative;
   isolation: isolate;
+  /* T-90-feedback-2 ITEM-3: the arena never clips a dragged hand card. */
+  overflow: visible;
 }
 
 [data-zone='table-arena'] *,
@@ -540,6 +542,17 @@
 .drag-ghost {
   width: var(--bout-card-width, 100px);
   height: var(--bout-card-height, 140px);
+  box-sizing: border-box;
+}
+
+/* T-90-feedback-2 ITEM-1b: the play area's documented card boxes share the same
+   100x140 base size as `.table-card-base` / `.table-card-cover`. */
+.bout-card,
+.bout-pair {
+  width: var(--bout-card-width, 100px);
+  height: var(--bout-card-height, 140px);
+  min-width: 100px;
+  min-height: 140px;
   box-sizing: border-box;
 }
 
@@ -1034,6 +1047,8 @@
      when the viewer has run out of cards, so the felt never resizes. */
   min-height: var(--hand-row-height, calc(var(--hand-card-height, 114px) + 38px));
   padding: 2px 0 8px;
+  /* T-90-feedback-2 ITEM-3: the hand column never clips a dragged card. */
+  overflow: visible;
 }
 
 /* T-90-feedback-20261103_172808-1 ITEM-PREV-4a/4b: the OUTER hand column never
@@ -1554,6 +1569,18 @@
     height: 68px;
     min-width: 48px;
     min-height: 68px;
+  }
+
+  /* T-90-feedback-2 ITEM-1b: the hand slot and the play-area card aliases scale
+     to the same 48x68 mobile footprint as the outlines. */
+  .hand-card-wrapper,
+  .bout-card,
+  .bout-pair {
+    width: var(--hand-card-width, 48px);
+    height: var(--hand-card-height, 68px);
+    min-width: 48px;
+    min-height: 68px;
+    flex: 0 0 var(--hand-card-width, 48px);
   }
 
   .seat {
@@ -2316,6 +2343,9 @@ body[data-dragging='true'] *,
 .hand-card-wrapper {
   width: var(--hand-card-width, 100px);
   height: var(--hand-card-height, 140px);
+  /* T-90-feedback-2 ITEM-1b: the slot never shrinks below the standard card. */
+  min-width: var(--hand-card-width, 100px);
+  min-height: var(--hand-card-height, 140px);
   /* T-90-feedback-2 ITEM-3: a dragged card may overhang the row while staying
      fully painted. */
   overflow: visible;
@@ -2351,6 +2381,13 @@ body[data-dragging='true'] *,
   visibility: visible;
   overflow: visible;
   z-index: 1000;
+}
+
+/* T-90-feedback-2 ITEM-3: the dragged card never intercepts hit-testing, so it
+   can never hide itself behind the browser's drop cursor. */
+.hand-card-wrapper[data-dragging='true'] .card-slot,
+.hand-card-wrapper[data-dragging='true'] .card-slot * {
+  pointer-events: none;
 }
 
 .hand-card-wrapper[data-part-direction='left'] {
