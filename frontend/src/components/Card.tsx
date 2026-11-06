@@ -20,6 +20,10 @@ export interface CardData {
  */
 export const CARD_DEFAULT_WIDTH = 100;
 export const CARD_DEFAULT_HEIGHT = 140;
+/** T-90: the `@media (max-width: 899px)` card size from `table.css`. */
+export const CARD_MOBILE_BREAKPOINT_PX = 899;
+export const CARD_MOBILE_WIDTH = 48;
+export const CARD_MOBILE_HEIGHT = 68;
 
 export interface CardProps {
   suit: string;
@@ -424,12 +428,18 @@ export function Card({
   // pass the measured responsive size, compact callers their own box); when no
   // size is passed the inline default is expressed through custom properties so
   // the `900px` breakpoint can still deliver 48x68 instead of being overridden.
-  const resolvedWidth = width ?? CARD_DEFAULT_WIDTH;
-  const resolvedHeight = height ?? CARD_DEFAULT_HEIGHT;
-  const widthCss =
-    width == null ? `var(--card-width, ${CARD_DEFAULT_WIDTH}px)` : `${width}px`;
-  const heightCss =
-    height == null ? `var(--card-height, ${CARD_DEFAULT_HEIGHT}px)` : `${height}px`;
+  // T-90: the default footprint is the shared `--card-w` / `--card-h` token, so
+  // hand cards, bout cards and every dashed outline are the same size and the
+  // 899px breakpoint scales all of them together. Compact callers (the sidebar
+  // bottom trump) still pin their own explicit box.
+  const viewportWidth = typeof window === 'undefined' ? 0 : window.innerWidth;
+  const mobileViewport = viewportWidth > 0 && viewportWidth <= CARD_MOBILE_BREAKPOINT_PX;
+  const resolvedWidth =
+    width ?? (mobileViewport ? CARD_MOBILE_WIDTH : CARD_DEFAULT_WIDTH);
+  const resolvedHeight =
+    height ?? (mobileViewport ? CARD_MOBILE_HEIGHT : CARD_DEFAULT_HEIGHT);
+  const widthCss = width == null ? `var(--card-w, ${CARD_DEFAULT_WIDTH}px)` : `${width}px`;
+  const heightCss = height == null ? `var(--card-h, ${CARD_DEFAULT_HEIGHT}px)` : `${height}px`;
   const cardStyle = {
     borderRadius: CARD_BORDER_RADIUS,
     width: widthCss,

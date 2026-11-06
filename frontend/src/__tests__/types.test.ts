@@ -607,3 +607,48 @@ describe('shared protocol types (T-90-2)', () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe('T-90-feedback-20261106_111512-3: throw-in projection fields', () => {
+  const base = {
+    myId: 'p0',
+    myHand: [],
+    opponents: [],
+    tablePairs: [],
+    talonCount: 6,
+    trumpSuit: 'spades',
+    attackerIdx: 0,
+    defenderIdx: 1,
+    boutPhase: 'Defense',
+    legalActions: [],
+    finishOrder: [],
+    isDraw: false,
+    maxBoutAttacks: 6,
+  };
+
+  it('defaults to empty / 0 / false when the backend omits the fields', () => {
+    const view = parsePlayerGameView(base);
+    expect(view.throwInCards).toEqual([]);
+    expect(view.throwInCapacity).toBe(0);
+    expect(view.canThrowIn).toBe(false);
+  });
+
+  it('parses the projected throw-in fields', () => {
+    const view = parsePlayerGameView({
+      ...base,
+      throwInCards: [{ suit: 'hearts', rank: 'seven' }],
+      throwInCapacity: 3,
+      canThrowIn: true,
+    });
+    expect(view.throwInCards).toEqual([{ suit: 'hearts', rank: 'seven' }]);
+    expect(view.throwInCapacity).toBe(3);
+    expect(view.canThrowIn).toBe(true);
+  });
+
+  it('rejects malformed throw-in fields', () => {
+    expect(() => parsePlayerGameView({ ...base, canThrowIn: 'yes' })).toThrow(/canThrowIn/);
+    expect(() => parsePlayerGameView({ ...base, throwInCards: 'no' })).toThrow(/throwInCards/);
+    expect(() => parsePlayerGameView({ ...base, throwInCapacity: 'no' })).toThrow(
+      /throwInCapacity/,
+    );
+  });
+});

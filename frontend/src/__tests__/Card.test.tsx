@@ -1407,13 +1407,14 @@ describe('T-90-feedback-20261105_221105-2: card footprint', () => {
     expect(slot.getAttribute('data-card-height')).toBe('140');
     // The default footprint is inline but expressed through the responsive
     // variables, so the 900px breakpoint is not overridden by fixed inline px.
-    expect(slot.style.width).toBe('var(--card-width, 100px)');
-    expect(slot.style.height).toBe('var(--card-height, 140px)');
-    expect(slot.style.minWidth).toBe('var(--card-width, 100px)');
-    expect(slot.style.minHeight).toBe('var(--card-height, 140px)');
-    expect(slot.style.flex).toBe('0 0 var(--card-width, 100px)');
+    // T-90: the root reads the shared `--card-w` / `--card-h` tokens.
+    expect(slot.style.width).toBe('var(--card-w, 100px)');
+    expect(slot.style.height).toBe('var(--card-h, 140px)');
+    expect(slot.style.minWidth).toBe('var(--card-w, 100px)');
+    expect(slot.style.minHeight).toBe('var(--card-h, 140px)');
+    expect(slot.style.flex).toBe('0 0 var(--card-w, 100px)');
     expect(tableCss).toMatch(
-      /\.card-slot\s*{[^}]*--card-width: 100px;[^}]*--card-height: 140px;/,
+      /\.card-slot\s*{[^}]*--card-width: var\(--card-w, 100px\);[^}]*--card-height: var\(--card-h, 140px\);/,
     );
     expect(tableCss).toMatch(
       /\.card-slot\s*{[^}]*width: var\(--card-width, 100px\);[^}]*height: var\(--card-height, 140px\);/,
@@ -1455,5 +1456,27 @@ describe('T-90-feedback-20261105_221105-2: card footprint', () => {
       }
       unmount();
     });
+  });
+});
+
+describe('T-90-feedback-20261106_111512-3: token-sized cards', () => {
+  it('sizes the root from var(--card-w)/var(--card-h) and fills the face', () => {
+    const { container, unmount } = render(<Card suit="hearts" rank="nine" />);
+    const slot = container.querySelector('.card-slot') as HTMLElement;
+
+    expect(slot.style.width).toBe('var(--card-w, 100px)');
+    expect(slot.style.height).toBe('var(--card-h, 140px)');
+    expect(slot.getAttribute('data-card-width')).toBe('100');
+    expect(slot.getAttribute('data-card-height')).toBe('140');
+    expect(slot.className).not.toMatch(/scale/);
+
+    const face = slot.querySelector('svg.card-face') as SVGElement | null;
+    expect(face).not.toBeNull();
+    expect(tableCss).toMatch(/\.playing-card\s*{[^}]*width: 100%;[^}]*height: 100%;/);
+    expect(tableCss).toMatch(/\.card-slot\s*{[^}]*--card-width: var\(--card-w, 100px\);/);
+    expect(tableCss).toMatch(
+      /@media \(max-width: 899px\)\s*{\s*:root\s*{[^}]*--card-w: 48px;/,
+    );
+    unmount();
   });
 });

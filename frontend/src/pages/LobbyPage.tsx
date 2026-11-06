@@ -16,6 +16,10 @@ const DEFAULT_NAMES = ['Alice', 'Bob', 'Carol', 'Dave'];
 
 /** One-click scripted positions, mirrored in the game's left sidebar. */
 const QA_SCENARIOS: { id: string; label: string }[] = [
+  { id: 'throw-in-visibility-4p', label: 'Throw-In Visibility (4P)' },
+  { id: 'throw-in-capacity-cap', label: 'Throw-In Capacity Cap' },
+  { id: 'huge-hand-36', label: 'Huge Hand (36)' },
+  { id: 'huge-hand-52', label: 'Huge Hand (52)' },
   { id: '3p-redirect-bob', label: '3P Redirect (Bob POV)' },
   { id: 'chaos-4p', label: '4P Chaos Targets' },
   { id: 'surrender-half-off', label: 'Surrender Half-Off' },

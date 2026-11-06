@@ -49,6 +49,19 @@ export interface PlayerGameView {
   maxBoutAttacks: number;
   /** True when the viewed defender has no legal cover and no legal redirect. */
   defenderDefenseless?: boolean;
+  /**
+   * T-90: the cards this seat may legally throw into the current bout. Empty
+   * whenever the seat cannot throw in, and when the backend omits the field.
+   */
+  throwInCards?: Card[];
+  /** T-90: how many more attacking cards this seat may add to the bout. */
+  throwInCapacity?: number;
+  /**
+   * T-90: the single source of truth for the throw-in outline visibility. The
+   * backend sets it only for a seat that can legally play into the outline; a
+   * missing field means hidden.
+   */
+  canThrowIn?: boolean;
   /** Chaos Mode variant: the attacker may choose any active defender. */
   chaosMode?: boolean;
   /** True when the viewed seat is computer-controlled, so it accepts no input. */
@@ -285,6 +298,21 @@ export function parsePlayerGameView(value: unknown): PlayerGameView {
   if (defenderDefenseless !== undefined && typeof defenderDefenseless !== 'boolean') {
     fail('defenderDefenseless must be a boolean');
   }
+  // T-90 throw-in projection: the backend owns all three fields. A missing
+  // field defaults to "nothing to throw in" (empty / 0 / false = hidden).
+  const throwInCards = raw.throwInCards;
+  if (throwInCards !== undefined && !Array.isArray(throwInCards)) {
+    fail('throwInCards must be an array of cards');
+  }
+  const parsedThrowInCards = ((throwInCards as unknown[] | undefined) ?? []).map(parseCard);
+  const throwInCapacity = raw.throwInCapacity;
+  if (throwInCapacity !== undefined && typeof throwInCapacity !== 'number') {
+    fail('throwInCapacity must be a number');
+  }
+  const canThrowIn = raw.canThrowIn;
+  if (canThrowIn !== undefined && typeof canThrowIn !== 'boolean') {
+    fail('canThrowIn must be a boolean');
+  }
   const myFinishRank = raw.myFinishRank;
   if (myFinishRank !== undefined && myFinishRank !== null && typeof myFinishRank !== 'number') {
     fail('myFinishRank must be a number or null');
@@ -377,6 +405,9 @@ export function parsePlayerGameView(value: unknown): PlayerGameView {
     gameEndedAtMs: (gameEndedAtMs as number | null | undefined) ?? null,
     winners: (winners as string[] | undefined) ?? [],
     defenderDefenseless: (defenderDefenseless as boolean | undefined) ?? false,
+    throwInCards: parsedThrowInCards,
+    throwInCapacity: (throwInCapacity as number | undefined) ?? 0,
+    canThrowIn: (canThrowIn as boolean | undefined) ?? false,
     ...(myHasPassed === undefined ? {} : { myHasPassed: myHasPassed as boolean }),
     ...(myFinishRank === undefined
       ? {}

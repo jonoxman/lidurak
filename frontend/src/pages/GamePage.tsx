@@ -271,6 +271,10 @@ export function playReplayFrameSound(frames: ReplayFrame[], targetIdx: number): 
 
 /** One-click scripted positions offered in the lobby and the game sidebar. */
 export const QA_SCENARIOS: { id: string; label: string }[] = [
+  { id: 'throw-in-visibility-4p', label: 'Throw-In Visibility (4P)' },
+  { id: 'throw-in-capacity-cap', label: 'Throw-In Capacity Cap' },
+  { id: 'huge-hand-36', label: 'Huge Hand (36)' },
+  { id: 'huge-hand-52', label: 'Huge Hand (52)' },
   { id: '3p-redirect-bob', label: '3P Redirect (Bob POV)' },
   { id: 'chaos-4p', label: '4P Chaos Targets' },
   { id: 'surrender-half-off', label: 'Surrender Half-Off' },
@@ -1000,6 +1004,12 @@ export function GamePage({
     maxThrowInCount >= 1 &&
     handMatchesTableRank &&
     serverAllowsThrowIn;
+
+  // T-90: the backend projection is the single source of truth for the
+  // throw-in outline — it is rendered only for a seat the server says may
+  // legally play into it. A missing field means hidden. Switching POV swaps
+  // `view`, so the gate is re-evaluated immediately for the newly viewed seat.
+  const canThrowInOutline = !reviewMode && view.canThrowIn === true;
 
   const isAttackerTurn =
     isInitialAttackPhase(view.boutPhase) && hasLegalAction(view.legalActions, 'attack');
@@ -1843,8 +1853,7 @@ export function GamePage({
           surrenderTriggered={surrenderLatchActive}
           defenderDefenseless={defenderDefenseless}
           canRedirect={!reviewMode && hasLegalAction(displayedView.legalActions, 'redirect')}
-          canThrowIn={canCurrentPlayerThrowIn}
-          throwInVisible={canCurrentPlayerThrowIn}
+          canThrowIn={canThrowInOutline}
           isReviewMode={reviewMode}
           isBot={isBotViewer}
           turnPlayerId={turnPlayerIdFor(displayedView)}
