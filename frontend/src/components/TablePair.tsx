@@ -68,7 +68,12 @@ export function TablePair({
       data-card-width={cardWidth}
       data-card-height={cardHeight}
       data-uncovered-highlighted={uncoveredHighlighted ? 'true' : 'false'}
-      style={marginLeft ? { marginLeft } : undefined}
+      // T-90: size the pair from the shared card tokens (no measured px).
+      style={{
+        '--pair-card-w': 'var(--card-w, 100px)',
+        '--pair-card-h': 'var(--card-h, 140px)',
+        ...(marginLeft ? { marginLeft } : {}),
+      }}
     >
       <div
         class="table-pair-attack table-card-attack table-card-base"
@@ -83,8 +88,6 @@ export function TablePair({
           suit={attack.suit}
           rank={attack.rank}
           trump={isTrump(attack)}
-          width={cardWidth}
-          height={cardHeight}
           onClick={onAttackClick}
         />
       </div>
@@ -94,8 +97,6 @@ export function TablePair({
             suit={defense.suit}
             rank={defense.rank}
             trump={isTrump(defense)}
-            width={cardWidth}
-            height={cardHeight}
           />
         </div>
       ) : null}

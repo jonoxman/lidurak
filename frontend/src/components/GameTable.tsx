@@ -98,15 +98,8 @@ export interface GameTableProps {
   boutPhase?: string;
   /** True while a redirect is legal for the viewer. */
   canRedirect?: boolean;
-  /** True while the viewer may throw in a matching card. */
+  /** T-90: backend-owned gate; `true` only when this seat may throw in. */
   canThrowIn?: boolean;
-  /**
-   * T-90-feedback-20261105_221105-3 ITEM-1a: GamePage's authoritative "the
-   * viewer can legally play into the throw-in outline right now" decision. The
-   * outline is rendered only when this is true; when the prop is omitted the
-   * legacy `canThrowIn` flag is the fallback gate.
-   */
-  throwInVisible?: boolean;
   /** Id of the player whose turn clock is running. */
   turnPlayerId?: string;
   /** Seconds left on the active turn clock (0..15). */
@@ -1336,7 +1329,6 @@ export function GameTable({
   boutPhase,
   canRedirect = false,
   canThrowIn = false,
-  throwInVisible,
   turnPlayerId,
   turnSecondsRemaining = 15,
   sortMode = 'rank',
@@ -1723,8 +1715,8 @@ export function GameTable({
     !reviewMode &&
     Boolean(onAttackDrop || onCoverDrop || onThrowInDrop || onRedirectDrop || onReorderHand);
   const throwInEnabled = !reviewMode && canThrowIn;
-  // ITEM-1a: never render the throw-in surface for a seat that cannot use it.
-  const showThrowInOutline = !reviewMode && (throwInVisible ?? canThrowIn);
+  // T-90: backend projection is the only gate; false/missing = not in the DOM.
+  const showThrowInOutline = !reviewMode && canThrowIn === true;
 
   // ITEM-7: the whole page keeps the link pointer finger for the entire drag,
   // including outside the arena where the browser would paint its own cursor.
@@ -2352,7 +2344,7 @@ export function GameTable({
             above the viewer's own taken cards — never inside the half-off
             `.table-pairs-group` transform, so its border box stays fully on the
             table at any viewport size. */}
-        {throwInSlot > 0 && throwInDetached ? (
+        {throwInDetached && throwInSlot > 0 ? (
           <div
             class="surrender-throw-in-anchor"
             data-testid="surrender-throw-in-anchor"
@@ -2362,6 +2354,18 @@ export function GameTable({
           >
             {throwInOutline}
           </div>
+        ) : null}
+        {/* T-90: empty, hidden, handler-free spacer keeps the taken cards still. */}
+        {throwInDetached && throwInSlot === 0 ? (
+          <div
+            class="surrender-throw-in-anchor"
+            data-testid="surrender-throw-in-anchor"
+            data-placement={throwInOutlinePosition}
+            data-surrender-seat={surrenderTarget}
+            data-outline-hidden="true"
+            aria-hidden="true"
+            style={{ visibility: 'hidden' }}
+          />
         ) : null}
         </div>
       </section>
@@ -2539,8 +2543,6 @@ export function GameTable({
               <Card
                 suit={card.suit}
                 rank={card.rank}
-                width={cardWidth}
-                height={cardHeight}
                 trump={isTrumpCard(card, trumpSuit)}
                 selected={selectedKeys.includes(cardKey(card))}
                 playable={activePlayableKeys.includes(cardKey(card))}
@@ -2572,18 +2574,29 @@ export function GameTable({
                 }
                 draggable={false}
                 onDragStart={(event) => {
-                  // ITEM-7: block the native drag image and its cursor swap; the
-                  // pointer gesture drives the drag, and this keeps the
-                  // programmatic drop path working for tests and automation.
+                  // T-90: drag image from the mounted card, before any re-render.
+                  const element = event.currentTarget as HTMLElement | null;
+                  const transfer = event.dataTransfer;
+                  if (transfer) {
+                    transfer.effectAllowed = 'move';
+                    transfer.setData('text/plain', cardKey(card));
+                    if (element && typeof transfer.setDragImage === 'function') {
+                      const rect =
+                        typeof element.getBoundingClientRect === 'function'
+                          ? element.getBoundingClientRect()
+                          : null;
+                      const offsetX =
+                        rect && rect.width > 0 ? rect.width / 2 : cardWidth / 2;
+                      const offsetY =
+                        rect && rect.height > 0 ? rect.height / 2 : cardHeight / 2;
+                      transfer.setDragImage(element, offsetX, offsetY);
+                    }
+                  }
+                  // Pointer-driven gesture stays; native drag is suppressed after.
                   event.preventDefault();
                   pointerDragRef.current = null;
                   setDragCard(card);
                   setDragOffset({ x: 0, y: 0 });
-                  if (event.dataTransfer) {
-                    // A move drag keeps the pointer cursor instead of the copy arrow.
-                    event.dataTransfer.effectAllowed = 'move';
-                    event.dataTransfer.setData('text/plain', cardKey(card));
-                  }
                 }}
                 onDragEnd={() => {
                   setDragCard(null);

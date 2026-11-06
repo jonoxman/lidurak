@@ -6,6 +6,10 @@
   --durak-accent: #629924;
   --durak-danger: #c33;
   --durak-amber: #d9a326;
+  /* T-90: one source of truth for every card-sized box on the table. */
+  --card-w: 100px;
+  --card-h: 140px;
+  --card-radius: var(--app-roundness, 8px);
   /* T-90-feedback-2: highlight aura multiplier written inline by settings.ts.
      Every glow below multiplies its blur/spread by this factor, so the Theme ▸
      Highlights intensity slider retunes the live table in real time. */
@@ -413,17 +417,15 @@
   /* Item 8: the card box and the reserve under each card are shared with the
      reflection outline, so both always line up on the same card edges. */
   /* ITEM-13: cards in play are 100x140, matching the hand (+25%). */
-  --bout-card-width: 100px;
-  --bout-card-height: 140px;
+  --bout-card-width: var(--card-w, 100px);
+  --bout-card-height: var(--card-h, 140px);
   --bout-card-offset: 18px;
   display: flex;
-  /* ITEM-NEW-2a/2b: the cards in play are one single compact row that never
-     wraps; the per-slot `margin-left` written by `boutLayout` carries the
-     spacing (a 4px gap, then an overlap down to the 22px visible-left limit). */
-  flex-wrap: nowrap;
+  /* T-90: never shrink a card to fit; up to six pairs wrap with a gap. */
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: center;
-  gap: 0;
+  gap: var(--bout-gap, 4px);
   min-width: 0;
   transition: transform 320ms ease;
 }
@@ -473,8 +475,8 @@
 /* T-90 ITEM-1b: a legal attack target belongs to the Attacker (emerald) family,
    so it reads as gameplay rather than as a UI menu selection. */
 .target-outline {
-  width: 100px;
-  height: 140px;
+  width: var(--card-w, 100px);
+  height: var(--card-h, 140px);
   margin-top: 10px;
   border: 2px dashed var(--role-attacker-border);
   border-radius: var(--app-roundness, 8px);
@@ -497,8 +499,8 @@
   place-items: center;
   flex: 0 0 auto;
   align-self: flex-start;
-  width: var(--bout-card-width, 100px);
-  height: var(--bout-card-height, 140px);
+  width: var(--card-w, 100px);
+  height: var(--card-h, 140px);
   margin: 0 0 var(--bout-card-offset, 18px) 0;
   border: 2px dashed var(--redirect-border);
   border-radius: var(--app-roundness, 8px);
@@ -564,9 +566,11 @@
 }
 
 .table-pair {
+  /* T-90: the pair owns its defence overhang, so wrapping never overlaps. */
+  --pair-defense-offset: 20px;
   display: grid;
-  grid-template-columns: var(--bout-card-width, 100px);
-  grid-template-rows: var(--bout-card-height, 140px);
+  grid-template-columns: var(--pair-card-w, var(--card-w, 100px));
+  grid-template-rows: var(--pair-card-h, var(--card-h, 140px));
   /* Item 8: cards start flush with the top of the pair box, so the attack cards
      and the reflection outline share one top edge. The bottom/right reserve is
      the space the overlapping defence card needs. */
@@ -576,7 +580,7 @@
   /* ITEM-NEW-2b: only the card itself is reserved horizontally; the defence
      card overhangs to the right, and the compact row spacing comes from the
      inline `margin-left` on every slot. */
-  padding: 0 0 var(--bout-card-offset, 18px) 0;
+  padding: 0 var(--pair-defense-offset, 20px) var(--bout-card-offset, 18px) 0;
   box-sizing: border-box;
 }
 
@@ -589,7 +593,7 @@
 
 /* The defender's card overlaps its attack card. */
 .table-pair-defense {
-  margin: 15px 0 0 20px;
+  margin: 15px 0 0 var(--pair-defense-offset, 20px);
 }
 
 /* An uncovered attack that can be clicked to cover it. */
@@ -919,8 +923,9 @@
      redirect / target outlines (the `900px` breakpoint below scales both to
      48x68). The card never shrinks below that box. Cards without an explicit
      `width` prop use these variables inline, so the breakpoint still wins. */
-  --card-width: 100px;
-  --card-height: 140px;
+  /* T-90: the card root resolves its footprint from the shared tokens. */
+  --card-width: var(--card-w, 100px);
+  --card-height: var(--card-h, 140px);
   flex: 0 0 var(--card-width, 100px);
   width: var(--card-width, 100px);
   height: var(--card-height, 140px);
@@ -1646,9 +1651,10 @@
   }
 
   .table-pair {
-    grid-template-columns: 48px;
-    grid-template-rows: 68px;
-    padding: 0 0 var(--bout-card-offset, 10px) 0;
+    --pair-defense-offset: 14px;
+    grid-template-columns: var(--card-w, 48px);
+    grid-template-rows: var(--card-h, 68px);
+    padding: 0 var(--pair-defense-offset, 14px) var(--bout-card-offset, 10px) 0;
   }
 
   .bout-area[data-anchor] {
@@ -1667,7 +1673,7 @@
   }
 
   .table-pair-defense {
-    margin: 10px 0 0 14px;
+    margin: 10px 0 0 var(--pair-defense-offset, 14px);
   }
 
   .action-button {
@@ -2317,6 +2323,12 @@
   padding-inline: 8px;
 }
 
+/* T-90: hand cards read the same card tokens as the bout and outlines. */
+[data-zone='player-hand'] {
+  --hand-card-width: var(--card-w, 100px);
+  --hand-card-height: var(--card-h, 140px);
+}
+
 /* ITEM-7: the link pointer finger is enforced on every node of a hand card —
    including the SVG `<rect>`, `<g>` and `<text>` inside it — and on every
    surface of the whole drag gesture, so the browser can never fall back to its
@@ -2413,8 +2425,8 @@ body[data-dragging='true'] *,
   display: grid;
   flex: 0 0 auto;
   align-self: flex-start;
-  width: 100px;
-  height: 140px;
+  width: var(--card-w, 100px);
+  height: var(--card-h, 140px);
   margin: 0;
   padding: 0;
   box-sizing: border-box;
@@ -2428,8 +2440,8 @@ body[data-dragging='true'] *,
   display: grid;
   justify-self: center;
   align-self: end;
-  width: 100px;
-  height: 140px;
+  width: var(--card-w, 100px);
+  height: var(--card-h, 140px);
   margin: 0;
   padding: 0;
   box-sizing: border-box;
@@ -2451,20 +2463,26 @@ body[data-dragging='true'] *,
   justify-self: end;
 }
 
+/* T-90: empty hidden spacer; keeps the taken cards in place. */
+.surrender-throw-in-anchor[data-outline-hidden='true'] {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 /* T-90 ITEM-2: the outline is always exactly one playing card — 100x140 — never
    shrunk by a full row, never stretched in the above/below column and never
    grown by the covered-card reserve of `.table-pair`. */
 .throw-in-outline {
   display: grid;
   place-items: center;
-  flex: 0 0 100px;
+  flex: 0 0 var(--card-w, 100px);
   align-self: flex-start;
-  width: 100px;
-  height: 140px;
-  min-width: 100px;
-  max-width: 100px;
-  min-height: 140px;
-  max-height: 140px;
+  width: var(--card-w, 100px);
+  height: var(--card-h, 140px);
+  min-width: var(--card-w, 100px);
+  max-width: var(--card-w, 100px);
+  min-height: var(--card-h, 140px);
+  max-height: var(--card-h, 140px);
   margin: 0;
   border: 2px dashed var(--role-attacker-border);
   border-radius: var(--app-roundness, 8px);
@@ -2577,5 +2595,13 @@ body[data-dragging='true'] *,
   .surrender-throw-in-anchor {
     width: 48px;
     height: 68px;
+  }
+}
+
+/* T-90: one responsive breakpoint for every card-sized box (48x68). */
+@media (max-width: 899px) {
+  :root {
+    --card-w: 48px;
+    --card-h: 68px;
   }
 }

@@ -539,3 +539,23 @@ describe('LobbyPage QA presets (T-90-feedback-20261105_221105-3)', () => {
     await waitFor(() => expect(window.location.hash).toBe('#/g/preset-f?player=p0'));
   });
 });
+
+describe('T-90-feedback-20261106_111512-3: new QA scenario presets', () => {
+  it('lists and launches the four new presets in one click', async () => {
+    createPresetGame.mockReset();
+    render(<LobbyPage initialServerReady />);
+    const panel = screen.getByTestId('qa-scenarios');
+    const presets = {
+      'throw-in-visibility-4p': 'Throw-In Visibility (4P)',
+      'throw-in-capacity-cap': 'Throw-In Capacity Cap',
+      'huge-hand-36': 'Huge Hand (36)',
+      'huge-hand-52': 'Huge Hand (52)',
+    };
+    for (const [id, label] of Object.entries(presets)) {
+      expect(within(panel).getByTestId(`preset-btn-${id}`).textContent).toBe(label);
+    }
+    createPresetGame.mockResolvedValue({ gameId: 'preset-t90', defaultPlayerId: 'p0' });
+    fireEvent.click(within(panel).getByTestId('preset-btn-throw-in-visibility-4p'));
+    await waitFor(() => expect(createPresetGame).toHaveBeenCalledWith('throw-in-visibility-4p'));
+  });
+});

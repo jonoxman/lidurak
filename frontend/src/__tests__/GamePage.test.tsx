@@ -184,8 +184,8 @@ describe('GamePage', () => {
     // ITEM-1b: the live card carries the 100x140 footprint inline.
     expect(card.getAttribute('data-card-width')).toBe('100');
     expect(card.getAttribute('data-card-height')).toBe('140');
-    expect(card.style.width).toBe('100px');
-    expect(card.style.height).toBe('140px');
+    expect(card.style.width).toBe('var(--card-w, 100px)');
+    expect(card.style.height).toBe('var(--card-h, 140px)');
 
     // ITEM-4: the live hand reports its clamped overlap geometry.
     expect(Number(box.getAttribute('data-overlap-ratio'))).toBeGreaterThanOrEqual(0.2);
@@ -668,6 +668,8 @@ describe('GamePage', () => {
       boutPhase: 'SurrenderThrowIn',
       legalActions: ['throwIn', 'pass'],
       defenderDefenseless: false,
+      // T-90: the backend projection now owns the throw-in gate (and glow).
+      canThrowIn: true,
     });
 
     const { container } = render(
@@ -3309,6 +3311,13 @@ describe('T-90-feedback-20261105_221105-3: throw-in gate, multi-card throw-in an
     boutPhase: 'Defense',
     legalActions: ['throwIn', 'pass'],
     maxBoutAttacks: 6,
+    // T-90: the outline is now gated by the backend projection.
+    canThrowIn: true,
+    throwInCards: [
+      { suit: 'hearts', rank: 'seven' },
+      { suit: 'clubs', rank: 'seven' },
+    ],
+    throwInCapacity: 5,
   };
 
   const renderGame = (override: PlayerGameView, playerId = 'p0') => {
@@ -3350,6 +3359,7 @@ describe('T-90-feedback-20261105_221105-3: throw-in gate, multi-card throw-in an
         attackerIdx: 0,
         defenderIdx: 1,
         legalActions: ['cover', 'surrender', 'throwIn'],
+        canThrowIn: false,
       },
       'p1',
     );
@@ -3364,6 +3374,8 @@ describe('T-90-feedback-20261105_221105-3: throw-in gate, multi-card throw-in an
       ...throwInView,
       myHand: [{ suit: 'hearts', rank: 'ace' }],
       legalActions: ['throwIn', 'pass'],
+      canThrowIn: false,
+      throwInCards: [],
     });
 
     await screen.findByTestId('hand-turn-highlight');
@@ -3377,11 +3389,18 @@ describe('T-90-feedback-20261105_221105-3: throw-in gate, multi-card throw-in an
       boutPhase: 'SurrenderThrowIn',
       legalActions: ['pass'],
       myHasPassed: true,
+      canThrowIn: false,
     });
 
     await screen.findByTestId('hand-turn-highlight');
     expect(screen.queryByTestId('throw-in-outline')).toBeNull();
-    expect(screen.queryByTestId('surrender-throw-in-anchor')).toBeNull();
+    // T-90: the anchor survives only as an empty, invisible, handler-free
+    // spacer so the half-off taken cards do not jump.
+    const spacer = screen.queryByTestId('surrender-throw-in-anchor');
+    if (spacer) {
+      expect(spacer.getAttribute('data-outline-hidden')).toBe('true');
+      expect(spacer.children).toHaveLength(0);
+    }
   });
 
   it('ITEM-5: selects legal cards and throws them all in with one double-click', async () => {
@@ -3597,10 +3616,53 @@ describe('T-90-feedback-20261105_221105-3 round 2: throw-in gate precision', () 
   });
 
   it('ITEM-1a: still shows the outline when the server lists the throw-in', async () => {
-    getGameView.mockResolvedValue(baseView);
+    getGameView.mockResolvedValue({ ...baseView, canThrowIn: true });
     render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
 
     const outline = await screen.findByTestId('throw-in-outline');
     expect(outline.getAttribute('data-throw-in-enabled')).toBe('true');
+  });
+});
+
+describe('T-90-feedback-20261106_111512-3: backend canThrowIn gate and new presets', () => {
+  const t90View: PlayerGameView = {
+    ...view, myId: 'p0', myName: 'Alice',
+    myHand: [{ suit: 'hearts', rank: 'seven' }, { suit: 'clubs', rank: 'nine' }],
+    opponents: [{ id: 'p1', name: 'Bob', cardCount: 6, hasPassed: false, finishRank: null }],
+    tablePairs: [{ attack: { suit: 'spades', rank: 'seven' }, defense: null }],
+    trumpSuit: 'clubs', attackerIdx: 0, defenderIdx: 1, boutPhase: 'Defense',
+    legalActions: ['throwIn', 'pass'], maxBoutAttacks: 6,
+  };
+  beforeEach(() => {
+    getGameView.mockReset();
+    getGameReplay.mockReset();
+    createPresetGameMock.mockReset();
+    wsState.onUpdate = null;
+    getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
+    window.location.hash = '';
+  });
+  const renderT90 = (override: PlayerGameView) => {
+    getGameView.mockResolvedValue(override);
+    return render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+  };
+  it('renders the outline only from backend canThrowIn', async () => {
+    renderT90({ ...t90View, canThrowIn: true });
+    expect(await screen.findByTestId('throw-in-outline')).toBeTruthy();
+  });
+  it('hides it when the backend projects false', async () => {
+    renderT90({ ...t90View, canThrowIn: false });
+    await screen.findByTestId('hand-turn-highlight');
+    expect(screen.queryByTestId('throw-in-outline')).toBeNull();
+    expect(document.querySelector('[data-drop-zone="throw-in"]')).toBeNull();
+  });
+  it('lists and launches the new presets from the left sidebar', async () => {
+    renderT90({ ...t90View, canThrowIn: false });
+    const panel = await screen.findByTestId('qa-scenarios');
+    for (const id of ['throw-in-visibility-4p', 'throw-in-capacity-cap', 'huge-hand-36', 'huge-hand-52']) {
+      expect(within(panel).getByTestId(`preset-btn-${id}`)).toBeTruthy();
+    }
+    createPresetGameMock.mockResolvedValue({ gameId: 'preset-t90', defaultPlayerId: 'p0' });
+    fireEvent.click(within(panel).getByTestId('preset-btn-huge-hand-52'));
+    await waitFor(() => expect(createPresetGameMock).toHaveBeenCalledWith('huge-hand-52'));
   });
 });
