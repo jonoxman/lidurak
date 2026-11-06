@@ -27,9 +27,12 @@ export interface CardProps {
   faceUp?: boolean;
   selected?: boolean;
   /**
-   * T-90-feedback-20261105_221105-2 ITEM-1b: explicit compact footprint (for
-   * example the rotated bottom-trump card in the sidebar). The default
-   * `100 × 140` is left to CSS so the `900px` breakpoint can deliver `48 × 68`.
+   * T-90-feedback-20261105_221105-2 ITEM-1b: explicit footprint in px. Hand,
+   * play-area and deck callers pass the measured responsive size (100 × 140
+   * desktop, 48 × 68 below 900px); compact callers (the sidebar bottom-trump)
+   * pass their own smaller box. When omitted, the card still sets an inline
+   * `100 × 140` footprint through `--card-width` / `--card-height`, so the
+   * mobile breakpoint can override the default without losing the inline box.
    */
   width?: number;
   height?: number;
@@ -404,25 +407,32 @@ export function Card({
   selected = false,
   playable = false,
   trump = false,
-  width = CARD_DEFAULT_WIDTH,
-  height = CARD_DEFAULT_HEIGHT,
+  width,
+  height,
   onClick,
   onDoubleClick,
   draggable = false,
   onDragStart,
   onDragEnd,
 }: CardProps) {
-  // T-90-feedback-2 ITEM-1b (review round 1): every card carries its footprint
-  // inline, as the ticket requires. The default is the 100x140 table size; the
-  // hand / play area pass the measured responsive size (48x68 below 900px), and
-  // compact callers (the sidebar bottom trump) pass their own smaller box.
+  // T-90-feedback-2 ITEM-1b (review round 2): every card carries its footprint
+  // inline, as the ticket requires. Explicit props win (the hand / play area
+  // pass the measured responsive size, compact callers their own box); when no
+  // size is passed the inline default is expressed through custom properties so
+  // the `900px` breakpoint can still deliver 48x68 instead of being overridden.
+  const resolvedWidth = width ?? CARD_DEFAULT_WIDTH;
+  const resolvedHeight = height ?? CARD_DEFAULT_HEIGHT;
+  const widthCss =
+    width == null ? `var(--card-width, ${CARD_DEFAULT_WIDTH}px)` : `${width}px`;
+  const heightCss =
+    height == null ? `var(--card-height, ${CARD_DEFAULT_HEIGHT}px)` : `${height}px`;
   const cardStyle = {
     borderRadius: CARD_BORDER_RADIUS,
-    width: `${width}px`,
-    height: `${height}px`,
-    minWidth: `${width}px`,
-    minHeight: `${height}px`,
-    flex: `0 0 ${width}px`,
+    width: widthCss,
+    height: heightCss,
+    minWidth: widthCss,
+    minHeight: heightCss,
+    flex: `0 0 ${widthCss}`,
   };
   // The face where the pips are drawn is theme-dependent: white on the light
   // theme, grey on the dark theme.
@@ -446,8 +456,8 @@ export function Card({
         class={classes.join(' ')}
         data-selected={selected ? 'true' : 'false'}
         data-roundness={roundness}
-        data-card-width={width}
-        data-card-height={height}
+        data-card-width={resolvedWidth}
+        data-card-height={resolvedHeight}
         style={cardStyle}
         onClick={onClick}
         onDblClick={onDoubleClick}
@@ -477,8 +487,8 @@ export function Card({
       data-card-theme={theme}
       data-roundness={roundness}
       data-trump-glow="false"
-      data-card-width={width}
-      data-card-height={height}
+      data-card-width={resolvedWidth}
+      data-card-height={resolvedHeight}
       style={cardStyle}
       onClick={onClick}
       onDblClick={onDoubleClick}

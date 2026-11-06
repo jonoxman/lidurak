@@ -1405,15 +1405,21 @@ describe('T-90-feedback-20261105_221105-2: card footprint', () => {
 
     expect(slot.getAttribute('data-card-width')).toBe('100');
     expect(slot.getAttribute('data-card-height')).toBe('140');
-    // The footprint is inline, exactly as the ticket asks.
-    expect(slot.style.width).toBe('100px');
-    expect(slot.style.height).toBe('140px');
-    expect(slot.style.minWidth).toBe('100px');
-    expect(slot.style.minHeight).toBe('140px');
-    expect(tableCss).toMatch(/\.card-slot\s*{[^}]*width: 100px;[^}]*height: 140px;/);
-    expect(tableCss).toMatch(/\.card-slot\s*{[^}]*min-width: 100px;[^}]*min-height: 140px;/);
+    // The default footprint is inline but expressed through the responsive
+    // variables, so the 900px breakpoint is not overridden by fixed inline px.
+    expect(slot.style.width).toBe('var(--card-width, 100px)');
+    expect(slot.style.height).toBe('var(--card-height, 140px)');
+    expect(slot.style.minWidth).toBe('var(--card-width, 100px)');
+    expect(slot.style.minHeight).toBe('var(--card-height, 140px)');
+    expect(slot.style.flex).toBe('0 0 var(--card-width, 100px)');
     expect(tableCss).toMatch(
-      /@media \(max-width: 900px\)[\s\S]*?\.card-slot\s*{[^}]*width: 48px;[^}]*height: 68px;/,
+      /\.card-slot\s*{[^}]*--card-width: 100px;[^}]*--card-height: 140px;/,
+    );
+    expect(tableCss).toMatch(
+      /\.card-slot\s*{[^}]*width: var\(--card-width, 100px\);[^}]*height: var\(--card-height, 140px\);/,
+    );
+    expect(tableCss).toMatch(
+      /@media \(max-width: 900px\)[\s\S]*?\.card-slot\s*{[^}]*--card-width: 48px;[^}]*--card-height: 68px;/,
     );
     unmount();
 

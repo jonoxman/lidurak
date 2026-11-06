@@ -917,12 +917,15 @@
   position: relative;
   /* T-90-feedback-2 ITEM-1b: every playing card matches the 100x140 throw-in /
      redirect / target outlines (the `900px` breakpoint below scales both to
-     48x68). The card never shrinks below that box. */
-  flex: 0 0 100px;
-  width: 100px;
-  height: 140px;
-  min-width: 100px;
-  min-height: 140px;
+     48x68). The card never shrinks below that box. Cards without an explicit
+     `width` prop use these variables inline, so the breakpoint still wins. */
+  --card-width: 100px;
+  --card-height: 140px;
+  flex: 0 0 var(--card-width, 100px);
+  width: var(--card-width, 100px);
+  height: var(--card-height, 140px);
+  min-width: var(--card-width, 100px);
+  min-height: var(--card-height, 140px);
   /* ITEM-NEW-1a: every card in play or in hand follows the roundness slider. */
   border-radius: var(--app-roundness, 8px);
   /* The trump border paints inside the card box, so a bordered card is never
@@ -1564,11 +1567,15 @@
   }
 
   .card-slot {
-    flex: 0 0 48px;
-    width: 48px;
-    height: 68px;
-    min-width: 48px;
-    min-height: 68px;
+    /* T-90-feedback-2 ITEM-1b: the responsive default for any card that did
+       not receive an explicit px size. */
+    --card-width: 48px;
+    --card-height: 68px;
+    flex: 0 0 var(--card-width, 48px);
+    width: var(--card-width, 48px);
+    height: var(--card-height, 68px);
+    min-width: var(--card-width, 48px);
+    min-height: var(--card-height, 68px);
   }
 
   /* T-90-feedback-2 ITEM-1b: the hand slot and the play-area card aliases scale
@@ -1932,19 +1939,19 @@
 
 /* --- Interaction polish (Items 11, 12, 18, 19) --- */
 
-/* T-90-feedback-2 ITEM-2: a playable / selected card lifts by the same 14px
-   the SVG contour uses, so the tight outline steps up over exactly the cards
-   that are raised. */
+/* T-90-feedback-2 ITEM-2: a playable / selected card lifts by the exact offset
+   the SVG contour uses (`--hand-raise`, written from `HAND_RAISED_OFFSET` on
+   `.hand-cards`), so the tight outline steps up over exactly the raised cards. */
 .hand-cards .card-slot.legal-playable {
-  transform: translateY(-14px);
+  transform: translateY(var(--hand-raise, -14px));
 }
 
 .hand-cards .card-slot.legal-playable:hover {
-  transform: translateY(-16px);
+  transform: translateY(calc(var(--hand-raise, -14px) - 2px));
 }
 
 .hand-cards .card-slot.selected {
-  transform: translateY(-14px);
+  transform: translateY(var(--hand-raise, -14px));
 }
 
 /* Item 19: the whole gesture keeps the pointer finger, never the slashed

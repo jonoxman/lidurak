@@ -342,13 +342,31 @@ const EMPTY_HAND_LAYOUT: HandLayout = {
 };
 
 /**
+ * T-90-feedback-2 ITEM-1b (review round 2): the play area's measured card size
+ * is clamped to the standard 100x140 box. Measuring a slot larger than a single
+ * card (for example a pair that reserves the defender's overhang) can therefore
+ * never stretch the cards or start a measure -> render growth loop.
+ */
+export function clampBoutCardSize(
+  width: number,
+  height: number,
+): { width: number; height: number } {
+  return {
+    width: Math.max(0, Math.min(CARD_WIDTH, width || 0)),
+    height: Math.max(0, Math.min(CARD_HEIGHT, height || 0)),
+  };
+}
+
+/**
  * T-90-feedback-20261105_221105-2 ITEM-4 single-row hand geometry.
  *
  * For `N >= 2` cards of width `W` in `availableWidth`:
  * - the stride (left-edge distance) is clamped to `[0.20W, 0.80W]`, so the
  *   overlap ratio `(W - stride) / W` always stays within `[20%, 80%]`;
  * - when even the minimum `0.20W` stride cannot fit a picked-up full deck
- *   (25-52 cards), the stride may compress to the `15px` readable left strip;
+ *   (25-52 cards), the stride may compress to a readable left strip that
+ *   scales with the card (`15px` at 100px, `7.2px` at 48px mobile), never
+ *   widening past the standard minimum stride;
  * - if the row still cannot fit, `scale` shrinks the whole hand so
  *   `totalWidth * scale` never exceeds `availableWidth` and never runs under
  *   the sidebar or the Surrender / Pass buttons.
@@ -383,8 +401,15 @@ export function handLayout(
   let stride = Math.min(maxStride, Math.max(minStride, idealStride));
 
   // Full-deck pickup safeguard: a 20% overlap can still overflow the column.
+  // The readable strip scales with the card, so a 48px mobile hand compresses
+  // to 7.2px instead of being widened back to the desktop 15px floor (which
+  // made the row wider and forced a needless scale-down).
   if (width + (count - 1) * minStride > available) {
-    stride = Math.max(HAND_MIN_VISIBLE_LEFT, (available - width) / (count - 1));
+    const readableStrip = Math.min(
+      minStride,
+      HAND_MIN_VISIBLE_LEFT * (width / HAND_CARD_WIDTH),
+    );
+    stride = Math.max(readableStrip, (available - width) / (count - 1));
   }
 
   const totalWidth = width + (count - 1) * stride;
@@ -1422,11 +1447,16 @@ export function GameTable({
       if (box.clientWidth > 0) setBoutWidth(Math.max(0, box.clientWidth - padding));
       // The pair's grid track is 100x140 desktop and 48x68 mobile, so measuring
       // the pair (not the inline-sized card) keeps the play area responsive.
-      const pair = box.querySelector('.table-pair') as HTMLElement | null;
-      const measured = pair?.offsetWidth ?? 0;
-      if (measured > 0) setBoutCardWidth(measured);
-      const measuredHeight = pair?.offsetHeight ?? 0;
-      if (measuredHeight > 0) setBoutCardHeight(measuredHeight);
+      // Measure ONE CSS-sized card slot (`.table-pair-attack`), never the pair
+      // box: the pair also reserves the defender's overhang and the 18px drop
+      // offset, so it is larger than a card.
+      const slot = box.querySelector('.table-pair-attack') as HTMLElement | null;
+      const measured = clampBoutCardSize(
+        slot?.offsetWidth ?? 0,
+        slot?.offsetHeight ?? 0,
+      );
+      if (measured.width > 0) setBoutCardWidth(measured.width);
+      if (measured.height > 0) setBoutCardHeight(measured.height);
     };
     measure();
     if (typeof ResizeObserver !== 'undefined' && battlefieldRef.current) {
@@ -1441,9 +1471,16 @@ export function GameTable({
     return undefined;
   }, []);
 
+  // T-90-feedback-2 ITEM-4 (review round 2): reserve the contour's 4px padding
+  // on both sides, so a fit-scaled full-deck row and its outline can never
+  // bleed into the talon or the Surrender / Pass column.
+  const handAvailableWidth = Math.max(
+    0,
+    (handWidth > 0 ? handWidth : HAND_FALLBACK_WIDTH) - HAND_CONTOUR_PADDING * 2,
+  );
   const handLayoutState = handLayout(
     hand.length,
-    handWidth > 0 ? handWidth : HAND_FALLBACK_WIDTH,
+    handAvailableWidth,
     0.5,
     cardWidth,
   );
@@ -1461,7 +1498,7 @@ export function GameTable({
   const compactHandLayoutState = gapClosed
     ? handLayout(
         Math.max(0, hand.length - 1),
-        handWidth > 0 ? handWidth : HAND_FALLBACK_WIDTH,
+        handAvailableWidth,
         0.5,
         cardWidth,
       )
@@ -1483,9 +1520,9 @@ export function GameTable({
   // the defender, the whole hand for the attacker who owes a play. The pulse
   // sits on the cards container so the highlight hugs the cards tightly.
   const reviewMode = isReviewMode || isBotView;
-  // ITEM-PB-3: when every card in hand is legal, the outline travels with the
-  // lifted cards instead of staying at the baseline. `data-all-legal` carries
-  // the state so the stylesheet can translate the whole box.
+  // ITEM-PB-3 / T-90-feedback-2 ITEM-2: `data-all-legal` no longer translates
+  // the whole box. The contour steps over the raised cards instead, because
+  // every legal card is lifted by the shared `--hand-raise` offset.
   const activePlayableKeys = reviewMode ? [] : playableKeys;
   const allCardsLegal =
     !reviewMode &&
@@ -1519,6 +1556,14 @@ export function GameTable({
   const handContour = computeHandContour(contourCards, cardWidth, cardHeight);
   const totalHandWidth = activeHandLayoutState.totalWidth;
   const handFitScale = activeHandLayoutState.scale;
+  // T-90-feedback-2 ITEM-3: the dragged card sits inside the fit-scaled row.
+  // Counter-scale it and divide the pointer delta, so it tracks the cursor at
+  // its full 100x140 size instead of moving at `scale x` pointer speed.
+  const dragFitScale = handFitScale > 0 ? handFitScale : 1;
+  const draggedTransform =
+    dragFitScale === 1
+      ? `translate3d(${dragOffset.x}px, ${dragOffset.y}px, 0)`
+      : `translate3d(${dragOffset.x / dragFitScale}px, ${dragOffset.y / dragFitScale}px, 0) scale(${1 / dragFitScale})`;
   const handRenderedWidth = Math.max(0, Math.round(totalHandWidth * handFitScale));
   // T-90 ITEM-PREV-4a/4b: the highlight data attributes are mirrored onto the
   // outer `[data-zone="player-hand"]` wrapper for testability only. Every
@@ -1986,8 +2031,8 @@ export function GameTable({
       data-throw-in-enabled={canThrowIn ? 'true' : 'false'}
       data-surrender-outline-position={throwInOutlinePosition}
       data-on-table="true"
-      data-card-width={CARD_WIDTH}
-      data-card-height={CARD_HEIGHT}
+      data-card-width={boutCardWidth}
+      data-card-height={boutCardHeight}
       aria-label="Throw in another card"
       onDragOver={hoverZone('throw-in')}
       onDragLeave={clearSnap}
@@ -2272,8 +2317,8 @@ export function GameTable({
               data-testid="redirect-outline"
               style={{ marginLeft: boutSlotMargin(tablePairs.length + throwInSlot) }}
               data-drop-zone="redirect"
-              data-card-width={CARD_WIDTH}
-              data-card-height={CARD_HEIGHT}
+              data-card-width={boutCardWidth}
+              data-card-height={boutCardHeight}
               data-direction={redirectDirection}
               data-target-seat={redirectDirection}
               data-target-player={
@@ -2373,6 +2418,9 @@ export function GameTable({
           // T-90-feedback-2 ITEM-2: `.hand-cards` is exactly the overlapped card
           // footprint; the contour SVG is anchored to this box.
           style={{
+            // T-90-feedback-2 ITEM-2: the CSS lift reads this exact constant, so
+            // the contour and the raised cards can never disagree.
+            '--hand-raise': `${HAND_RAISED_OFFSET}px`,
             // The row lays out at its natural `totalWidth`; when the fit scale
             // is below 1 the box is the scaled width and the whole row is
             // scaled from its LEFT edge, so the cards and the contour SVG (a
@@ -2459,7 +2507,8 @@ export function GameTable({
                 index === draggedCardIndex
                   ? {
                       marginLeft: handSlotMargin(index),
-                      transform: `translate3d(${dragOffset.x}px, ${dragOffset.y}px, 0)`,
+                      transform: draggedTransform,
+                      transformOrigin: dragFitScale === 1 ? undefined : 'left top',
                       zIndex: 1000,
                       transition: 'none',
                     }
