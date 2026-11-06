@@ -90,8 +90,9 @@ trap cleanup_on_interrupt INT TERM
 
 # === THREE-POOL ANTIGRAVITY MODEL ROUTING ===
 ARCHITECT_CHAIN=("gemini-4-argon-high" "claude-opus-5-5-high" "claude-sonnet-5-5-high" "gemini-3.8-flash-high")
-REVIEWER_R1_CHAIN=("gemini-4-argon-high" "claude-sonnet-5-5-high" "gemini-4-argon-medium" "gemini-3.8-flash-high")
+REVIEWER_R1_CHAIN=("gemini-3.8-flash-high" "gemini-4-argon-medium" "claude-sonnet-5-5-high" "gemini-4-argon-high")
 REVIEWER_ESCALATED_CHAIN=("gemini-4-argon-high" "claude-opus-5-5-high" "claude-sonnet-5-5-high" "gemini-3.8-flash-high")
+FLASH_PRIMARY_CHAIN=("gemini-3.8-flash-high" "gemini-4-argon-medium" "gemini-4-argon-high" "claude-sonnet-5-5-high")
 
 AGY_TIMEOUT_SEC=600
 SESSION_TIMEOUT_SEC=3300
@@ -231,6 +232,9 @@ run_agy_pool() {
     REVIEWER_R1)
       CHAIN=("${REVIEWER_R1_CHAIN[@]}")
       ;;
+    FLASH_PRIMARY)
+      CHAIN=("${FLASH_PRIMARY_CHAIN[@]}")
+      ;;
     *)
       CHAIN=("${REVIEWER_ESCALATED_CHAIN[@]}")
       ;;
@@ -252,22 +256,29 @@ run_agy_pool() {
 
 # Helper to dump full current source files (up to ~150KB) so Architect & Auditor never miss lines > 160
 dump_full_codebase_context() {
-  for f in README.md ARCHITECTURE.md play-local.sh \
-           backend/src/main/scala/durak/Main.scala \
-           backend/src/main/scala/durak/engine/*.scala \
-           backend/src/main/scala/durak/server/*.scala \
-           frontend/src/types.ts \
-           frontend/src/app.tsx \
-           frontend/src/api/*.ts \
-           frontend/src/audio/*.ts \
-           frontend/src/pages/*.tsx \
-           frontend/src/components/*.tsx \
-           frontend/src/styles/*.css; do
+  # Compact structural context (~28KB max): strips comments/blank lines and caps per-file lines
+  for f in play-local.sh            backend/src/main/scala/durak/Main.scala            backend/src/main/scala/durak/engine/*.scala            backend/src/main/scala/durak/server/*.scala            frontend/src/types.ts            frontend/src/app.tsx            frontend/src/api/*.ts            frontend/src/pages/*.tsx            frontend/src/components/*.tsx            frontend/src/styles/*.css; do
     [ -f "$f" ] || continue
     echo "===SOURCE_FILE:${f}==="
-    cat "$f"
-    echo ""
-  done | grep -v '^[[:space:]]*$' | head -c 65000
+    grep -vE '^[[:space:]]*(//|/\*|\*|$)' "$f" | head -n 220
+  done | head -c 38000
+}
+
+dump_changed_files_context() {
+  # Ultra-lean post-wave context (~20KB max): ONLY outputs files actually modified in this round!
+  local BASE_C
+  BASE_C=$(cat .reviews/feedback_base_commit 2>/dev/null || git rev-parse HEAD~1 2>/dev/null || echo "HEAD")
+  local CHANGED_LIST
+  CHANGED_LIST=$(git diff --name-only "${BASE_C}...HEAD" -- backend/ frontend/ play-local.sh 2>/dev/null || true)
+  if [ -z "$CHANGED_LIST" ]; then
+    dump_full_codebase_context | head -c 22000
+    return 0
+  fi
+  for f in $CHANGED_LIST; do
+    [ -f "$f" ] || continue
+    echo "===MODIFIED_FILE:${f}==="
+    grep -vE '^[[:space:]]*$' "$f" | head -n 260
+  done | head -c 26000
 }
 
 # Serialized FreeBuff admission & prompt submission (handles "This session was released" / "Enter: retry" automatically)
@@ -680,7 +691,7 @@ ${NOTES_BODY}" >/dev/null 2>&1 || true
         ':(exclude).reviews/*' \
         ':(exclude).tickets/*' \
         ':(exclude)agent-orchestration/*' \
-        ':(exclude)FEEDBACK*.md' | head -c 75000 > .reviews/current.diff
+        ':(exclude)FEEDBACK*.md' | head -c 40000 > .reviews/current.diff
     )
 
     local NOTES_CONTENT="No implementer notes provided."
@@ -971,7 +982,7 @@ OPTIONS: [Option A vs. Option B, or what needs to be decided]
 ===END_OF_QUESTIONS===
 PROMPT_EOF
 
-  run_agy_pool "ARCHITECT" ".reviews/ambiguity_check_prompt.txt" ".reviews/ambiguity_questions_raw.txt" "===NO_QUESTIONS===|===QUESTION:"
+  run_agy_pool "FLASH_PRIMARY" ".reviews/ambiguity_check_prompt.txt" ".reviews/ambiguity_questions_raw.txt" "===NO_QUESTIONS===|===QUESTION:"
 
   python3 "$PROJECT_ROOT/agent-orchestration/qa-assistant.py"
 
@@ -1116,9 +1127,9 @@ $(cat .reviews/active_feedback_resolved.md)
 $(cat .reviews/holistic_cumulative.diff)
 </cumulative_git_diff_on_main>
 
-<current_main_source_files>
-$(dump_full_codebase_context)
-</current_main_source_files>
+<modified_source_files_on_main>
+$(dump_changed_files_context)
+</modified_source_files_on_main>
 
 AUDIT INSTRUCTIONS:
 1. Output an \`===AUDIT_CHECKLIST===\` checking every numbered item and sub-point in <resolved_human_feedback> (ignoring items under DEFERRED ITEMS):
@@ -1219,11 +1230,11 @@ $(cat "$SOURCE_SPEC")
 </implemented_feedback>
 
 <browser_visual_telemetry>
-$(head -c 45000 .reviews/visual_qa_telemetry.json 2>/dev/null || echo "No telemetry JSON generated.")
+$(python3 -c 'import json,sys; d=json.load(open(".reviews/visual_qa_telemetry.json")); [s.pop("measurements",None) for s in d.get("steps",[]) if not s.get("issues")]; print(json.dumps(d,indent=2)[:18000])' 2>/dev/null || head -c 18000 .reviews/visual_qa_telemetry.json 2>/dev/null || echo "No telemetry")
 </browser_visual_telemetry>
 
 <frontend_styles_and_components>
-$(head -n 160 frontend/src/styles/*.css frontend/src/pages/*.tsx frontend/src/components/*.tsx 2>/dev/null | head -c 40000)
+$(dump_changed_files_context | head -c 18000)
 </frontend_styles_and_components>
 
 VISUAL AUDIT RULES:
@@ -1242,7 +1253,7 @@ VISUAL AUDIT RULES:
 ===END_OF_TICKETS===
 PROMPT_EOF
 
-  run_agy_pool "REVIEWER_R1" ".reviews/visual_audit_prompt.txt" ".reviews/visual_audit_out.txt" "===VISUAL_QA_PASSED===|===TICKET:"
+  run_agy_pool "FLASH_PRIMARY" ".reviews/visual_audit_prompt.txt" ".reviews/visual_audit_out.txt" "===VISUAL_QA_PASSED===|===TICKET:"
 
   if grep -q "===TICKET:" .reviews/visual_audit_out.txt 2>/dev/null; then
     echo "⚠️  Visual QA Gate caught objective UI/layout/border issues in the live browser! Dispatching remediation wave..."
@@ -1290,7 +1301,7 @@ STRICT PUBLIC DOCUMENTATION RULES:
    - Keep it 100% free of internal ticket IDs or agent workflow notes.
 
 <current_codebase>
-$(dump_full_codebase_context)
+$(dump_changed_files_context)
 </current_codebase>
 
 Output both complete files using this EXACT delimiter format (with NO markdown code fences wrapping the whole file) and end with \`===END_OF_FILES===\`:
@@ -1301,7 +1312,7 @@ Output both complete files using this EXACT delimiter format (with NO markdown c
 ===END_OF_FILES===
 PROMPT_EOF
 
-  if run_agy_pool "ARCHITECT" ".reviews/orchestrator_docs_prompt.txt" ".reviews/orchestrator_docs_out.txt" "===FILE:README.md==="; then
+  if run_agy_pool "FLASH_PRIMARY" ".reviews/orchestrator_docs_prompt.txt" ".reviews/orchestrator_docs_out.txt" "===FILE:README.md==="; then
     awk '
       /^===FILE:.*===$/ {
         line=$0;
@@ -1354,7 +1365,7 @@ $(cat "$SOURCE_SPEC")
 </implemented_feedback>
 
 <current_codebase>
-$(dump_full_codebase_context)
+$(dump_changed_files_context)
 </current_codebase>
 
 Format your response in clean Markdown (with NO preamble) and end with \`===END_OF_FILES===\`:
@@ -1370,7 +1381,7 @@ Format your response in clean Markdown (with NO preamble) and end with \`===END_
 ===END_OF_FILES===
 PROMPT_EOF
 
-  run_agy_pool "REVIEWER_R1" ".reviews/qa_playbook_prompt.txt" ".reviews/QA_PLAYBOOK.raw.md" "===END_OF_FILES==="
+  run_agy_pool "FLASH_PRIMARY" ".reviews/qa_playbook_prompt.txt" ".reviews/QA_PLAYBOOK.raw.md" "===END_OF_FILES==="
   rm -f QA_PLAYBOOK.md
   python3 "$PROJECT_ROOT/agent-orchestration/qa-assistant.py" --render-playbook >/dev/null 2>&1 || sed '/===END_OF_FILES===/d' .reviews/QA_PLAYBOOK.raw.md > .reviews/QA_PLAYBOOK.md
 }
