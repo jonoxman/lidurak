@@ -271,6 +271,9 @@ export function playReplayFrameSound(frames: ReplayFrame[], targetIdx: number): 
 
 /** One-click scripted positions offered in the lobby and the game sidebar. */
 export const QA_SCENARIOS: { id: string; label: string }[] = [
+  { id: 'throw-in-visibility-3p', label: 'Throw-In Visibility (3P)' },
+  { id: 'multi-throw-in', label: 'Multi Throw-In' },
+  { id: 'full-hand-4p', label: 'Full Hand (4P)' },
   { id: 'throw-in-visibility-4p', label: 'Throw-In Visibility (4P)' },
   { id: 'throw-in-capacity-cap', label: 'Throw-In Capacity Cap' },
   { id: 'huge-hand-36', label: 'Huge Hand (36)' },

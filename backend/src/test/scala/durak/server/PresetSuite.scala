@@ -759,3 +759,187 @@ class PresetSuite extends munit.FunSuite:
       52
     )
   }
+
+  // --- T-90-feedback-20261106_161731-1: the three new presets ---
+
+  test("throw-in-visibility-3p shows throw-ins only to Alice") {
+    val manager = newManager
+    val (gameId, json) = startPreset(manager, "throw-in-visibility-3p")
+
+    assertEquals(json.hcursor.get[String]("defaultPlayerId").toOption, Some("p0"))
+    assertEquals(
+      json.hcursor.downField("players").as[List[Json]].map(_.size).toOption,
+      Some(3)
+    )
+
+    val alice = view(manager, gameId, "p0")
+    assertEquals(alice.myName, "Alice")
+    assertEquals(alice.boutPhase, BoutPhase.Defense)
+    assertEquals(alice.attackerIdx, 0)
+    assertEquals(alice.defenderIdx, 1)
+    assertEquals(alice.tablePairs.map(_.attack), Vector(Card(Suit.Spades, Rank.Seven)))
+    assertEquals(alice.tablePairs.head.defense, None)
+    assertEquals(
+      alice.myHand,
+      List(
+        Card(Suit.Hearts, Rank.Seven),
+        Card(Suit.Clubs, Rank.Six),
+        Card(Suit.Diamonds, Rank.Queen),
+        Card(Suit.Spades, Rank.King),
+        Card(Suit.Hearts, Rank.Eight)
+      )
+    )
+    assertEquals(alice.throwInCards, List(Card(Suit.Hearts, Rank.Seven)))
+    assertEquals(alice.throwInCapacity, 1)
+    assertEquals(alice.canThrowIn, true)
+    assert(alice.talonCount > 0, alice.talonCount.toString)
+
+    // Bob defends with a legal cover; Carol holds no table rank.
+    val bob = view(manager, gameId, "p1")
+    assertEquals(bob.myHand.size, 5)
+    assert(bob.myHand.contains(Card(Suit.Spades, Rank.Nine)), bob.myHand.toString)
+    assertEquals(bob.throwInCards, Nil)
+    assertEquals(bob.canThrowIn, false)
+
+    val carol = view(manager, gameId, "p2")
+    assertEquals(carol.myHand.size, 5)
+    assertEquals(carol.throwInCards, Nil)
+    assertEquals(carol.canThrowIn, false)
+
+    val room = manager.getRoom(gameId).unsafeRunSync().getOrElse(fail("room is missing"))
+    val state = room.stateRef.get.unsafeRunSync()
+    val tableCards = state.tablePairs.flatMap(pair => pair.attack :: pair.defense.toList)
+    val allCards = state.players.flatMap(_.hand) ++ tableCards ++ state.talon ++ state.discardPile
+    assertEquals(state.talon.size, 20)
+    assertEquals(state.bottomTrumpCard.map(_.suit), Some(Suit.Clubs))
+    assertEquals(allCards.size, 36)
+    assertEquals(allCards.distinct.size, 36)
+
+    // Bob covers, Alice passes: the outline disappears for her too.
+    val (coverStatus, coverJson) = post(
+      manager,
+      s"/api/games/$gameId/action",
+      Json.obj(
+        "type" -> "coverCard".asJson,
+        "playerId" -> "p1".asJson,
+        "attackIndex" -> 0.asJson,
+        "defenseCard" -> Card(Suit.Spades, Rank.Nine).asJson
+      )
+    )
+    assertEquals(coverStatus, Status.Ok, coverJson.noSpaces)
+
+    val (passStatus, passJson) = post(
+      manager,
+      s"/api/games/$gameId/action",
+      Json.obj("type" -> "passTurn".asJson, "playerId" -> "p0".asJson)
+    )
+    assertEquals(passStatus, Status.Ok, passJson.noSpaces)
+    val passed = passJson
+      .as[PlayerGameView]
+      .getOrElse(fail(s"invalid view body: ${passJson.noSpaces}"))
+    assertEquals(passed.myHasPassed, true)
+    assertEquals(passed.canThrowIn, false)
+  }
+
+  test("multi-throw-in accepts three cards atomically through the action route") {
+    val manager = newManager
+    val (gameId, json) = startPreset(manager, "multi-throw-in")
+
+    assertEquals(json.hcursor.get[String]("defaultPlayerId").toOption, Some("p0"))
+
+    val alice = view(manager, gameId, "p0")
+    assertEquals(alice.boutPhase, BoutPhase.Defense)
+    assertEquals(alice.myHand.size, 6)
+    assertEquals(
+      alice.throwInCards,
+      List(
+        Card(Suit.Hearts, Rank.Seven),
+        Card(Suit.Diamonds, Rank.Seven),
+        Card(Suit.Clubs, Rank.Seven)
+      )
+    )
+    assertEquals(alice.throwInCapacity, 3)
+    assertEquals(alice.canThrowIn, true)
+
+    // Bob can answer the attack or surrender, opening the surrender throw-in.
+    val bob = view(manager, gameId, "p1")
+    assertEquals(bob.myHand.size, 5)
+    assertEquals(bob.canThrowIn, false)
+    assert(bob.legalActions.contains("cover"), bob.legalActions.toString)
+    assert(bob.legalActions.contains("surrender"), bob.legalActions.toString)
+
+    val sevens = alice.throwInCards
+    val (status, afterJson) = post(
+      manager,
+      s"/api/games/$gameId/action",
+      Json.obj(
+        "type" -> "throwInCards".asJson,
+        "playerId" -> "p0".asJson,
+        "cards" -> sevens.asJson
+      )
+    )
+    assertEquals(status, Status.Ok, afterJson.noSpaces)
+    val after = afterJson
+      .as[PlayerGameView]
+      .getOrElse(fail(s"invalid view body: ${afterJson.noSpaces}"))
+    assertEquals(after.tablePairs.size, 4)
+    assertEquals(after.tablePairs.map(_.attack).takeRight(3), sevens.toVector)
+    assertEquals(after.myHand.size, 3)
+    assertEquals(after.canThrowIn, false)
+
+    val room = manager.getRoom(gameId).unsafeRunSync().getOrElse(fail("room is missing"))
+    val state = room.stateRef.get.unsafeRunSync()
+    val tableCards = state.tablePairs.flatMap(pair => pair.attack :: pair.defense.toList)
+    val allCards = state.players.flatMap(_.hand) ++ tableCards ++ state.talon ++ state.discardPile
+    assertEquals(allCards.size, 36)
+    assertEquals(allCards.distinct.size, 36)
+  }
+
+  test("full-hand-4p gives Bob 40 cards with playable and unplayable cards") {
+    val manager = newManager
+    val (gameId, json) = startPreset(manager, "full-hand-4p")
+
+    assertEquals(json.hcursor.get[String]("defaultPlayerId").toOption, Some("p1"))
+    assertEquals(
+      json.hcursor.downField("players").as[List[Json]].map(_.size).toOption,
+      Some(4)
+    )
+    assertEquals(
+      json.hcursor.downField("playerTypes").as[List[String]].toOption,
+      Some(List("human", "human", "human", "human"))
+    )
+
+    val bob = view(manager, gameId, "p1")
+    assertEquals(bob.myName, "Bob")
+    assertEquals(bob.boutPhase, BoutPhase.Defense)
+    assertEquals(bob.attackerIdx, 0)
+    assertEquals(bob.defenderIdx, 1)
+    assertEquals(bob.myHand.size, 40)
+    assertEquals(bob.tablePairs.size, 1)
+    assertEquals(bob.tablePairs.head.attack, Card(Suit.Spades, Rank.Seven))
+    assertEquals(bob.tablePairs.head.defense, None)
+    assertEquals(bob.talonCount, 1)
+    assertEquals(bob.bottomTrumpCard, Some(Card(Suit.Clubs, Rank.Six)))
+    assertEquals(bob.trumpSuit, Suit.Clubs)
+    // The defender never sees a throw-in, however large the hand.
+    assertEquals(bob.canThrowIn, false)
+    // Several cards cover the attack and several do not.
+    val playable = bob.myHand.count(card => card.covers(bob.tablePairs.head.attack, bob.trumpSuit))
+    val unplayable = bob.myHand.count(card => !card.covers(bob.tablePairs.head.attack, bob.trumpSuit))
+    assert(playable >= 2, playable.toString)
+    assert(unplayable >= 2, unplayable.toString)
+
+    val alice = view(manager, gameId, "p0")
+    assertEquals(alice.myHand.size, 4)
+    assertEquals(view(manager, gameId, "p2").myHand.size, 3)
+    assertEquals(view(manager, gameId, "p3").myHand.size, 3)
+
+    val room = manager.getRoom(gameId).unsafeRunSync().getOrElse(fail("room is missing"))
+    val state = room.stateRef.get.unsafeRunSync()
+    val tableCards = state.tablePairs.flatMap(pair => pair.attack :: pair.defense.toList)
+    val allCards = state.players.flatMap(_.hand) ++ tableCards ++ state.talon ++ state.discardPile
+    assertEquals(state.players.map(_.hand.size), Vector(4, 40, 3, 3))
+    assertEquals(state.talon.size, 1)
+    assertEquals(allCards.size, 52)
+    assertEquals(allCards.distinct.size, 52)
+  }

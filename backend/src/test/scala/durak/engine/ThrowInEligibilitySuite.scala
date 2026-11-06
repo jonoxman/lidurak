@@ -187,3 +187,94 @@ class ThrowInEligibilitySuite extends munit.FunSuite:
     // The surrendered defender picks up exactly the cards of both variants.
     assertEquals(multi.players(1).hand, sequential.players(1).hand)
   }
+
+  // --- T-90-feedback-20261106_161731-1: 3-player visibility & multi throw-in ---
+
+  test("throw-in-visibility-3p shows the outline only to Alice") {
+    val threePlayer = preset("throw-in-visibility-3p")
+
+    val alice = PlayerGameView.forViewer(threePlayer, "p0")
+    assertEquals(alice.throwInCards, List(sevenHearts))
+    assertEquals(alice.throwInCapacity, 1)
+    assertEquals(alice.canThrowIn, true)
+
+    // Bob defends and holds a legal cover, but never qualifies himself.
+    val bob = PlayerGameView.forViewer(threePlayer, "p1")
+    assert(bob.myHand.contains(card(Rank.Nine, Suit.Spades)), bob.myHand.toString)
+    assertEquals(bob.throwInCards, Nil)
+    assertEquals(bob.canThrowIn, false)
+
+    // Carol holds neither 7 (the table rank) nor 9/10 (the ranks Bob can cover
+    // with), so covering the attack never hands her a throw-in either.
+    val carol = PlayerGameView.forViewer(threePlayer, "p2")
+    assert(!carol.myHand.exists(_.rank == Rank.Seven), carol.myHand.toString)
+    assert(!carol.myHand.exists(_.rank == Rank.Nine), carol.myHand.toString)
+    assert(!carol.myHand.exists(_.rank == Rank.Ten), carol.myHand.toString)
+    assertEquals(carol.canThrowIn, false)
+
+    // An uncovered attack blocks passing; once Bob covers it Alice may pass,
+    // and her own outline disappears.
+    val covered = GameEngine
+      .applyAction(threePlayer, GameAction.CoverCard("p1", 0, card(Rank.Nine, Suit.Spades)))
+      .getOrElse(fail("expected 9♠ to cover 7♠"))
+    val passed = GameEngine
+      .applyAction(covered, GameAction.PassTurn("p0"))
+      .getOrElse(fail("expected Alice to pass once the table is covered"))
+    val passedView = PlayerGameView.forViewer(passed, "p0")
+    assertEquals(passedView.myHasPassed, true)
+    assertEquals(passedView.throwInCards, Nil)
+    assertEquals(passedView.canThrowIn, false)
+  }
+
+  test("multi-throw-in exposes exactly three atomic cards") {
+    val multi = preset("multi-throw-in")
+
+    val alice = PlayerGameView.forViewer(multi, "p0")
+    assertEquals(alice.throwInCards, List(sevenHearts, sevenDiamonds, sevenClubs))
+    assertEquals(alice.throwInCapacity, 3)
+    assertEquals(alice.canThrowIn, true)
+    assertEquals(PlayerGameView.forViewer(multi, "p1").canThrowIn, false)
+  }
+
+  // --- Property-style agreement between the projection and the engine ---
+
+  test("canThrowIn always agrees with the engine's legal throw-in actions") {
+    val random = new scala.util.Random(20261106L)
+    var checked = 0
+    var seed = 1L
+    while seed <= 12 do
+      val playerCount = if seed % 3 == 0 then 4 else if seed % 2 == 0 then 3 else 2
+      var state = GameEngine.createGame(
+        GameConfig(playerCount = playerCount, seed = seed),
+        Vector.tabulate(playerCount)(idx => s"P$idx")
+      )
+      var steps = 0
+      var running = true
+      while running && steps < 120 do
+        state.players.foreach { player =>
+          val view = PlayerGameView.forViewer(state, player.id)
+          val engineOffers = GameEngine
+            .legalActions(state, player.id)
+            .exists(_.isInstanceOf[GameAction.ThrowInCards])
+          assertEquals(
+            view.canThrowIn,
+            engineOffers,
+            s"seed=$seed step=$steps player=${player.id} phase=${state.boutPhase}"
+          )
+          if view.canThrowIn then
+            assertEquals(view.throwInCards.nonEmpty, true)
+            assertEquals(view.throwInCapacity > 0, true)
+          checked += 1
+        }
+        val actions =
+          state.players.flatMap(player => GameEngine.legalActions(state, player.id)).distinct
+        if state.isGameOver || actions.isEmpty then running = false
+        else
+          GameEngine.applyAction(state, actions(random.nextInt(actions.size))) match
+            case Right(next) =>
+              state = next
+              steps += 1
+            case Left(error) => fail(s"a legal action was rejected: $error")
+      seed += 1
+    assert(checked > 500, s"only $checked views were checked")
+  }
