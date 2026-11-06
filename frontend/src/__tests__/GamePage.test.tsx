@@ -155,11 +155,11 @@ describe('GamePage', () => {
 
     render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
 
-    await waitFor(() => expect(screen.getByText('Pass')).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Pass' })).toBeTruthy());
     // ITEM-14b: the opening seat is always sent as the requester too.
     expect(getGameView).toHaveBeenCalledWith('game-1', 'p0', 'p0');
 
-    fireEvent.click(screen.getByText('Pass'));
+    fireEvent.click(screen.getByRole('button', { name: 'Pass' }));
 
     await waitFor(() =>
       expect(sendAction).toHaveBeenCalledWith('game-1', {
@@ -233,7 +233,7 @@ describe('GamePage', () => {
       <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
     );
 
-    await waitFor(() => expect(screen.getByText('Pass')).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Pass' })).toBeTruthy());
 
     const left = container.querySelector('[data-zone="sidebar-left"]');
     const arena = container.querySelector('[data-zone="table-arena"]');
@@ -432,7 +432,7 @@ describe('GamePage', () => {
       <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
     );
 
-    await waitFor(() => expect(screen.getByText('Surrender')).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Surrender' })).toBeTruthy());
 
     fireEvent.click(screen.getByLabelText('ace of hearts'));
     expect(
@@ -469,7 +469,7 @@ describe('GamePage', () => {
 
     await waitFor(() => expect(screen.getByText('Bob wins')).toBeTruthy());
     expect(screen.getByText('You are the Durak.')).toBeTruthy();
-    expect(screen.queryByText('Pass')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Pass' })).toBeNull();
 
     const result = container.querySelector('[data-zone="sidebar-right"] .game-result');
     expect(result).not.toBeNull();
@@ -482,7 +482,7 @@ describe('GamePage', () => {
       <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
     );
 
-    await waitFor(() => expect(screen.getByText('Pass')).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Pass' })).toBeTruthy());
 
     const arena = container.querySelector('[data-zone="table-arena"]') as HTMLElement;
     expect(arena.textContent).not.toMatch(/Waiting for/i);
@@ -502,7 +502,7 @@ describe('GamePage', () => {
       <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
     );
 
-    await waitFor(() => expect(screen.getByText('Pass')).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Pass' })).toBeTruthy());
 
     const controls = container.querySelector('[data-zone="player-controls"]') as HTMLElement;
     // Feedback #9: the sort dropdown moved to its own right-sidebar box.
@@ -533,7 +533,7 @@ describe('GamePage', () => {
       <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
     );
 
-    await waitFor(() => expect(screen.getByText('Surrender')).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Surrender' })).toBeTruthy());
 
     const controls = container.querySelector('[data-zone="player-controls"]') as HTMLElement;
     expect(within(controls).queryByRole('button', { name: 'Pass' })).toBeNull();
@@ -583,7 +583,7 @@ describe('GamePage', () => {
       <GamePage gameId="game-1" playerId="p1" onSwitchPlayer={() => {}} />,
     );
 
-    await waitFor(() => expect(screen.getByTestId('surrender-button')).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('surrender-btn')).toBeTruthy());
     const zone = first.container.querySelector('[data-zone="player-hand"]') as HTMLElement;
     const handBox = screen.getByTestId('hand-turn-highlight') as HTMLElement;
     for (const node of [zone, handBox]) {
@@ -607,7 +607,7 @@ describe('GamePage', () => {
       legalActions: [],
       defenderDefenseless: false,
     });
-    fireEvent.click(screen.getByTestId('surrender-button'));
+    fireEvent.click(screen.getByTestId('surrender-btn'));
     for (const node of [zone, handBox]) {
       expect(node.getAttribute('data-highlighted')).toBe('false');
       expect(node.getAttribute('data-highlight-variant')).toBe('none');
@@ -697,7 +697,7 @@ describe('GamePage', () => {
     wsState.onUpdate?.({ ...view, legalActions: ['surrender'] });
 
     await waitFor(() => expect(screen.getByText('Connected')).toBeTruthy());
-    expect(screen.getByText('Surrender')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Surrender' })).toBeTruthy();
   });
 
   it('counts the clock down from the turn deadline and ticks in the last five seconds', async () => {
@@ -737,8 +737,8 @@ describe('GamePage', () => {
 
     render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
 
-    await waitFor(() => expect(screen.getByText('Pass')).toBeTruthy());
-    fireEvent.click(screen.getByText('Pass'));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Pass' })).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: 'Pass' }));
 
     await waitFor(() =>
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('Action rejected')),
@@ -806,7 +806,7 @@ describe('GamePage', () => {
     render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
 
     await waitFor(() => expect(wsState.onUpdate).not.toBeNull());
-    await waitFor(() => expect(screen.getByText('Pass')).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Pass' })).toBeTruthy());
 
     wsState.onUpdate?.({
       ...view,
@@ -834,11 +834,11 @@ describe('GamePage', () => {
 
     render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
 
-    await waitFor(() => expect(screen.getByText('Pass')).toBeTruthy());
-    fireEvent.click(screen.getByText('Pass'));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Pass' })).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: 'Pass' }));
 
-    await waitFor(() => expect(screen.getByText('Surrender')).toBeTruthy());
-    expect(screen.queryByText('Pass')).toBeNull();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Surrender' })).toBeTruthy());
+    expect(screen.queryByRole('button', { name: 'Pass' })).toBeNull();
   });
 
   it('renders Back to lobby as a styled action button', async () => {
@@ -846,7 +846,7 @@ describe('GamePage', () => {
 
     render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
 
-    await waitFor(() => expect(screen.getByText('Pass')).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Pass' })).toBeTruthy());
     const backToLobby = screen.getByRole('button', { name: 'Back to lobby' });
 
     expect(backToLobby.tagName).toBe('BUTTON');
@@ -887,7 +887,7 @@ describe('GamePage', () => {
     try {
       render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
 
-      await waitFor(() => expect(screen.getByText('Pass')).toBeTruthy());
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Pass' })).toBeTruthy());
       const backToLobby = screen.getByRole('button', { name: 'Back to lobby' });
 
       expect(backToLobby.className).toContain('action-button');
@@ -1016,7 +1016,7 @@ describe('GamePage', () => {
       <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
     );
 
-    await waitFor(() => expect(screen.getByText('Surrender')).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Surrender' })).toBeTruthy());
 
     const lifted = Array.from(
       container.querySelectorAll('.card-slot.legal-playable'),
@@ -1042,11 +1042,11 @@ describe('GamePage', () => {
 
     // T-90 ITEM-PREV-4a: the Surrender button is on screen, enabled and
     // clickable as soon as the defenseless defense loads.
-    await waitFor(() => expect(screen.getByTestId('surrender-button')).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('surrender-btn')).toBeTruthy());
     expect(screen.getByRole('button', { name: 'Surrender' })).toBeTruthy();
-    expect(screen.getByTestId('surrender-button').hasAttribute('disabled')).toBe(false);
+    expect(screen.getByTestId('surrender-btn').hasAttribute('disabled')).toBe(false);
     await waitFor(() =>
-      expect(screen.getByTestId('surrender-countdown').textContent).toBe('3'),
+      expect(screen.getByTestId('surrender-countdown').getAttribute('data-countdown')).toBe('3'),
     );
     // ...and nothing is dispatched during the grace window.
     await new Promise((resolve) => setTimeout(resolve, 350));
@@ -1073,8 +1073,8 @@ describe('GamePage', () => {
 
     render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
 
-    await waitFor(() => expect(screen.getByTestId('surrender-button')).toBeTruthy());
-    fireEvent.click(screen.getByTestId('surrender-button'));
+    await waitFor(() => expect(screen.getByTestId('surrender-btn')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('surrender-btn'));
 
     await waitFor(() => expect(sendAction).toHaveBeenCalledTimes(1));
     // No cloud of duplicate surrenders arrives after the click.
@@ -1316,8 +1316,8 @@ describe('GamePage', () => {
 
     // Review mode: no commands, no drop surfaces, no turn glow, no drags.
     expect(container.querySelector('[data-zone="player-controls"]')).toBeNull();
-    expect(screen.queryByText('Pass')).toBeNull();
-    expect(screen.queryByText('Surrender')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Pass' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Surrender' })).toBeNull();
     expect(screen.queryByText('Throw In')).toBeNull();
     expect(container.querySelector('[data-drop-zone]')).toBeNull();
     expect(
@@ -1347,9 +1347,12 @@ describe('GamePage', () => {
 
     await waitFor(() => expect(screen.getByTestId('pass-countdown')).toBeTruthy());
     const countdown = screen.getByTestId('pass-countdown');
-    expect(countdown.textContent).toMatch(/^(11|12)$/);
+    expect(countdown.getAttribute('data-countdown')).toMatch(/^(11|12)$/);
     expect(countdown.className).toBe('surrender-countdown');
-    expect(countdown.closest('button')?.textContent).toContain('Pass');
+    // ITEM-7: the button is icon-only, so the action is carried by its label
+    // and the painted number never leaks into textContent.
+    expect(countdown.closest('button')?.textContent).toBe('');
+    expect(countdown.closest('button')?.getAttribute('aria-label')).toBe('Pass');
   });
 
   it('puts a return-to-lobby button inside the game-over banner', async () => {
@@ -1592,7 +1595,7 @@ describe('GamePage', () => {
 
     render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
 
-    await waitFor(() => expect(screen.getByText('Pass')).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Pass' })).toBeTruthy());
     expect(screen.queryByTestId('game-over-banner')).toBeNull();
 
     // ITEM-9: the moment the authoritative view finishes, the banner appears.
@@ -2271,8 +2274,8 @@ describe('GamePage', () => {
     // table reports its locked state.
     expect(container.querySelector('[data-zone="player-controls"]')).toBeNull();
     expect(screen.queryByText('Attack')).toBeNull();
-    expect(screen.queryByText('Pass')).toBeNull();
-    expect(screen.queryByText('Surrender')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Pass' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Surrender' })).toBeNull();
     expect(
       container.querySelector('[data-zone="table-arena"]')?.getAttribute('data-bot-locked'),
     ).toBe('true');
@@ -2678,8 +2681,9 @@ describe('GamePage client auto-surrender and auto-pass delays', () => {
     await renderGame(defenselessView);
 
     // The button is on screen, enabled and counting down from 3 immediately.
-    expect(screen.getByTestId('surrender-button').hasAttribute('disabled')).toBe(false);
-    expect(screen.getByTestId('surrender-countdown').textContent).toBe('3');
+    expect(screen.getByTestId('surrender-btn').hasAttribute('disabled')).toBe(false);
+    expect(screen.getByTestId('surrender-countdown').getAttribute('data-countdown')).toBe('3');
+    expect(screen.getByTestId('surrender-countdown').textContent).toBe('');
     // T-90-2 ITEM-PREV-4: the red defender glow is still on during the grace.
     expect(
       screen.getByTestId('hand-turn-highlight').getAttribute('data-highlight-variant'),
@@ -2694,13 +2698,13 @@ describe('GamePage client auto-surrender and auto-pass delays', () => {
       vi.advanceTimersByTime(1000);
     });
     expect(sendAction).not.toHaveBeenCalled();
-    expect(screen.getByTestId('surrender-countdown').textContent).toBe('2');
+    expect(screen.getByTestId('surrender-countdown').getAttribute('data-countdown')).toBe('2');
 
     act(() => {
       vi.advanceTimersByTime(1999);
     });
     expect(sendAction).not.toHaveBeenCalled();
-    expect(screen.getByTestId('surrender-countdown').textContent).toBe('1');
+    expect(screen.getByTestId('surrender-countdown').getAttribute('data-countdown')).toBe('1');
 
     act(() => {
       vi.advanceTimersByTime(1);
@@ -2729,7 +2733,7 @@ describe('GamePage client auto-surrender and auto-pass delays', () => {
     act(() => {
       vi.advanceTimersByTime(500);
     });
-    fireEvent.click(screen.getByTestId('surrender-button'));
+    fireEvent.click(screen.getByTestId('surrender-btn'));
 
     expect(sendAction).toHaveBeenCalledTimes(1);
     expect(sendAction).toHaveBeenCalledWith('game-1', {
@@ -2754,7 +2758,7 @@ describe('GamePage client auto-surrender and auto-pass delays', () => {
 
     await renderGame(coverView);
 
-    expect(screen.getByTestId('surrender-button').hasAttribute('disabled')).toBe(false);
+    expect(screen.getByTestId('surrender-btn').hasAttribute('disabled')).toBe(false);
     expect(screen.queryByTestId('surrender-countdown')).toBeNull();
 
     act(() => {
@@ -2768,8 +2772,8 @@ describe('GamePage client auto-surrender and auto-pass delays', () => {
 
     await renderGame(autoPassView);
 
-    expect(screen.getByTestId('pass-button')).toBeTruthy();
-    expect(screen.getByTestId('pass-countdown').textContent).toBe('1');
+    expect(screen.getByTestId('pass-btn')).toBeTruthy();
+    expect(screen.getByTestId('pass-countdown').getAttribute('data-countdown')).toBe('1');
 
     act(() => {
       vi.advanceTimersByTime(0);
@@ -2799,7 +2803,7 @@ describe('GamePage client auto-surrender and auto-pass delays', () => {
     act(() => {
       vi.advanceTimersByTime(400);
     });
-    fireEvent.click(screen.getByTestId('pass-button'));
+    fireEvent.click(screen.getByTestId('pass-btn'));
 
     expect(sendAction).toHaveBeenCalledTimes(1);
     expect(sendAction).toHaveBeenCalledWith('game-1', {
@@ -2855,7 +2859,7 @@ describe('GamePage client auto-surrender and auto-pass delays', () => {
     const bob = render(
       <GamePage gameId="game-1" playerId="p1" onSwitchPlayer={() => {}} />,
     );
-    await waitFor(() => expect(screen.getByTestId('surrender-button')).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('surrender-btn')).toBeTruthy());
 
     // Bob is the defender: the uncovered 7♠ pulses, and neither clock is lit.
     expect(bob.container.querySelectorAll('.table-card-uncovered')).toHaveLength(1);
@@ -2869,7 +2873,7 @@ describe('GamePage client auto-surrender and auto-pass delays', () => {
     expect(gameHalfCss).toContain('box-shadow: none');
 
     // The decision to surrender clears the prompt before the server replies.
-    fireEvent.click(screen.getByTestId('surrender-button'));
+    fireEvent.click(screen.getByTestId('surrender-btn'));
     expect(bob.container.querySelectorAll('.table-card-uncovered')).toHaveLength(0);
     expect(
       bob.container.querySelector('.table-pair')!.getAttribute('data-uncovered-highlighted'),
@@ -3105,7 +3109,7 @@ describe('T-90-4: Transparent Mode, POV gating and custom hand order', () => {
       />,
     );
 
-    const button = await screen.findByTestId('qa-preset-transparent-mode');
+    const button = await screen.findByTestId('preset-btn-transparent-mode');
     expect(button.getAttribute('data-preset')).toBe('transparent-mode');
     expect(button.textContent).toBe('Transparent Mode');
 
@@ -3269,5 +3273,331 @@ describe('T-90-2 theme, controls and status labels', () => {
     expect(tableCss).not.toMatch(
       /:root\[data-theme='light'\] \.playing-card\.card-back\s*{[^}]*rgba\(203, 213, 225/,
     );
+  });
+});
+
+/**
+ * T-90-feedback-20261105_221105-3: ITEM-1a throw-in outline visibility, ITEM-5
+ * multi-card click-select + double-click throw-in (no "Throw In" button) and
+ * ITEM-6/7 icon-only Surrender / Pass controls, all wired through GamePage.
+ */
+describe('T-90-feedback-20261105_221105-3: throw-in gate, multi-card throw-in and action icons', () => {
+  beforeEach(() => {
+    getGameView.mockReset();
+    getGameReplay.mockReset();
+    sendAction.mockReset();
+    createPresetGameMock.mockReset();
+    wsState.onUpdate = null;
+    getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
+    window.location.hash = '';
+  });
+
+  const throwInView: PlayerGameView = {
+    ...view,
+    myId: 'p0',
+    myName: 'Alice',
+    myHand: [
+      { suit: 'hearts', rank: 'seven' },
+      { suit: 'clubs', rank: 'seven' },
+      { suit: 'diamonds', rank: 'nine' },
+    ],
+    opponents: [{ id: 'p1', name: 'Bob', cardCount: 6, hasPassed: false, finishRank: null }],
+    tablePairs: [{ attack: { suit: 'spades', rank: 'seven' }, defense: null }],
+    trumpSuit: 'clubs',
+    attackerIdx: 0,
+    defenderIdx: 1,
+    boutPhase: 'Defense',
+    legalActions: ['throwIn', 'pass'],
+    maxBoutAttacks: 6,
+  };
+
+  const renderGame = (override: PlayerGameView, playerId = 'p0') => {
+    getGameView.mockResolvedValue(override);
+    return render(
+      <GamePage gameId="game-1" playerId={playerId} onSwitchPlayer={() => {}} />,
+    );
+  };
+
+  const handCard = (label: string): HTMLElement =>
+    screen.getByLabelText(label).closest('.card-slot') as HTMLElement;
+
+  it('ITEM-1a: shows the throw-in outline to a player who can legally throw in', async () => {
+    renderGame(throwInView);
+
+    const outline = await screen.findByTestId('throw-in-outline');
+    expect(outline.getAttribute('data-drop-zone')).toBe('throw-in');
+    expect(outline.getAttribute('data-throw-in-enabled')).toBe('true');
+    expect(screen.queryByTestId('surrender-throw-in-anchor')).toBeNull();
+  });
+
+  it('ITEM-1a: keeps the detached surrender anchor while the throw-in is still legal', async () => {
+    renderGame({ ...throwInView, boutPhase: 'SurrenderThrowIn' });
+
+    const anchor = await screen.findByTestId('surrender-throw-in-anchor');
+    expect(within(anchor).getByTestId('throw-in-outline')).toBeTruthy();
+  });
+
+  it('ITEM-1a: hides the outline from the defending player', async () => {
+    renderGame(
+      {
+        ...throwInView,
+        myId: 'p1',
+        myName: 'Bob',
+        myHand: [{ suit: 'clubs', rank: 'seven' }],
+        opponents: [
+          { id: 'p0', name: 'Alice', cardCount: 6, hasPassed: false, finishRank: null },
+        ],
+        attackerIdx: 0,
+        defenderIdx: 1,
+        legalActions: ['cover', 'surrender', 'throwIn'],
+      },
+      'p1',
+    );
+
+    await screen.findByTestId('surrender-btn');
+    expect(screen.queryByTestId('throw-in-outline')).toBeNull();
+    expect(screen.queryByTestId('throw-in-slot')).toBeNull();
+  });
+
+  it('ITEM-1a: hides the outline when no hand card matches a rank on the table', async () => {
+    renderGame({
+      ...throwInView,
+      myHand: [{ suit: 'hearts', rank: 'ace' }],
+      legalActions: ['throwIn', 'pass'],
+    });
+
+    await screen.findByTestId('hand-turn-highlight');
+    expect(screen.queryByTestId('throw-in-outline')).toBeNull();
+  });
+
+  it('ITEM-1a: hides the outline and the surrender anchor after this player passed', async () => {
+    renderGame({
+      ...throwInView,
+      myHand: [{ suit: 'clubs', rank: 'seven' }],
+      boutPhase: 'SurrenderThrowIn',
+      legalActions: ['pass'],
+      myHasPassed: true,
+    });
+
+    await screen.findByTestId('hand-turn-highlight');
+    expect(screen.queryByTestId('throw-in-outline')).toBeNull();
+    expect(screen.queryByTestId('surrender-throw-in-anchor')).toBeNull();
+  });
+
+  it('ITEM-5: selects legal cards and throws them all in with one double-click', async () => {
+    renderGame(throwInView);
+    sendAction.mockResolvedValue(throwInView);
+
+    await screen.findByTestId('throw-in-outline');
+    // The old dedicated button is gone for good.
+    expect(screen.queryByText('Throw In')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Throw In' })).toBeNull();
+
+    fireEvent.click(handCard('seven of hearts'));
+    fireEvent.click(handCard('seven of clubs'));
+
+    await waitFor(() =>
+      expect(
+        document.querySelectorAll('.hand-card-wrapper[data-selected="true"]'),
+      ).toHaveLength(2),
+    );
+    // Real double-click order: the first click (detail 1) toggles the card off,
+    // the second click (detail 2) is ignored, and the pre-click snapshot keeps
+    // it in the group so `dblClick` still deploys both sevens.
+    fireEvent.click(handCard('seven of clubs'), { detail: 1 });
+    await waitFor(() =>
+      expect(
+        document.querySelectorAll('.hand-card-wrapper[data-selected="true"]'),
+      ).toHaveLength(1),
+    );
+    fireEvent.click(handCard('seven of clubs'), { detail: 2 });
+    expect(
+      document.querySelectorAll('.hand-card-wrapper[data-selected="true"]'),
+    ).toHaveLength(1);
+
+    fireEvent.dblClick(handCard('seven of clubs'));
+
+    await waitFor(() => expect(sendAction).toHaveBeenCalledTimes(1));
+    const action = sendAction.mock.calls[0][1] as {
+      type: string;
+      playerId: string;
+      cards: { suit: string; rank: string }[];
+    };
+    expect(action.type).toBe('throwInCards');
+    expect(action.playerId).toBe('p0');
+    expect(action.cards).toHaveLength(2);
+    expect(action.cards.map((card) => `${card.rank}:${card.suit}`).sort()).toEqual([
+      'seven:clubs',
+      'seven:hearts',
+    ]);
+  });
+
+  it('ITEM-5: reflects every selected same-rank card with one double-click', async () => {
+    renderGame({
+      ...throwInView,
+      myHand: [
+        { suit: 'hearts', rank: 'seven' },
+        { suit: 'clubs', rank: 'seven' },
+        { suit: 'diamonds', rank: 'nine' },
+      ],
+      opponents: [{ id: 'p1', name: 'Bob', cardCount: 6, hasPassed: false, finishRank: null }],
+      attackerIdx: 1,
+      defenderIdx: 0,
+      legalActions: ['redirect', 'surrender', 'pass'],
+    });
+    sendAction.mockResolvedValue(throwInView);
+
+    await screen.findByTestId('hand-turn-highlight');
+    fireEvent.click(handCard('seven of hearts'));
+    fireEvent.click(handCard('seven of clubs'));
+    await waitFor(() =>
+      expect(
+        document.querySelectorAll('.hand-card-wrapper[data-selected="true"]'),
+      ).toHaveLength(2),
+    );
+
+    // Real double-click order on an already-selected card: the first click
+    // toggles it off, and the pre-click snapshot keeps it in the group.
+    fireEvent.click(handCard('seven of hearts'), { detail: 1 });
+    await waitFor(() =>
+      expect(
+        document.querySelectorAll('.hand-card-wrapper[data-selected="true"]'),
+      ).toHaveLength(1),
+    );
+    fireEvent.click(handCard('seven of hearts'), { detail: 2 });
+    fireEvent.dblClick(handCard('seven of hearts'));
+
+    await waitFor(() => expect(sendAction).toHaveBeenCalledTimes(1));
+    const action = sendAction.mock.calls[0][1] as {
+      type: string;
+      cards: { suit: string; rank: string }[];
+    };
+    expect(action.type).toBe('redirectAttack');
+    expect(action.cards).toHaveLength(2);
+    expect(action.cards.map((card) => `${card.rank}:${card.suit}`).sort()).toEqual([
+      'seven:clubs',
+      'seven:hearts',
+    ]);
+  });
+
+  it('ITEM-6/7: renders compact icon-only Surrender and Pass buttons in the table corner', async () => {
+    renderGame({
+      ...throwInView,
+      // `cover` disarms the client auto-surrender and `throwIn` the auto-pass,
+      // so both buttons render with no countdown text.
+      legalActions: ['pass', 'surrender', 'cover', 'throwIn'],
+      turnPlayerId: 'p1',
+    });
+
+    const surrender = await screen.findByTestId('surrender-btn');
+    const pass = screen.getByTestId('pass-btn');
+    for (const [button, label, iconId] of [
+      [surrender, 'Surrender', 'surrender-icon'],
+      [pass, 'Pass', 'pass-icon'],
+    ] as const) {
+      expect(button.tagName).toBe('BUTTON');
+      expect(button.textContent).toBe('');
+      expect(button.getAttribute('aria-label')).toBe(label);
+      expect(button.getAttribute('title')).toBe(label);
+      expect(button.classList.contains('action-icon-btn')).toBe(true);
+      expect(within(button).getByTestId(iconId)).toBeTruthy();
+    }
+
+    const surrenderIcon = within(surrender).getByTestId('surrender-icon');
+    expect(surrenderIcon.querySelector('[data-icon-part="cards"]')).not.toBeNull();
+    expect(surrenderIcon.querySelector('[data-icon-part="arrow-down"]')).not.toBeNull();
+    expect(surrenderIcon.querySelector('[data-icon-part="raised-hands"]')).not.toBeNull();
+    const passIcon = within(pass).getByTestId('pass-icon');
+    expect(passIcon.querySelector('[data-icon-part="cards"]')).not.toBeNull();
+    expect(passIcon.querySelector('[data-icon-part="pass-hand"]')).not.toBeNull();
+    expect(passIcon.querySelector('[data-icon-part="arrow-pass"]')).not.toBeNull();
+
+    // Both stay in the bottom-right controls column of the felt table.
+    const controls = surrender.closest('[data-zone="player-controls"]');
+    expect(controls).not.toBeNull();
+    expect(controls?.contains(pass)).toBe(true);
+    expect(surrender.closest('[data-zone="table-arena"]')).not.toBeNull();
+  });
+
+  it('QA: offers the full-hand-pickup preset beside surrender-half-off in the left sidebar', async () => {
+    createPresetGameMock.mockResolvedValue({ gameId: 'preset-f', defaultPlayerId: 'p0' });
+    renderGame(view);
+
+    const panel = await screen.findByTestId('qa-scenarios');
+    expect(panel.closest('[data-zone="sidebar-left"]')).not.toBeNull();
+    expect(within(panel).getByTestId('preset-btn-surrender-half-off')).toBeTruthy();
+    const pickup = within(panel).getByTestId('preset-btn-full-hand-pickup');
+    expect(pickup.textContent).toBe('Full Hand Pickup (30 Cards)');
+
+    fireEvent.click(pickup);
+    await waitFor(() => expect(createPresetGameMock).toHaveBeenCalledWith('full-hand-pickup'));
+  });
+});
+
+/**
+ * T-90-feedback-20261105_221105-3 (review round 2): the throw-in gate must not
+ * trust an empty server `legalActions` list and must never point at a
+ * bot-locked seat a human cannot act for.
+ */
+describe('T-90-feedback-20261105_221105-3 round 2: throw-in gate precision', () => {
+  beforeEach(() => {
+    getGameView.mockReset();
+    getGameReplay.mockReset();
+    sendAction.mockReset();
+    createPresetGameMock.mockReset();
+    wsState.onUpdate = null;
+    getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
+  });
+
+  const baseView: PlayerGameView = {
+    ...view,
+    myId: 'p0',
+    myName: 'Alice',
+    myHand: [
+      { suit: 'hearts', rank: 'seven' },
+      { suit: 'clubs', rank: 'seven' },
+    ],
+    opponents: [{ id: 'p1', name: 'Bob', cardCount: 6, hasPassed: false, finishRank: null }],
+    tablePairs: [{ attack: { suit: 'spades', rank: 'seven' }, defense: null }],
+    trumpSuit: 'clubs',
+    attackerIdx: 0,
+    defenderIdx: 1,
+    boutPhase: 'Defense',
+    legalActions: ['throwIn', 'pass'],
+    maxBoutAttacks: 6,
+  };
+
+  it('ITEM-1a: draws no outline on a bot-locked seat, even with a matching card', async () => {
+    getGameView.mockResolvedValue({ ...baseView, isBot: true });
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    await screen.findByTestId('hand-turn-highlight');
+    expect(
+      document.querySelector('[data-zone="table-arena"]')?.getAttribute('data-bot-locked'),
+    ).toBe('true');
+    expect(screen.queryByTestId('throw-in-outline')).toBeNull();
+    expect(screen.queryByTestId('throw-in-slot')).toBeNull();
+    expect(screen.queryByTestId('surrender-throw-in-anchor')).toBeNull();
+  });
+
+  it('ITEM-1a: an empty server legalActions list forbids the outline', async () => {
+    getGameView.mockResolvedValue({ ...baseView, legalActions: [] });
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    await screen.findByTestId('hand-turn-highlight');
+    // A matching rank in hand is not enough: the server listed no legal action.
+    expect(screen.queryByTestId('throw-in-outline')).toBeNull();
+    expect(screen.queryByTestId('throw-in-slot')).toBeNull();
+    expect(
+      screen.getByTestId('hand-turn-highlight').getAttribute('data-highlighted'),
+    ).toBe('false');
+  });
+
+  it('ITEM-1a: still shows the outline when the server lists the throw-in', async () => {
+    getGameView.mockResolvedValue(baseView);
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    const outline = await screen.findByTestId('throw-in-outline');
+    expect(outline.getAttribute('data-throw-in-enabled')).toBe('true');
   });
 });

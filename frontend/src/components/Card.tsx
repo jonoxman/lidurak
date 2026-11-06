@@ -40,8 +40,12 @@ export interface CardProps {
   playable?: boolean;
   /** Applies the gilded gold trump border (no corner badge, no glow). */
   trump?: boolean;
-  onClick?: () => void;
-  onDoubleClick?: () => void;
+  /**
+   * T-90-feedback-20261105_221105-3 ITEM-5: the native mouse event is forwarded
+   * so callers can ignore the second click of a double-click (`event.detail >= 2`).
+   */
+  onClick?: (event: MouseEvent) => void;
+  onDoubleClick?: (event: MouseEvent) => void;
   draggable?: boolean;
   onDragStart?: (event: DragEvent) => void;
   onDragEnd?: () => void;

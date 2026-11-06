@@ -1219,9 +1219,18 @@ describe('hand highlight geometry, redirect double-click and review mode', () =>
 
     const pass = screen.getByTestId('pass-countdown');
     expect(pass.className).toBe(screen.getByTestId('surrender-countdown').className);
-    expect(pass.textContent).toBe('12');
-    expect(pass.closest('button')?.textContent).toContain('Pass');
-    expect(screen.getByTestId('surrender-countdown').textContent).toBe('3');
+    // ITEM-6/7 (review round 1): the number lives in `data-countdown` and is
+    // painted by CSS, so the icon button never carries visible text.
+    expect(pass.getAttribute('data-countdown')).toBe('12');
+    expect(pass.textContent).toBe('');
+    expect(pass.closest('button')?.textContent).toBe('');
+    expect(pass.closest('button')?.getAttribute('aria-label')).toBe('Pass');
+    expect(pass.closest('button')?.querySelector('[data-testid="pass-icon"]')).not.toBeNull();
+    const surrenderBadge = screen.getByTestId('surrender-countdown');
+    expect(surrenderBadge.getAttribute('data-countdown')).toBe('3');
+    expect(surrenderBadge.textContent).toBe('');
+    expect(surrenderBadge.closest('button')?.textContent).toBe('');
+    expect(tableCss).toContain('content: attr(data-countdown)');
   });
 
   it('leaves the pass button bare without a countdown', () => {
@@ -1230,7 +1239,7 @@ describe('hand highlight geometry, redirect double-click and review mode', () =>
     );
 
     expect(screen.queryByTestId('pass-countdown')).toBeNull();
-    expect(screen.getByText('Pass')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Pass' })).toBeTruthy();
   });
 
   it('hides every command control and drop surface in review mode', () => {
@@ -1259,8 +1268,8 @@ describe('hand highlight geometry, redirect double-click and review mode', () =>
 
     expect(container.querySelector('[data-zone="player-controls"]')).toBeNull();
     expect(screen.queryByText('Throw In')).toBeNull();
-    expect(screen.queryByText('Pass')).toBeNull();
-    expect(screen.queryByText('Surrender')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Pass' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Surrender' })).toBeNull();
     expect(screen.queryByTestId('redirect-outline')).toBeNull();
     expect(container.querySelector('[data-drop-zone]')).toBeNull();
     expect(container.querySelectorAll('[draggable="true"]')).toHaveLength(0);
@@ -2379,8 +2388,8 @@ describe('T-90-3: outline lift, discard stack, chaos targets, deflect arrow and 
     expect(container.querySelector('[data-drop-zone]')).toBeNull();
     expect(container.querySelectorAll('[draggable="true"]')).toHaveLength(0);
     expect(container.querySelector('[data-zone="player-controls"]')).toBeNull();
-    expect(screen.queryByText('Pass')).toBeNull();
-    expect(screen.queryByText('Surrender')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Pass' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Surrender' })).toBeNull();
 
     const highlight = screen.getByTestId('hand-turn-highlight');
     expect(highlight.getAttribute('data-active')).toBe('false');
@@ -2393,8 +2402,8 @@ describe('T-90-3: outline lift, discard stack, chaos targets, deflect arrow and 
       <ActionBar legalActions={['pass', 'surrender']} onAction={() => {}} isBotSeat />,
     );
 
-    expect(screen.queryByText('Pass')).toBeNull();
-    expect(screen.queryByText('Surrender')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Pass' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Surrender' })).toBeNull();
   });
 });
 
@@ -3364,8 +3373,8 @@ describe('T-90 ITEM-1c: distinct gameplay feature colours', () => {
   it('tags Pass and Surrender with their role classes and families', () => {
     render(<ActionBar legalActions={['pass', 'surrender']} onAction={() => {}} />);
 
-    const pass = screen.getByTestId('pass-button');
-    const surrender = screen.getByTestId('surrender-button');
+    const pass = screen.getByTestId('pass-btn');
+    const surrender = screen.getByTestId('surrender-btn');
     expect(pass.classList.contains('action-btn-pass')).toBe(true);
     expect(surrender.classList.contains('action-btn-surrender')).toBe(true);
     expect(pass.classList.contains('action-button')).toBe(true);
@@ -3375,6 +3384,55 @@ describe('T-90 ITEM-1c: distinct gameplay feature colours', () => {
     expect(cssRule(tableCss, '.action-btn-surrender')).toContain('var(--role-defender-accent)');
     expect(cssRule(tableCss, '.action-btn-pass')).not.toMatch(/#f59e0b|#ef4444/);
     expect(cssRule(tableCss, '.action-btn-surrender')).not.toMatch(/#f59e0b|#22c55e/);
+  });
+
+  /** T-90-feedback-20261105_221105-3 ITEM-6/7: no word on the button, only a
+   *  theme-matched glyph that still names itself for assistive tech. */
+  it('ITEM-6/7: renders icon-only Surrender and Pass buttons with no visible text', () => {
+    render(<ActionBar legalActions={['pass', 'surrender']} onAction={() => {}} />);
+
+    const surrender = screen.getByTestId('surrender-btn');
+    const pass = screen.getByTestId('pass-btn');
+    for (const [button, label, iconId] of [
+      [surrender, 'Surrender', 'surrender-icon'],
+      [pass, 'Pass', 'pass-icon'],
+    ] as const) {
+      expect(button.tagName).toBe('BUTTON');
+      expect(button.textContent).toBe('');
+      expect(button.getAttribute('aria-label')).toBe(label);
+      expect(button.getAttribute('title')).toBe(label);
+      expect(button.classList.contains('action-icon-btn')).toBe(true);
+      expect(within(button).getByTestId(iconId)).toBeTruthy();
+    }
+
+    const surrenderIcon = within(surrender).getByTestId('surrender-icon');
+    expect(surrenderIcon.querySelector('[data-icon-part="cards"]')).not.toBeNull();
+    expect(surrenderIcon.querySelector('[data-icon-part="arrow-down"]')).not.toBeNull();
+    expect(surrenderIcon.querySelector('[data-icon-part="raised-hands"]')).not.toBeNull();
+    const passIcon = within(pass).getByTestId('pass-icon');
+    expect(passIcon.querySelector('[data-icon-part="cards"]')).not.toBeNull();
+    expect(passIcon.querySelector('[data-icon-part="pass-hand"]')).not.toBeNull();
+    expect(passIcon.querySelector('[data-icon-part="arrow-pass"]')).not.toBeNull();
+
+    expect(tableCss).toMatch(
+      /\.action-button\.action-icon-btn \{[^}]*width: 44px;[^}]*height: 44px;/,
+    );
+    expect(tableCss).toMatch(
+      /@media \(max-width: 900px\) \{[\s\S]*?\.action-button\.action-icon-btn[^{]*\{[^}]*width: 36px;[^}]*height: 36px;/,
+    );
+    expect(tableCss).toMatch(/background: var\(--bg-elevated, rgba\(24, 34, 29, 0\.85\)\)/);
+    expect(tableCss).toMatch(/border: 1px solid var\(--border-subtle, rgba\(255, 255, 255, 0\.18\)\)/);
+    expect(tableCss).toMatch(/border-radius: var\(--ui-radius, 10px\)/);
+    expect(tableCss).toMatch(/backdrop-filter: blur\(6px\)/);
+    // ITEM-6/7 (review round 2): the digit must not inherit the button's
+    // `font-size: 0; line-height: 0`, or the countdown is drawn at 0px.
+    expect(tableCss).toMatch(
+      /\.action-button\.action-icon-btn \.surrender-countdown \{[^}]*font-size: 11px;[^}]*line-height: 1;/,
+    );
+    // The hand glyphs are outlined palms with fingers and a thumb, not comb
+    // strokes: two palms + fingers + thumb per raised hand, one waving hand.
+    expect(surrenderIcon.querySelectorAll('[data-icon-part="raised-hands"] path')).toHaveLength(6);
+    expect(passIcon.querySelectorAll('[data-icon-part="pass-hand"] path')).toHaveLength(3);
   });
 
   it('defines all six non-overlapping families with the ticket values', () => {
@@ -3512,8 +3570,8 @@ describe('T-90-4: larger cards, aura containment, throw-in slot, hand reorder an
     expect(onThrowInDrop).toHaveBeenCalledWith({ suit: 'clubs', rank: 'king' });
   });
 
-  it('ITEM-8: keeps the throw-in outline visible without any legal throw-in card', () => {
-    render(
+  it('ITEM-1a/ITEM-8: hides the throw-in outline without any legal throw-in card', () => {
+    const pending = render(
       <GameTable
         myId="p0"
         myHand={hand}
@@ -3525,8 +3583,28 @@ describe('T-90-4: larger cards, aura containment, throw-in slot, hand reorder an
       />,
     );
 
+    // T-90-feedback-20261105_221105-3 ITEM-1a: no legal throw-in, no outline.
+    expect(screen.queryByTestId('throw-in-outline')).toBeNull();
+    expect(screen.queryByTestId('throw-in-slot')).toBeNull();
+    pending.unmount();
+
+    // The moment the seat can legally play into it, the outline is back.
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={[fourPlayerOpponents[0]]}
+        tablePairs={[{ attack: { suit: 'spades', rank: 'six' }, defense: null }]}
+        trumpSuit="diamonds"
+        attackerId="p1"
+        defenderId="p1"
+        canThrowIn
+        throwInVisible
+      />,
+    );
+
     const outline = screen.getByTestId('throw-in-outline');
-    expect(outline.getAttribute('data-throw-in-enabled')).toBe('false');
+    expect(outline.getAttribute('data-throw-in-enabled')).toBe('true');
     expect(outline.getAttribute('data-drop-zone')).toBe('throw-in');
   });
 
@@ -3825,6 +3903,8 @@ describe('T-90-feedback-20261104_195410-2: drag animation, pointer cursor, throw
         trumpSuit="diamonds"
         attackerId="p1"
         defenderId="p1"
+        canThrowIn
+        throwInVisible
         onThrowInDrop={onThrowInDrop}
       />,
     );
@@ -3850,7 +3930,7 @@ describe('T-90-feedback-20261104_195410-2: drag animation, pointer cursor, throw
     }
   });
 
-  it('ITEM-8: keeps the throw-in outline for an ongoing attack with no legal cards, drops it at GameOver', () => {
+  it('ITEM-1a: shows the throw-in outline only while a throw-in is legal, never at GameOver', () => {
     const pairs: TablePairData[] = [{ attack: { suit: 'spades', rank: 'six' }, defense: null }];
     const props = {
       myId: 'p0',
@@ -3862,14 +3942,20 @@ describe('T-90-feedback-20261104_195410-2: drag animation, pointer cursor, throw
       defenderId: 'p0',
     } as const;
 
+    // The viewer is the defender and nobody flagged a legal throw-in: the
+    // outline and its slot are gone entirely.
     const view = render(<GameTable {...props} boutPhase="Defense" />);
+    expect(screen.queryByTestId('throw-in-outline')).toBeNull();
+    expect(screen.queryByTestId('throw-in-slot')).toBeNull();
+
+    view.rerender(<GameTable {...props} boutPhase="Defense" canThrowIn throwInVisible />);
     const outline = screen.getByTestId('throw-in-outline');
-    // Nobody holds a legal throw-in card (the viewer is even the defender), yet
-    // the next-card slot is still on the felt.
-    expect(outline.getAttribute('data-throw-in-enabled')).toBe('false');
+    expect(outline.getAttribute('data-throw-in-enabled')).toBe('true');
     expect(outline.getAttribute('data-drop-zone')).toBe('throw-in');
 
-    view.rerender(<GameTable {...props} boutPhase="GameOver" />);
+    view.rerender(
+      <GameTable {...props} boutPhase="GameOver" canThrowIn throwInVisible />,
+    );
     expect(screen.queryByTestId('throw-in-outline')).toBeNull();
   });
 
@@ -4346,6 +4432,8 @@ describe('T-90-feedback-20261105_221105-2: card size, hand overlap, contour and 
         attackerId="p1"
         defenderId="p0"
         canRedirect
+        canThrowIn
+        throwInVisible
       />,
     );
 

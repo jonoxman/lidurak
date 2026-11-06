@@ -2583,3 +2583,108 @@ body[data-dragging='true'] *,
     height: 68px;
   }
 }
+
+/* --- T-90-feedback-20261105_221105-3 ITEM-6/7: compact, non-verbal,
+   theme-matched Surrender and Pass controls ------------------------------- */
+
+/* The action column is a flex stack; the two icon buttons stay square instead
+   of stretching to the column width, and the icon itself is the only content. */
+.action-bar .action-button.action-icon-btn {
+  flex: 0 0 auto;
+}
+
+.game-buttons .action-button.action-icon-btn,
+.action-bar .action-button.action-icon-btn {
+  display: grid;
+  grid-template-areas: 'icon';
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  max-width: 44px;
+  padding: 0;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.18));
+  border-radius: var(--ui-radius, 10px);
+  background: var(--bg-elevated, rgba(24, 34, 29, 0.85));
+  color: var(--text-primary, #e8e4d8);
+  font-size: 0;
+  line-height: 0;
+  box-shadow: none;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  transition:
+    transform 120ms ease,
+    border-color 150ms ease,
+    background-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.game-buttons .action-button.action-icon-btn:hover:not(:disabled),
+.action-bar .action-button.action-icon-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  border-color: var(--border-strong, rgba(255, 255, 255, 0.32));
+  background: var(--bg-elevated-hover, rgba(32, 44, 38, 0.92));
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.32);
+  filter: none;
+}
+
+.game-buttons .action-button.action-icon-btn:focus-visible,
+.action-bar .action-button.action-icon-btn:focus-visible {
+  outline: 2px solid var(--text-primary, #e8e4d8);
+  outline-offset: 2px;
+}
+
+.action-icon {
+  grid-area: icon;
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.92;
+}
+
+/* The countdown badge stacks in the button's single grid cell instead of
+   widening the square or shifting the layout. */
+/* ITEM-6/7 (review round 2): the badge explicitly resets the button's
+   `font-size: 0; line-height: 0`, so the 3 → 2 → 1 digit and the pass countdown
+   stay readable instead of being inherited down to zero. */
+.action-button.action-icon-btn .surrender-countdown {
+  grid-area: icon;
+  align-self: start;
+  justify-self: end;
+  margin-left: 0;
+  font-size: 11px;
+  line-height: 1;
+}
+
+/* ITEM-6/7 (review round 1): the countdown number is drawn from the attribute,
+   so the icon-only button carries no visible text at any time. */
+.surrender-countdown::after {
+  content: attr(data-countdown);
+}
+
+:root[data-theme='light'] .game-buttons .action-button.action-icon-btn,
+:root[data-theme='light'] .action-bar .action-button.action-icon-btn {
+  border-color: var(--border-subtle, rgba(15, 23, 42, 0.18));
+  background: var(--bg-elevated, rgba(255, 255, 255, 0.92));
+  color: var(--text-primary, #2b2a26);
+  box-shadow: none;
+}
+
+@media (max-width: 900px) {
+  .game-buttons .action-button.action-icon-btn,
+  .action-bar .action-button.action-icon-btn {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    max-width: 36px;
+  }
+
+  .action-icon {
+    width: 18px;
+    height: 18px;
+  }
+}

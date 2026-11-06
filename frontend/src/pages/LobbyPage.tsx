@@ -19,6 +19,7 @@ const QA_SCENARIOS: { id: string; label: string }[] = [
   { id: '3p-redirect-bob', label: '3P Redirect (Bob POV)' },
   { id: 'chaos-4p', label: '4P Chaos Targets' },
   { id: 'surrender-half-off', label: 'Surrender Half-Off' },
+  { id: 'full-hand-pickup', label: 'Full Hand Pickup (30 Cards)' },
   { id: 'defenseless-surrender', label: 'Defenseless Auto-Surrender' },
   { id: 'discard-and-endgame', label: 'Discard & Endgame Durak' },
   { id: 'transparent-mode', label: 'Transparent Mode' },
@@ -310,7 +311,7 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
                   key={scenario.id}
                   type="button"
                   class="qa-scenario-button"
-                  data-testid={`qa-preset-${scenario.id}`}
+                  data-testid={`preset-btn-${scenario.id}`}
                   data-preset={scenario.id}
                   disabled={presetPending}
                   onClick={() => startPreset(scenario.id)}
