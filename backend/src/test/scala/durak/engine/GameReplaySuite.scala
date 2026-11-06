@@ -250,6 +250,29 @@ class GameReplaySuite extends munit.FunSuite:
     assertEquals(afterSecond.tablePairs.map(_.attack).takeRight(2), Vector(sixHearts, sixDiamonds))
   }
 
+  test("a multi-card throw-in recorded as one action replays deterministically") {
+    val room = newRoom(players = 3, seed = 5L)
+    val start = pairedThrowInTable(room)
+    val sixHearts = card(Rank.Six, Suit.Hearts)
+    val sixDiamonds = card(Rank.Six, Suit.Diamonds)
+    val action = GameAction.ThrowInCards("p2", List(sixHearts, sixDiamonds))
+    val next = GameEngine
+      .applyAction(start, action)
+      .getOrElse(fail("expected a legal multi-card throw-in"))
+
+    val replay = GameReplay.appendMove(GameReplay.initial(room.gameId, start), action, next, 1L)
+    GameActor.stopClock(room).unsafeRunSync()
+
+    assertEquals(replay.moves.size, 1)
+    assertEquals(replay.moves.head.action, action)
+    assertEquals(replay.moves.head.stateAfter.tablePairs.size, 3)
+
+    val verified = GameReplay.verifyReplay(replay)
+    assert(verified.isRight, verified)
+    assertEquals(verified.map(_.size), Right(2))
+    assertEquals(verified.map(_.last.tablePairs), Right(next.tablePairs))
+  }
+
   // --- Serialization & verification ---
 
   test("the serialized game round-trips through JSON and replays deterministically") {

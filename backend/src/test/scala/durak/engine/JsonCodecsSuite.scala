@@ -262,3 +262,55 @@ class JsonCodecsSuite extends munit.FunSuite:
         .isLeft
     )
   }
+
+  // --- Throw-in projection (T-90-feedback-20261106_111512-1) ---
+
+  test("the throw-in view fields round-trip and default when absent") {
+    val state = durak.server.GameManager.preset("throw-in-visibility-4p") match
+      case Right(game) => game.state
+      case Left(error) => fail(error)
+    val view = PlayerGameView.forViewer(state, "p0")
+
+    assert(view.canThrowIn, view.throwInCards.toString)
+    assertEquals(
+      view.throwInCards,
+      List(card(Rank.Seven, Suit.Hearts), card(Rank.Seven, Suit.Diamonds), card(Rank.Nine, Suit.Diamonds))
+    )
+    assertEquals(view.throwInCapacity, 3)
+
+    val json = view.asJson
+    assert(json.noSpaces.contains("\"canThrowIn\":true"), json.noSpaces)
+    assertEquals(json.hcursor.get[Int]("throwInCapacity").toOption, Some(3))
+    assertEquals(parser.decode[PlayerGameView](json.noSpaces), Right(view))
+
+    // A legacy payload predating the throw-in projection decodes to "nothing to
+    // throw in" instead of failing.
+    val legacy = Json.fromJsonObject(
+      json.asObject
+        .getOrElse(fail("a view must encode as an object"))
+        .remove("throwInCards")
+        .remove("throwInCapacity")
+        .remove("canThrowIn")
+    )
+    val decoded = parser
+      .decode[PlayerGameView](legacy.noSpaces)
+      .fold(error => fail(error.getMessage), identity)
+
+    assertEquals(decoded.throwInCards, Nil)
+    assertEquals(decoded.throwInCapacity, 0)
+    assertEquals(decoded.canThrowIn, false)
+  }
+
+  test("a multi-card ThrowInCards action round-trips through JSON") {
+    val action = GameAction.ThrowInCards(
+      "p0",
+      List(card(Rank.Seven, Suit.Hearts), card(Rank.Seven, Suit.Diamonds), card(Rank.Nine, Suit.Diamonds))
+    )
+    val json = action.asJson
+
+    assertEquals(
+      json.hcursor.downField("cards").as[List[Card]].toOption,
+      Some(List(card(Rank.Seven, Suit.Hearts), card(Rank.Seven, Suit.Diamonds), card(Rank.Nine, Suit.Diamonds)))
+    )
+    assertEquals(parser.decode[GameAction](json.noSpaces), Right(action))
+  }

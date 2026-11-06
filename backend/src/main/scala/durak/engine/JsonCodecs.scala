@@ -149,7 +149,10 @@ object JsonCodecs:
       "transparentMode" -> view.transparentMode.asJson,
       "devMode" -> view.devMode.asJson,
       "eligibleTargetIds" -> view.eligibleTargetIds.asJson,
-      "redirectTargetId" -> view.redirectTargetId.asJson
+      "redirectTargetId" -> view.redirectTargetId.asJson,
+      "throwInCards" -> view.throwInCards.asJson,
+      "throwInCapacity" -> view.throwInCapacity.asJson,
+      "canThrowIn" -> view.canThrowIn.asJson
     )
   }
 
@@ -215,6 +218,20 @@ object JsonCodecs:
         .as[Option[Vector[String]]]
         .map(_.getOrElse(Vector.empty))
       redirectTargetId <- cursor.downField("redirectTargetId").as[Option[String]]
+      // Optional additions: a legacy payload omits the throw-in projection,
+      // which then decodes to "nothing to throw in".
+      throwInCards <- cursor
+        .downField("throwInCards")
+        .as[Option[List[Card]]]
+        .map(_.getOrElse(Nil))
+      throwInCapacity <- cursor
+        .downField("throwInCapacity")
+        .as[Option[Int]]
+        .map(_.getOrElse(0))
+      canThrowIn <- cursor
+        .downField("canThrowIn")
+        .as[Option[Boolean]]
+        .map(_.getOrElse(false))
     yield PlayerGameView(
       myId = myId,
       myName = myName,
@@ -253,7 +270,10 @@ object JsonCodecs:
       transparentMode = transparentMode,
       devMode = devMode,
       eligibleTargetIds = eligibleTargetIds,
-      redirectTargetId = redirectTargetId
+      redirectTargetId = redirectTargetId,
+      throwInCards = throwInCards,
+      throwInCapacity = throwInCapacity,
+      canThrowIn = canThrowIn
     )
   }
 

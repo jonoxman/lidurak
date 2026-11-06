@@ -427,6 +427,28 @@ class PlayerViewSuite extends munit.FunSuite:
     assertEquals(PlayerGameView.forViewer(gs, "p2").myFinishRank, Some(1))
   }
 
+  // --- Throw-in projection (T-90-feedback-20261106_111512-1) ---
+
+  test("the throw-in projection is populated live and cleared in review mode") {
+    val gs = durak.server.GameManager.preset("throw-in-visibility-4p") match
+      case Right(game) => game.state
+      case Left(error) => fail(error)
+
+    val live = PlayerGameView.forViewer(gs, "p0")
+    assertEquals(
+      live.throwInCards,
+      List(card(Rank.Seven, Suit.Hearts), card(Rank.Seven, Suit.Diamonds), card(Rank.Nine, Suit.Diamonds))
+    )
+    assertEquals(live.throwInCapacity, 3)
+    assertEquals(live.canThrowIn, true)
+
+    // A replay review exposes nothing to throw in, whatever the seat holds.
+    val review = PlayerGameView.forViewer(gs, "p0", reviewMode = true)
+    assertEquals(review.throwInCards, Nil)
+    assertEquals(review.throwInCapacity, 0)
+    assertEquals(review.canThrowIn, false)
+  }
+
   test("the own status fields round-trip through JSON and default when absent") {
     val gs = state(
       Vector(player("p0", List.empty, hasPassed = true), player("p1", List(card(Rank.Seven)))),
