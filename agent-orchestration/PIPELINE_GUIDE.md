@@ -31,7 +31,7 @@ The project lives in `~/lidurak-agent-project` inside WSL 2 Ubuntu and separates
 ## 1. Quick Start
 - **Launch from Windows PowerShell:**
   ```powershell
-  powershell -ExecutionPolicy Bypass -File "$HOME\mission_control.ps1" -Workers 3
+  powershell -ExecutionPolicy Bypass -File ".\mission_control.ps1" -Workers 3
   ```
 - **One-Time FreeBuff Login Capture (Stored in Gitignored agent-orchestration/.env):
   ```bash
