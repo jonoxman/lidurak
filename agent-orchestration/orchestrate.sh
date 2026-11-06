@@ -281,6 +281,23 @@ dump_changed_files_context() {
   done | head -c 26000
 }
 
+dump_changed_files_context() {
+  # Ultra-lean post-wave context (~20KB max): ONLY outputs files actually modified in this round!
+  local BASE_C
+  BASE_C=$(cat .reviews/feedback_base_commit 2>/dev/null || git rev-parse HEAD~1 2>/dev/null || echo "HEAD")
+  local CHANGED_LIST
+  CHANGED_LIST=$(git diff --name-only "${BASE_C}...HEAD" -- backend/ frontend/ play-local.sh 2>/dev/null || true)
+  if [ -z "$CHANGED_LIST" ]; then
+    dump_full_codebase_context | head -c 22000
+    return 0
+  fi
+  for f in $CHANGED_LIST; do
+    [ -f "$f" ] || continue
+    echo "===MODIFIED_FILE:${f}==="
+    grep -vE '^[[:space:]]*$' "$f" | head -n 260
+  done | head -c 26000
+}
+
 # Serialized FreeBuff admission & prompt submission (handles "This session was released" / "Enter: retry" automatically)
 admit_and_send_prompt() {
   local WORKER_ID=$1
