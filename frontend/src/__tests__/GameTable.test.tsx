@@ -57,6 +57,7 @@ import { ActionBar } from '../components/ActionBar';
 import { DEFAULT_SETTINGS, setSettings } from '../state/settings';
 import type { CardData } from '../components/Card';
 import tableCss from '../styles/table.css?raw';
+import actionIconsCss from '../styles/actionIcons.css?raw';
 import appCss from '../app.css?raw';
 
 /** Declarations of the first rule whose selector text contains `selector`. */
@@ -282,7 +283,7 @@ describe('GameTable', () => {
         tablePairs={[]}
         trumpSuit="diamonds"
       >
-        <button type="button">Pass</button>
+        <ActionBar legalActions={['pass']} onAction={() => {}} />
       </GameTable>,
     );
 
@@ -290,7 +291,7 @@ describe('GameTable', () => {
     expect(container.querySelector('[data-zone="player-hand"]')).not.toBeNull();
     const controls = container.querySelector('[data-zone="player-controls"]');
     expect(controls).not.toBeNull();
-    expect(within(controls as HTMLElement).getByText('Pass')).toBeTruthy();
+    expect(within(controls as HTMLElement).getByTestId('pass-button')).toBeTruthy();
   });
 
   it('hides the bottom trump card once the talon is empty', () => {
@@ -755,13 +756,7 @@ describe('drag-snap and double-click', () => {
 describe('minimalist controls', () => {
   it('keeps only the contextual buttons in the third column', () => {
     const { container } = renderSortableTable({
-      children: (
-        <div class="action-bar">
-          <button type="button" class="action-button red">
-            Surrender
-          </button>
-        </div>
-      ),
+      children: <ActionBar legalActions={['surrender']} onAction={() => {}} />,
     });
 
     const controls = container.querySelector('[data-zone="player-controls"]') as HTMLElement;
@@ -772,7 +767,7 @@ describe('minimalist controls', () => {
     expect(within(controls).queryByRole('button', { name: 'Suit' })).toBeNull();
     expect(within(controls).queryByRole('button', { name: 'Pairs' })).toBeNull();
     expect(within(controls).queryByRole('button', { name: 'Rank' })).toBeNull();
-    expect(within(controls).getByRole('button', { name: 'Surrender' })).toBeTruthy();
+    expect(within(controls).getByTestId('surrender-button')).toBeTruthy();
     expect(within(controls).queryByRole('button', { name: 'Redirect' })).toBeNull();
   });
 });
@@ -1224,13 +1219,13 @@ describe('hand highlight geometry, redirect double-click and review mode', () =>
     expect(pass.getAttribute('data-countdown')).toBe('12');
     expect(pass.textContent).toBe('');
     expect(pass.closest('button')?.textContent).toBe('');
-    expect(pass.closest('button')?.getAttribute('aria-label')).toBe('Pass');
+    expect(pass.closest('button')?.getAttribute('aria-label')).toBe('Pass — done throwing in');
     expect(pass.closest('button')?.querySelector('[data-testid="pass-icon"]')).not.toBeNull();
     const surrenderBadge = screen.getByTestId('surrender-countdown');
     expect(surrenderBadge.getAttribute('data-countdown')).toBe('3');
     expect(surrenderBadge.textContent).toBe('');
     expect(surrenderBadge.closest('button')?.textContent).toBe('');
-    expect(tableCss).toContain('content: attr(data-countdown)');
+    expect(actionIconsCss).toContain('content: attr(data-countdown)');
   });
 
   it('leaves the pass button bare without a countdown', () => {
@@ -1239,7 +1234,7 @@ describe('hand highlight geometry, redirect double-click and review mode', () =>
     );
 
     expect(screen.queryByTestId('pass-countdown')).toBeNull();
-    expect(screen.getByRole('button', { name: 'Pass' })).toBeTruthy();
+    expect(screen.getByTestId('pass-button')).toBeTruthy();
   });
 
   it('hides every command control and drop surface in review mode', () => {
@@ -1268,8 +1263,8 @@ describe('hand highlight geometry, redirect double-click and review mode', () =>
 
     expect(container.querySelector('[data-zone="player-controls"]')).toBeNull();
     expect(screen.queryByText('Throw In')).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Pass' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Surrender' })).toBeNull();
+    expect(screen.queryByTestId('pass-button')).toBeNull();
+    expect(screen.queryByTestId('surrender-button')).toBeNull();
     expect(screen.queryByTestId('redirect-outline')).toBeNull();
     expect(container.querySelector('[data-drop-zone]')).toBeNull();
     expect(container.querySelectorAll('[draggable="true"]')).toHaveLength(0);
@@ -2388,8 +2383,8 @@ describe('T-90-3: outline lift, discard stack, chaos targets, deflect arrow and 
     expect(container.querySelector('[data-drop-zone]')).toBeNull();
     expect(container.querySelectorAll('[draggable="true"]')).toHaveLength(0);
     expect(container.querySelector('[data-zone="player-controls"]')).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Pass' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Surrender' })).toBeNull();
+    expect(screen.queryByTestId('pass-button')).toBeNull();
+    expect(screen.queryByTestId('surrender-button')).toBeNull();
 
     const highlight = screen.getByTestId('hand-turn-highlight');
     expect(highlight.getAttribute('data-active')).toBe('false');
@@ -2402,8 +2397,8 @@ describe('T-90-3: outline lift, discard stack, chaos targets, deflect arrow and 
       <ActionBar legalActions={['pass', 'surrender']} onAction={() => {}} isBotSeat />,
     );
 
-    expect(screen.queryByRole('button', { name: 'Pass' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Surrender' })).toBeNull();
+    expect(screen.queryByTestId('pass-button')).toBeNull();
+    expect(screen.queryByTestId('surrender-button')).toBeNull();
   });
 });
 
@@ -3370,20 +3365,25 @@ describe('T-90 ITEM-1c: distinct gameplay feature colours', () => {
     expect(cssRule(tableCss, '.trump-badge')).toContain('var(--trump-accent)');
   });
 
-  it('tags Pass and Surrender with their role classes and families', () => {
+  it('tags Pass and Surrender with the shared icon-button family and muted accents', () => {
     render(<ActionBar legalActions={['pass', 'surrender']} onAction={() => {}} />);
 
-    const pass = screen.getByTestId('pass-btn');
-    const surrender = screen.getByTestId('surrender-btn');
-    expect(pass.classList.contains('action-btn-pass')).toBe(true);
-    expect(surrender.classList.contains('action-btn-surrender')).toBe(true);
-    expect(pass.classList.contains('action-button')).toBe(true);
-    expect(surrender.classList.contains('action-button')).toBe(true);
+    const pass = screen.getByTestId('pass-button');
+    const surrender = screen.getByTestId('surrender-button');
+    for (const button of [pass, surrender]) {
+      expect(button.classList.contains('action-icon-btn')).toBe(true);
+      expect(button.classList.contains('action-button')).toBe(true);
+      expect(button.className).not.toContain('action-btn-pass');
+      expect(button.className).not.toContain('action-btn-surrender');
+      expect(button.className).not.toContain('red');
+    }
+    expect(pass.classList.contains('action-icon-pass')).toBe(true);
+    expect(surrender.classList.contains('action-icon-surrender')).toBe(true);
 
-    expect(cssRule(tableCss, '.action-btn-pass')).toContain('var(--role-attacker-accent)');
-    expect(cssRule(tableCss, '.action-btn-surrender')).toContain('var(--role-defender-accent)');
-    expect(cssRule(tableCss, '.action-btn-pass')).not.toMatch(/#f59e0b|#ef4444/);
-    expect(cssRule(tableCss, '.action-btn-surrender')).not.toMatch(/#f59e0b|#22c55e/);
+    // The shared theme accents live in the stylesheet the bar imports.
+    expect(actionIconsCss).toContain('--icon-accent: #7d9e83');
+    expect(actionIconsCss).toContain('--icon-accent: #b98a5e');
+    expect(actionIconsCss).not.toMatch(/#ef4444|#dc2626/);
   });
 
   /** T-90-feedback-20261105_221105-3 ITEM-6/7: no word on the button, only a
@@ -3391,18 +3391,18 @@ describe('T-90 ITEM-1c: distinct gameplay feature colours', () => {
   it('ITEM-6/7: renders icon-only Surrender and Pass buttons with no visible text', () => {
     render(<ActionBar legalActions={['pass', 'surrender']} onAction={() => {}} />);
 
-    const surrender = screen.getByTestId('surrender-btn');
-    const pass = screen.getByTestId('pass-btn');
-    for (const [button, label, iconId] of [
-      [surrender, 'Surrender', 'surrender-icon'],
-      [pass, 'Pass', 'pass-icon'],
+    const surrender = screen.getByTestId('surrender-button');
+    const pass = screen.getByTestId('pass-button');
+    for (const [button, label, iconId, iconName] of [
+      [surrender, 'Surrender — take the cards', 'surrender-icon', 'surrender-hands-cards'],
+      [pass, 'Pass — done throwing in', 'pass-icon', 'pass-wave-cards'],
     ] as const) {
       expect(button.tagName).toBe('BUTTON');
       expect(button.textContent).toBe('');
       expect(button.getAttribute('aria-label')).toBe(label);
       expect(button.getAttribute('title')).toBe(label);
       expect(button.classList.contains('action-icon-btn')).toBe(true);
-      expect(within(button).getByTestId(iconId)).toBeTruthy();
+      expect(within(button).getByTestId(iconId).getAttribute('data-icon')).toBe(iconName);
     }
 
     const surrenderIcon = within(surrender).getByTestId('surrender-icon');
@@ -3414,25 +3414,27 @@ describe('T-90 ITEM-1c: distinct gameplay feature colours', () => {
     expect(passIcon.querySelector('[data-icon-part="pass-hand"]')).not.toBeNull();
     expect(passIcon.querySelector('[data-icon-part="arrow-pass"]')).not.toBeNull();
 
-    expect(tableCss).toMatch(
-      /\.action-button\.action-icon-btn \{[^}]*width: 44px;[^}]*height: 44px;/,
+    // T-90-feedback-20261106_111512-2: the square size and theme live in the
+    // stylesheet the bar imports — 40x40 desktop, 32x32 below 900px.
+    expect(actionIconsCss).toMatch(
+      /\.action-button\.action-icon-btn \{[^}]*width: 40px;[^}]*height: 40px;/,
     );
-    expect(tableCss).toMatch(
-      /@media \(max-width: 900px\) \{[\s\S]*?\.action-button\.action-icon-btn[^{]*\{[^}]*width: 36px;[^}]*height: 36px;/,
+    expect(actionIconsCss).toMatch(
+      /@media \(max-width: 900px\) \{[\s\S]*?\.action-button\.action-icon-btn[^{]*\{[^}]*width: 32px;[^}]*height: 32px;/,
     );
-    expect(tableCss).toMatch(/background: var\(--bg-elevated, rgba\(24, 34, 29, 0\.85\)\)/);
-    expect(tableCss).toMatch(/border: 1px solid var\(--border-subtle, rgba\(255, 255, 255, 0\.18\)\)/);
-    expect(tableCss).toMatch(/border-radius: var\(--ui-radius, 10px\)/);
-    expect(tableCss).toMatch(/backdrop-filter: blur\(6px\)/);
-    // ITEM-6/7 (review round 2): the digit must not inherit the button's
-    // `font-size: 0; line-height: 0`, or the countdown is drawn at 0px.
-    expect(tableCss).toMatch(
+    expect(actionIconsCss).toMatch(/background: var\(--bg-elevated, rgba\(24, 34, 29, 0\.85\)\)/);
+    expect(actionIconsCss).toMatch(/border: 1px solid var\(--durak-border, rgba\(214, 199, 170, 0\.34\)\)/);
+    expect(actionIconsCss).toMatch(/border-radius: 8px/);
+    expect(actionIconsCss).toMatch(/backdrop-filter: blur\(6px\)/);
+    // The digit must not inherit the button's `font-size: 0; line-height: 0`,
+    // or the countdown is drawn at 0px.
+    expect(actionIconsCss).toMatch(
       /\.action-button\.action-icon-btn \.surrender-countdown \{[^}]*font-size: 11px;[^}]*line-height: 1;/,
     );
     // The hand glyphs are outlined palms with fingers and a thumb, not comb
-    // strokes: two palms + fingers + thumb per raised hand, one waving hand.
+    // strokes: two palms + fingers + thumb per raised hand, one flat hand.
     expect(surrenderIcon.querySelectorAll('[data-icon-part="raised-hands"] path')).toHaveLength(6);
-    expect(passIcon.querySelectorAll('[data-icon-part="pass-hand"] path')).toHaveLength(3);
+    expect(passIcon.querySelectorAll('[data-icon-part="pass-hand"] path')).toHaveLength(4);
   });
 
   it('defines all six non-overlapping families with the ticket values', () => {
