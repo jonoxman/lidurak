@@ -450,3 +450,114 @@ class PresetSuite extends munit.FunSuite:
     val human = view(manager, gameId, "p1")
     assert(!human.isBot)
   }
+
+  test("surrender-half-off gives Alice two rank-7 cards for one multi-card throw-in") {
+    val manager = newManager
+    val (gameId, _) = startPreset(manager, "surrender-half-off")
+
+    val alice = view(manager, gameId, "p0")
+    assertEquals(alice.myName, "Alice")
+    assertEquals(alice.myHand.size, 6)
+    // ITEM-5: both sevens are in her hand while 7♠ sits on the table.
+    assert(alice.myHand.contains(Card(Suit.Hearts, Rank.Seven)), alice.myHand.toString)
+    assert(alice.myHand.contains(Card(Suit.Diamonds, Rank.Seven)), alice.myHand.toString)
+    assert(alice.legalActions.contains("throwIn"), alice.legalActions.toString)
+
+    val room = manager.getRoom(gameId).unsafeRunSync().getOrElse(fail("room is missing"))
+    val state = room.stateRef.get.unsafeRunSync()
+    assertEquals(GameEngine.canPlayerThrowIn(state, 0), true)
+    // The position stays card-conserving: 7♦ moved from the discard into her hand.
+    val tableCards = state.tablePairs.flatMap(pair => pair.attack :: pair.defense.toList)
+    val allCards = state.players.flatMap(_.hand) ++ tableCards ++ state.talon ++ state.discardPile
+    assertEquals(state.players.map(_.hand.size).sum, 18)
+    assertEquals(state.discardPile.size, 7)
+    assertEquals(allCards.size, 36)
+    assertEquals(allCards.distinct.size, 36)
+
+    // Bob surrenders; Carol holds no rank on the table and is auto-passed.
+    val (surrenderStatus, surrenderJson) = post(
+      manager,
+      s"/api/games/$gameId/action",
+      Json.obj("type" -> "declareSurrender".asJson, "playerId" -> "p1".asJson)
+    )
+    assertEquals(surrenderStatus, Status.Ok, surrenderJson.noSpaces)
+    awaitRoomState(room, 5.seconds)(_.players(2).hasPassed)
+
+    val beforeThrowIn = view(manager, gameId, "p0")
+    assertEquals(beforeThrowIn.boutPhase, BoutPhase.SurrenderThrowIn)
+    assertEquals(beforeThrowIn.tablePairs.size, 3)
+
+    val sevens = List(Card(Suit.Hearts, Rank.Seven), Card(Suit.Diamonds, Rank.Seven))
+    val (status, afterJson) = post(
+      manager,
+      s"/api/games/$gameId/action",
+      Json.obj(
+        "type" -> "throwInCards".asJson,
+        "playerId" -> "p0".asJson,
+        "cards" -> sevens.asJson
+      )
+    )
+    assertEquals(status, Status.Ok, afterJson.noSpaces)
+    val after = afterJson
+      .as[PlayerGameView]
+      .getOrElse(fail(s"invalid view body: ${afterJson.noSpaces}"))
+    assertEquals(after.boutPhase, BoutPhase.SurrenderThrowIn)
+    assertEquals(after.tablePairs.size, 5)
+    assertEquals(after.tablePairs.map(_.attack).takeRight(2), sevens.toVector)
+    assertEquals(after.myHand.size, 4)
+  }
+
+  test("POST /api/games/preset/:presetId starts full-hand-pickup with a near-full-deck hand") {
+    val manager = newManager
+    val (status, json) = post(manager, "/api/games/preset/full-hand-pickup", Json.obj())
+
+    assertEquals(status, Status.Ok, json.noSpaces)
+    val gameId = json.hcursor
+      .get[String]("gameId")
+      .getOrElse(fail(s"missing gameId in ${json.noSpaces}"))
+    assertEquals(json.hcursor.get[String]("defaultPlayerId").toOption, Some("p0"))
+    assertEquals(
+      json.hcursor.downField("players").as[List[Json]].map(_.size).toOption,
+      Some(2)
+    )
+
+    val alice = view(manager, gameId, "p0")
+    assertEquals(alice.myName, "Alice")
+    assertEquals(alice.opponents.size, 1)
+    assertEquals(alice.boutPhase, BoutPhase.InitialAttack)
+    assertEquals(alice.attackerIdx, 0)
+    assertEquals(alice.defenderIdx, 1)
+    assertEquals(alice.talonCount, 0)
+    // A near-full-deck hand, with the defender keeping the remaining 6-8 cards.
+    assert(alice.myHand.size >= 28 && alice.myHand.size <= 30, alice.myHand.size.toString)
+    val bob = alice.opponents.head
+    assertEquals(bob.id, "p1")
+    assert(bob.cardCount >= 6 && bob.cardCount <= 8, bob.cardCount.toString)
+    assertEquals(alice.myHand.size + bob.cardCount + alice.talonCount, 36)
+    // The opening attack is live, so every card in that hand is playable.
+    assert(alice.legalActions.contains("attack"), alice.legalActions.toString)
+
+    val room = manager.getRoom(gameId).unsafeRunSync().getOrElse(fail("room is missing"))
+    val state = room.stateRef.get.unsafeRunSync()
+    assertEquals(state.players.map(_.hand.size).sum, 36)
+    assertEquals(state.players.flatMap(_.hand).distinct.size, 36)
+    assertEquals(state.talon, Vector.empty)
+
+    // The debug alias starts the very same scripted position.
+    val (debugStatus, debugJson) =
+      post(manager, "/api/debug/preset/full-hand-pickup", Json.obj())
+    assertEquals(debugStatus, Status.Ok, debugJson.noSpaces)
+    val debugGameId = debugJson.hcursor
+      .get[String]("gameId")
+      .getOrElse(fail(s"missing gameId in ${debugJson.noSpaces}"))
+    assertEquals(view(manager, debugGameId, "p0").myHand.size, alice.myHand.size)
+  }
+
+  test("POST /api/games/preset/:presetId rejects an unknown preset with 400") {
+    val manager = newManager
+
+    val (status, json) = post(manager, "/api/games/preset/nope", Json.obj())
+
+    assertEquals(status, Status.BadRequest)
+    assert(json.hcursor.get[String]("error").exists(_.nonEmpty), json.noSpaces)
+  }

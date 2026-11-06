@@ -445,21 +445,23 @@ class SurrenderThrowInSuite extends munit.FunSuite:
   test("a defense-phase throw-in resets every non-defender passed flag") {
     val thrown = card(Rank.Six, Suit.Clubs)
     val gs = threePlayer(
-      attackerHand = List(thrown),
+      // p0 already passed, so only p2 — still holding a matching six — can act.
+      attackerHand = List(card(Rank.Ace, Suit.Clubs)),
       defenderHand = List(
         card(Rank.Seven, Suit.Spades),
         card(Rank.Eight, Suit.Spades)
       ),
-      thirdHand = List(card(Rank.King, Suit.Diamonds), card(Rank.Queen, Suit.Diamonds)),
+      thirdHand = List(thrown, card(Rank.King, Suit.Diamonds)),
       tablePairs = Vector(TablePair(card(Rank.Six, Suit.Spades))),
       attackerPassed = true,
-      thirdPassed = true
+      thirdPassed = false
     )
 
-    val result = GameEngine.applyAction(gs, GameAction.ThrowInCards("p0", List(thrown)))
+    val result = GameEngine.applyAction(gs, GameAction.ThrowInCards("p2", List(thrown)))
 
     assert(result.isRight, result)
     val next = result.getOrElse(fail("expected a valid throw-in"))
+    // The throw-in reopens the window for the seat that had already passed.
     assertEquals(next.players(0).hasPassed, false)
     assertEquals(next.players(2).hasPassed, false)
   }
@@ -578,6 +580,119 @@ class SurrenderThrowInSuite extends munit.FunSuite:
 
     // The defender owns a single card and already faces one uncovered attack.
     val result = GameEngine.applyAction(gs, GameAction.ThrowInCards("p0", List(thrown)))
+
+    assert(result.isLeft, result)
+  }
+
+  // --- ITEM-1a: throw-in legality is never offered to an ineligible seat ---
+
+  test("a passed non-defender has no throw-in or pass legal action") {
+    val attack = card(Rank.Six, Suit.Spades)
+    val thrown = card(Rank.Six, Suit.Clubs)
+    val gs = threePlayer(
+      attackerHand = List(card(Rank.Ace, Suit.Clubs)),
+      defenderHand = List(card(Rank.Seven, Suit.Spades), card(Rank.Eight, Suit.Spades)),
+      thirdHand = List(thrown, card(Rank.King, Suit.Diamonds)),
+      tablePairs = Vector(TablePair(attack)),
+      thirdPassed = true
+    )
+
+    assertEquals(GameEngine.canPlayerThrowIn(gs, 2), false)
+    assertEquals(GameEngine.legalActions(gs, "p2"), Nil)
+    assertEquals(PlayerGameView.forViewer(gs, "p2").legalActions, List.empty)
+    // The engine refuses a passed seat's throw-in outright, not just the view.
+    assert(GameEngine.applyAction(gs, GameAction.ThrowInCards("p2", List(thrown))).isLeft)
+  }
+
+  test("the defender and a seat holding no matching rank offer no throw-in") {
+    val attack = card(Rank.Six, Suit.Spades)
+    val gs = threePlayer(
+      attackerHand = List(card(Rank.King, Suit.Clubs)),
+      defenderHand = List(
+        card(Rank.Six, Suit.Hearts),
+        card(Rank.Eight, Suit.Hearts),
+        card(Rank.Nine, Suit.Hearts)
+      ),
+      thirdHand = List(card(Rank.King, Suit.Diamonds)),
+      tablePairs = Vector(TablePair(attack))
+    )
+
+    // The bout has room and the defender can answer, so the missing rank — and
+    // the defender's own role — are the only reasons no throw-in is offered.
+    assertEquals(gs.tablePairs.size < gs.maxBoutAttacks, true)
+    assertEquals(GameEngine.canPlayerThrowIn(gs, 0), false)
+    assertEquals(GameEngine.canPlayerThrowIn(gs, 1), false)
+    assertEquals(GameEngine.canPlayerThrowIn(gs, 2), false)
+    assertEquals(PlayerGameView.forViewer(gs, "p0").legalActions, List.empty)
+    assertEquals(PlayerGameView.forViewer(gs, "p2").legalActions, List.empty)
+    assert(
+      !GameEngine.legalActions(gs, "p1").exists(_.isInstanceOf[GameAction.ThrowInCards]),
+      GameEngine.legalActions(gs, "p1").toString
+    )
+  }
+
+  // --- ITEM-5: one move may deploy several matching cards ---
+
+  test("two matching cards can be thrown in together during the defense phase") {
+    val attack = card(Rank.Seven, Suit.Spades)
+    val first = card(Rank.Seven, Suit.Hearts)
+    val second = card(Rank.Seven, Suit.Diamonds)
+    val gs = twoPlayer(
+      attackerHand = List(first, second, card(Rank.Ace, Suit.Clubs)),
+      defenderHand = List(
+        card(Rank.Eight, Suit.Spades),
+        card(Rank.Nine, Suit.Spades),
+        card(Rank.Ten, Suit.Spades)
+      ),
+      tablePairs = Vector(TablePair(attack))
+    )
+
+    val result = GameEngine.applyAction(gs, GameAction.ThrowInCards("p0", List(first, second)))
+
+    assert(result.isRight, result)
+    val next = result.getOrElse(fail("expected a valid multi-card throw-in"))
+    assertEquals(next.tablePairs.map(_.attack), Vector(attack, first, second))
+    assertEquals(next.players(0).hand, Vector(card(Rank.Ace, Suit.Clubs)))
+    assertEquals(next.boutPhase, BoutPhase.Defense)
+  }
+
+  test("two matching cards can be thrown in together during a surrender throw-in") {
+    val attack = card(Rank.Seven, Suit.Spades)
+    val first = card(Rank.Seven, Suit.Hearts)
+    val second = card(Rank.Seven, Suit.Diamonds)
+    val gs = twoPlayer(
+      attackerHand = List(first, second, card(Rank.Ace, Suit.Clubs)),
+      defenderHand = List(card(Rank.Eight, Suit.Spades)),
+      tablePairs = Vector(TablePair(attack)),
+      boutPhase = BoutPhase.SurrenderThrowIn
+    )
+
+    val result = GameEngine.applyAction(gs, GameAction.ThrowInCards("p0", List(first, second)))
+
+    assert(result.isRight, result)
+    val next = result.getOrElse(fail("expected a valid multi-card throw-in"))
+    assertEquals(next.tablePairs.map(_.attack), Vector(attack, first, second))
+    assertEquals(next.players(0).hand.size, 1)
+    // The thrower keeps the window open because it still holds cards.
+    assertEquals(next.boutPhase, BoutPhase.SurrenderThrowIn)
+    assertEquals(next.players(0).hasPassed, false)
+  }
+
+  test("a multi-card throw-in containing an off-rank card is rejected") {
+    val attack = card(Rank.Seven, Suit.Spades)
+    val first = card(Rank.Seven, Suit.Hearts)
+    val offRank = card(Rank.King, Suit.Diamonds)
+    val gs = twoPlayer(
+      attackerHand = List(first, offRank),
+      defenderHand = List(
+        card(Rank.Eight, Suit.Spades),
+        card(Rank.Nine, Suit.Spades),
+        card(Rank.Ten, Suit.Spades)
+      ),
+      tablePairs = Vector(TablePair(attack))
+    )
+
+    val result = GameEngine.applyAction(gs, GameAction.ThrowInCards("p0", List(first, offRank)))
 
     assert(result.isLeft, result)
   }
