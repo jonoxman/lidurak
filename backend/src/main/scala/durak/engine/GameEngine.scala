@@ -464,30 +464,83 @@ object GameEngine:
       )
 
   /**
-   * True when `seatIdx` still has a legitimate throw-in: it is an active
-   * non-defender that has not passed, the table still holds attacking cards,
-   * it holds a card whose rank is on the table, the bout still has room for
-   * another attacking card, and — while the defender is still answering — the
-   * defender could cover it.
+   * The largest number of cards [[applyThrowInCards]] accepts from `playerId` in
+   * one action right now: the bout's free slots (capped by `maxBoutAttacks` and,
+   * while the defender is still answering, by the cards the defender has left
+   * to cover with), never more than the matching cards that player holds.
+   *
+   * Returns `0` for an unknown or finished player, the defender, a seat that
+   * already passed, an empty hand, a table without attacking cards, a phase
+   * other than the two throw-in phases, and once the game is over. The
+   * projection and the UI multi-selection both read this number, so a client
+   * can never build a throw-in the engine would reject (ITEM-1a / ITEM-5).
+   */
+  def throwInCapacity(state: GameState, playerId: String): Int =
+    throwInSeat(state, playerId) match
+      case None => 0
+      case Some(player) =>
+        val matching = player.hand.count(card => state.tableRanks.contains(card.rank))
+        Math.min(matching, remainingThrowInSlots(state))
+
+  /**
+   * Every card in `playerId`'s hand that may be thrown in right now, in hand
+   * order. Empty for every seat [[throwInCapacity]] reports as `0`, so the
+   * defender, a seat that already passed and a seat holding no rank on the
+   * table never see a throw-in outline (ITEM-1a).
+   */
+  def legalThrowInCards(state: GameState, playerId: String): List[Card] =
+    if throwInCapacity(state, playerId) <= 0 then Nil
+    else
+      state.players
+        .find(_.id == playerId)
+        .map(_.hand.toList.filter(card => state.tableRanks.contains(card.rank)))
+        .getOrElse(Nil)
+
+  /**
+   * The seat that may throw in right now, if any. It carries every eligibility
+   * guard the throw-in helpers share: the game is still running, the phase is
+   * open to throw-ins, attacking cards sit on the table, and the seat is an
+   * active non-defender that holds cards and has not passed.
+   */
+  private def throwInSeat(state: GameState, playerId: String): Option[PlayerState] =
+    val phaseAllowsThrowIn =
+      state.boutPhase == BoutPhase.Defense || state.boutPhase == BoutPhase.SurrenderThrowIn
+    if state.isGameOver || !phaseAllowsThrowIn || state.tablePairs.isEmpty then None
+    else
+      val seatIdx = state.players.indexWhere(_.id == playerId)
+      if seatIdx == -1 || seatIdx == state.defenderIdx then None
+      else
+        state.players.lift(seatIdx).filter { player =>
+          player.isActive && player.hand.nonEmpty && !player.hasPassed
+        }
+
+  /**
+   * Free attacking slots in the current bout before the player's own hand is
+   * considered: `maxBoutAttacks` minus what already sits on the table, and —
+   * while the defender is still answering — what that defender can still cover.
+   * [[throwInCapacity]] is the only caller, so the projection and
+   * [[applyThrowInCards]] can never disagree about the limit.
+   */
+  private def remainingThrowInSlots(state: GameState): Int =
+    val boutRoom = state.maxBoutAttacks - state.tablePairs.size
+    val defenderRoom =
+      if state.boutPhase == BoutPhase.Defense then
+        state.players
+          .lift(state.defenderIdx)
+          .map(defender => defender.hand.size - state.uncoveredCount)
+          .getOrElse(0)
+      else Int.MaxValue
+    Math.max(0, Math.min(boutRoom, defenderRoom))
+
+  /**
+   * True when `seatIdx` holds at least one legal throw-in right now.
    *
    * This is the single definition the projection, the UI outline and the
    * server's auto-pass all read, so a seat that is the defender, already passed
    * or holds no matching rank never sees a throw-in outline (ITEM-1a).
    */
   def canPlayerThrowIn(state: GameState, seatIdx: Int): Boolean =
-    if seatIdx == state.defenderIdx then false
-    else
-      state.players.lift(seatIdx).exists { player =>
-        val surrendered = state.boutPhase == BoutPhase.SurrenderThrowIn
-        val defenderHand = state.players.lift(state.defenderIdx).map(_.hand.size).getOrElse(0)
-        player.isActive &&
-          player.hand.nonEmpty &&
-          !player.hasPassed &&
-          state.tablePairs.nonEmpty &&
-          state.tablePairs.size < state.maxBoutAttacks &&
-          (surrendered || state.uncoveredCount < defenderHand) &&
-          player.hand.exists(card => state.tableRanks.contains(card.rank))
-      }
+    state.players.lift(seatIdx).exists(player => legalThrowInCards(state, player.id).nonEmpty)
 
   /**
    * Seats the server passes on a short delay instead of the engine passing them
@@ -568,6 +621,10 @@ object GameEngine:
       _ <- check(thrower.finishRank.isEmpty, s"$playerId has already finished the game")
       _ <- check(!thrower.hasPassed, s"$playerId has already passed")
       _ <- check(cards.nonEmpty, "A throw-in must contain at least one card")
+      _ <- check(
+        cards.distinct.size == cards.size,
+        "A throw-in cannot contain the same card twice"
+      )
       remainingHand <- removeCards(thrower.hand, cards)
         .toRight("Throw-in contains cards that are not in the player's hand")
       tableRanks = state.tableRanks
@@ -575,14 +632,12 @@ object GameEngine:
         cards.forall(card => tableRanks.contains(card.rank)),
         "Every thrown-in card must match the rank of a card on the table"
       )
+      // One shared capacity helper caps a whole multi-card throw-in, so the
+      // engine and the projected `throwInCapacity` can never drift apart.
+      capacity = throwInCapacity(state, playerId)
       _ <- check(
-        state.tablePairs.size + cards.size <= state.maxBoutAttacks,
-        s"A throw-in may not grow the attack beyond ${state.maxBoutAttacks} cards"
-      )
-      _ <- check(
-        state.boutPhase != BoutPhase.Defense ||
-          state.tablePairs.count(_.defense.isEmpty) + cards.size <= defender.hand.size,
-        "The defender does not have enough cards to cover the thrown-in cards"
+        cards.size <= capacity,
+        s"A throw-in may deploy at most $capacity matching cards right now"
       )
     yield
       val players = state.players.zipWithIndex.map { case (player, idx) =>

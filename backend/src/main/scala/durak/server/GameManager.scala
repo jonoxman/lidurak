@@ -125,7 +125,11 @@ object GameManager:
     DefenselessSurrender,
     DiscardAndEndgame,
     TransparentMode,
-    FullHandPickup
+    FullHandPickup,
+    ThrowInVisibility4p,
+    ThrowInCapacityCap,
+    HugeHand36,
+    HugeHand52
   )
 
   /** Three-player deflection: Alice attacked, Bob holds the matching six. */
@@ -155,6 +159,30 @@ object GameManager:
    */
   val FullHandPickup: String = "full-hand-pickup"
 
+  /**
+   * Alice may throw in `7♥ 7♦ 9♦`, while the defender Bob, the unmatched Carol
+   * and the already-passed Dave must see no throw-in outline at all (ITEM-1a).
+   */
+  val ThrowInVisibility4p: String = "throw-in-visibility-4p"
+
+  /**
+   * Alice holds four matching cards, but the bout only has room for two: the
+   * UI must cap her multi-selection at two (ITEM-5).
+   */
+  val ThrowInCapacityCap: String = "throw-in-capacity-cap"
+
+  /**
+   * A two-player table whose defender holds 34 of the 36 cards, so the reviewer
+   * can check that an enormous hand still fits the felt (ITEM-4 / new #3).
+   */
+  val HugeHand36: String = "huge-hand-36"
+
+  /**
+   * The same enormous-hand check on the 52-card deck: Bob holds 46 cards while
+   * the other three seats share five (ITEM-4 / new #3).
+   */
+  val HugeHand52: String = "huge-hand-52"
+
   /** The scripted position called `presetId`, or an error naming the unknown one. */
   def preset(presetId: String): Either[String, PresetGame] =
     Option(presetId).map(_.trim.toLowerCase).getOrElse("") match
@@ -165,6 +193,10 @@ object GameManager:
       case DiscardAndEndgame  => Right(discardAndEndgamePreset)
       case TransparentMode    => Right(transparentModePreset)
       case FullHandPickup     => Right(fullHandPickupPreset)
+      case ThrowInVisibility4p => Right(throwInVisibility4pPreset)
+      case ThrowInCapacityCap => Right(throwInCapacityCapPreset)
+      case HugeHand36         => Right(hugeHand36Preset)
+      case HugeHand52         => Right(hugeHand52Preset)
       case other =>
         Left(
           s"Unknown preset: $other (expected one of ${Presets.mkString(", ")})"
@@ -195,7 +227,9 @@ object GameManager:
       discardPile: Vector[Card] = Vector.empty,
       lastDiscardCards: Vector[Card] = Vector.empty,
       finishOrder: Vector[String] = Vector.empty,
-      finishRanks: Vector[Option[Int]] = Vector.empty
+      finishRanks: Vector[Option[Int]] = Vector.empty,
+      // Seats that already declared a pass, by seat index.
+      passedSeats: Set[Int] = Set.empty
   ): GameState =
     GameState(
       config = GameConfig(
@@ -212,6 +246,7 @@ object GameManager:
           id = s"p$idx",
           name = name,
           hand = hands.lift(idx).getOrElse(Vector.empty),
+          hasPassed = passedSeats.contains(idx),
           finishRank = finishRanks.lift(idx).flatten
         )
       },
@@ -663,4 +698,187 @@ object GameManager:
         defenderInitialHandSize = bobHand.size
       ),
       defaultPlayerId = "p0"
+    )
+
+  /**
+   * The cards of the `playerCount` deck nobody holds yet, ordered so the very
+   * last one is a trump (`♣`): that card becomes the bottom trump and is drawn
+   * last, exactly like a dealt game.
+   */
+  private def clubBottomTalon(playerCount: Int, used: Vector[Card]): Vector[Card] =
+    val remaining = Deck.forPlayerCount(playerCount).filterNot(used.contains)
+    remaining.filterNot(_.suit == Suit.Clubs) ++ remaining.filter(_.suit == Suit.Clubs)
+
+  /**
+   * `throw-in-visibility-4p` (ITEM-1a): Bob (`p1`) has covered Alice's (`p0`)
+   * `7♠` with `9♠` at `trumpSuit = Clubs`, and Dave (`p3`) already passed.
+   *
+   * Alice holds `7♥`, `7♦` and `9♦` — all matching a rank on the table — so she
+   * is the only seat that may throw in. Bob is the defender (his `9♥` never
+   * qualifies), Carol holds no `7` or `9`, and Dave has passed, so none of them
+   * sees a throw-in outline. The position conserves all 52 cards (26 in hands
+   * and on the table, 26 in the talon with a club at the bottom).
+   */
+  private def throwInVisibility4pPreset: PresetGame =
+    val aliceHand = Vector(
+      card(Rank.Seven, Suit.Hearts),
+      card(Rank.Seven, Suit.Diamonds),
+      card(Rank.Nine, Suit.Diamonds),
+      card(Rank.King, Suit.Spades),
+      card(Rank.Queen, Suit.Hearts),
+      card(Rank.Six, Suit.Clubs)
+    )
+    val bobHand = Vector(
+      card(Rank.Nine, Suit.Hearts),
+      card(Rank.Ten, Suit.Diamonds),
+      card(Rank.Jack, Suit.Spades),
+      card(Rank.Eight, Suit.Hearts),
+      card(Rank.Six, Suit.Diamonds),
+      card(Rank.Ace, Suit.Diamonds)
+    )
+    val carolHand = Vector(
+      card(Rank.Eight, Suit.Spades),
+      card(Rank.Ten, Suit.Clubs),
+      card(Rank.Jack, Suit.Hearts),
+      card(Rank.Queen, Suit.Diamonds),
+      card(Rank.King, Suit.Diamonds),
+      card(Rank.Ace, Suit.Spades)
+    )
+    val daveHand = Vector(
+      card(Rank.Seven, Suit.Clubs),
+      card(Rank.Eight, Suit.Diamonds),
+      card(Rank.Ten, Suit.Hearts),
+      card(Rank.Jack, Suit.Diamonds),
+      card(Rank.Queen, Suit.Spades),
+      card(Rank.King, Suit.Hearts)
+    )
+    val tablePairs = Vector(
+      TablePair(card(Rank.Seven, Suit.Spades), Some(card(Rank.Nine, Suit.Spades)))
+    )
+    val used = aliceHand ++ bobHand ++ carolHand ++ daveHand ++
+      tablePairs.flatMap(pair => pair.attack :: pair.defense.toList)
+    val talon = clubBottomTalon(4, used)
+    PresetGame(
+      state = presetState(
+        names = Vector("Alice", "Bob", "Carol", "Dave"),
+        hands = Vector(aliceHand, bobHand, carolHand, daveHand),
+        talon = talon,
+        trumpSuit = Suit.Clubs,
+        bottomTrumpCard = talon.lastOption,
+        tablePairs = tablePairs,
+        attackerIdx = 0,
+        defenderIdx = 1,
+        boutPhase = BoutPhase.Defense,
+        // Bob held seven cards when the bout opened, so capacity is five.
+        defenderInitialHandSize = 7,
+        passedSeats = Set(3)
+      ),
+      defaultPlayerId = "p0"
+    )
+
+  /**
+   * `throw-in-capacity-cap` (ITEM-5): the same covered `7♠`/`9♠` table in a
+   * two-player game, but the bout only has room for two more attacks.
+   *
+   * Alice holds `7♥ 7♦ 7♣ 9♦` — four matching cards — while
+   * `maxBoutAttacks = min(6, defenderInitialHandSize = 3) = 3` and the table
+   * already holds one card, so `throwInCapacity` is exactly `2`. Throwing two
+   * cards at once succeeds; three are rejected. The position conserves all 36
+   * cards (10 in hands and on the table, 26 in the talon).
+   */
+  private def throwInCapacityCapPreset: PresetGame =
+    val aliceHand = Vector(
+      card(Rank.Seven, Suit.Hearts),
+      card(Rank.Seven, Suit.Diamonds),
+      card(Rank.Seven, Suit.Clubs),
+      card(Rank.Nine, Suit.Diamonds),
+      card(Rank.King, Suit.Spades),
+      card(Rank.Queen, Suit.Hearts)
+    )
+    val bobHand = Vector(
+      card(Rank.Eight, Suit.Hearts),
+      card(Rank.Ten, Suit.Diamonds)
+    )
+    val tablePairs = Vector(
+      TablePair(card(Rank.Seven, Suit.Spades), Some(card(Rank.Nine, Suit.Spades)))
+    )
+    val used = aliceHand ++ bobHand ++
+      tablePairs.flatMap(pair => pair.attack :: pair.defense.toList)
+    val talon = clubBottomTalon(2, used)
+    PresetGame(
+      state = presetState(
+        names = Vector("Alice", "Bob"),
+        hands = Vector(aliceHand, bobHand),
+        talon = talon,
+        trumpSuit = Suit.Clubs,
+        bottomTrumpCard = talon.lastOption,
+        tablePairs = tablePairs,
+        attackerIdx = 0,
+        defenderIdx = 1,
+        boutPhase = BoutPhase.Defense,
+        defenderInitialHandSize = 3
+      ),
+      defaultPlayerId = "p0"
+    )
+
+  /**
+   * `huge-hand-36` (ITEM-4 / new #3): Alice (`p0`) has opened with `6♠` and
+   * holds only `6♦`, while Bob (`p1`, the default POV) defends with all 34
+   * remaining cards of the 36-card deck. The talon and the discard pile are
+   * empty, so the hand fan is the whole game.
+   */
+  private def hugeHand36Preset: PresetGame =
+    val aliceHand = Vector(card(Rank.Six, Suit.Diamonds))
+    val attack = card(Rank.Six, Suit.Spades)
+    val bobHand = Deck.forPlayerCount(2).filterNot(card => aliceHand.contains(card) || card == attack)
+    PresetGame(
+      state = presetState(
+        names = Vector("Alice", "Bob"),
+        hands = Vector(aliceHand, bobHand),
+        talon = Vector.empty,
+        trumpSuit = Suit.Hearts,
+        bottomTrumpCard = None,
+        tablePairs = Vector(TablePair(attack)),
+        attackerIdx = 0,
+        defenderIdx = 1,
+        boutPhase = BoutPhase.Defense,
+        defenderInitialHandSize = bobHand.size
+      ),
+      defaultPlayerId = "p1"
+    )
+
+  /**
+   * `huge-hand-52` (ITEM-4 / new #3): the four-player variant. Alice (`p0`)
+   * opened with `2♠` and holds `2♦ 3♦`; Bob (`p1`, the default POV) defends
+   * with all 46 remaining cards, while Carol (`p2`) holds `4♦ 5♦` and Dave
+   * (`p3`) holds `6♦`. The talon and discard pile are empty and all 52 cards
+   * are conserved.
+   */
+  private def hugeHand52Preset: PresetGame =
+    val aliceHand = Vector(
+      card(Rank.Two, Suit.Diamonds),
+      card(Rank.Three, Suit.Diamonds)
+    )
+    val carolHand = Vector(
+      card(Rank.Four, Suit.Diamonds),
+      card(Rank.Five, Suit.Diamonds)
+    )
+    val daveHand = Vector(card(Rank.Six, Suit.Diamonds))
+    val attack = card(Rank.Two, Suit.Spades)
+    val used = aliceHand ++ carolHand ++ daveHand :+ attack
+    val bobHand = Deck.forPlayerCount(4).filterNot(used.contains)
+    PresetGame(
+      state = presetState(
+        names = Vector("Alice", "Bob", "Carol", "Dave"),
+        hands = Vector(aliceHand, bobHand, carolHand, daveHand),
+        talon = Vector.empty,
+        trumpSuit = Suit.Hearts,
+        bottomTrumpCard = None,
+        tablePairs = Vector(TablePair(attack)),
+        attackerIdx = 0,
+        defenderIdx = 1,
+        boutPhase = BoutPhase.Defense,
+        defenderInitialHandSize = bobHand.size
+      ),
+      defaultPlayerId = "p1"
     )

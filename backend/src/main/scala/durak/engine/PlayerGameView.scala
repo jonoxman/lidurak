@@ -84,7 +84,14 @@ case class PlayerGameView(
   // (a single clockwise defender normally, every other seat in Chaos mode).
   eligibleTargetIds: Vector[String] = Vector.empty,
   // The seat a redirect would land on, so the table can point the arrow at it.
-  redirectTargetId: Option[String] = None
+  redirectTargetId: Option[String] = None,
+  // Cards this viewer may throw in right now, in hand order, and the largest
+  // number the engine accepts in a single action. All three stay empty / `0` /
+  // `false` for the defender, a seat that already passed, a seat holding no
+  // rank on the table and every review-mode projection (ITEM-1a / ITEM-5).
+  throwInCards: List[Card] = Nil,
+  throwInCapacity: Int = 0,
+  canThrowIn: Boolean = false
 )
 
 object PlayerGameView:
@@ -118,6 +125,14 @@ object PlayerGameView:
     // Bots compute their own moves from `GameState`; a client looking at a bot
     // seat must never be offered (or be able to send) a move for it.
     val isBotSeat = state.config.isBotSeat(viewerIdx)
+    // Throw-in eligibility is computed once, from the engine helpers, so the
+    // table's outline and the multi-select cap can never disagree with the
+    // moves the engine actually accepts (ITEM-1a). A replay review exposes
+    // nothing to throw in.
+    val throwInCards =
+      if reviewMode then Nil else GameEngine.legalThrowInCards(state, viewer.id)
+    val throwInCapacity =
+      if reviewMode then 0 else GameEngine.throwInCapacity(state, viewer.id)
 
     PlayerGameView(
       myId = viewer.id,
@@ -178,7 +193,10 @@ object PlayerGameView:
         if state.boutPhase == BoutPhase.InitialAttack then
           GameEngine.eligibleInitialTargets(state).map(idx => state.players(idx).id)
         else Vector.empty,
-      redirectTargetId = redirectTargetIdFor(state)
+      redirectTargetId = redirectTargetIdFor(state),
+      throwInCards = throwInCards,
+      throwInCapacity = throwInCapacity,
+      canThrowIn = throwInCards.nonEmpty && throwInCapacity > 0
     )
 
   /**
