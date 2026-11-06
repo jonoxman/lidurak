@@ -1266,14 +1266,25 @@ update_docs_by_orchestrator() {
   echo "📝 Stage 3.6: Orchestrator updating public README.md & ARCHITECTURE.md..."
   echo "=================================================================="
 
+  local USER_SECTION=""
+  if [ -f README.md ]; then
+    USER_SECTION=$(sed -n '/<!-- USER_SECTION_START -->/,/<!-- USER_SECTION_END -->/p' README.md 2>/dev/null || true)
+  fi
+  if [ -z "$USER_SECTION" ]; then
+    USER_SECTION="<!-- USER_SECTION_START -->\n# Lidurak\n\nWrite your protected human-authored introduction here. The AI will never modify text between these tags.\n<!-- USER_SECTION_END -->"
+  fi
+  echo -e "$USER_SECTION" > .reviews/readme_user_section.txt
+
   cat << PROMPT_EOF > .reviews/orchestrator_docs_prompt.txt
 You are the Principal Release Architect for Lidurak. DO NOT use tools or run bash commands.
 All implementation waves, holistic audits, and visual QA checks have passed. Now update the public-facing \`README.md\` and technical \`ARCHITECTURE.md\` to accurately reflect the current application state in <current_codebase>.
 
 STRICT PUBLIC DOCUMENTATION RULES:
-1. \`README.md\` is the front page of the public GitHub repository for human players and developers:
-   - Include a clear project overview, prerequisites, how to launch the app via \`./play-local.sh\`, how to run backend/frontend tests, and a complete User Interface & Gameplay Guide explaining how to use all current features in the browser.
-   - NEVER mention internal tickets (\`T-01\`, \`T-90\`, etc.), execution waves, FreeBuff, Antigravity, \`FEEDBACK.md\`, QA Playbooks, or agent orchestration anywhere in \`README.md\` or \`ARCHITECTURE.md\`!
+1. \`README.md\` is the high-level front page for human players and developers:
+   - DO NOT write microscopic, granular technical details (e.g., exact ping millisecond thresholds, SVG hover states, exact CSS animations, or chevron dropdown behaviors). Keep it concise, high-level, and easy to read.
+   - Include ONLY: Prerequisites, how to launch via \`./play-local.sh\`, how to run tests, and a BASIC overview of the UI and gameplay.
+   - NEVER mention internal tickets (\`T-01\`, \`T-90\`, etc.), execution waves, FreeBuff, Antigravity, \`FEEDBACK.md\`, QA Playbooks, or agent orchestration.
+   - CRITICAL: The human's protected introduction is handled externally. DO NOT output a main title or introduction. Start your \`README.md\` output directly with \`## 1. Quick Start & Installation\`.
 2. \`ARCHITECTURE.md\` is the clean technical engineering reference for the repository:
    - Document the directory tree, Scala 3 engine state machine (\`durak.engine\`), server actors & WebSocket/REST protocol (\`durak.server\`), and Preact/CSS Grid frontend architecture (\`frontend/src\`).
    - Keep it 100% free of internal ticket IDs or agent workflow notes.
@@ -1284,7 +1295,7 @@ $(dump_full_codebase_context)
 
 Output both complete files using this EXACT delimiter format (with NO markdown code fences wrapping the whole file) and end with \`===END_OF_FILES===\`:
 ===FILE:README.md===
-[Full clean Markdown content of README.md]
+[Full clean Markdown content of README.md starting at ## 1. Quick Start]
 ===FILE:ARCHITECTURE.md===
 [Full clean Markdown content of ARCHITECTURE.md]
 ===END_OF_FILES===
@@ -1296,8 +1307,9 @@ PROMPT_EOF
         line=$0;
         gsub(/^===FILE:/, "", line);
         gsub(/===$/, "", line);
-        gsub(/[ 	]/, "", line);
+        gsub(/[ \t\r]/, "", line);
         out=line;
+        if (out == "README.md") { out=".reviews/README_generated.md" }
         printf "" > out;
         next
       }
@@ -1305,10 +1317,14 @@ PROMPT_EOF
       out != "" { print >> out }
     ' .reviews/orchestrator_docs_out.txt
 
+    cat .reviews/readme_user_section.txt > README.md
+    echo "" >> README.md
+    cat .reviews/README_generated.md >> README.md
+
     git checkout main 2>/dev/null || true
     git add README.md ARCHITECTURE.md 2>/dev/null || true
     if ! git diff --cached --quiet; then
-      agent_git commit -m "docs(release): update clean public README.md and ARCHITECTURE.md via orchestrator" >/dev/null 2>&1 || true
+      agent_git commit -m "docs(release): update clean public README.md (preserving user header) and ARCHITECTURE.md" >/dev/null 2>&1 || true
       [ "$USE_GITHUB_PRS" -eq 1 ] && (retry_git_push origin main >/dev/null 2>&1 || true)
       echo "✅ Orchestrator updated and pushed clean README.md and ARCHITECTURE.md!"
     else
@@ -1316,7 +1332,6 @@ PROMPT_EOF
     fi
   fi
 }
-
 generate_qa_playbook() {
   local SOURCE_SPEC=".reviews/active_feedback_resolved.md"
   [ ! -f "$SOURCE_SPEC" ] && SOURCE_SPEC="FEEDBACK.backup.md"
