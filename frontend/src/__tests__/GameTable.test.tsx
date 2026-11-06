@@ -1219,10 +1219,18 @@ describe('hand highlight geometry, redirect double-click and review mode', () =>
 
     const pass = screen.getByTestId('pass-countdown');
     expect(pass.className).toBe(screen.getByTestId('surrender-countdown').className);
-    expect(pass.textContent).toBe('12');
+    // ITEM-6/7 (review round 1): the number lives in `data-countdown` and is
+    // painted by CSS, so the icon button never carries visible text.
+    expect(pass.getAttribute('data-countdown')).toBe('12');
+    expect(pass.textContent).toBe('');
+    expect(pass.closest('button')?.textContent).toBe('');
     expect(pass.closest('button')?.getAttribute('aria-label')).toBe('Pass');
     expect(pass.closest('button')?.querySelector('[data-testid="pass-icon"]')).not.toBeNull();
-    expect(screen.getByTestId('surrender-countdown').textContent).toBe('3');
+    const surrenderBadge = screen.getByTestId('surrender-countdown');
+    expect(surrenderBadge.getAttribute('data-countdown')).toBe('3');
+    expect(surrenderBadge.textContent).toBe('');
+    expect(surrenderBadge.closest('button')?.textContent).toBe('');
+    expect(tableCss).toContain('content: attr(data-countdown)');
   });
 
   it('leaves the pass button bare without a countdown', () => {

@@ -416,6 +416,14 @@ export function GamePage({
   const [now, setNow] = useState(() => Date.now());
   const socketRef = useRef<GameWebSocket | null>(null);
   const previousViewRef = useRef<PlayerGameView | null>(null);
+  // ITEM-5 (review round 1): the hand selection from just before the most
+  // recent single click. A real double-click delivers click(detail 1) first,
+  // which toggles an already-selected card off before `onDoubleClick` fires,
+  // so double-click grouping must also see the pre-click selection.
+  const selectionSnapshotRef = useRef<{
+    view: PlayerGameView;
+    indices: Set<number>;
+  } | null>(null);
   const tickedSecondRef = useRef(0);
   const [selfPresent, setSelfPresent] = useState(true);
   // Hand order is display-only state shared between the sidebar dropdown and
@@ -1081,6 +1089,9 @@ export function GamePage({
       (handCard) => handCard.suit === card.suit && handCard.rank === card.rank,
     );
     if (index < 0) return;
+    // ITEM-5 (review round 1): remember the selection this click starts from,
+    // so the double-click that may follow still groups the toggled-off card.
+    selectionSnapshotRef.current = { view, indices: new Set(selected) };
     const next = new Set(selected);
     if (next.has(index)) {
       next.delete(index);
@@ -1101,10 +1112,32 @@ export function GamePage({
     if (canAttack) dispatch(buildInitialAttack(playerId, selectedCards));
   };
 
-  /** ITEM-5: the clicked card plus every already-selected card of its rank. */
-  const sameRankGroup = (card: GameCard): GameCard[] => {
+  /**
+   * ITEM-5 (review round 1): the selection a double-click groups from. The live
+   * selection is unioned with the snapshot recorded just before the preceding
+   * single click, because a real double-click's first click toggles an
+   * already-selected card off before `onDoubleClick` fires. The clicked card is
+   * always added by the group helpers below.
+   */
+  const doubleClickSelection = (): GameCard[] => {
+    const indices = new Set(selected);
+    const snapshot = selectionSnapshotRef.current;
+    if (snapshot != null && snapshot.view === view) {
+      snapshot.indices.forEach((index) => indices.add(index));
+    }
+    return [...indices]
+      .sort((left, right) => left - right)
+      .map((index) => view.myHand[index])
+      .filter((candidate): candidate is GameCard => candidate !== undefined);
+  };
+
+  /** ITEM-5: the clicked card plus every pooled card of its rank. */
+  const sameRankGroup = (
+    card: GameCard,
+    pool: GameCard[] = selectedCards,
+  ): GameCard[] => {
     const chosen: GameCard[] = [card];
-    selectedCards.forEach((candidate) => {
+    pool.forEach((candidate) => {
       if (candidate.rank !== card.rank) return;
       if (chosen.some((entry) => cardKey(entry) === cardKey(candidate))) return;
       chosen.push(candidate);
@@ -1112,10 +1145,13 @@ export function GamePage({
     return chosen.slice(0, Math.max(1, view.maxBoutAttacks));
   };
 
-  /** ITEM-5: the clicked card plus every selected legal throw-in card. */
-  const throwInGroup = (card: GameCard): GameCard[] => {
+  /** ITEM-5: the clicked card plus every pooled legal throw-in card. */
+  const throwInGroup = (
+    card: GameCard,
+    pool: GameCard[] = selectedCards,
+  ): GameCard[] => {
     const chosen: GameCard[] = [card];
-    selectedCards.forEach((candidate) => {
+    pool.forEach((candidate) => {
       if (!tableRanks.has(candidate.rank.toLowerCase())) return;
       if (chosen.some((entry) => cardKey(entry) === cardKey(candidate))) return;
       chosen.push(candidate);
@@ -1123,9 +1159,11 @@ export function GamePage({
     return chosen.slice(0, Math.max(1, maxThrowInCount));
   };
 
-  /** True when this exact card is one of the click-selected hand cards. */
-  const isSelectedCard = (card: GameCard): boolean =>
-    selectedCards.some((candidate) => cardKey(candidate) === cardKey(card));
+  /** True when this exact card is in the pooled selection (default: live). */
+  const isSelectedCard = (
+    card: GameCard,
+    pool: GameCard[] = selectedCards,
+  ): boolean => pool.some((candidate) => cardKey(candidate) === cardKey(card));
 
   const coverAttack = (attackIndex: number) => {
     if (!hasLegalAction(view.legalActions, 'cover')) return;
@@ -1138,9 +1176,12 @@ export function GamePage({
    * it; ambiguous cards are left alone.
    */
   const playCard = (card: GameCard) => {
+    // ITEM-5 (review round 1): group from the live selection AND the snapshot
+    // taken before the double-click's first click.
+    const selectionPool = doubleClickSelection();
     if (isAttackerTurn) {
       // ITEM-5: same-rank cards selected together are deployed as one attack.
-      const cards = sameRankGroup(card);
+      const cards = sameRankGroup(card, selectionPool);
       if (view.chaosMode) {
         const legalTargets = view.opponents.filter(
           (opponent) => opponent.finishRank == null && opponent.cardCount > 0,
@@ -1156,7 +1197,7 @@ export function GamePage({
     // ITEM-5: a double-click throws in the clicked card together with every
     // other selected legal throw-in card, in one single command.
     if (canCurrentPlayerThrowIn && tableRanks.has(card.rank.toLowerCase())) {
-      const cards = throwInGroup(card);
+      const cards = throwInGroup(card, selectionPool);
       dispatch(buildThrowInCards(playerId, cards.length > 1 ? cards : [card]));
       return;
     }
@@ -1164,10 +1205,10 @@ export function GamePage({
     if (isDefender) {
       // ITEM-5: double-clicking one of several selected same-rank cards reflects
       // every one of them in a single RedirectAttack, exactly like the drop path.
-      const reflectGroup = sameRankGroup(card);
+      const reflectGroup = sameRankGroup(card, selectionPool);
       if (
         hasLegalAction(view.legalActions, 'redirect') &&
-        isSelectedCard(card) &&
+        isSelectedCard(card, selectionPool) &&
         reflectGroup.length > 1 &&
         reflectGroup.every((candidate) => tableRanks.has(candidate.rank.toLowerCase()))
       ) {

@@ -1046,7 +1046,7 @@ describe('GamePage', () => {
     expect(screen.getByRole('button', { name: 'Surrender' })).toBeTruthy();
     expect(screen.getByTestId('surrender-btn').hasAttribute('disabled')).toBe(false);
     await waitFor(() =>
-      expect(screen.getByTestId('surrender-countdown').textContent).toBe('3'),
+      expect(screen.getByTestId('surrender-countdown').getAttribute('data-countdown')).toBe('3'),
     );
     // ...and nothing is dispatched during the grace window.
     await new Promise((resolve) => setTimeout(resolve, 350));
@@ -1347,10 +1347,11 @@ describe('GamePage', () => {
 
     await waitFor(() => expect(screen.getByTestId('pass-countdown')).toBeTruthy());
     const countdown = screen.getByTestId('pass-countdown');
-    expect(countdown.textContent).toMatch(/^(11|12)$/);
+    expect(countdown.getAttribute('data-countdown')).toMatch(/^(11|12)$/);
     expect(countdown.className).toBe('surrender-countdown');
-    // ITEM-7: the button is icon-only, so the action is carried by its label.
-    expect(countdown.closest('button')?.textContent).toBe('12');
+    // ITEM-7: the button is icon-only, so the action is carried by its label
+    // and the painted number never leaks into textContent.
+    expect(countdown.closest('button')?.textContent).toBe('');
     expect(countdown.closest('button')?.getAttribute('aria-label')).toBe('Pass');
   });
 
@@ -2681,7 +2682,8 @@ describe('GamePage client auto-surrender and auto-pass delays', () => {
 
     // The button is on screen, enabled and counting down from 3 immediately.
     expect(screen.getByTestId('surrender-btn').hasAttribute('disabled')).toBe(false);
-    expect(screen.getByTestId('surrender-countdown').textContent).toBe('3');
+    expect(screen.getByTestId('surrender-countdown').getAttribute('data-countdown')).toBe('3');
+    expect(screen.getByTestId('surrender-countdown').textContent).toBe('');
     // T-90-2 ITEM-PREV-4: the red defender glow is still on during the grace.
     expect(
       screen.getByTestId('hand-turn-highlight').getAttribute('data-highlight-variant'),
@@ -2696,13 +2698,13 @@ describe('GamePage client auto-surrender and auto-pass delays', () => {
       vi.advanceTimersByTime(1000);
     });
     expect(sendAction).not.toHaveBeenCalled();
-    expect(screen.getByTestId('surrender-countdown').textContent).toBe('2');
+    expect(screen.getByTestId('surrender-countdown').getAttribute('data-countdown')).toBe('2');
 
     act(() => {
       vi.advanceTimersByTime(1999);
     });
     expect(sendAction).not.toHaveBeenCalled();
-    expect(screen.getByTestId('surrender-countdown').textContent).toBe('1');
+    expect(screen.getByTestId('surrender-countdown').getAttribute('data-countdown')).toBe('1');
 
     act(() => {
       vi.advanceTimersByTime(1);
@@ -2771,7 +2773,7 @@ describe('GamePage client auto-surrender and auto-pass delays', () => {
     await renderGame(autoPassView);
 
     expect(screen.getByTestId('pass-btn')).toBeTruthy();
-    expect(screen.getByTestId('pass-countdown').textContent).toBe('1');
+    expect(screen.getByTestId('pass-countdown').getAttribute('data-countdown')).toBe('1');
 
     act(() => {
       vi.advanceTimersByTime(0);
@@ -3399,11 +3401,19 @@ describe('T-90-feedback-20261105_221105-3: throw-in gate, multi-card throw-in an
         document.querySelectorAll('.hand-card-wrapper[data-selected="true"]'),
       ).toHaveLength(2),
     );
-    // The second click of a double-click never deselects the card.
+    // Real double-click order: the first click (detail 1) toggles the card off,
+    // the second click (detail 2) is ignored, and the pre-click snapshot keeps
+    // it in the group so `dblClick` still deploys both sevens.
+    fireEvent.click(handCard('seven of clubs'), { detail: 1 });
+    await waitFor(() =>
+      expect(
+        document.querySelectorAll('.hand-card-wrapper[data-selected="true"]'),
+      ).toHaveLength(1),
+    );
     fireEvent.click(handCard('seven of clubs'), { detail: 2 });
     expect(
       document.querySelectorAll('.hand-card-wrapper[data-selected="true"]'),
-    ).toHaveLength(2);
+    ).toHaveLength(1);
 
     fireEvent.dblClick(handCard('seven of clubs'));
 
@@ -3446,6 +3456,15 @@ describe('T-90-feedback-20261105_221105-3: throw-in gate, multi-card throw-in an
       ).toHaveLength(2),
     );
 
+    // Real double-click order on an already-selected card: the first click
+    // toggles it off, and the pre-click snapshot keeps it in the group.
+    fireEvent.click(handCard('seven of hearts'), { detail: 1 });
+    await waitFor(() =>
+      expect(
+        document.querySelectorAll('.hand-card-wrapper[data-selected="true"]'),
+      ).toHaveLength(1),
+    );
+    fireEvent.click(handCard('seven of hearts'), { detail: 2 });
     fireEvent.dblClick(handCard('seven of hearts'));
 
     await waitFor(() => expect(sendAction).toHaveBeenCalledTimes(1));

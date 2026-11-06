@@ -133,19 +133,24 @@ export function ActionBar({
           onClick={() => onAction({ type: button.type })}
         >
           {button.action === 'pass' ? <PassIcon /> : <SurrenderIcon />}
+          {/* ITEM-6/7 (review round 1): the number is painted from
+              `data-countdown` by CSS, so the icon-only button's textContent
+              stays empty even while a countdown is running. */}
           {button.action === 'pass' && passCountdownActive ? (
-            <span class="surrender-countdown" data-testid="pass-countdown" aria-hidden="true">
-              {passCountdownSeconds}
-            </span>
+            <span
+              class="surrender-countdown"
+              data-testid="pass-countdown"
+              data-countdown={String(passCountdownSeconds)}
+              aria-hidden="true"
+            />
           ) : null}
           {button.action === 'surrender' && surrenderSeconds != null && surrenderSeconds > 0 ? (
             <span
               class="surrender-countdown"
               data-testid="surrender-countdown"
+              data-countdown={String(surrenderSeconds)}
               aria-hidden="true"
-            >
-              {surrenderSeconds}
-            </span>
+            />
           ) : null}
         </button>
       ))}

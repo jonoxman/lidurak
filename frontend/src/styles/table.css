@@ -2655,6 +2655,12 @@ body[data-dragging='true'] *,
   margin-left: 0;
 }
 
+/* ITEM-6/7 (review round 1): the countdown number is drawn from the attribute,
+   so the icon-only button carries no visible text at any time. */
+.surrender-countdown::after {
+  content: attr(data-countdown);
+}
+
 :root[data-theme='light'] .game-buttons .action-button.action-icon-btn,
 :root[data-theme='light'] .action-bar .action-button.action-icon-btn {
   border-color: var(--border-subtle, rgba(15, 23, 42, 0.18));
