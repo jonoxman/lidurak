@@ -3554,6 +3554,25 @@ describe('T-90-feedback-20261105_221105-3: throw-in gate, multi-card throw-in an
     fireEvent.click(pickup);
     await waitFor(() => expect(createPresetGameMock).toHaveBeenCalledWith('full-hand-pickup'));
   });
+
+  it('QA: offers the three throw-in and full-hand presets in the left sidebar', async () => {
+    createPresetGameMock.mockResolvedValue({ gameId: 'preset-161731', defaultPlayerId: 'p1' });
+    renderGame(view);
+
+    const panel = await screen.findByTestId('qa-scenarios');
+    expect(panel.closest('[data-zone="sidebar-left"]')).not.toBeNull();
+    const presets = {
+      'throw-in-visibility-3p': 'Throw-In Visibility (3P)',
+      'multi-throw-in': 'Multi Throw-In',
+      'full-hand-4p': 'Full Hand (4P)',
+    };
+    for (const [id, label] of Object.entries(presets)) {
+      expect(within(panel).getByTestId(`preset-btn-${id}`).textContent).toBe(label);
+    }
+
+    fireEvent.click(within(panel).getByTestId('preset-btn-full-hand-4p'));
+    await waitFor(() => expect(createPresetGameMock).toHaveBeenCalledWith('full-hand-4p'));
+  });
 });
 
 /**

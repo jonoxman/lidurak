@@ -559,3 +559,26 @@ describe('T-90-feedback-20261106_111512-3: new QA scenario presets', () => {
     await waitFor(() => expect(createPresetGame).toHaveBeenCalledWith('throw-in-visibility-4p'));
   });
 });
+
+describe('T-90-feedback-20261106_161731-1: throw-in eligibility and full-hand presets', () => {
+  it('lists and launches the three new presets in one click', async () => {
+    createPresetGame.mockReset();
+    window.location.hash = '';
+    render(<LobbyPage initialServerReady />);
+    const panel = screen.getByTestId('qa-scenarios');
+    const presets = {
+      'throw-in-visibility-3p': 'Throw-In Visibility (3P)',
+      'multi-throw-in': 'Multi Throw-In',
+      'full-hand-4p': 'Full Hand (4P)',
+    };
+    for (const [id, label] of Object.entries(presets)) {
+      expect(within(panel).getByTestId(`preset-btn-${id}`).textContent).toBe(label);
+    }
+
+    createPresetGame.mockResolvedValue({ gameId: 'preset-161731', defaultPlayerId: 'p1' });
+    fireEvent.click(within(panel).getByTestId('preset-btn-full-hand-4p'));
+
+    await waitFor(() => expect(createPresetGame).toHaveBeenCalledWith('full-hand-4p'));
+    await waitFor(() => expect(window.location.hash).toBe('#/g/preset-161731?player=p1'));
+  });
+});

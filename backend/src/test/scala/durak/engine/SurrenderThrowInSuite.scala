@@ -696,3 +696,72 @@ class SurrenderThrowInSuite extends munit.FunSuite:
 
     assert(result.isLeft, result)
   }
+
+  // --- T-90-feedback-20261106_161731-1: atomic multi-card surrender throw-ins ---
+
+  test("a multi-card surrender throw-in hands every card to the defender") {
+    val attack = card(Rank.Seven, Suit.Spades)
+    val first = card(Rank.Seven, Suit.Hearts)
+    val second = card(Rank.Seven, Suit.Diamonds)
+    val defenderHand = List(
+      card(Rank.Eight, Suit.Spades),
+      card(Rank.Nine, Suit.Spades),
+      card(Rank.Ten, Suit.Spades)
+    )
+    val gs = twoPlayer(
+      attackerHand = List(first, second, card(Rank.Ace, Suit.Clubs)),
+      defenderHand = defenderHand,
+      tablePairs = Vector(TablePair(attack)),
+      boutPhase = BoutPhase.SurrenderThrowIn
+    )
+
+    val thrown = GameEngine
+      .applyAction(gs, GameAction.ThrowInCards("p0", List(first, second)))
+      .getOrElse(fail("expected a legal multi-card surrender throw-in"))
+    assertEquals(thrown.boutPhase, BoutPhase.SurrenderThrowIn)
+    assertEquals(thrown.tablePairs.map(_.attack), Vector(attack, first, second))
+    assertEquals(thrown.players(0).hand, Vector(card(Rank.Ace, Suit.Clubs)))
+
+    // Passing settles the surrender: the defender takes the whole table.
+    val settled = pass(thrown, "p0")
+    assertEquals(settled.tablePairs, Vector.empty)
+    assertEquals(settled.discardPile, Vector.empty)
+    assertEquals(
+      settled.players(1).hand.toSet,
+      (defenderHand ++ List(attack, first, second)).toSet
+    )
+  }
+
+  test("an over-capacity or mixed-invalid surrender throw-in is rejected atomically") {
+    val attack = card(Rank.Seven, Suit.Spades)
+    val first = card(Rank.Seven, Suit.Hearts)
+    val second = card(Rank.Seven, Suit.Diamonds)
+    val third = card(Rank.Seven, Suit.Clubs)
+    val king = card(Rank.King, Suit.Diamonds)
+    val gs = twoPlayer(
+      attackerHand = List(first, second, third, king),
+      defenderHand = List(
+        card(Rank.Eight, Suit.Spades),
+        card(Rank.Nine, Suit.Spades),
+        card(Rank.Ten, Suit.Spades)
+      ),
+      tablePairs = Vector(TablePair(attack)),
+      defenderInitialHandSize = 3,
+      boutPhase = BoutPhase.SurrenderThrowIn
+    )
+    // maxBoutAttacks = 3 and one card sits on the table, so capacity is two.
+    assertEquals(GameEngine.throwInCapacity(gs, "p0"), 2)
+
+    val tooMany =
+      GameEngine.applyAction(gs, GameAction.ThrowInCards("p0", List(first, second, third)))
+    assert(tooMany.isLeft, tooMany)
+
+    val mixed = GameEngine.applyAction(gs, GameAction.ThrowInCards("p0", List(first, king)))
+    assert(mixed.isLeft, mixed)
+
+    // Neither rejected move applied anything partially.
+    assertEquals(gs.tablePairs.map(_.attack), Vector(attack))
+    assertEquals(gs.players(0).hand.size, 4)
+    assertEquals(gs.players(1).hand.size, 3)
+    assertEquals(gs.boutPhase, BoutPhase.SurrenderThrowIn)
+  }

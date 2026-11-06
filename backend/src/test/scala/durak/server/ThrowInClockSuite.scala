@@ -336,3 +336,62 @@ class ThrowInClockSuite extends munit.FunSuite:
     val recorded = room.replay.get.unsafeRunSync().moves.map(_.action)
     assert(recorded.contains(GameAction.PassTurn("p0")), recorded.toString)
   }
+
+  // --- T-90-feedback-20261106_161731-1: multi-card throw-in clock parity ---
+
+  test("a multi-card throw-in restarts the clock exactly like a single-card throw-in") {
+    val singleRoom = newRoom(players = 3)
+    val multiRoom = newRoom(players = 3)
+    val base = state(
+      Vector(
+        player(
+          "p0",
+          List(
+            card(Rank.Seven, Suit.Hearts),
+            card(Rank.Seven, Suit.Diamonds),
+            card(Rank.Ace, Suit.Clubs)
+          )
+        ),
+        player("p1", List(card(Rank.Eight, Suit.Spades), card(Rank.Nine, Suit.Spades))),
+        player("p2", List(card(Rank.King, Suit.Diamonds)))
+      ),
+      tablePairs = Vector(TablePair(card(Rank.Seven, Suit.Spades))),
+      boutPhase = BoutPhase.SurrenderThrowIn,
+      defenderInitialHandSize = 3
+    )
+    singleRoom.stateRef.set(base).unsafeRunSync()
+    multiRoom.stateRef.set(base).unsafeRunSync()
+
+    val before = System.currentTimeMillis()
+    val single = GameActor
+      .applyAction(singleRoom, GameAction.ThrowInCards("p0", List(card(Rank.Seven, Suit.Hearts))))
+      .unsafeRunSync()
+      .getOrElse(fail("expected a legal single-card throw-in"))
+    val multi = GameActor
+      .applyAction(
+        multiRoom,
+        GameAction.ThrowInCards(
+          "p0",
+          List(card(Rank.Seven, Suit.Hearts), card(Rank.Seven, Suit.Diamonds))
+        )
+      )
+      .unsafeRunSync()
+      .getOrElse(fail("expected a legal multi-card throw-in"))
+    GameActor.stopClock(singleRoom).unsafeRunSync()
+    GameActor.stopClock(multiRoom).unsafeRunSync()
+
+    // Both keep the same surrender window open for the same seats and both
+    // restart the throw-in clock on the move itself.
+    assertEquals(single.boutPhase, BoutPhase.SurrenderThrowIn)
+    assertEquals(multi.boutPhase, BoutPhase.SurrenderThrowIn)
+    assertEquals(single.promptedPlayerIds, multi.promptedPlayerIds)
+    assertEquals(single.promptedPlayerIds, Set("p0", "p2"))
+    assert(single.turnDeadlineMs > before, single.turnDeadlineMs.toString)
+    assert(multi.turnDeadlineMs > before, multi.turnDeadlineMs.toString)
+    // The single-card throw-in leaves Alice one more matching card, while the
+    // two-card throw-in spends both; the waiting seats are unchanged.
+    assertEquals(GameEngine.canPlayerThrowIn(single, 0), true)
+    assertEquals(GameEngine.canPlayerThrowIn(multi, 0), false)
+    assertEquals(single.players(2).hasPassed, false)
+    assertEquals(multi.players(2).hasPassed, false)
+  }
