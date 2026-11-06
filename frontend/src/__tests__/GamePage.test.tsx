@@ -169,6 +169,63 @@ describe('GamePage', () => {
     );
   });
 
+  it('T-90-feedback-2: wires 100x140 cards, the tight hand contour and a visible dragged card', async () => {
+    getGameView.mockResolvedValue(sortableView);
+    const { container } = render(
+      <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
+    );
+
+    await waitFor(() => expect(container.querySelector('.hand-cards')).not.toBeNull());
+
+    const zone = container.querySelector('[data-zone="player-hand"]') as HTMLElement;
+    const box = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+    const card = zone.querySelector('.card-slot') as HTMLElement;
+
+    // ITEM-1b: the live card carries the 100x140 footprint inline.
+    expect(card.getAttribute('data-card-width')).toBe('100');
+    expect(card.getAttribute('data-card-height')).toBe('140');
+    expect(card.style.width).toBe('100px');
+    expect(card.style.height).toBe('140px');
+
+    // ITEM-4: the live hand reports its clamped overlap geometry.
+    expect(Number(box.getAttribute('data-overlap-ratio'))).toBeGreaterThanOrEqual(0.2);
+    expect(Number(box.getAttribute('data-overlap-ratio'))).toBeLessThanOrEqual(0.8);
+    expect(Number(box.getAttribute('data-hand-width'))).toBeGreaterThanOrEqual(100);
+
+    // ITEM-2: the contour is anchored to the hand and shares its width.
+    const contour = screen.getByTestId('hand-highlight-contour');
+    expect(contour.getAttribute('data-non-rectangular')).toBe('false');
+    expect(Number(contour.getAttribute('data-contour-width'))).toBe(
+      Number(box.getAttribute('data-hand-width')),
+    );
+
+    // ITEM-3: neither the hand column nor the arena clips a dragged card.
+    expect(cssRule(tableCss, "[data-zone='player-hand']")).toContain('overflow: visible');
+    expect(cssRule(tableCss, "[data-zone='table-arena']")).toContain('overflow: visible');
+
+    const svg = zone.querySelector('.card-slot svg') as unknown as SVGElement;
+    const wrapper = svg.closest('.hand-card-wrapper') as HTMLElement;
+    expect(container.querySelector('[data-zone="table-arena"]')?.getAttribute('data-review-mode')).toBe(
+      'false',
+    );
+    expect(wrapper.getAttribute('data-draggable')).toBe('true');
+
+    // Let Preact flush the GameTable effects that attach the document drag
+    // listeners (the table mounts after the async view resolves).
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    });
+    fireEvent.mouseDown(svg, { button: 0, clientX: 10, clientY: 20 });
+    fireEvent.mouseMove(document, { clientX: 70, clientY: 50 });
+
+    expect(wrapper.isConnected).toBe(true);
+    expect(wrapper.getAttribute('data-dragging')).toBe('true');
+    expect(wrapper.style.transform).toBe('translate3d(60px, 30px, 0)');
+    expect(wrapper.style.opacity === '' || wrapper.style.opacity === '1').toBe(true);
+    expect(wrapper.querySelector('.card-slot')).not.toBeNull();
+    fireEvent.mouseUp(document, { clientX: 70, clientY: 50 });
+  });
+
   it('renders the three-column shell zones', async () => {
     getGameView.mockResolvedValue(view);
 

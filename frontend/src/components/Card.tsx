@@ -12,11 +12,30 @@ export interface CardData {
   rank: string;
 }
 
+/**
+ * T-90-feedback-20261105_221105-2 ITEM-1b: the standard playing-card footprint.
+ * Every card on the table and in hand matches the throw-in / redirect / target
+ * outlines at `100px × 140px`; CSS scales the same box to `48px × 68px` below
+ * the `900px` mobile breakpoint.
+ */
+export const CARD_DEFAULT_WIDTH = 100;
+export const CARD_DEFAULT_HEIGHT = 140;
+
 export interface CardProps {
   suit: string;
   rank: string;
   faceUp?: boolean;
   selected?: boolean;
+  /**
+   * T-90-feedback-20261105_221105-2 ITEM-1b: explicit footprint in px. Hand,
+   * play-area and deck callers pass the measured responsive size (100 × 140
+   * desktop, 48 × 68 below 900px); compact callers (the sidebar bottom-trump)
+   * pass their own smaller box. When omitted, the card still sets an inline
+   * `100 × 140` footprint through `--card-width` / `--card-height`, so the
+   * mobile breakpoint can override the default without losing the inline box.
+   */
+  width?: number;
+  height?: number;
   /** True when this card can legally be played right now; lifts it off the hand. */
   playable?: boolean;
   /** Applies the gilded gold trump border (no corner badge, no glow). */
@@ -74,30 +93,30 @@ export const CARD_CORNER_FONT_FAMILY =
 export const CARD_BORDER_RADIUS = 'var(--app-roundness, 8px)';
 
 /**
- * Corner index geometry inside the `70x100` viewBox (T-90 ITEM-3a).
+ * Corner index geometry inside the `70x100` viewBox (T-90 ITEM-3a, reworked by
+ * T-90-feedback-2 ITEM-4).
  *
- * The rank number/letter and its suit pip now share **one horizontal centre
- * axis** (`x = 11.5` in the top-left corner, mirrored at `70 - 11.5 = 58.5` in
- * the bottom-right corner) and both are drawn with `text-anchor="middle"`, so
- * the suit sits exactly centred beneath the rank on every rank — including the
- * two-character `"10"` and the single-character `2`–`9`, `J`, `Q`, `K`, `A`.
+ * The rank number/letter and its suit pip share **one horizontal centre axis**
+ * at `x = 7.5` in the top-left corner, mirrored at `70 - 7.5 = 62.5` in the
+ * bottom-right corner, and both are drawn with `text-anchor="middle"`. That
+ * places the whole corner index inside `x ∈ [2.5, 12.5]` (≈`3.5px`–`18px` at
+ * 100px card width), so an 80% overlap — which leaves the leftmost 20px of
+ * every card uncovered — can never hide a card's rank or suit.
  *
- * The corner suit pip grew from `10` to `12` viewBox units (clearly readable at
- * standard table zoom) and keeps `y = 34` (top) / `y = 82` (bottom), so the rank
- * band still ends at `y = 21`. T-90-1 ITEM-3a then re-centred the face grid, so
- * the leftmost pip column (`x = 22.5`) begins just clear of that `x = 11.5` axis
- * and its 12pt suit glyph: the wider two-digit `"10"` rank text and the enlarged
- * corner suit never touch a face pip.
+ * The two-character `"10"` is drawn at `twoDigitFontSize = 9` so its ink stays
+ * inside that same strip; `2`–`9`, `J`, `Q`, `K`, `A` keep the larger `15`.
+ * The 12pt suit pip fits naturally (`≈2.7`–`12.3`), the rank band still ends at
+ * `y = 21`, and the face grid starts at the leftmost pip column `x = 22.5`.
  */
 export const CARD_INDEX = {
-  topRank: { x: 11.5, y: 21, fontSize: 15 },
-  topSuit: { x: 11.5, y: 34, fontSize: 12 },
+  topRank: { x: 7.5, y: 21, fontSize: 15, twoDigitFontSize: 9 },
+  topSuit: { x: 7.5, y: 34, fontSize: 12 },
   // T-90-2 ITEM-11: the bottom-right corner is the exact 180° rotation of the
   // top-left one around the `(35, 50)` card centre, so the upside-down rank
-  // sits nearest the corner (`70 - 11.5`, `100 - 21`) and the upside-down suit
-  // directly above it (`70 - 11.5`, `100 - 34`).
-  bottomRank: { x: 58.5, y: 79, fontSize: 15 },
-  bottomSuit: { x: 58.5, y: 66, fontSize: 12 },
+  // sits nearest the corner (`70 - 7.5`, `100 - 21`) and the upside-down suit
+  // directly above it (`70 - 7.5`, `100 - 34`).
+  bottomRank: { x: 62.5, y: 79, fontSize: 15, twoDigitFontSize: 9 },
+  bottomSuit: { x: 62.5, y: 66, fontSize: 12 },
 } as const;
 
 /**
@@ -388,12 +407,33 @@ export function Card({
   selected = false,
   playable = false,
   trump = false,
+  width,
+  height,
   onClick,
   onDoubleClick,
   draggable = false,
   onDragStart,
   onDragEnd,
 }: CardProps) {
+  // T-90-feedback-2 ITEM-1b (review round 2): every card carries its footprint
+  // inline, as the ticket requires. Explicit props win (the hand / play area
+  // pass the measured responsive size, compact callers their own box); when no
+  // size is passed the inline default is expressed through custom properties so
+  // the `900px` breakpoint can still deliver 48x68 instead of being overridden.
+  const resolvedWidth = width ?? CARD_DEFAULT_WIDTH;
+  const resolvedHeight = height ?? CARD_DEFAULT_HEIGHT;
+  const widthCss =
+    width == null ? `var(--card-width, ${CARD_DEFAULT_WIDTH}px)` : `${width}px`;
+  const heightCss =
+    height == null ? `var(--card-height, ${CARD_DEFAULT_HEIGHT}px)` : `${height}px`;
+  const cardStyle = {
+    borderRadius: CARD_BORDER_RADIUS,
+    width: widthCss,
+    height: heightCss,
+    minWidth: widthCss,
+    minHeight: heightCss,
+    flex: `0 0 ${widthCss}`,
+  };
   // The face where the pips are drawn is theme-dependent: white on the light
   // theme, grey on the dark theme.
   const settings = useSettings();
@@ -416,7 +456,9 @@ export function Card({
         class={classes.join(' ')}
         data-selected={selected ? 'true' : 'false'}
         data-roundness={roundness}
-        style={{ borderRadius: CARD_BORDER_RADIUS }}
+        data-card-width={resolvedWidth}
+        data-card-height={resolvedHeight}
+        style={cardStyle}
         onClick={onClick}
         onDblClick={onDoubleClick}
       >
@@ -445,7 +487,9 @@ export function Card({
       data-card-theme={theme}
       data-roundness={roundness}
       data-trump-glow="false"
-      style={{ borderRadius: CARD_BORDER_RADIUS }}
+      data-card-width={resolvedWidth}
+      data-card-height={resolvedHeight}
+      style={cardStyle}
       onClick={onClick}
       onDblClick={onDoubleClick}
       draggable={draggable}
@@ -490,7 +534,11 @@ export function Card({
           data-inverted="false"
           x={CARD_INDEX.topRank.x}
           y={CARD_INDEX.topRank.y}
-          font-size={CARD_INDEX.topRank.fontSize}
+          font-size={
+            label.length > 1
+              ? CARD_INDEX.topRank.twoDigitFontSize
+              : CARD_INDEX.topRank.fontSize
+          }
           font-family={CARD_CORNER_FONT_FAMILY}
           font-weight="700"
           text-anchor="middle"
@@ -602,7 +650,11 @@ export function Card({
           data-inverted="true"
           x={CARD_INDEX.bottomRank.x}
           y={CARD_INDEX.bottomRank.y}
-          font-size={CARD_INDEX.bottomRank.fontSize}
+          font-size={
+            label.length > 1
+              ? CARD_INDEX.bottomRank.twoDigitFontSize
+              : CARD_INDEX.bottomRank.fontSize
+          }
           font-family={CARD_CORNER_FONT_FAMILY}
           font-weight="700"
           text-anchor="middle"

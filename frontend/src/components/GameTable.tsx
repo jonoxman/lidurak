@@ -179,18 +179,56 @@ export const SEAT_BOX = { width: 240, height: 140 } as const;
 /** ITEM-13: the single card size shared by the hand, the play area and the outlines. */
 export const CARD_WIDTH = 100;
 export const CARD_HEIGHT = 140;
+/** T-90-feedback-2 ITEM-1b: the `@media (max-width: 900px)` card size. */
+export const MOBILE_BREAKPOINT_PX = 900;
+export const MOBILE_CARD_WIDTH = 48;
+export const MOBILE_CARD_HEIGHT = 68;
+
+/**
+ * The footprint every card should be rendered at for a given viewport. The
+ * measured hand / play-area slot wins once it exists; this is the initial and
+ * fallback size, and it is what makes the 48x68 mobile constant live rather
+ * than CSS-only.
+ */
+export function cardSizeForViewport(viewportWidth: number): {
+  width: number;
+  height: number;
+} {
+  return viewportWidth > 0 && viewportWidth <= MOBILE_BREAKPOINT_PX
+    ? { width: MOBILE_CARD_WIDTH, height: MOBILE_CARD_HEIGHT }
+    : { width: CARD_WIDTH, height: CARD_HEIGHT };
+}
 /** ITEM-13: width of one hand card at desktop scale (+25% from 80). */
 export const HAND_CARD_WIDTH = CARD_WIDTH;
 /** ITEM-13: height of one hand card at desktop scale (+25% from 114). */
 export const HAND_CARD_HEIGHT = CARD_HEIGHT;
-/** ITEM-13b: neighbouring hand cards overlap by at least 10% of the card width. */
-export const HAND_MIN_OVERLAP_RATIO = 0.1;
-/** Neighbouring hand cards always overlap by at least 10% of their 100px width. */
+/**
+ * T-90-feedback-20261105_221105-2 ITEM-4: neighbouring hand cards overlap by
+ * at least 20% of their width (`20px` of the 100px card), so the row parts
+ * visibly while the left rank/suit index of every card stays readable.
+ */
+export const HAND_MIN_OVERLAP_RATIO = 0.2;
+/**
+ * T-90-feedback-20261105_221105-2 ITEM-4: at most 80% of each card is covered
+ * (`80px` of the 100px card), which always leaves a `20px` visible left strip
+ * carrying the top-left rank symbol and suit pip.
+ */
+export const HAND_MAX_OVERLAP_RATIO = 0.8;
 export const HAND_MIN_OVERLAP = Math.round(HAND_CARD_WIDTH * HAND_MIN_OVERLAP_RATIO);
+export const HAND_MAX_OVERLAP = Math.round(HAND_CARD_WIDTH * HAND_MAX_OVERLAP_RATIO);
+/**
+ * Full-deck pickup safeguard (25-52 cards): the stride may compress to this
+ * `15px` strip before the whole `.hand-cards` row is scaled to fit instead.
+ */
+export const HAND_MIN_VISIBLE_LEFT = 15;
 /** Used until the hand has been measured (jsdom reports zero widths). */
 export const HAND_FALLBACK_WIDTH = 720;
-/** Symmetric padding of the turn-highlight box around the rendered hand row. */
-export const HAND_BOX_PADDING = 6;
+/** T-90-feedback-2 ITEM-2: `.hand-cards` now wraps the exact card footprint. */
+export const HAND_BOX_PADDING = 0;
+/** T-90-feedback-2 ITEM-2: how far a playable / selected card rises. */
+export const HAND_RAISED_OFFSET = -14;
+/** T-90-feedback-2 ITEM-2: tight padding between the cards and the contour. */
+export const HAND_CONTOUR_PADDING = 4;
 /** Width of one talon deck card; the discard pile reuses the exact same size. */
 export const DECK_CARD_WIDTH = 80;
 /** Height of one talon deck card; the discard pile reuses the exact same size. */
@@ -276,52 +314,117 @@ const RANK_SYMBOLS: Record<string, string> = {
 export const lowDetailRank = (rank: string): string =>
   RANK_SYMBOLS[rank.toLowerCase()] ?? rank.toUpperCase();
 
-/** Left strip kept visible so the top-left rank/suit index stays readable. */
-const readableEdge = (cardWidth: number): number =>
-  Math.max(12, Math.round(cardWidth * 0.28));
-
 export interface HandLayout {
+  /** Pixels of each card covered by its right-hand neighbour. */
   overlap: number;
+  /** `overlap / cardWidth`; 20-80% for a normal hand, more only on a full deck. */
+  overlapRatio: number;
+  /** Distance between the left edges of two neighbouring cards. */
+  stride: number;
+  /** Width of the whole row: `cardWidth + (count - 1) * stride`. */
+  totalWidth: number;
+  /** Fit multiplier applied when even the 15px strip cannot fit. */
+  scale: number;
   visibleCount: number;
   hiddenLeft: number;
   hiddenRight: number;
 }
 
+const EMPTY_HAND_LAYOUT: HandLayout = {
+  overlap: 0,
+  overlapRatio: 0,
+  stride: 0,
+  totalWidth: 0,
+  scale: 1,
+  visibleCount: 0,
+  hiddenLeft: 0,
+  hiddenRight: 0,
+};
+
 /**
- * Single-row hand layout. Cards start at a 10px (10% of the 100px card)
- * overlap and tighten up to the readable limit; beyond that the surplus cards
- * are stacked at 100% overlap on the ends, and `cursorFraction` (0 = left edge,
- * 1 = right edge) slides them between the two hidden stacks.
+ * T-90-feedback-2 ITEM-1b (review round 2): the play area's measured card size
+ * is clamped to the standard 100x140 box. Measuring a slot larger than a single
+ * card (for example a pair that reserves the defender's overhang) can therefore
+ * never stretch the cards or start a measure -> render growth loop.
+ */
+export function clampBoutCardSize(
+  width: number,
+  height: number,
+): { width: number; height: number } {
+  return {
+    width: Math.max(0, Math.min(CARD_WIDTH, width || 0)),
+    height: Math.max(0, Math.min(CARD_HEIGHT, height || 0)),
+  };
+}
+
+/**
+ * T-90-feedback-20261105_221105-2 ITEM-4 single-row hand geometry.
+ *
+ * For `N >= 2` cards of width `W` in `availableWidth`:
+ * - the stride (left-edge distance) is clamped to `[0.20W, 0.80W]`, so the
+ *   overlap ratio `(W - stride) / W` always stays within `[20%, 80%]`;
+ * - when even the minimum `0.20W` stride cannot fit a picked-up full deck
+ *   (25-52 cards), the stride may compress to a readable left strip that
+ *   scales with the card (`15px` at 100px, `7.2px` at 48px mobile), never
+ *   widening past the standard minimum stride;
+ * - if the row still cannot fit, `scale` shrinks the whole hand so
+ *   `totalWidth * scale` never exceeds `availableWidth` and never runs under
+ *   the sidebar or the Surrender / Pass buttons.
+ *
+ * Every card stays visible: the old "hidden surplus stack" is gone.
  */
 export function handLayout(
   count: number,
   availableWidth: number,
-  cursorFraction = 0.5,
+  _cursorFraction = 0.5,
   cardWidth = HAND_CARD_WIDTH,
 ): HandLayout {
-  if (count <= 0) return { overlap: 0, visibleCount: 0, hiddenLeft: 0, hiddenRight: 0 };
-
-  const maxOverlap = Math.max(HAND_MIN_OVERLAP, cardWidth - readableEdge(cardWidth));
-  const step = cardWidth - maxOverlap;
-  const capacity = Math.max(
-    1,
-    Math.floor(Math.max(0, availableWidth - cardWidth) / step) + 1,
-  );
-
-  if (count <= capacity) {
-    const needed = count === 1 ? 0 : cardWidth - (availableWidth - cardWidth) / (count - 1);
-    const overlap = Math.min(maxOverlap, Math.max(HAND_MIN_OVERLAP, needed));
-    return { overlap, visibleCount: count, hiddenLeft: 0, hiddenRight: 0 };
+  const width = Math.max(1, cardWidth);
+  if (count <= 0) return { ...EMPTY_HAND_LAYOUT };
+  if (count === 1) {
+    return {
+      overlap: 0,
+      overlapRatio: 0,
+      stride: width,
+      totalWidth: width,
+      scale: 1,
+      visibleCount: 1,
+      hiddenLeft: 0,
+      hiddenRight: 0,
+    };
   }
 
-  const hidden = count - capacity;
-  const fraction = Math.min(1, Math.max(0, cursorFraction));
-  const hiddenLeft = Math.round(hidden * fraction);
+  const available = Math.max(0, availableWidth);
+  const minStride = width * HAND_MIN_OVERLAP_RATIO;
+  const maxStride = width * HAND_MAX_OVERLAP_RATIO;
+  const idealStride = available > 0 ? (available - width) / (count - 1) : minStride;
+  let stride = Math.min(maxStride, Math.max(minStride, idealStride));
+
+  // Full-deck pickup safeguard: a 20% overlap can still overflow the column.
+  // The readable strip scales with the card, so a 48px mobile hand compresses
+  // to 7.2px instead of being widened back to the desktop 15px floor (which
+  // made the row wider and forced a needless scale-down).
+  if (width + (count - 1) * minStride > available) {
+    const readableStrip = Math.min(
+      minStride,
+      HAND_MIN_VISIBLE_LEFT * (width / HAND_CARD_WIDTH),
+    );
+    stride = Math.max(readableStrip, (available - width) / (count - 1));
+  }
+
+  const totalWidth = width + (count - 1) * stride;
+  const scale = available > 0 && totalWidth > available ? available / totalWidth : 1;
+  const overlap = width - stride;
+
   return {
-    overlap: maxOverlap,
-    visibleCount: capacity,
-    hiddenLeft,
-    hiddenRight: hidden - hiddenLeft,
+    overlap,
+    overlapRatio: overlap / width,
+    stride,
+    totalWidth,
+    scale,
+    visibleCount: count,
+    hiddenLeft: 0,
+    hiddenRight: 0,
   };
 }
 
@@ -331,17 +434,21 @@ export function handOffsets(
   count: number,
   cardWidth = HAND_CARD_WIDTH,
 ): number[] {
-  const step = cardWidth - layout.overlap;
-  const lastVisible = Math.max(0, layout.visibleCount - 1);
-  return Array.from({ length: count }, (_, index) => {
-    const visibleIndex = index - layout.hiddenLeft;
-    if (visibleIndex < 0) return 0;
-    if (visibleIndex >= layout.visibleCount) return lastVisible * step;
-    return visibleIndex * step;
-  });
+  const stride = layout.stride > 0 ? layout.stride : cardWidth - layout.overlap;
+  // The discard pile still stacks its surplus cards on the row's ends.
+  if (layout.hiddenLeft > 0 || layout.hiddenRight > 0) {
+    const lastVisible = Math.max(0, layout.visibleCount - 1);
+    return Array.from({ length: count }, (_, index) => {
+      const visibleIndex = index - layout.hiddenLeft;
+      if (visibleIndex < 0) return 0;
+      if (visibleIndex >= layout.visibleCount) return lastVisible * stride;
+      return visibleIndex * stride;
+    });
+  }
+  return Array.from({ length: count }, (_, index) => index * stride);
 }
 
-/** Negative left margin per card, so 100% overlap needs no positioning. */
+/** Negative left margin per card, so the overlap needs no positioning. */
 export function handMargins(
   layout: HandLayout,
   count: number,
@@ -355,13 +462,174 @@ export function handMargins(
 
 /**
  * Rendered width of a single overlap row: from the first card's left edge to the
- * last visible card's right edge. Exported so the discard pile can prove that
- * its row never exceeds the pile box's available inner width.
+ * last card's right edge. Exported so the discard pile can prove that its row
+ * never exceeds the pile box's available inner width.
  */
 export function rowWidth(layout: HandLayout, cardWidth = HAND_CARD_WIDTH): number {
   if (layout.visibleCount <= 0) return 0;
-  const step = cardWidth - layout.overlap;
-  return (layout.visibleCount - 1) * step + cardWidth;
+  if (layout.totalWidth > 0) return layout.totalWidth;
+  const stride = cardWidth - layout.overlap;
+  return (layout.visibleCount - 1) * stride + cardWidth;
+}
+
+/** Narrowest left strip a clipped discard row keeps visible. */
+const readableEdge = (cardWidth: number): number =>
+  Math.max(12, Math.round(cardWidth * 0.28));
+
+/**
+ * The discard pile keeps its own clipped single-row geometry: unlike the
+ * player's hand (T-90-feedback-2 ITEM-4), a discarded bout may be dozens of
+ * cards long, so the surplus becomes an end stack the cursor slides between
+ * instead of pushing the row outside the sidebar.
+ */
+export function discardLayout(
+  count: number,
+  availableWidth: number,
+  cursorFraction = 0.5,
+  cardWidth = DECK_CARD_WIDTH,
+): HandLayout {
+  if (count <= 0) return { ...EMPTY_HAND_LAYOUT };
+
+  const maxOverlap = Math.max(HAND_MIN_OVERLAP, cardWidth - readableEdge(cardWidth));
+  const step = cardWidth - maxOverlap;
+  const capacity = Math.max(
+    1,
+    Math.floor(Math.max(0, availableWidth - cardWidth) / step) + 1,
+  );
+
+  let overlap: number;
+  let visibleCount: number;
+  let hiddenLeft = 0;
+  let hiddenRight = 0;
+  if (count <= capacity) {
+    const needed = count === 1 ? 0 : cardWidth - (availableWidth - cardWidth) / (count - 1);
+    overlap = Math.min(maxOverlap, Math.max(HAND_MIN_OVERLAP, needed));
+    visibleCount = count;
+  } else {
+    const hidden = count - capacity;
+    const fraction = Math.min(1, Math.max(0, cursorFraction));
+    overlap = maxOverlap;
+    visibleCount = capacity;
+    hiddenLeft = Math.round(hidden * fraction);
+    hiddenRight = hidden - hiddenLeft;
+  }
+
+  const stride = cardWidth - overlap;
+  return {
+    overlap,
+    overlapRatio: overlap / cardWidth,
+    stride,
+    totalWidth: (visibleCount - 1) * stride + cardWidth,
+    scale: 1,
+    visibleCount,
+    hiddenLeft,
+    hiddenRight,
+  };
+}
+
+/** One card's rectangle inside `.hand-cards`, in row coordinates. */
+export interface HandCardPosition {
+  x: number;
+  y: number;
+}
+
+/** Tight contour around the whole hand, ready to anchor an SVG overlay. */
+export interface HandContour {
+  d: string;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  nonRectangular: boolean;
+}
+
+const round2 = (value: number): number => Math.round(value * 100) / 100;
+
+/**
+ * T-90-feedback-20261105_221105-2 ITEM-2: the tight union outline of every card
+ * rectangle (`[x, x + W] x [y, y + H]`, plus a 4px pad).
+ *
+ * The upper envelope is traced left-to-right and the lower envelope
+ * right-to-left across every x breakpoint, so a hand whose playable / selected
+ * cards are raised produces a non-rectangular staircase: it steps up tightly
+ * over a raised card and down again over its unraised neighbour.
+ */
+export function computeHandContour(
+  cards: HandCardPosition[],
+  cardWidth = HAND_CARD_WIDTH,
+  cardHeight = HAND_CARD_HEIGHT,
+  pad = HAND_CONTOUR_PADDING,
+): HandContour {
+  if (cards.length === 0) {
+    return { d: '', left: 0, top: 0, width: 0, height: 0, nonRectangular: false };
+  }
+
+  const rects = cards.map((card) => ({
+    left: card.x - pad,
+    right: card.x + cardWidth + pad,
+    top: card.y - pad,
+    bottom: card.y + cardHeight + pad,
+  }));
+  const left = Math.min(...rects.map((rect) => rect.left));
+  const top = Math.min(...rects.map((rect) => rect.top));
+  const right = Math.max(...rects.map((rect) => rect.right));
+  const bottom = Math.max(...rects.map((rect) => rect.bottom));
+  const xs = Array.from(new Set(rects.flatMap((rect) => [rect.left, rect.right]))).sort(
+    (a, b) => a - b,
+  );
+
+  // One envelope value per x interval; `xs` holds the shared breakpoints.
+  const tops: number[] = [];
+  const bottoms: number[] = [];
+  for (let index = 0; index < xs.length - 1; index += 1) {
+    const start = xs[index];
+    const end = xs[index + 1];
+    const middle = (start + end) / 2;
+    const covering = rects.filter((rect) => rect.left <= middle && rect.right >= middle);
+    tops.push(Math.min(...covering.map((rect) => rect.top)));
+    bottoms.push(Math.max(...covering.map((rect) => rect.bottom)));
+  }
+
+  const x = (value: number): number => round2(value - left);
+  const y = (value: number): number => round2(value - top);
+  const last = xs.length - 1;
+  const parts: string[] = [`M ${x(xs[0])} ${y(tops[0])}`];
+
+  // Upper envelope, left to right.
+  for (let index = 1; index < last; index += 1) {
+    parts.push(`H ${x(xs[index])}`);
+    if (tops[index] !== tops[index - 1]) parts.push(`V ${y(tops[index])}`);
+  }
+  parts.push(`H ${x(xs[last])}`);
+  // Right edge, then the lower envelope right-to-left.
+  parts.push(`V ${y(bottoms[bottoms.length - 1])}`);
+  for (let index = bottoms.length - 1; index >= 0; index -= 1) {
+    parts.push(`H ${x(xs[index])}`);
+    if (index > 0 && bottoms[index - 1] !== bottoms[index]) {
+      parts.push(`V ${y(bottoms[index - 1])}`);
+    }
+  }
+  parts.push('Z');
+
+  const nonRectangular = new Set(cards.map((card) => card.y)).size > 1;
+  return {
+    d: parts.join(' '),
+    left,
+    top,
+    width: right - left,
+    height: bottom - top,
+    nonRectangular,
+  };
+}
+
+/** The `d` attribute of [[computeHandContour]], for tests and callers. */
+export function handContourPath(
+  cards: HandCardPosition[],
+  cardWidth = HAND_CARD_WIDTH,
+  cardHeight = HAND_CARD_HEIGHT,
+  pad = HAND_CONTOUR_PADDING,
+): string {
+  return computeHandContour(cards, cardWidth, cardHeight, pad).d;
 }
 
 /** ITEM-13: documented alias of [[handLayout]] used by the hand geometry spec. */
@@ -460,7 +728,7 @@ export function TableDeck({
     deckCardWidth,
     overlapsFaceDown ? discardAvailable - MIN_VISIBLE_STRIP_PX : discardAvailable,
   );
-  const visibleLayout = handLayout(
+  const visibleLayout = discardLayout(
     lastDiscardCards.length,
     visibleAvailable,
     discardCursor,
@@ -500,7 +768,14 @@ export function TableDeck({
           {talonCount > 0 && bottomTrumpCard ? (
             <div class="table-trump" aria-label="Bottom trump card">
               <div class="table-trump-card" data-rotated="true">
-                <Card suit={bottomTrumpCard.suit} rank={bottomTrumpCard.rank} trump />
+                {/* The bottom trump keeps the sidebar deck's compact footprint. */}
+                <Card
+                  suit={bottomTrumpCard.suit}
+                  rank={bottomTrumpCard.rank}
+                  trump
+                  width={deckCardWidth}
+                  height={Math.round((deckCardWidth * DECK_CARD_HEIGHT) / DECK_CARD_WIDTH)}
+                />
               </div>
             </div>
           ) : null}
@@ -601,6 +876,10 @@ export function TableDeck({
                       <Card
                         suit={card.suit}
                         rank={card.rank}
+                        width={deckCardWidth}
+                        height={Math.round(
+                          (deckCardWidth * DECK_CARD_HEIGHT) / DECK_CARD_WIDTH,
+                        )}
                         trump={isTrumpCard(card, trumpSuit)}
                       />
                     </span>
@@ -1087,10 +1366,22 @@ export function GameTable({
   } | null>(null);
   const suppressClickRef = useRef(false);
   const [handWidth, setHandWidth] = useState(0);
-  const [cardWidth, setCardWidth] = useState(HAND_CARD_WIDTH);
-  const [cursorFraction, setCursorFraction] = useState(0.5);
+  const [cardWidth, setCardWidth] = useState(
+    () => cardSizeForViewport(typeof window === 'undefined' ? 0 : window.innerWidth).width,
+  );
+  const [cardHeight, setCardHeight] = useState(
+    () => cardSizeForViewport(typeof window === 'undefined' ? 0 : window.innerWidth).height,
+  );
+  // T-90-feedback-2 ITEM-3: the dragged card's pointer offset. It is applied as
+  // a `translate3d` on the card's own wrapper, which stays fully visible.
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [boutWidth, setBoutWidth] = useState(0);
-  const [boutCardWidth, setBoutCardWidth] = useState(BOUT_CARD_WIDTH);
+  const [boutCardWidth, setBoutCardWidth] = useState(
+    () => cardSizeForViewport(typeof window === 'undefined' ? 0 : window.innerWidth).width,
+  );
+  const [boutCardHeight, setBoutCardHeight] = useState(
+    () => cardSizeForViewport(typeof window === 'undefined' ? 0 : window.innerWidth).height,
+  );
   const arenaRef = useRef<HTMLDivElement>(null);
   const handRef = useRef<HTMLDivElement>(null);
   const handZoneRef = useRef<HTMLElement>(null);
@@ -1116,9 +1407,14 @@ export function GameTable({
       const zone = handZoneRef.current ?? node.parentElement;
       const available = zone?.clientWidth ?? node.clientWidth;
       setHandWidth(available > 0 ? Math.max(0, available - HAND_BOX_PADDING * 2) : available);
-      const card = node.querySelector('.card-slot') as HTMLElement | null;
-      const measured = card?.offsetWidth ?? 0;
+      // Measure the CSS-sized slot (`.hand-slot`), never the inline-sized card:
+      // the slot carries `--hand-card-width/height` (100x140 desktop, 48x68
+      // mobile), so the card is re-rendered at exactly the responsive size.
+      const slot = node.querySelector('.hand-slot') as HTMLElement | null;
+      const measured = slot?.offsetWidth ?? 0;
       if (measured > 0) setCardWidth(measured);
+      const measuredHeight = slot?.offsetHeight ?? 0;
+      if (measuredHeight > 0) setCardHeight(measuredHeight);
     };
     measure();
     const zone = handZoneRef.current ?? handRef.current?.parentElement ?? null;
@@ -1149,9 +1445,18 @@ export function GameTable({
           (parseFloat(styles.paddingRight || '0') || 0)
         : 0;
       if (box.clientWidth > 0) setBoutWidth(Math.max(0, box.clientWidth - padding));
-      const card = box.querySelector('.table-pair .card-slot') as HTMLElement | null;
-      const measured = card?.offsetWidth ?? 0;
-      if (measured > 0) setBoutCardWidth(measured);
+      // The pair's grid track is 100x140 desktop and 48x68 mobile, so measuring
+      // the pair (not the inline-sized card) keeps the play area responsive.
+      // Measure ONE CSS-sized card slot (`.table-pair-attack`), never the pair
+      // box: the pair also reserves the defender's overhang and the 18px drop
+      // offset, so it is larger than a card.
+      const slot = box.querySelector('.table-pair-attack') as HTMLElement | null;
+      const measured = clampBoutCardSize(
+        slot?.offsetWidth ?? 0,
+        slot?.offsetHeight ?? 0,
+      );
+      if (measured.width > 0) setBoutCardWidth(measured.width);
+      if (measured.height > 0) setBoutCardHeight(measured.height);
     };
     measure();
     if (typeof ResizeObserver !== 'undefined' && battlefieldRef.current) {
@@ -1166,14 +1471,20 @@ export function GameTable({
     return undefined;
   }, []);
 
+  // T-90-feedback-2 ITEM-4 (review round 2): reserve the contour's 4px padding
+  // on both sides, so a fit-scaled full-deck row and its outline can never
+  // bleed into the talon or the Surrender / Pass column.
+  const handAvailableWidth = Math.max(
+    0,
+    (handWidth > 0 ? handWidth : HAND_FALLBACK_WIDTH) - HAND_CONTOUR_PADDING * 2,
+  );
   const handLayoutState = handLayout(
     hand.length,
-    handWidth > 0 ? handWidth : HAND_FALLBACK_WIDTH,
-    cursorFraction,
+    handAvailableWidth,
+    0.5,
     cardWidth,
   );
   const handMarginList = handMargins(handLayoutState, hand.length, cardWidth);
-  const hiddenCards = handLayoutState.hiddenLeft + handLayoutState.hiddenRight;
 
   // T-90-2 ITEM-6a: while a card is dragged out of the hand, the remaining
   // N - 1 cards compact into the sequence without it, so the original slot
@@ -1187,8 +1498,8 @@ export function GameTable({
   const compactHandLayoutState = gapClosed
     ? handLayout(
         Math.max(0, hand.length - 1),
-        handWidth > 0 ? handWidth : HAND_FALLBACK_WIDTH,
-        cursorFraction,
+        handAvailableWidth,
+        0.5,
         cardWidth,
       )
     : handLayoutState;
@@ -1209,14 +1520,51 @@ export function GameTable({
   // the defender, the whole hand for the attacker who owes a play. The pulse
   // sits on the cards container so the highlight hugs the cards tightly.
   const reviewMode = isReviewMode || isBotView;
-  // ITEM-PB-3: when every card in hand is legal, the outline travels with the
-  // lifted cards instead of staying at the baseline. `data-all-legal` carries
-  // the state so the stylesheet can translate the whole box.
+  // ITEM-PB-3 / T-90-feedback-2 ITEM-2: `data-all-legal` no longer translates
+  // the whole box. The contour steps over the raised cards instead, because
+  // every legal card is lifted by the shared `--hand-raise` offset.
   const activePlayableKeys = reviewMode ? [] : playableKeys;
   const allCardsLegal =
     !reviewMode &&
     hand.length > 0 &&
     hand.every((card) => activePlayableKeys.includes(cardKey(card)));
+  // T-90-feedback-2 ITEM-2/ITEM-4: the exact footprint of every card in the
+  // hand. `x` follows the overlapped stride, `y` drops to `-14px` for a card
+  // that is raised because it is playable or selected. The SVG contour below is
+  // built from these rectangles, so it always wraps the real cards tightly and
+  // distorts non-rectangularly when only some of them are raised.
+  // The x of every card is accumulated from the SAME inline margins the row
+  // renders, so the contour matches the compacted N-1 layout while a card is
+  // dragged out of the hand (its collapsed slot contributes zero width).
+  const handCardPositions: HandCardPosition[] = [];
+  let runningX = 0;
+  hand.forEach((card, index) => {
+    if (index > 0) {
+      const previousWidth = gapClosed && index - 1 === draggedCardIndex ? 0 : cardWidth;
+      runningX += previousWidth + (parseFloat(handSlotMargin(index)) || 0);
+    }
+    const key = cardKey(card);
+    const raised =
+      !reviewMode && (activePlayableKeys.includes(key) || selectedKeys.includes(key));
+    handCardPositions.push({ x: runningX, y: raised ? HAND_RAISED_OFFSET : 0 });
+  });
+  // The dragged card floats under the pointer, so it is not part of the hand
+  // contour; the outline wraps the real, remaining row.
+  const contourCards = gapClosed
+    ? handCardPositions.filter((_, index) => index !== draggedCardIndex)
+    : handCardPositions;
+  const handContour = computeHandContour(contourCards, cardWidth, cardHeight);
+  const totalHandWidth = activeHandLayoutState.totalWidth;
+  const handFitScale = activeHandLayoutState.scale;
+  // T-90-feedback-2 ITEM-3: the dragged card sits inside the fit-scaled row.
+  // Counter-scale it and divide the pointer delta, so it tracks the cursor at
+  // its full 100x140 size instead of moving at `scale x` pointer speed.
+  const dragFitScale = handFitScale > 0 ? handFitScale : 1;
+  const draggedTransform =
+    dragFitScale === 1
+      ? `translate3d(${dragOffset.x}px, ${dragOffset.y}px, 0)`
+      : `translate3d(${dragOffset.x / dragFitScale}px, ${dragOffset.y / dragFitScale}px, 0) scale(${1 / dragFitScale})`;
+  const handRenderedWidth = Math.max(0, Math.round(totalHandWidth * handFitScale));
   // T-90 ITEM-PREV-4a/4b: the highlight data attributes are mirrored onto the
   // outer `[data-zone="player-hand"]` wrapper for testability only. Every
   // visual glow rule is scoped to `.hand-cards`, and the wrapper is pinned to
@@ -1472,7 +1820,14 @@ export function GameTable({
         }
         pointer.active = true;
         setDragCard(pointer.card);
+        setDragOffset({ x: 0, y: 0 });
       }
+      // T-90-feedback-2 ITEM-3: the dragged card follows the pointer at its full
+      // 100x140 size, so it is never invisible during the gesture.
+      setDragOffset({
+        x: event.clientX - pointer.startX,
+        y: event.clientY - pointer.startY,
+      });
       event.preventDefault();
       const box = handRef.current;
       if (!box) return;
@@ -1510,6 +1865,7 @@ export function GameTable({
       // Stop the click that follows a completed drag from selecting the card.
       suppressClickRef.current = true;
       setDragCard(null);
+      setDragOffset({ x: 0, y: 0 });
       setSnapZone(null);
       setReorderIndex(null);
     };
@@ -1552,6 +1908,7 @@ export function GameTable({
     const targetIndex =
       reorderIndex ?? (element ? reorderIndexFromClientX(event.clientX, element) : 0);
     setDragCard(null);
+    setDragOffset({ x: 0, y: 0 });
     setSnapZone(null);
     setReorderIndex(null);
     if (!card) return;
@@ -1674,8 +2031,8 @@ export function GameTable({
       data-throw-in-enabled={canThrowIn ? 'true' : 'false'}
       data-surrender-outline-position={throwInOutlinePosition}
       data-on-table="true"
-      data-card-width={CARD_WIDTH}
-      data-card-height={CARD_HEIGHT}
+      data-card-width={boutCardWidth}
+      data-card-height={boutCardHeight}
       aria-label="Throw in another card"
       onDragOver={hoverZone('throw-in')}
       onDragLeave={clearSnap}
@@ -1916,8 +2273,8 @@ export function GameTable({
                 defense={pair.defense}
                 trumpSuit={trumpSuit}
                 marginLeft={boutSlotMargin(index)}
-                cardWidth={CARD_WIDTH}
-                cardHeight={CARD_HEIGHT}
+                cardWidth={boutCardWidth}
+                cardHeight={boutCardHeight}
                 highlightUncovered={uncoveredHighlight && !pair.defense}
                 snap={snapZone === zone}
                 dropZone={coverable ? zone : undefined}
@@ -1960,6 +2317,8 @@ export function GameTable({
               data-testid="redirect-outline"
               style={{ marginLeft: boutSlotMargin(tablePairs.length + throwInSlot) }}
               data-drop-zone="redirect"
+              data-card-width={boutCardWidth}
+              data-card-height={boutCardHeight}
               data-direction={redirectDirection}
               data-target-seat={redirectDirection}
               data-target-player={
@@ -2040,28 +2399,72 @@ export function GameTable({
           data-part-direction={
             dragCard !== null && reorderIndex === null ? 'none' : undefined
           }
-          data-min-overlap-ratio="0.10"
+          data-min-overlap-ratio={String(HAND_MIN_OVERLAP_RATIO)}
+          data-max-overlap-ratio={String(HAND_MAX_OVERLAP_RATIO)}
           data-min-overlap={HAND_MIN_OVERLAP}
+          data-max-overlap={HAND_MAX_OVERLAP}
           data-overlap={activeHandLayoutState.overlap}
+          data-overlap-px={activeHandLayoutState.overlap}
+          data-overlap-ratio={activeHandLayoutState.overlapRatio}
+          data-stride-px={activeHandLayoutState.stride}
+          // Both widths below are reported in the SAME unscaled row coordinate
+          // space as the contour; the on-screen width is `data-rendered-hand-width`.
+          data-hand-width={Math.round(totalHandWidth)}
+          data-rendered-hand-width={handRenderedWidth}
+          data-fit-scale={handFitScale}
           data-hidden-left={handLayoutState.hiddenLeft}
           data-hidden-right={handLayoutState.hiddenRight}
           data-reorder-target-index={reorderIndex === null ? undefined : reorderIndex}
+          // T-90-feedback-2 ITEM-2: `.hand-cards` is exactly the overlapped card
+          // footprint; the contour SVG is anchored to this box.
+          style={{
+            // T-90-feedback-2 ITEM-2: the CSS lift reads this exact constant, so
+            // the contour and the raised cards can never disagree.
+            '--hand-raise': `${HAND_RAISED_OFFSET}px`,
+            // The row lays out at its natural `totalWidth`; when the fit scale
+            // is below 1 the box is the scaled width and the whole row is
+            // scaled from its LEFT edge, so the cards and the contour SVG (a
+            // child of this same box) scale together into exactly that width.
+            width: `${handRenderedWidth}px`,
+            height: `${Math.round(cardHeight * handFitScale)}px`,
+            justifyContent: handFitScale < 1 ? 'flex-start' : undefined,
+            transform: handFitScale < 1 ? `scale(${handFitScale})` : undefined,
+            transformOrigin: handFitScale < 1 ? 'left center' : undefined,
+          }}
           ref={handRef}
           onDragOver={draggable && onReorderHand ? hoverHandZone : undefined}
           onDrop={draggable && onReorderHand ? dropOnHand : undefined}
-          onMouseMove={
-            hiddenCards > 0
-              ? (event) => {
-                  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-                  if (rect.width <= 0) return;
-                  const fraction = (event.clientX - rect.left) / rect.width;
-                  setCursorFraction(Math.min(1, Math.max(0, fraction)));
-                }
-              : undefined
-          }
-          onMouseLeave={hiddenCards > 0 ? () => setCursorFraction(0.5) : undefined}
           onDragLeave={draggable && onReorderHand ? leaveHand : undefined}
         >
+        {/* T-90-feedback-2 ITEM-2: the tight, non-rectangular highlight contour.
+            It is an SVG overlay anchored to `.hand-cards`, so it wraps the real
+            card rectangles (including raised playable / selected cards) instead
+            of drawing a loose rectangle around the hand column. */}
+        <svg
+          class="hand-highlight-contour"
+          data-testid="hand-highlight-contour"
+          data-non-rectangular={handContour.nonRectangular ? 'true' : 'false'}
+          data-contour-width={Math.round(totalHandWidth)}
+          data-contour-rendered-width={Math.round(totalHandWidth * handFitScale)}
+          width={handContour.width}
+          height={handContour.height}
+          viewBox={`0 0 ${handContour.width} ${handContour.height}`}
+          style={{
+            left: `${handContour.left}px`,
+            top: `${handContour.top}px`,
+            width: `${handContour.width}px`,
+            height: `${handContour.height}px`,
+          }}
+          aria-hidden="true"
+        >
+          <path
+            class="hand-highlight-path"
+            data-testid="hand-highlight-path"
+            d={handContour.d}
+            stroke-linejoin="round"
+            stroke-linecap="round"
+          />
+        </svg>
         {hand.map((card, index) => {
           const hidden =
             index < handLayoutState.hiddenLeft ||
@@ -2088,14 +2491,29 @@ export function GameTable({
               class="hand-slot hand-card-wrapper"
               data-hidden={hidden ? 'true' : 'false'}
               data-index={index}
+              data-card-x={Math.round(handCardPositions[index].x)}
+              data-card-y={handCardPositions[index].y}
               data-part-direction={partDirection}
               data-collapsed={index === draggedCardIndex ? 'true' : 'false'}
+              // T-90-feedback-2 ITEM-3: the dragged wrapper keeps `data-dragging`
+              // and a live `translate3d`; it is never hidden or clipped.
+              data-dragging={index === draggedCardIndex ? 'true' : 'false'}
               data-draggable={draggable ? 'true' : 'false'}
               // ITEM-7: the wrapper never starts a native HTML5 drag, so the
               // browser can never swap the pointer finger for its arrow.
               draggable={false}
               aria-hidden={hidden ? 'true' : undefined}
-              style={{ marginLeft: handSlotMargin(index) }}
+              style={
+                index === draggedCardIndex
+                  ? {
+                      marginLeft: handSlotMargin(index),
+                      transform: draggedTransform,
+                      transformOrigin: dragFitScale === 1 ? undefined : 'left top',
+                      zIndex: 1000,
+                      transition: 'none',
+                    }
+                  : { marginLeft: handSlotMargin(index) }
+              }
               onMouseDown={beginPointerDrag(card)}
               onDragStart={(event) => event.preventDefault()}
               onClickCapture={(event) => {
@@ -2108,6 +2526,8 @@ export function GameTable({
               <Card
                 suit={card.suit}
                 rank={card.rank}
+                width={cardWidth}
+                height={cardHeight}
                 trump={isTrumpCard(card, trumpSuit)}
                 selected={selectedKeys.includes(cardKey(card))}
                 playable={activePlayableKeys.includes(cardKey(card))}
@@ -2136,6 +2556,7 @@ export function GameTable({
                   event.preventDefault();
                   pointerDragRef.current = null;
                   setDragCard(card);
+                  setDragOffset({ x: 0, y: 0 });
                   if (event.dataTransfer) {
                     // A move drag keeps the pointer cursor instead of the copy arrow.
                     event.dataTransfer.effectAllowed = 'move';
@@ -2144,6 +2565,7 @@ export function GameTable({
                 }}
                 onDragEnd={() => {
                   setDragCard(null);
+                  setDragOffset({ x: 0, y: 0 });
                   setSnapZone(null);
                   setReorderIndex(null);
                 }}

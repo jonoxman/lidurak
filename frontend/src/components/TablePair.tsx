@@ -83,12 +83,20 @@ export function TablePair({
           suit={attack.suit}
           rank={attack.rank}
           trump={isTrump(attack)}
+          width={cardWidth}
+          height={cardHeight}
           onClick={onAttackClick}
         />
       </div>
       {defense ? (
         <div class="table-pair-defense table-card-cover" data-card-align="overlap">
-          <Card suit={defense.suit} rank={defense.rank} trump={isTrump(defense)} />
+          <Card
+            suit={defense.suit}
+            rank={defense.rank}
+            trump={isTrump(defense)}
+            width={cardWidth}
+            height={cardHeight}
+          />
         </div>
       ) : null}
     </div>

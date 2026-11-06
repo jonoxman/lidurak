@@ -14,9 +14,20 @@ import {
   DISCARD_FALLBACK_WIDTH,
   HAND_BOX_PADDING,
   HAND_CARD_HEIGHT,
+  HAND_CONTOUR_PADDING,
+  HAND_FALLBACK_WIDTH,
   HAND_CARD_WIDTH,
+  HAND_MAX_OVERLAP,
+  HAND_MAX_OVERLAP_RATIO,
   HAND_MIN_OVERLAP,
   HAND_MIN_OVERLAP_RATIO,
+  HAND_MIN_VISIBLE_LEFT,
+  HAND_RAISED_OFFSET,
+  MOBILE_BREAKPOINT_PX,
+  MOBILE_CARD_HEIGHT,
+  MOBILE_CARD_WIDTH,
+  cardSizeForViewport,
+  clampBoutCardSize,
   LOW_DETAIL_CARD_WIDTH,
   OPPONENT_CARD_WIDTH,
   OPPONENT_MIN_OVERLAP,
@@ -24,6 +35,7 @@ import {
   TableDeck,
   assignSeats,
   clockwiseOffset,
+  discardLayout,
   handLayout,
   handMargins,
   opponentOverlap,
@@ -771,41 +783,38 @@ describe('single-row hand overlap', () => {
     rank: 'six',
   }));
 
-  it('keeps a hand that fits at the default 8px overlap', () => {
+  it('keeps a hand that fits at the 20% minimum overlap', () => {
     const layout = handLayout(4, 720);
 
     expect(layout.hiddenLeft + layout.hiddenRight).toBe(0);
+    expect(layout.overlapRatio).toBeCloseTo(HAND_MIN_OVERLAP_RATIO, 5);
     expect(layout.overlap).toBe(HAND_MIN_OVERLAP);
     expect(handMargins(layout, 4)[1]).toBe(-HAND_MIN_OVERLAP);
   });
 
-  it('tightens the overlap before hiding any cards', () => {
+  it('clamps the overlap into the 20%-80% band on a normal hand', () => {
     const layout = handLayout(12, 500);
 
     expect(layout.hiddenLeft + layout.hiddenRight).toBe(0);
-    expect(layout.overlap).toBeGreaterThan(HAND_MIN_OVERLAP);
+    expect(layout.overlapRatio).toBeGreaterThanOrEqual(HAND_MIN_OVERLAP_RATIO - 1e-9);
+    expect(layout.overlapRatio).toBeLessThanOrEqual(HAND_MAX_OVERLAP_RATIO + 1e-9);
     // The top-left rank/suit index stays visible at the maximum overlap.
-    expect(HAND_CARD_WIDTH - layout.overlap).toBeGreaterThanOrEqual(22);
+    expect(HAND_CARD_WIDTH - layout.overlap).toBeGreaterThanOrEqual(20);
+    expect(layout.totalWidth).toBeLessThanOrEqual(500 + 1e-9);
   });
 
-  it('slides the hidden stack from right to left as the cursor moves', () => {
-    const centered = handLayout(36, 300);
-    const hidden = centered.hiddenLeft + centered.hiddenRight;
-    expect(hidden).toBeGreaterThan(0);
+  it('keeps a picked-up full deck on screen at the 15px readable strip', () => {
+    const layout = handLayout(36, 300);
 
-    const atLeft = handLayout(36, 300, 0);
-    expect(atLeft.hiddenLeft).toBe(0);
-    expect(atLeft.hiddenRight).toBe(hidden);
-
-    const atRight = handLayout(36, 300, 1);
-    expect(atRight.hiddenLeft).toBe(hidden);
-    expect(atRight.hiddenRight).toBe(0);
-
-    // Hidden cards are stacked at 100% overlap on the ends.
-    expect(handMargins(atRight, 36)[1]).toBe(-HAND_CARD_WIDTH);
+    // Every card stays in the row: nothing is hidden or stacked.
+    expect(layout.hiddenLeft + layout.hiddenRight).toBe(0);
+    expect(layout.visibleCount).toBe(36);
+    expect(layout.stride).toBeGreaterThanOrEqual(HAND_MIN_VISIBLE_LEFT - 1e-9);
+    // The row is scaled so it can never leave the hand column.
+    expect(layout.totalWidth * layout.scale).toBeLessThanOrEqual(300 + 1e-9);
   });
 
-  it('renders every overflow card in one row with hidden stacks marked', () => {
+  it('renders every picked-up card in one row without hiding any', () => {
     const { container } = render(
       <GameTable
         myId="p0"
@@ -819,13 +828,9 @@ describe('single-row hand overlap', () => {
     const row = container.querySelector('.hand-cards') as HTMLElement;
     expect(row.querySelectorAll('.hand-slot')).toHaveLength(36);
     expect(row.querySelectorAll('.card-slot')).toHaveLength(36);
-    const hiddenLeft = Number(row.getAttribute('data-hidden-left'));
-    const hiddenRight = Number(row.getAttribute('data-hidden-right'));
-    expect(hiddenLeft + hiddenRight).toBeGreaterThan(0);
-    expect(row.querySelectorAll('.hand-slot[data-hidden="true"]')).toHaveLength(
-      hiddenLeft + hiddenRight,
-    );
-    expect(Number(row.getAttribute('data-overlap'))).toBeGreaterThan(HAND_MIN_OVERLAP);
+    expect(row.querySelectorAll('.hand-slot[data-hidden="true"]')).toHaveLength(0);
+    expect(Number(row.getAttribute('data-overlap'))).toBeGreaterThanOrEqual(HAND_MIN_OVERLAP);
+    expect(Number(row.getAttribute('data-hand-width'))).toBeLessThanOrEqual(720);
   });
 
   it('overlaps opponent card backs inside a fixed box without cursor input', () => {
@@ -1055,7 +1060,9 @@ describe('hand highlight geometry, redirect double-click and review mode', () =>
     renderSortableTable({ awaitingAttack: true });
 
     const highlight = screen.getByTestId('hand-turn-highlight') as HTMLElement;
-    const slots = Array.from(highlight.children) as HTMLElement[];
+    const slots = Array.from(
+      highlight.querySelectorAll('.hand-card-wrapper'),
+    ) as HTMLElement[];
     expect(slots).toHaveLength(sortableHand.length);
 
     expect(slots[0].style.marginLeft).toBe('0px');
@@ -1076,7 +1083,7 @@ describe('hand highlight geometry, redirect double-click and review mode', () =>
     expect(slotRule).toContain('flex: 0 0 auto');
   });
 
-  it('stacks surplus cards with negative margins instead of transforms', () => {
+  it('keeps every card of a 40-card hand in one compact, visible row', () => {
     const ranks = ['six', 'seven', 'eight', 'nine', 'ten', 'jack', 'queen', 'king', 'ace'];
     const suits = ['spades', 'hearts', 'clubs', 'diamonds'];
     const bigHand: CardData[] = Array.from({ length: 40 }, (_, index) => ({
@@ -1087,13 +1094,17 @@ describe('hand highlight geometry, redirect double-click and review mode', () =>
     renderSortableTable({ myHand: bigHand });
 
     const highlight = screen.getByTestId('hand-turn-highlight') as HTMLElement;
-    const slots = Array.from(highlight.children) as HTMLElement[];
+    const slots = Array.from(
+      highlight.querySelectorAll('.hand-card-wrapper'),
+    ) as HTMLElement[];
     expect(slots).toHaveLength(bigHand.length);
-    expect(highlight.querySelectorAll('.hand-slot[data-hidden="true"]').length).toBeGreaterThan(0);
+    expect(highlight.querySelectorAll('.hand-slot[data-hidden="true"]')).toHaveLength(0);
     expect(slots[0].style.marginLeft).toBe('0px');
     for (const slot of slots) expect(slot.style.transform).toBe('');
-    // The hidden surplus stack overlaps fully, still through margin-left only.
-    expect(slots.some((slot) => slot.style.marginLeft === `-${HAND_CARD_WIDTH}px`)).toBe(true);
+    // Every neighbour overlaps by at least the 20px left strip.
+    for (const slot of slots.slice(1)) {
+      expect(-parseFloat(slot.style.marginLeft)).toBeGreaterThanOrEqual(HAND_MIN_OVERLAP);
+    }
   });
 
   it('plays the redirect when it is the only legal move for the card', () => {
@@ -1356,7 +1367,9 @@ describe('fixed play area, tight hand highlight and surrender shift', () => {
     expect(highlight.classList.contains('hand-cards')).toBe(true);
     expect(highlight.getAttribute('data-active')).toBe('true');
 
-    const slots = Array.from(highlight.children) as HTMLElement[];
+    const slots = Array.from(
+      highlight.querySelectorAll('.hand-card-wrapper'),
+    ) as HTMLElement[];
     expect(slots).toHaveLength(hand.length);
     for (const slot of slots) {
       expect(slot.classList.contains('hand-slot')).toBe(true);
@@ -1465,7 +1478,7 @@ describe('feedback 7: tight glow, discard pile and reflection alignment', () => 
     expect(rule).toContain('max-width: 100%');
     expect(rule).toContain('align-items: center');
     expect(rule).toContain('justify-content: center');
-    expect(rule).toContain(`padding: ${HAND_BOX_PADDING}px;`);
+    expect(rule).toContain('padding: 0;');
     expect(rule).toContain('border-radius: calc(var(--app-roundness, 8px) + 4px)');
     expect(rule).toContain('box-sizing: border-box');
 
@@ -1478,7 +1491,9 @@ describe('feedback 7: tight glow, discard pile and reflection alignment', () => 
     // A bordered trump card paints inside its box, so it can never poke out.
     expect(cssRule('.card-slot')).toContain('box-sizing: border-box');
 
-    const slots = Array.from(highlight.children) as HTMLElement[];
+    const slots = Array.from(
+      highlight.querySelectorAll('.hand-card-wrapper'),
+    ) as HTMLElement[];
     expect(slots).toHaveLength(sortableHand.length);
     for (const slot of slots) {
       expect(slot.style.marginTop).toBe('');
@@ -1619,7 +1634,7 @@ describe('feedback 7: tight glow, discard pile and reflection alignment', () => 
     // allowed margin (only the 22px peek strip stays visible) and spreads the
     // revealed cards over the rest of the pile width.
     const visibleAvailable = DISCARD_FALLBACK_WIDTH - MIN_VISIBLE_STRIP_PX;
-    const layout = handLayout(2, visibleAvailable, 0.5, DECK_CARD_WIDTH);
+    const layout = discardLayout(2, visibleAvailable, 0.5, DECK_CARD_WIDTH);
     const slots = Array.from(row.querySelectorAll('.discard-slot')) as HTMLElement[];
     expect(slots).toHaveLength(2);
     expect(row.querySelectorAll('.discard-slot[data-face="up"]')).toHaveLength(2);
@@ -1696,7 +1711,7 @@ describe('feedback 7: tight glow, discard pile and reflection alignment', () => 
   it('ITEM-7b: never lets the discard row exceed the available pile width', () => {
     for (const count of [1, 2, 6, 18, 36, 52]) {
       for (const available of [160, DISCARD_FALLBACK_WIDTH, 720]) {
-        const layout = handLayout(count, available, 0.5, DECK_CARD_WIDTH);
+        const layout = discardLayout(count, available, 0.5, DECK_CARD_WIDTH);
         expect(rowWidth(layout, DECK_CARD_WIDTH)).toBeLessThanOrEqual(
           Math.max(available, DECK_CARD_WIDTH),
         );
@@ -1900,18 +1915,23 @@ describe('T-90-3: outline lift, discard stack, chaos targets, deflect arrow and 
     expect(highlight.getAttribute('data-active')).toBe('true');
   });
 
-  it('ITEM-PB-3: translates the outline box and keeps the slots inside it', () => {
-    const rule = cssRule(".hand-cards[data-all-legal='true'][data-active='true']");
-    expect(rule).toContain('transform: translateY(-8px)');
-
-    const slotRule = cssRule(
-      ".hand-cards[data-all-legal='true'][data-active='true'] .card-slot.legal-playable",
+  it('ITEM-PB-3/ITEM-2: the contour wraps the raised cards without lifting the box', () => {
+    // T-90-feedback-2 ITEM-2 supersedes the old translate-the-whole-box rule.
+    expect(tableCss).not.toMatch(
+      /\.hand-cards\[data-all-legal='true'\]\[data-active='true'\]\s*{[^}]*transform: translateY/,
     );
-    expect(slotRule).toContain('transform: none');
 
     renderSortableTable({ awaitingAttack: true, playableKeys: sortableHand.map(cardKey) });
     const highlight = screen.getByTestId('hand-turn-highlight') as HTMLElement;
-    for (const slot of Array.from(highlight.children) as HTMLElement[]) {
+    const contour = screen.getByTestId('hand-highlight-contour');
+    // All three cards are raised, so the contour still hugs the same row width.
+    expect(contour.getAttribute('data-non-rectangular')).toBe('false');
+    expect(Number(contour.getAttribute('data-contour-width'))).toBe(
+      Number(highlight.getAttribute('data-hand-width')),
+    );
+    for (const slot of Array.from(
+      highlight.querySelectorAll('.hand-card-wrapper'),
+    ) as HTMLElement[]) {
       expect(slot.style.transform).toBe('');
     }
   });
@@ -3094,7 +3114,7 @@ describe('T-90 ITEM-PREV-4a/4b: single tight hand highlight outline', () => {
     expect(rule).toContain('width: fit-content');
     expect(rule).toContain('align-self: center');
     expect(rule).toContain('height: fit-content');
-    expect(rule).toContain(`padding: ${HAND_BOX_PADDING}px;`);
+    expect(rule).toContain('padding: 0;');
     // No asymmetric top/bottom padding and no reserved height: the outline hugs
     // the top, bottom, left and right edges of the cards symmetrically.
     expect(rule).not.toMatch(/padding-(top|bottom)/);
@@ -3853,33 +3873,38 @@ describe('T-90-feedback-20261104_195410-2: drag animation, pointer cursor, throw
     expect(screen.queryByTestId('throw-in-outline')).toBeNull();
   });
 
-  it('ITEM-13a/13b: the hand box wraps the 100x140 row with at least 10% overlap', () => {
+  it('ITEM-13a/13b/ITEM-4: the hand box wraps the row at 20%-80% overlap', () => {
     renderTable();
     const box = screen.getByTestId('hand-turn-highlight') as HTMLElement;
 
-    expect(HAND_MIN_OVERLAP_RATIO).toBe(0.1);
-    expect(HAND_MIN_OVERLAP).toBe(Math.round(HAND_CARD_WIDTH * 0.1));
-    expect(box.getAttribute('data-min-overlap-ratio')).toBe('0.10');
-    expect(Number(box.getAttribute('data-overlap'))).toBeGreaterThanOrEqual(HAND_MIN_OVERLAP);
+    expect(HAND_MIN_OVERLAP_RATIO).toBe(0.2);
+    expect(HAND_MAX_OVERLAP_RATIO).toBe(0.8);
+    expect(HAND_MIN_OVERLAP).toBe(Math.round(HAND_CARD_WIDTH * 0.2));
+    expect(box.getAttribute('data-min-overlap-ratio')).toBe('0.2');
+    const ratio = Number(box.getAttribute('data-overlap-ratio'));
+    expect(ratio).toBeGreaterThanOrEqual(HAND_MIN_OVERLAP_RATIO);
+    expect(ratio).toBeLessThanOrEqual(HAND_MAX_OVERLAP_RATIO);
+    expect(Number(box.getAttribute('data-overlap-px'))).toBeGreaterThanOrEqual(
+      HAND_MIN_OVERLAP,
+    );
+    expect(Number(box.getAttribute('data-stride-px'))).toBeGreaterThan(0);
 
     const wrappers = Array.from(box.querySelectorAll('.hand-card-wrapper')) as HTMLElement[];
     expect(wrappers).toHaveLength(3);
     for (const wrapper of wrappers.slice(1)) {
-      expect(parseFloat(wrapper.style.marginLeft)).toBeLessThanOrEqual(
-        -Math.round(HAND_CARD_WIDTH * 0.1),
-      );
+      expect(parseFloat(wrapper.style.marginLeft)).toBeLessThanOrEqual(-HAND_MIN_OVERLAP);
     }
 
     const boxRule = (tableCss.match(/\.hand-cards\s*{[^}]*}/) ?? [''])[0];
     expect(boxRule).toContain('display: inline-flex');
-    expect(boxRule).toContain('padding: 6px');
+    expect(boxRule).toContain('padding: 0');
     expect(boxRule).toContain('overflow: visible');
     expect(boxRule).not.toMatch(/height:\s*(112|120)px/);
     expect(tableCss).toMatch(
       /\.hand-card-wrapper\s*{[^}]*width: var\(--hand-card-width, 100px\);[^}]*height: var\(--hand-card-height, 140px\);[^}]*flex: 0 0 var\(--hand-card-width, 100px\);/,
     );
 
-    // The box width is exactly `100 + (visibleCount - 1) * step`.
+    // The box width is exactly `100 + (visibleCount - 1) * stride`.
     const layout = handLayout(3, 720, 0.5, HAND_CARD_WIDTH);
     expect(layout.overlap).toBe(HAND_MIN_OVERLAP);
     expect(rowWidth(layout, HAND_CARD_WIDTH)).toBe(
@@ -4274,4 +4299,485 @@ describe('T-90-feedback-20261105_183601-1: surrender throw-in outline placement 
       view.unmount();
     }
   });
+});
+
+/**
+ * T-90-feedback-20261105_221105-2: card-size parity with the outlines, the
+ * 20%-80% hand overlap, the tight non-rectangular hand contour and the
+ * always-visible dragged card.
+ */
+describe('T-90-feedback-20261105_221105-2: card size, hand overlap, contour and drag visibility', () => {
+  const bob: OpponentSummary = {
+    id: 'p1',
+    name: 'Bob',
+    cardCount: 6,
+    hasPassed: false,
+    finishRank: null,
+  };
+
+  const cssRule = (selector: string): string => {
+    const start = tableCss.indexOf(`\n${selector} {`);
+    if (start < 0) return '';
+    const end = tableCss.indexOf('}', start);
+    return tableCss.slice(start, end);
+  };
+
+  const fakeRect = (width: number): DOMRect =>
+    ({
+      left: 0,
+      top: 0,
+      right: width,
+      bottom: 140,
+      width,
+      height: 140,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    }) as DOMRect;
+
+  it('ITEM-1b: renders 100x140 cards matching the throw-in and redirect outlines', () => {
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={[bob]}
+        tablePairs={[{ attack: { suit: 'spades', rank: 'six' }, defense: null }]}
+        trumpSuit="diamonds"
+        attackerId="p1"
+        defenderId="p0"
+        canRedirect
+      />,
+    );
+
+    const handCard = document.querySelector(
+      '[data-zone="player-hand"] .card-slot',
+    ) as HTMLElement;
+    const tableCard = document.querySelector(
+      '.table-pair-attack .card-slot',
+    ) as HTMLElement;
+    for (const card of [handCard, tableCard]) {
+      expect(card.getAttribute('data-card-width')).toBe('100');
+      expect(card.getAttribute('data-card-height')).toBe('140');
+    }
+
+    const throwIn = screen.getByTestId('throw-in-outline');
+    const redirect = screen.getByTestId('redirect-outline');
+    expect(throwIn.getAttribute('data-card-width')).toBe('100');
+    expect(throwIn.getAttribute('data-card-height')).toBe('140');
+    expect(redirect.getAttribute('data-card-width')).toBe('100');
+    expect(redirect.getAttribute('data-card-height')).toBe('140');
+
+    expect(cssRule('.card-slot')).toContain('width: var(--card-width, 100px)');
+    expect(cssRule('.card-slot')).toContain('height: var(--card-height, 140px)');
+    expect(cssRule('.card-slot')).toContain('min-width: var(--card-width, 100px)');
+    expect(cssRule('.card-slot')).toContain('min-height: var(--card-height, 140px)');
+    expect(cssRule('.card-slot')).not.toMatch(/width:\s*(80|70)px/);
+    expect(cssRule('.hand-card-wrapper')).toContain('width: var(--hand-card-width, 100px)');
+    expect(tableCss).toMatch(
+      /@media \(max-width: 900px\)[\s\S]*?\.card-slot\s*{[^}]*--card-width: 48px;[^}]*--card-height: 68px;/,
+    );
+  });
+
+  it('ITEM-4: stays inside the 20%-80% overlap band and never overflows', () => {
+    for (const count of [2, 3, 6, 12, 18, 30]) {
+      const layout = handLayout(count, 720);
+      expect(layout.overlapRatio).toBeGreaterThanOrEqual(HAND_MIN_OVERLAP_RATIO - 1e-9);
+      expect(layout.overlapRatio).toBeLessThanOrEqual(HAND_MAX_OVERLAP_RATIO + 1e-9);
+      expect(layout.totalWidth).toBeLessThanOrEqual(720 + 1e-9);
+      expect(layout.hiddenLeft + layout.hiddenRight).toBe(0);
+    }
+
+    // A picked-up full deck compresses to the readable strip and is scaled to
+    // fit, so no card ever leaves the hand column or covers the UI.
+    for (const count of [30, 36, 52]) {
+      const layout = handLayout(count, 640);
+      expect(layout.totalWidth * layout.scale).toBeLessThanOrEqual(640 + 1e-9);
+      expect(layout.hiddenLeft + layout.hiddenRight).toBe(0);
+      expect(layout.stride).toBeGreaterThan(0);
+    }
+
+    // A very wide column never parts the cards past the 20% overlap.
+    expect(handLayout(4, 2000).overlapRatio).toBeCloseTo(HAND_MIN_OVERLAP_RATIO, 5);
+
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={[bob]}
+        tablePairs={[]}
+        trumpSuit="diamonds"
+        defenderId="p1"
+      />,
+    );
+    const box = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+    expect(Number(box.getAttribute('data-overlap-ratio'))).toBeCloseTo(
+      handLayout(3, 720).overlapRatio,
+      5,
+    );
+    expect(Number(box.getAttribute('data-overlap-px'))).toBeCloseTo(
+      handLayout(3, 720).overlap,
+      5,
+    );
+    expect(Number(box.getAttribute('data-stride-px'))).toBe(
+      HAND_CARD_WIDTH - HAND_MIN_OVERLAP,
+    );
+    expect(Number(box.getAttribute('data-hand-width'))).toBe(
+      HAND_CARD_WIDTH + 2 * (HAND_CARD_WIDTH - HAND_MIN_OVERLAP),
+    );
+  });
+
+  it('ITEM-2: wraps the hand tightly and distorts over raised cards', () => {
+    const { unmount } = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={[bob]}
+        tablePairs={[]}
+        trumpSuit="diamonds"
+        defenderId="p1"
+        awaitingAttack
+        playableKeys={[cardKey(hand[1])]}
+      />,
+    );
+
+    const box = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+    const contour = screen.getByTestId('hand-highlight-contour');
+    const path = screen.getByTestId('hand-highlight-path');
+    const layout = handLayout(3, 720);
+
+    expect(contour.getAttribute('data-non-rectangular')).toBe('true');
+    expect(Number(contour.getAttribute('data-contour-width'))).toBe(
+      Number(box.getAttribute('data-hand-width')),
+    );
+    expect(Number(contour.getAttribute('data-contour-width'))).toBe(
+      HAND_CARD_WIDTH + 2 * layout.stride,
+    );
+
+    // The raised middle card steps the outline up and back down tightly.
+    const d = path.getAttribute('d') ?? '';
+    const verticals = Array.from(d.match(/V -?\d+(?:\.\d+)?/g) ?? []).map((command) =>
+      Number(command.slice(1)),
+    );
+    expect(new Set(verticals).size).toBeGreaterThan(1);
+    // 4px of tight padding above the -14px raised card.
+    expect(parseFloat(contour.style.top)).toBe(HAND_RAISED_OFFSET - 4);
+
+    unmount();
+
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={[bob]}
+        tablePairs={[]}
+        trumpSuit="diamonds"
+        defenderId="p1"
+      />,
+    );
+    expect(screen.getByTestId('hand-highlight-contour').getAttribute('data-non-rectangular')).toBe(
+      'false',
+    );
+  });
+
+  it('ITEM-3: keeps a clicked-and-dragged card fully visible at 100x140', () => {
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={[bob]}
+        tablePairs={[]}
+        trumpSuit="diamonds"
+        defenderId="p1"
+        onReorderHand={vi.fn()}
+      />,
+    );
+
+    const box = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+    vi.spyOn(box, 'getBoundingClientRect').mockReturnValue(fakeRect(300));
+    const labeled = screen.getByLabelText('six of spades');
+    const wrapper = labeled.closest('.hand-card-wrapper') as HTMLElement;
+
+    fireEvent.mouseDown(labeled, { button: 0, clientX: 10, clientY: 20 });
+    fireEvent.mouseMove(document, { clientX: 130, clientY: 60 });
+
+    expect(wrapper.isConnected).toBe(true);
+    expect(wrapper.getAttribute('data-dragging')).toBe('true');
+    expect(wrapper.getAttribute('data-collapsed')).toBe('true');
+    expect(wrapper.style.opacity === '' || wrapper.style.opacity === '1').toBe(true);
+    expect(wrapper.style.visibility).not.toBe('hidden');
+    expect(wrapper.style.display).not.toBe('none');
+    expect(wrapper.style.transform).toBe('translate3d(120px, 40px, 0)');
+
+    const card = wrapper.querySelector('.card-slot') as HTMLElement;
+    expect(card).not.toBeNull();
+    expect(card.getAttribute('data-card-width')).toBe('100');
+    expect(card.getAttribute('data-card-height')).toBe('140');
+
+    const collapsedRule = cssRule(".hand-card-wrapper[data-collapsed='true']");
+    expect(collapsedRule).not.toMatch(/opacity:\s*0/);
+    expect(collapsedRule).not.toMatch(/visibility:\s*hidden/);
+    expect(collapsedRule).not.toMatch(/display:\s*none/);
+    expect(collapsedRule).toContain('overflow: visible');
+    expect(cssRule('.hand-card-wrapper')).toContain('overflow: visible');
+
+    fireEvent.mouseUp(document, { clientX: 130, clientY: 60 });
+    expect(wrapper.getAttribute('data-collapsed')).toBe('false');
+  });
+
+  it('ITEM-1b: exposes the responsive 100x140 / 48x68 constants and slot rules', () => {
+    expect(cardSizeForViewport(1920)).toEqual({ width: CARD_WIDTH, height: CARD_HEIGHT });
+    expect(cardSizeForViewport(MOBILE_BREAKPOINT_PX)).toEqual({
+      width: MOBILE_CARD_WIDTH,
+      height: MOBILE_CARD_HEIGHT,
+    });
+    expect(cardSizeForViewport(MOBILE_BREAKPOINT_PX + 1)).toEqual({
+      width: CARD_WIDTH,
+      height: CARD_HEIGHT,
+    });
+
+    // The play-area aliases and the hand slot never shrink below the desktop
+    // card, and both switch to 48x68 below 900px.
+    expect(tableCss).toMatch(
+      /\.bout-card,\s*\.bout-pair\s*{[^}]*min-width: 100px;[^}]*min-height: 140px;/,
+    );
+    expect(cssRule('.hand-card-wrapper')).toContain('min-width: var(--hand-card-width, 100px)');
+    expect(cssRule('.hand-card-wrapper')).toContain(
+      'min-height: var(--hand-card-height, 140px)',
+    );
+    expect(tableCss).toMatch(
+      /@media \(max-width: 900px\)[\s\S]*?--hand-card-width: 48px;[\s\S]*?--hand-card-height: 68px;/,
+    );
+    expect(tableCss).toMatch(
+      /@media \(max-width: 900px\)[\s\S]*?\.hand-card-wrapper,\s*\.bout-card,\s*\.bout-pair\s*{[^}]*min-width: 48px;[^}]*min-height: 68px;/,
+    );
+  });
+
+  it('ITEM-4: fits a 52-card hand by scaling the row from its left edge', () => {
+    const ranks = ['six', 'seven', 'eight', 'nine', 'ten', 'jack', 'queen', 'king', 'ace'];
+    const suits = ['spades', 'hearts', 'clubs', 'diamonds'];
+    const fullDeck: CardData[] = Array.from({ length: 52 }, (_, index) => ({
+      suit: suits[index % suits.length],
+      rank: ranks[index % ranks.length],
+    }));
+
+    render(
+      <GameTable
+        myId="p0"
+        myHand={fullDeck}
+        opponents={[bob]}
+        tablePairs={[]}
+        trumpSuit="diamonds"
+        defenderId="p1"
+      />,
+    );
+
+    const box = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+    // The hand reserves the contour's 4px padding on both sides.
+    const layout = handLayout(
+      fullDeck.length,
+      HAND_FALLBACK_WIDTH - HAND_CONTOUR_PADDING * 2,
+    );
+    expect(layout.scale).toBeLessThan(1);
+    expect(Number(box.getAttribute('data-fit-scale'))).toBeCloseTo(layout.scale, 2);
+
+    // The rendered box is exactly the scaled natural row, and the children are
+    // laid out from the left edge before the same transform shrinks them into
+    // that box, so the cards, the box and the contour share one origin.
+    expect(Number(box.getAttribute('data-rendered-hand-width'))).toBe(
+      Math.round(layout.totalWidth * layout.scale),
+    );
+    expect(box.style.width).toBe(
+      `${Math.round(layout.totalWidth * layout.scale)}px`,
+    );
+    expect(box.style.justifyContent).toBe('flex-start');
+    expect(box.style.transformOrigin).toBe('left center');
+    expect(box.style.transform).toBe(`scale(${layout.scale})`);
+
+    // `data-hand-width` and `data-contour-width` are in the SAME unscaled row
+    // coordinate space as the contour path; the scaled width is separate.
+    const contour = screen.getByTestId('hand-highlight-contour');
+    expect(Number(contour.getAttribute('data-contour-width'))).toBe(
+      Number(box.getAttribute('data-hand-width')),
+    );
+    expect(Number(contour.getAttribute('data-contour-width'))).toBe(
+      Math.round(layout.totalWidth),
+    );
+    expect(Number(contour.getAttribute('data-contour-rendered-width'))).toBe(
+      Math.round(layout.totalWidth * layout.scale),
+    );
+
+    const cards = Array.from(box.querySelectorAll('.hand-card-wrapper')) as HTMLElement[];
+    expect(cards).toHaveLength(fullDeck.length);
+    expect(cards[fullDeck.length - 1].getAttribute('data-card-x')).toBe(
+      String(Math.round((fullDeck.length - 1) * layout.stride)),
+    );
+    // ITEM-4g: every slot reports its vertical offset.
+    for (const card of cards) expect(card.getAttribute('data-card-y')).toBe('0');
+
+    // ITEM-3c: under a fit scale the dragged card counter-scales and divides
+    // the pointer delta, so it tracks the cursor at its full 100x140 size.
+    fireEvent.mouseDown(within(cards[0]).getByLabelText('six of spades'), {
+      button: 0,
+      clientX: 10,
+      clientY: 20,
+    });
+    fireEvent.mouseMove(document, { clientX: 70, clientY: 50 });
+    // Once the drag starts the row switches to the compacted N-1 layout, so the
+    // counter-scale uses that layout's scale.
+    const dragLayout = handLayout(
+      fullDeck.length - 1,
+      HAND_FALLBACK_WIDTH - HAND_CONTOUR_PADDING * 2,
+    );
+    expect(cards[0].style.transform).toBe(
+      `translate3d(${60 / dragLayout.scale}px, ${30 / dragLayout.scale}px, 0) scale(${
+        1 / dragLayout.scale
+      })`,
+    );
+    expect(cards[0].style.transformOrigin).toBe('left top');
+    expect(cards[0].style.zIndex).toBe('1000');
+    fireEvent.mouseUp(document, { clientX: 70, clientY: 50 });
+  });
+
+  it('ITEM-2: rebuilds the contour from the compacted row while a card is dragged', () => {
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={[bob]}
+        tablePairs={[]}
+        trumpSuit="diamonds"
+        defenderId="p1"
+        onReorderHand={vi.fn()}
+      />,
+    );
+
+    const box = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+    vi.spyOn(box, 'getBoundingClientRect').mockReturnValue(fakeRect(300));
+    expect(Number(box.getAttribute('data-hand-width'))).toBe(260);
+
+    fireEvent.mouseDown(screen.getByLabelText('six of spades'), {
+      button: 0,
+      clientX: 10,
+      clientY: 20,
+    });
+    fireEvent.mouseMove(document, { clientX: 400, clientY: 900 });
+
+    // The dragged card floats under the pointer, so the hand (and the contour)
+    // wrap the compacted N-1 row of 100 + 80 = 180px.
+    expect(box.getAttribute('data-gap-closed')).toBe('true');
+    expect(Number(box.getAttribute('data-hand-width'))).toBe(180);
+    const contour = screen.getByTestId('hand-highlight-contour');
+    const path = screen.getByTestId('hand-highlight-path');
+    expect(Number(contour.getAttribute('data-contour-width'))).toBe(180);
+    const xs = Array.from((path.getAttribute('d') ?? '').match(/[MH] (-?\d+(?:\.\d+)?)/g) ?? []).map(
+      (pair) => Number(pair.slice(1)),
+    );
+    // The path is in the contour's own coordinate space (2 * 4px padding), and
+    // its right edge equals the SVG width.
+    expect(Math.max(...xs)).toBe(Number(contour.getAttribute('width')));
+    expect(Number(contour.getAttribute('width'))).toBe(180 + 8);
+
+    fireEvent.mouseUp(document, { clientX: 400, clientY: 900 });
+    expect(Number(screen.getByTestId('hand-turn-highlight').getAttribute('data-hand-width'))).toBe(
+      260,
+    );
+  });
+
+  it('ITEM-3: never clips the hand column or the arena and lets the drag pass through', () => {
+    expect(cssRule("[data-zone='player-hand']")).toContain('overflow: visible');
+    expect(cssRule("[data-zone='table-arena']")).toContain('overflow: visible');
+    expect(tableCss).toMatch(
+      /\.hand-card-wrapper\[data-dragging='true'\] \.card-slot,[\s\S]*?pointer-events: none;/,
+    );
+    expect(tableCss).toMatch(
+      /\.hand-card-wrapper\[data-dragging='true'\]\s*{[^}]*opacity: 1;/,
+    );
+    const dragged = cssRule(".hand-card-wrapper[data-dragging='true']");
+    expect(dragged).toContain('visibility: visible');
+    expect(dragged).toContain('z-index: 1000');
+  });
+  it('ITEM-4: compresses a mobile full deck with a card-scaled readable strip', () => {
+    const layout = handLayout(36, 300, 0.5, MOBILE_CARD_WIDTH);
+    // 20% of 48px is 9.6px, so the desktop 15px floor must not widen the row.
+    expect(layout.stride).toBeCloseTo((300 - MOBILE_CARD_WIDTH) / 35, 5);
+    expect(layout.stride).toBeLessThan(HAND_MIN_VISIBLE_LEFT);
+    expect(layout.totalWidth * layout.scale).toBeLessThanOrEqual(300 + 1e-9);
+    expect(layout.hiddenLeft + layout.hiddenRight).toBe(0);
+  });
+
+  it('ITEM-1b: clamps a measured bout slot to the standard card box', () => {
+    // A pair box reserves the defender overhang + drop offset, so measuring it
+    // would inflate the cards. Clamping also stops a measure -> render loop.
+    expect(clampBoutCardSize(320, 480)).toEqual({ width: 100, height: 140 });
+    expect(clampBoutCardSize(MOBILE_CARD_WIDTH, MOBILE_CARD_HEIGHT)).toEqual({
+      width: 48,
+      height: 68,
+    });
+    expect(clampBoutCardSize(0, 0)).toEqual({ width: 0, height: 0 });
+  });
+
+  it('ITEM-2: raises the cards and the contour from one shared constant', () => {
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={[bob]}
+        tablePairs={[]}
+        trumpSuit="diamonds"
+        defenderId="p1"
+        awaitingAttack
+        playableKeys={[cardKey(hand[0])]}
+      />,
+    );
+
+    const box = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+    expect(box.style.getPropertyValue('--hand-raise')).toBe(`${HAND_RAISED_OFFSET}px`);
+    const wrappers = Array.from(box.querySelectorAll('.hand-card-wrapper')) as HTMLElement[];
+    expect(wrappers[0].getAttribute('data-card-y')).toBe(String(HAND_RAISED_OFFSET));
+    expect(wrappers[1].getAttribute('data-card-y')).toBe('0');
+    expect(cssRule('.hand-cards .card-slot.legal-playable')).toContain(
+      'translateY(var(--hand-raise, -14px))',
+    );
+    expect(cssRule('.hand-cards .card-slot.selected')).toContain(
+      'translateY(var(--hand-raise, -14px))',
+    );
+    // The old all-legal translate-the-whole-box rule is gone, not just unused.
+    expect(tableCss).not.toContain(
+      "[data-all-legal='true'][data-active='true'] .card-slot.legal-playable",
+    );
+  });
+
+  it('ITEM-2: colours the contour per role and drops the old rectangular glow', () => {
+    const box = cssRule('.hand-cards');
+    expect(box).not.toContain('border:');
+    expect(box).not.toContain('box-shadow');
+
+    const path = cssRule('.hand-highlight-path');
+    expect(path).toContain('stroke-linejoin: round');
+    expect(path).toContain('stroke: var(--hl-neutral-border');
+    expect(tableCss).toMatch(
+      /\.hand-cards\.attacker-turn \.hand-highlight-path,[\s\S]*?stroke: var\(--hl-attacker-border\);/,
+    );
+    expect(tableCss).toMatch(
+      /\.hand-cards\.defender-turn \.hand-highlight-path,[\s\S]*?stroke: var\(--hl-defender-border\);/,
+    );
+    expect(tableCss).toMatch(
+      /\.hand-cards\.throw-in-turn \.hand-highlight-path,[\s\S]*?stroke: var\(--hl-attacker-border\);/,
+    );
+
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={[bob]}
+        tablePairs={[]}
+        trumpSuit="diamonds"
+        defenderId="p1"
+      />,
+    );
+    const rendered = screen.getByTestId('hand-highlight-path');
+    expect(rendered.getAttribute('stroke-linejoin')).toBe('round');
+    expect(rendered.getAttribute('stroke-linecap')).toBe('round');
+  });
+
 });
