@@ -26,7 +26,9 @@ run_stack() {
 
   (cd "$root/backend" && exec sbt run) &
   backend_pid=$!
-  (cd "$root/frontend" && exec npm run dev -- --host 0.0.0.0 --port 5173) &
+  # `npm run dev` already pins `--host 0.0.0.0 --port 5173`, so repeating the
+  # flags here only duplicated them in the Vite banner.
+  (cd "$root/frontend" && exec npm run dev) &
   frontend_pid=$!
 
   # If either server dies (for example a port collision), stop the other one
@@ -50,7 +52,7 @@ if docker inspect -f '{{.State.Running}}' freebuff_worker >/dev/null 2>&1; then
     }
     trap stop_stack INT TERM EXIT
     (cd /workspace/backend && exec sbt run) &
-    (cd /workspace/frontend && exec npm run dev -- --host 0.0.0.0 --port 5173) &
+    (cd /workspace/frontend && exec npm run dev) &
     wait
   '
 else
