@@ -600,7 +600,7 @@ process_ticket_on_worker() {
     rm -f .tickets/STATUS .reviews/agent_notes.md
   )
 
-  local WORK_PROMPT="Implement EVERY single requirement and checklist item in @.tickets/${TICKET_NAME}.md following all rules in @AGENTS.md and @SPEC.md (including end-to-end UI wiring, QA Scenario presets if specified, and keeping ./README.md, ./ARCHITECTURE.md, and ./play-local.sh updated). Do NOT skip or stub any bullet point. In .reviews/agent_notes.md, write a checklist confirming how each requirement in the ticket was implemented and wired into the live UI, verify all unit tests pass, and then run: echo DONE > .tickets/STATUS"
+  local WORK_PROMPT="Implement EVERY single requirement and checklist item in @.tickets/${TICKET_NAME}.md following all rules in @AGENTS.md and @SPEC.md (including end-to-end UI wiring, QA Scenario presets if specified, and keeping ./play-local.sh updated if startup changes; do NOT touch README.md or ARCHITECTURE.md). Do NOT skip or stub any bullet point. In .reviews/agent_notes.md, write a checklist confirming how each requirement in the ticket was implemented and wired into the live UI, verify all unit tests pass, and then run: echo DONE > .tickets/STATUS"
   run_worker_freebuff "$WORKER_ID" "$WORK_PROMPT"
 
   local PR_NUMBER=""
@@ -625,8 +625,9 @@ process_ticket_on_worker() {
     (
       cd "$WT_DIR"
       rm -f .tickets/STATUS
+      git checkout HEAD -- README.md ARCHITECTURE.md 2>/dev/null || true
       git add -A
-      git reset -- .reviews/ .tickets/ 2>/dev/null || true
+      git reset -- .reviews/ .tickets/ README.md ARCHITECTURE.md 2>/dev/null || true
       if ! git diff --cached --quiet; then
         agent_git commit -m "feat(${TICKET_NAME}): round ${ROUND} implementation" >/dev/null
       fi
@@ -852,7 +853,7 @@ CRITICAL COMPLETENESS, TESTABILITY & TRACEABILITY RULES:
 2. Inside each ticket, include a \`## Mandatory Acceptance Criteria Checklist\` containing the exact, unabridged technical details for every \`REQ-XX\` assigned to that ticket.
 3. Include QA Scenario Presets (e.g., Lobby or Left Sidebar quick-state loaders) for any complex or late-game features so the human can test them in 1 click.
 4. Put tickets that touch independent files/subsystems into the SAME wave, and put tickets that edit the exact same files into sequential waves.
-5. Ensure the final wave updates ./README.md, ./ARCHITECTURE.md, and ./play-local.sh (in a single ticket).
+5. Do NOT create tickets to update ./README.md or ./ARCHITECTURE.md (the Orchestrator updates documentation automatically after all waves and audits pass). Only update ./play-local.sh if server startup commands change.
 
 <spec>
 $(cat SPEC.md)
@@ -1146,6 +1147,7 @@ PROMPT_EOF
   if ! run_visual_ui_qa_gate; then
     return 1
   fi
+  update_docs_by_orchestrator
   generate_qa_playbook
   rm -f .reviews/feedback_base_commit .reviews/feedback_audit_passes
   return 0
@@ -1255,6 +1257,64 @@ PROMPT_EOF
   echo "✅ Headless Browser Visual & Interactive QA PASSED!"
   rm -f .reviews/visual_qa_passes
   return 0
+}
+
+
+# === STAGE 3.6: ORCHESTRATOR-ONLY PUBLIC DOCUMENTATION UPDATER ===
+update_docs_by_orchestrator() {
+  echo "=================================================================="
+  echo "📝 Stage 3.6: Orchestrator updating public README.md & ARCHITECTURE.md..."
+  echo "=================================================================="
+
+  cat << PROMPT_EOF > .reviews/orchestrator_docs_prompt.txt
+You are the Principal Release Architect for Lidurak. DO NOT use tools or run bash commands.
+All implementation waves, holistic audits, and visual QA checks have passed. Now update the public-facing \`README.md\` and technical \`ARCHITECTURE.md\` to accurately reflect the current application state in <current_codebase>.
+
+STRICT PUBLIC DOCUMENTATION RULES:
+1. \`README.md\` is the front page of the public GitHub repository for human players and developers:
+   - Include a clear project overview, prerequisites, how to launch the app via \`./play-local.sh\`, how to run backend/frontend tests, and a complete User Interface & Gameplay Guide explaining how to use all current features in the browser.
+   - NEVER mention internal tickets (\`T-01\`, \`T-90\`, etc.), execution waves, FreeBuff, Antigravity, \`FEEDBACK.md\`, QA Playbooks, or agent orchestration anywhere in \`README.md\` or \`ARCHITECTURE.md\`!
+2. \`ARCHITECTURE.md\` is the clean technical engineering reference for the repository:
+   - Document the directory tree, Scala 3 engine state machine (\`durak.engine\`), server actors & WebSocket/REST protocol (\`durak.server\`), and Preact/CSS Grid frontend architecture (\`frontend/src\`).
+   - Keep it 100% free of internal ticket IDs or agent workflow notes.
+
+<current_codebase>
+$(dump_full_codebase_context)
+</current_codebase>
+
+Output both complete files using this EXACT delimiter format (with NO markdown code fences wrapping the whole file) and end with \`===END_OF_FILES===\`:
+===FILE:README.md===
+[Full clean Markdown content of README.md]
+===FILE:ARCHITECTURE.md===
+[Full clean Markdown content of ARCHITECTURE.md]
+===END_OF_FILES===
+PROMPT_EOF
+
+  if run_agy_pool "ARCHITECT" ".reviews/orchestrator_docs_prompt.txt" ".reviews/orchestrator_docs_out.txt" "===FILE:README.md==="; then
+    awk '
+      /^===FILE:.*===$/ {
+        line=$0;
+        gsub(/^===FILE:/, "", line);
+        gsub(/===$/, "", line);
+        gsub(/[ 	]/, "", line);
+        out=line;
+        printf "" > out;
+        next
+      }
+      /^===END_OF_FILES===/ { out=""; next }
+      out != "" { print >> out }
+    ' .reviews/orchestrator_docs_out.txt
+
+    git checkout main 2>/dev/null || true
+    git add README.md ARCHITECTURE.md 2>/dev/null || true
+    if ! git diff --cached --quiet; then
+      agent_git commit -m "docs(release): update clean public README.md and ARCHITECTURE.md via orchestrator" >/dev/null 2>&1 || true
+      [ "$USE_GITHUB_PRS" -eq 1 ] && (retry_git_push origin main >/dev/null 2>&1 || true)
+      echo "✅ Orchestrator updated and pushed clean README.md and ARCHITECTURE.md!"
+    else
+      echo "ℹ️  README.md and ARCHITECTURE.md are already up to date."
+    fi
+  fi
 }
 
 generate_qa_playbook() {

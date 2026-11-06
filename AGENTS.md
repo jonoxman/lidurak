@@ -1,7 +1,7 @@
 # Autonomous Agent Rules (STRICT)
 
 ## Core Workflow Rules
-1. **Scope:** Only implement the requirements specified in the assigned `.tickets/T-XX.md` file. Never touch `agent-orchestration/` or host scripts.
+1. **Scope:** Only implement the requirements specified in the assigned `.tickets/T-XX.md` file. Never touch `README.md`, `ARCHITECTURE.md`, `agent-orchestration/`, or host scripts (`README.md` and `ARCHITECTURE.md` are maintained exclusively by the Orchestrator).
 2. **Resuming Partial Work:** Always start by running `git status` and `git diff` to see existing progress. Do not duplicate or overwrite working code.
 3. **Mandatory Testing:** You MUST run the project test suite in the terminal (`sbt -batch test` and/or `npm test -- --run`) and fix all errors before finishing.
 4. **No Git Commits:** Never run `git commit`, `git checkout`, or `git branch`.
@@ -23,11 +23,7 @@
 ## QA Testability & Scenario Presets (MANDATORY)
 - Whenever a ticket introduces or modifies a state-dependent feature (e.g., endgame victory/Durak elimination when the talon deck is empty, 1-card surrender edge cases, multi-card reflections, or turn-clock timeouts), you MUST ensure the feature is wired end-to-end into the live UI and provide any requested **QA Scenario Preset** (in the Lobby or Left Sidebar) so a human reviewer can jump straight to that exact game state in 1 click without playing a full 36-card match manually.
 
-## Real-Time Documentation & Launcher Maintenance (MANDATORY)
-The repository root contains three living project files that MUST be kept synchronized with the codebase as features evolve:
-1. **`./README.md` (Installation, Startup & User Interface Guide):**
-   - Must always provide accurate instructions on how to install dependencies, launch the application locally (`./play-local.sh`), run backend/frontend test suites, and use every current UI feature and QA Scenario preset in the browser.
-2. **`./ARCHITECTURE.md` (Technical Structure & System Reference):**
-   - Must always document the current directory layout, backend Scala 3 engine/state machine (`durak.engine`), server actors & WebSocket/REST protocol (`durak.server`), frontend Preact components, CSS Grid zones, and audio/interaction subsystems.
-3. **`./play-local.sh` (Local Server Launcher):**
-   - Whenever a ticket modifies server ports, environment variables, build targets, or startup commands in `backend/` or `frontend/`, you MUST update `./play-local.sh` (and `./README.md`) so `./play-local.sh` starts the full stack cleanly.
+## Local Server Launcher Maintenance (`./play-local.sh`)
+- `./play-local.sh` in the repository root is an official project file used to launch the backend and frontend locally.
+- Whenever a ticket modifies server ports, environment variables, build targets, or startup commands in `backend/` or `frontend/`, you MUST update `./play-local.sh` accordingly so `./play-local.sh` always starts the full application cleanly.
+- Do NOT edit `./README.md` or `./ARCHITECTURE.md` during ticket execution; the Orchestrator updates project documentation after all waves pass verification.
