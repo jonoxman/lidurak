@@ -68,9 +68,7 @@ export function TablePair({
       data-card-width={cardWidth}
       data-card-height={cardHeight}
       data-uncovered-highlighted={uncoveredHighlighted ? 'true' : 'false'}
-      // T-90: the pair is sized from the shared card tokens in table.css, so the
-      // attack/defence cards, the hand cards and every dashed outline are
-      // exactly `--card-w x --card-h`. No measured px is passed to `Card`.
+      // T-90: size the pair from the shared card tokens (no measured px).
       style={{
         '--pair-card-w': 'var(--card-w, 100px)',
         '--pair-card-h': 'var(--card-h, 140px)',

@@ -1460,23 +1460,16 @@ describe('T-90-feedback-20261105_221105-2: card footprint', () => {
 });
 
 describe('T-90-feedback-20261106_111512-3: token-sized cards', () => {
-  it('sizes the root from var(--card-w)/var(--card-h) and fills the face', () => {
+  it('sizes the root from the card tokens and fills the face', () => {
     const { container, unmount } = render(<Card suit="hearts" rank="nine" />);
     const slot = container.querySelector('.card-slot') as HTMLElement;
-
-    expect(slot.style.width).toBe('var(--card-w, 100px)');
-    expect(slot.style.height).toBe('var(--card-h, 140px)');
-    expect(slot.getAttribute('data-card-width')).toBe('100');
-    expect(slot.getAttribute('data-card-height')).toBe('140');
+    expect([slot.style.width, slot.style.height]).toEqual(['var(--card-w, 100px)', 'var(--card-h, 140px)']);
+    expect([slot.getAttribute('data-card-width'), slot.getAttribute('data-card-height')]).toEqual(['100', '140']);
     expect(slot.className).not.toMatch(/scale/);
-
-    const face = slot.querySelector('svg.card-face') as SVGElement | null;
-    expect(face).not.toBeNull();
+    expect(slot.querySelector('svg.card-face')).not.toBeNull();
     expect(tableCss).toMatch(/\.playing-card\s*{[^}]*width: 100%;[^}]*height: 100%;/);
     expect(tableCss).toMatch(/\.card-slot\s*{[^}]*--card-width: var\(--card-w, 100px\);/);
-    expect(tableCss).toMatch(
-      /@media \(max-width: 899px\)\s*{\s*:root\s*{[^}]*--card-w: 48px;/,
-    );
+    expect(tableCss).toMatch(/@media \(max-width: 899px\)\s*{\s*:root\s*{[^}]*--card-w: 48px;/);
     unmount();
   });
 });

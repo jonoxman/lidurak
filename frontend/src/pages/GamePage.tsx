@@ -1005,10 +1005,7 @@ export function GamePage({
     handMatchesTableRank &&
     serverAllowsThrowIn;
 
-  // T-90: the backend projection is the single source of truth for the
-  // throw-in outline — it is rendered only for a seat the server says may
-  // legally play into it. A missing field means hidden. Switching POV swaps
-  // `view`, so the gate is re-evaluated immediately for the newly viewed seat.
+  // T-90: backend `canThrowIn` is the single source of truth for the outline.
   const canThrowInOutline = !reviewMode && view.canThrowIn === true;
 
   const isAttackerTurn =

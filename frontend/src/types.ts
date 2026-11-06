@@ -49,18 +49,11 @@ export interface PlayerGameView {
   maxBoutAttacks: number;
   /** True when the viewed defender has no legal cover and no legal redirect. */
   defenderDefenseless?: boolean;
-  /**
-   * T-90: the cards this seat may legally throw into the current bout. Empty
-   * whenever the seat cannot throw in, and when the backend omits the field.
-   */
+  /** T-90: cards this seat may legally throw in (empty = cannot). */
   throwInCards?: Card[];
-  /** T-90: how many more attacking cards this seat may add to the bout. */
+  /** T-90: remaining attacking cards this seat may add to the bout. */
   throwInCapacity?: number;
-  /**
-   * T-90: the single source of truth for the throw-in outline visibility. The
-   * backend sets it only for a seat that can legally play into the outline; a
-   * missing field means hidden.
-   */
+  /** T-90: backend-owned throw-in gate; a missing field means hidden. */
   canThrowIn?: boolean;
   /** Chaos Mode variant: the attacker may choose any active defender. */
   chaosMode?: boolean;
@@ -298,8 +291,7 @@ export function parsePlayerGameView(value: unknown): PlayerGameView {
   if (defenderDefenseless !== undefined && typeof defenderDefenseless !== 'boolean') {
     fail('defenderDefenseless must be a boolean');
   }
-  // T-90 throw-in projection: the backend owns all three fields. A missing
-  // field defaults to "nothing to throw in" (empty / 0 / false = hidden).
+  // T-90: backend-owned throw-in projection; missing fields default to hidden.
   const throwInCards = raw.throwInCards;
   if (throwInCards !== undefined && !Array.isArray(throwInCards)) {
     fail('throwInCards must be an array of cards');

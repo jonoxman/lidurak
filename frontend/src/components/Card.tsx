@@ -428,10 +428,7 @@ export function Card({
   // pass the measured responsive size, compact callers their own box); when no
   // size is passed the inline default is expressed through custom properties so
   // the `900px` breakpoint can still deliver 48x68 instead of being overridden.
-  // T-90: the default footprint is the shared `--card-w` / `--card-h` token, so
-  // hand cards, bout cards and every dashed outline are the same size and the
-  // 899px breakpoint scales all of them together. Compact callers (the sidebar
-  // bottom trump) still pin their own explicit box.
+  // T-90: default footprint is the shared `--card-w` / `--card-h` token.
   const viewportWidth = typeof window === 'undefined' ? 0 : window.innerWidth;
   const mobileViewport = viewportWidth > 0 && viewportWidth <= CARD_MOBILE_BREAKPOINT_PX;
   const resolvedWidth =

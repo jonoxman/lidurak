@@ -3625,6 +3625,14 @@ describe('T-90-feedback-20261105_221105-3 round 2: throw-in gate precision', () 
 });
 
 describe('T-90-feedback-20261106_111512-3: backend canThrowIn gate and new presets', () => {
+  const t90View: PlayerGameView = {
+    ...view, myId: 'p0', myName: 'Alice',
+    myHand: [{ suit: 'hearts', rank: 'seven' }, { suit: 'clubs', rank: 'nine' }],
+    opponents: [{ id: 'p1', name: 'Bob', cardCount: 6, hasPassed: false, finishRank: null }],
+    tablePairs: [{ attack: { suit: 'spades', rank: 'seven' }, defense: null }],
+    trumpSuit: 'clubs', attackerIdx: 0, defenderIdx: 1, boutPhase: 'Defense',
+    legalActions: ['throwIn', 'pass'], maxBoutAttacks: 6,
+  };
   beforeEach(() => {
     getGameView.mockReset();
     getGameReplay.mockReset();
@@ -3633,55 +3641,26 @@ describe('T-90-feedback-20261106_111512-3: backend canThrowIn gate and new prese
     getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
     window.location.hash = '';
   });
-
-  const t90View: PlayerGameView = {
-    ...view,
-    myId: 'p0',
-    myName: 'Alice',
-    myHand: [
-      { suit: 'hearts', rank: 'seven' },
-      { suit: 'clubs', rank: 'nine' },
-    ],
-    opponents: [{ id: 'p1', name: 'Bob', cardCount: 6, hasPassed: false, finishRank: null }],
-    tablePairs: [{ attack: { suit: 'spades', rank: 'seven' }, defense: null }],
-    trumpSuit: 'clubs',
-    attackerIdx: 0,
-    defenderIdx: 1,
-    boutPhase: 'Defense',
-    legalActions: ['throwIn', 'pass'],
-    maxBoutAttacks: 6,
-  };
-
   const renderT90 = (override: PlayerGameView) => {
     getGameView.mockResolvedValue(override);
     return render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
   };
-
-  it('renders the outline from the backend canThrowIn projection', async () => {
+  it('renders the outline only from backend canThrowIn', async () => {
     renderT90({ ...t90View, canThrowIn: true });
     expect(await screen.findByTestId('throw-in-outline')).toBeTruthy();
   });
-
-  it('hides the outline when the backend projects canThrowIn false', async () => {
+  it('hides it when the backend projects false', async () => {
     renderT90({ ...t90View, canThrowIn: false });
     await screen.findByTestId('hand-turn-highlight');
     expect(screen.queryByTestId('throw-in-outline')).toBeNull();
     expect(document.querySelector('[data-drop-zone="throw-in"]')).toBeNull();
   });
-
-  it('lists and launches the four new presets from the left sidebar', async () => {
+  it('lists and launches the new presets from the left sidebar', async () => {
     renderT90({ ...t90View, canThrowIn: false });
     const panel = await screen.findByTestId('qa-scenarios');
-
-    for (const id of [
-      'throw-in-visibility-4p',
-      'throw-in-capacity-cap',
-      'huge-hand-36',
-      'huge-hand-52',
-    ]) {
+    for (const id of ['throw-in-visibility-4p', 'throw-in-capacity-cap', 'huge-hand-36', 'huge-hand-52']) {
       expect(within(panel).getByTestId(`preset-btn-${id}`)).toBeTruthy();
     }
-
     createPresetGameMock.mockResolvedValue({ gameId: 'preset-t90', defaultPlayerId: 'p0' });
     fireEvent.click(within(panel).getByTestId('preset-btn-huge-hand-52'));
     await waitFor(() => expect(createPresetGameMock).toHaveBeenCalledWith('huge-hand-52'));

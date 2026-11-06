@@ -541,29 +541,21 @@ describe('LobbyPage QA presets (T-90-feedback-20261105_221105-3)', () => {
 });
 
 describe('T-90-feedback-20261106_111512-3: new QA scenario presets', () => {
-  beforeEach(() => {
-    createPresetGame.mockReset();
-  });
-
   it('lists and launches the four new presets in one click', async () => {
+    createPresetGame.mockReset();
     render(<LobbyPage initialServerReady />);
     const panel = screen.getByTestId('qa-scenarios');
-
-    const presets: [string, string][] = [
-      ['throw-in-visibility-4p', 'Throw-In Visibility (4P)'],
-      ['throw-in-capacity-cap', 'Throw-In Capacity Cap'],
-      ['huge-hand-36', 'Huge Hand (36)'],
-      ['huge-hand-52', 'Huge Hand (52)'],
-    ];
-    for (const [id, label] of presets) {
-      const button = within(panel).getByTestId(`preset-btn-${id}`);
-      expect(button.textContent).toBe(label);
+    const presets = {
+      'throw-in-visibility-4p': 'Throw-In Visibility (4P)',
+      'throw-in-capacity-cap': 'Throw-In Capacity Cap',
+      'huge-hand-36': 'Huge Hand (36)',
+      'huge-hand-52': 'Huge Hand (52)',
+    };
+    for (const [id, label] of Object.entries(presets)) {
+      expect(within(panel).getByTestId(`preset-btn-${id}`).textContent).toBe(label);
     }
-
     createPresetGame.mockResolvedValue({ gameId: 'preset-t90', defaultPlayerId: 'p0' });
     fireEvent.click(within(panel).getByTestId('preset-btn-throw-in-visibility-4p'));
-    await waitFor(() =>
-      expect(createPresetGame).toHaveBeenCalledWith('throw-in-visibility-4p'),
-    );
+    await waitFor(() => expect(createPresetGame).toHaveBeenCalledWith('throw-in-visibility-4p'));
   });
 });

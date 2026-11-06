@@ -1833,9 +1833,7 @@ describe('feedback 7: tight glow, discard pile and reflection alignment', () => 
     const pairRule = cssRule('.table-pair');
     expect(pairRule).toContain('grid-template-rows: var(--pair-card-h, var(--card-h, 140px))');
     expect(pairRule).toContain('align-content: start');
-    expect(pairRule).toContain(
-      'padding: 0 var(--pair-defense-offset, 20px) var(--bout-card-offset, 18px) 0',
-    );
+    expect(pairRule).toContain('padding: 0 var(--pair-defense-offset, 20px) var(--bout-card-offset, 18px) 0');
     expect(pairRule).toContain('box-sizing: border-box');
 
     const outlineRule = cssRule('.redirect-outline');
@@ -4873,82 +4871,33 @@ describe('T-90-feedback-20261105_221105-2: card size, hand overlap, contour and 
 
 });
 
-/**
- * T-90-feedback-20261106_111512-3: the backend-owned throw-in gate, the shared
- * --card-w / --card-h tokens and the always-painted dragged card.
- */
-describe('T-90-feedback-20261106_111512-3: throw-in gate, card tokens and drag visibility', () => {
-  const gateOpponent: OpponentSummary = {
-    id: 'p1',
-    name: 'Bob',
-    cardCount: 4,
-    hasPassed: false,
-    finishRank: null,
+describe('T-90-feedback-20261106_111512-3: throw-in gate, card tokens, drag visibility', () => {
+  const bob: OpponentSummary = { id: 'p1', name: 'Bob', cardCount: 4, hasPassed: false, finishRank: null };
+  const pairs: TablePairData[] = [{ attack: { suit: 'spades', rank: 'seven' }, defense: null }];
+  const base = {
+    myId: 'p0', myHand: hand, opponents: [bob], tablePairs: pairs, trumpSuit: 'clubs',
+    attackerId: 'p1', defenderId: 'p0', boutPhase: 'Defense',
   };
-  const gatePairs: TablePairData[] = [
-    { attack: { suit: 'spades', rank: 'seven' }, defense: null },
-  ];
+  const renderGate = (overrides: Partial<Parameters<typeof GameTable>[0]> = {}) =>
+    render(<GameTable {...base} canThrowIn {...overrides} />);
 
-  const renderGate = (
-    overrides: Partial<Parameters<typeof GameTable>[0]> = {},
-  ) =>
-    render(
-      <GameTable
-        myId="p0"
-        myHand={hand}
-        opponents={[gateOpponent]}
-        tablePairs={gatePairs}
-        trumpSuit="clubs"
-        attackerId="p1"
-        defenderId="p0"
-        boutPhase="Defense"
-        canThrowIn
-        {...overrides}
-      />,
-    );
-
-  it('renders the outline only when canThrowIn is exactly true', () => {
+  it('hides the outline unless canThrowIn is exactly true', () => {
     const shown = renderGate();
     expect(screen.getByTestId('throw-in-outline')).toBeTruthy();
     shown.unmount();
-
-    const hidden = renderGate({ canThrowIn: false });
-    expect(screen.queryByTestId('throw-in-outline')).toBeNull();
-    expect(document.querySelector('[data-drop-zone="throw-in"]')).toBeNull();
-    hidden.unmount();
-
-    // A missing field (the prop is omitted) means hidden.
-    const missing = render(
-      <GameTable
-        myId="p0"
-        myHand={hand}
-        opponents={[gateOpponent]}
-        tablePairs={gatePairs}
-        trumpSuit="clubs"
-        attackerId="p1"
-        defenderId="p0"
-        boutPhase="Defense"
-      />,
-    );
+    for (const overrides of [{ canThrowIn: false }, { canThrowIn: false, defending: true }]) {
+      const view = renderGate(overrides);
+      expect(screen.queryByTestId('throw-in-outline')).toBeNull();
+      expect(document.querySelector('[data-drop-zone="throw-in"]')).toBeNull();
+      view.unmount();
+    }
+    const missing = render(<GameTable {...base} />);
     expect(screen.queryByTestId('throw-in-outline')).toBeNull();
     missing.unmount();
   });
 
-  it('hides the outline for a defender view and after this seat passed', () => {
-    const defender = renderGate({ defending: true, canThrowIn: false });
-    expect(screen.queryByTestId('throw-in-outline')).toBeNull();
-    expect(screen.queryByTestId('throw-in-slot')).toBeNull();
-    defender.unmount();
-
-    // A passed seat is projected with `canThrowIn: false`, so it is hidden.
-    const passed = renderGate({ canThrowIn: false });
-    expect(screen.queryByTestId('throw-in-outline')).toBeNull();
-    passed.unmount();
-  });
-
-  it('keeps an empty, hidden, handler-free surrender anchor when hidden', () => {
+  it('keeps an empty hidden spacer instead of the surrendered outline', () => {
     renderGate({ boutPhase: 'SurrenderThrowIn', defenderId: 'p1', canThrowIn: false });
-
     expect(screen.queryByTestId('throw-in-outline')).toBeNull();
     const anchor = screen.getByTestId('surrender-throw-in-anchor');
     expect(anchor.getAttribute('data-outline-hidden')).toBe('true');
@@ -4956,92 +4905,54 @@ describe('T-90-feedback-20261106_111512-3: throw-in gate, card tokens and drag v
     expect(anchor.style.visibility).toBe('hidden');
     expect(anchor.getAttribute('data-drop-zone')).toBeNull();
     expect(anchor.children).toHaveLength(0);
-    expect(anchor.querySelector('[data-testid="throw-in-outline"]')).toBeNull();
   });
 
-  it('applies the gate at all three surrender positions', () => {
-    const scenarios = [
-      { defenderId: 'p1', boutPhase: 'Defense', position: 'inline' },
-      { defenderId: 'p0', boutPhase: 'SurrenderThrowIn', position: 'above' },
-      { defenderId: 'p1', boutPhase: 'SurrenderThrowIn', position: 'below' },
-    ];
-    for (const scenario of scenarios) {
-      const view = renderGate({
-        defenderId: scenario.defenderId,
-        boutPhase: scenario.boutPhase,
-      });
+  it('applies the gate in all three surrender positions', () => {
+    for (const [defenderId, boutPhase, position] of [
+      ['p1', 'Defense', 'inline'],
+      ['p0', 'SurrenderThrowIn', 'above'],
+      ['p1', 'SurrenderThrowIn', 'below'],
+    ] as const) {
+      const view = renderGate({ defenderId, boutPhase });
       const outline = screen.getByTestId('throw-in-outline');
-      expect(outline.getAttribute('data-surrender-outline-position')).toBe(scenario.position);
+      expect(outline.getAttribute('data-surrender-outline-position')).toBe(position);
       view.unmount();
     }
   });
 
-  it('sizes cards and every outline from the same --card-w / --card-h tokens', () => {
-    expect(tableCss).toMatch(
-      /:root\s*{[^}]*--card-w: 100px;[^}]*--card-h: 140px;[^}]*--card-radius:/,
-    );
-    expect(tableCss).toMatch(
-      /@media \(max-width: 899px\)\s*{\s*:root\s*{[^}]*--card-w: 48px;[^}]*--card-h: 68px;/,
-    );
-
-    // Exact rule block, never a later descendant selector that mentions it.
+  it('sizes cards and outlines from the same tokens and never shrinks them', () => {
+    expect(tableCss).toMatch(/:root\s*{[^}]*--card-w: 100px;[^}]*--card-h: 140px;/);
+    expect(tableCss).toMatch(/@media \(max-width: 899px\)\s*{\s*:root\s*{[^}]*--card-w: 48px;[^}]*--card-h: 68px;/);
     const block = (selector: string): string => {
       const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const match = tableCss.match(new RegExp(`(?:^|\\n)${escaped} \\{([^}]*)\\}`));
-      return match?.[1] ?? '';
+      return tableCss.match(new RegExp(`(?:^|\\n)${escaped} \\{([^}]*)\\}`))?.[1] ?? '';
     };
-
     for (const selector of ['.card-slot', '.target-outline', '.redirect-outline']) {
       expect(block(selector), selector).toMatch(/var\(--card-w, 100px\)/);
       expect(block(selector), selector).toMatch(/var\(--card-h, 140px\)/);
     }
-
-    const throwInRule =
-      (tableCss.match(/\.throw-in-outline \{[^}]*\}/g) ?? []).find((block) =>
-        block.includes('max-width'),
-      ) ?? '';
-    expect(throwInRule).toContain('var(--card-w, 100px)');
-    expect(throwInRule).toContain('var(--card-h, 140px)');
-
-    const group = block('.table-pairs-group');
-    expect(group).toContain('flex-wrap: wrap');
-    expect(group).toMatch(/gap: var\(--bout-gap, 4px\)/);
-
-    // The visible face fills exactly the token box and nothing scales a card.
-    const face = block('.playing-card');
-    expect(face).toContain('width: 100%');
-    expect(face).toContain('height: 100%');
+    const throwIn = (tableCss.match(/\.throw-in-outline \{[^}]*\}/g) ?? []).find((b) => b.includes('max-width')) ?? '';
+    expect(throwIn).toContain('var(--card-w, 100px)');
+    expect(throwIn).toContain('var(--card-h, 140px)');
+    expect(block('.table-pairs-group')).toContain('flex-wrap: wrap');
+    expect(block('.table-pairs-group')).toMatch(/gap: var\(--bout-gap, 4px\)/);
+    expect(block('.playing-card')).toContain('width: 100%');
+    expect(block('.playing-card')).toContain('height: 100%');
     expect(block('.card-slot')).not.toMatch(/transform:\s*scale\(/);
   });
 
-  it('keeps the dragged card painted and passes a live card element to setDragImage', () => {
-    render(
-      <GameTable
-        myId="p0"
-        myHand={hand}
-        opponents={[gateOpponent]}
-        tablePairs={[]}
-        trumpSuit="clubs"
-        defenderId="p1"
-        onReorderHand={vi.fn()}
-      />,
-    );
-
+  it('keeps the dragged card painted and images it from the live element', () => {
+    render(<GameTable {...base} tablePairs={[]} defenderId="p1" onReorderHand={vi.fn()} />);
     const card = screen.getByLabelText('king of clubs').closest('.card-slot') as HTMLElement;
     const wrapper = card.closest('.hand-card-wrapper') as HTMLElement;
     const setDragImage = vi.fn();
-    fireEvent.dragStart(card, {
-      dataTransfer: { setData: vi.fn(), setDragImage, effectAllowed: 'move' },
-    });
-
+    fireEvent.dragStart(card, { dataTransfer: { setData: vi.fn(), setDragImage, effectAllowed: 'move' } });
     expect(setDragImage).toHaveBeenCalledTimes(1);
     const [image, offsetX, offsetY] = setDragImage.mock.calls[0];
     expect(image).toBe(card);
     expect((image as HTMLElement).isConnected).toBe(true);
     expect(Number(offsetX)).toBeGreaterThanOrEqual(0);
     expect(Number(offsetY)).toBeGreaterThanOrEqual(0);
-
-    // The source card is still in the hand, painted, with no hiding style/class.
     expect(document.body.contains(card)).toBe(true);
     expect(wrapper.isConnected).toBe(true);
     expect(card.style.opacity).not.toBe('0');

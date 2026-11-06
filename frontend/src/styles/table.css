@@ -6,10 +6,7 @@
   --durak-accent: #629924;
   --durak-danger: #c33;
   --durak-amber: #d9a326;
-  /* T-90: ONE source of truth for every card-sized box on the table. Hand
-     cards, bout attack/defence cards, surrender taken cards and the
-     throw-in / redirect / target outlines all read these two tokens, so they
-     can never drift apart in size again. */
+  /* T-90: one source of truth for every card-sized box on the table. */
   --card-w: 100px;
   --card-h: 140px;
   --card-radius: var(--app-roundness, 8px);
@@ -424,9 +421,7 @@
   --bout-card-height: var(--card-h, 140px);
   --bout-card-offset: 18px;
   display: flex;
-  /* T-90: the bout row never shrinks a card to fit. Up to six covered pairs
-     wrap onto a second line with an explicit gap instead, and the per-slot
-     `margin-left` written by `boutLayout` still tightens the first line. */
+  /* T-90: never shrink a card to fit; up to six pairs wrap with a gap. */
   flex-wrap: wrap;
   align-items: flex-start;
   justify-content: center;
@@ -571,8 +566,7 @@
 }
 
 .table-pair {
-  /* T-90: a covered pair owns its defence overhang inside its own box, so a
-     wrapped second line can never sit on top of a defence card. */
+  /* T-90: the pair owns its defence overhang, so wrapping never overlaps. */
   --pair-defense-offset: 20px;
   display: grid;
   grid-template-columns: var(--pair-card-w, var(--card-w, 100px));
@@ -2329,8 +2323,7 @@
   padding-inline: 8px;
 }
 
-/* T-90: the hand cards resolve their footprint from the same `--card-w` /
-   `--card-h` tokens as the bout cards and the dashed outlines. */
+/* T-90: hand cards read the same card tokens as the bout and outlines. */
 [data-zone='player-hand'] {
   --hand-card-width: var(--card-w, 100px);
   --hand-card-height: var(--card-h, 140px);
@@ -2470,8 +2463,7 @@ body[data-dragging='true'] *,
   justify-self: end;
 }
 
-/* T-90: the hidden spacer keeps the taken cards' position while the outline is
-   not allowed for this seat. It is empty, has no handlers and no drop zone. */
+/* T-90: empty hidden spacer; keeps the taken cards in place. */
 .surrender-throw-in-anchor[data-outline-hidden='true'] {
   visibility: hidden;
   pointer-events: none;
@@ -2606,11 +2598,7 @@ body[data-dragging='true'] *,
   }
 }
 
-/* ==========================================================================
-   T-90: the only responsive breakpoint for card-sized boxes. Every card, the
-   surplus taken cards and the throw-in / redirect / target outlines switch to
-   the same 48x68 footprint here, because they all read `--card-w` / `--card-h`.
-   ========================================================================== */
+/* T-90: one responsive breakpoint for every card-sized box (48x68). */
 @media (max-width: 899px) {
   :root {
     --card-w: 48px;

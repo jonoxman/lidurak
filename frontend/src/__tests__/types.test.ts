@@ -610,45 +610,22 @@ describe('shared protocol types (T-90-2)', () => {
 
 describe('T-90-feedback-20261106_111512-3: throw-in projection fields', () => {
   const base = {
-    myId: 'p0',
-    myHand: [],
-    opponents: [],
-    tablePairs: [],
-    talonCount: 6,
-    trumpSuit: 'spades',
-    attackerIdx: 0,
-    defenderIdx: 1,
-    boutPhase: 'Defense',
-    legalActions: [],
-    finishOrder: [],
-    isDraw: false,
-    maxBoutAttacks: 6,
+    myId: 'p0', myHand: [], opponents: [], tablePairs: [], talonCount: 6, trumpSuit: 'spades',
+    attackerIdx: 0, defenderIdx: 1, boutPhase: 'Defense', legalActions: [], finishOrder: [],
+    isDraw: false, maxBoutAttacks: 6,
   };
-
-  it('defaults to empty / 0 / false when the backend omits the fields', () => {
+  it('defaults missing fields to empty / 0 / false', () => {
     const view = parsePlayerGameView(base);
-    expect(view.throwInCards).toEqual([]);
-    expect(view.throwInCapacity).toBe(0);
-    expect(view.canThrowIn).toBe(false);
+    expect([view.throwInCards, view.throwInCapacity, view.canThrowIn]).toEqual([[], 0, false]);
   });
-
-  it('parses the projected throw-in fields', () => {
+  it('parses projected values and rejects malformed ones', () => {
     const view = parsePlayerGameView({
-      ...base,
-      throwInCards: [{ suit: 'hearts', rank: 'seven' }],
-      throwInCapacity: 3,
-      canThrowIn: true,
+      ...base, throwInCards: [{ suit: 'hearts', rank: 'seven' }], throwInCapacity: 3, canThrowIn: true,
     });
     expect(view.throwInCards).toEqual([{ suit: 'hearts', rank: 'seven' }]);
-    expect(view.throwInCapacity).toBe(3);
-    expect(view.canThrowIn).toBe(true);
-  });
-
-  it('rejects malformed throw-in fields', () => {
+    expect([view.throwInCapacity, view.canThrowIn]).toEqual([3, true]);
     expect(() => parsePlayerGameView({ ...base, canThrowIn: 'yes' })).toThrow(/canThrowIn/);
     expect(() => parsePlayerGameView({ ...base, throwInCards: 'no' })).toThrow(/throwInCards/);
-    expect(() => parsePlayerGameView({ ...base, throwInCapacity: 'no' })).toThrow(
-      /throwInCapacity/,
-    );
+    expect(() => parsePlayerGameView({ ...base, throwInCapacity: 'no' })).toThrow(/throwInCapacity/);
   });
 });

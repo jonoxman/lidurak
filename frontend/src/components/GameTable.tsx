@@ -98,12 +98,7 @@ export interface GameTableProps {
   boutPhase?: string;
   /** True while a redirect is legal for the viewer. */
   canRedirect?: boolean;
-  /**
-   * T-90: the backend projection flag — this seat may legally throw in right
-   * now. The throw-in outline is rendered only when this is exactly `true`; a
-   * missing field means hidden. Hotseat POV switches re-evaluate it immediately
-   * because `GamePage` passes the newly viewed seat's projection.
-   */
+  /** T-90: backend-owned gate; `true` only when this seat may throw in. */
   canThrowIn?: boolean;
   /** Id of the player whose turn clock is running. */
   turnPlayerId?: string;
@@ -1720,9 +1715,7 @@ export function GameTable({
     !reviewMode &&
     Boolean(onAttackDrop || onCoverDrop || onThrowInDrop || onRedirectDrop || onReorderHand);
   const throwInEnabled = !reviewMode && canThrowIn;
-  // T-90: the backend projection is the ONLY gate for the throw-in surface. A
-  // missing / false field means the outline is not in the DOM at all, so there
-  // is no drop target for a seat that cannot legally use it.
+  // T-90: backend projection is the only gate; false/missing = not in the DOM.
   const showThrowInOutline = !reviewMode && canThrowIn === true;
 
   // ITEM-7: the whole page keeps the link pointer finger for the entire drag,
@@ -2362,9 +2355,7 @@ export function GameTable({
             {throwInOutline}
           </div>
         ) : null}
-        {/* T-90: while the outline is hidden for a surrendered bout, the anchor
-            keeps an empty, card-sized, handler-free spacer so the half-off taken
-            cards do not jump. It is invisible to pointer and assistive tech. */}
+        {/* T-90: empty, hidden, handler-free spacer keeps the taken cards still. */}
         {throwInDetached && throwInSlot === 0 ? (
           <div
             class="surrender-throw-in-anchor"
@@ -2583,10 +2574,7 @@ export function GameTable({
                 }
                 draggable={false}
                 onDragStart={(event) => {
-                  // T-90 New #2: the drag image is the already-painted card
-                  // element in the hand, captured SYNCHRONOUSLY before any
-                  // state update re-renders and never an unmounted / off-DOM
-                  // node. The source card itself is never hidden.
+                  // T-90: drag image from the mounted card, before any re-render.
                   const element = event.currentTarget as HTMLElement | null;
                   const transfer = event.dataTransfer;
                   if (transfer) {
@@ -2604,9 +2592,7 @@ export function GameTable({
                       transfer.setDragImage(element, offsetX, offsetY);
                     }
                   }
-                  // The live gesture stays pointer-driven (ITEM-7 keeps the
-                  // finger cursor); the native drag is suppressed after the
-                  // preview image has been taken from the mounted card.
+                  // Pointer-driven gesture stays; native drag is suppressed after.
                   event.preventDefault();
                   pointerDragRef.current = null;
                   setDragCard(card);
