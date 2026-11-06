@@ -1,0 +1,121 @@
+/* --- T-90-feedback-20261106_111512-2: compact, icon-only, theme-matched
+   Surrender and Pass controls ---------------------------------------------- */
+
+/* The action column is a flex stack: the two squares keep their 40x40 size
+   instead of stretching, and the glyph is the only content. Colors come from
+   the same tokens SortBar and the rest of the table chrome use. */
+.action-bar .action-button.action-icon-btn {
+  display: grid;
+  grid-template-areas: 'icon';
+  place-items: center;
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  max-width: 40px;
+  padding: 0;
+  box-sizing: border-box;
+  border: 1px solid var(--durak-border, rgba(214, 199, 170, 0.34));
+  border-radius: 8px;
+  background: var(--bg-elevated, rgba(24, 34, 29, 0.85));
+  color: var(--durak-text, #e8e4d8);
+  font-size: 0;
+  line-height: 0;
+  box-shadow: none;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  transition:
+    transform 120ms ease,
+    border-color 150ms ease,
+    background-color 150ms ease,
+    box-shadow 150ms ease,
+    filter 150ms ease;
+}
+
+/* Muted accents only: desaturated terracotta for Surrender, sage for Pass —
+   both read as theme colors, never as an alarm. */
+.action-bar .action-button.action-icon-btn.action-icon-surrender {
+  --icon-accent: #b98a5e;
+}
+
+.action-bar .action-button.action-icon-btn.action-icon-pass {
+  --icon-accent: #7d9e83;
+}
+
+.action-bar .action-button.action-icon-btn:hover:not(:disabled) {
+  filter: brightness(1.12);
+  border-color: var(--icon-accent, var(--durak-border, rgba(214, 199, 170, 0.34)));
+  background: var(--bg-elevated-hover, rgba(32, 44, 38, 0.92));
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.32);
+}
+
+.action-bar .action-button.action-icon-btn:focus-visible {
+  outline: 2px solid var(--icon-accent, var(--durak-text, #e8e4d8));
+  outline-offset: 2px;
+}
+
+.action-bar .action-button.action-icon-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* The glyph is ~70% of the button, so it stays legible without a label. */
+.action-icon {
+  grid-area: icon;
+  width: 28px;
+  height: 28px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.92;
+}
+
+/* The countdown badge stacks in the button's single grid cell instead of
+   widening the square or shifting the layout. */
+.action-button.action-icon-btn .surrender-countdown {
+  grid-area: icon;
+  align-self: start;
+  justify-self: end;
+  margin-left: 0;
+  font-size: 11px;
+  line-height: 1;
+}
+
+/* The number is painted from the attribute, so the icon-only button carries no
+   visible text node at any time. */
+.surrender-countdown::after {
+  content: attr(data-countdown);
+}
+
+/* The contextual cluster stays anchored in the bottom-right corner of the felt
+   table using grid/flex alignment only — no absolute positioning. */
+[data-zone='table-arena'] [data-zone='player-controls'] {
+  justify-self: end;
+  align-self: end;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+:root[data-theme='light'] .action-bar .action-button.action-icon-btn {
+  border-color: var(--durak-border, rgba(15, 23, 42, 0.18));
+  background: var(--bg-elevated, rgba(255, 255, 255, 0.92));
+  color: var(--durak-text, #2b2a26);
+  box-shadow: none;
+}
+
+@media (max-width: 900px) {
+  .action-bar .action-button.action-icon-btn,
+  .action-button.action-icon-btn {
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    max-width: 32px;
+  }
+
+  .action-icon {
+    width: 22px;
+    height: 22px;
+  }
+}
