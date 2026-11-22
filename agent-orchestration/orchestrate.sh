@@ -791,6 +791,8 @@ STRICT COMPLETENESS & WIRING REVIEW GUIDELINES:
 3. **Zero Tolerance for Partial Implementations:** Verify against <git_diff>, not <implementer_notes_and_rebuttals>. If ANY requirement in <ticket_specification> is marked \`[MISSING]\`, \`[PARTIAL]\`, or \`[UNWIRED DEAD CODE]\`, you MUST output \`VERDICT: CHANGES_REQUESTED\`.
 4. Only output \`VERDICT: APPROVED\` when 100% of requirements in <ticket_specification> are verified \`[IMPLEMENTED & WIRED]\` in <git_diff>.
 
+5. **Protected Documentation Rule (CRITICAL):** Worker agents are STRICTLY FORBIDDEN from editing `README.md` or `ARCHITECTURE.md` (the Orchestrator updates them exclusively in Stage 3.6, and any worker edits to those files are automatically discarded by git). NEVER request changes for missing `README.md` or `ARCHITECTURE.md` edits—even if a ticket mistakenly mentions them, ignore doc edits when deciding your verdict.
+
 End your response with EXACTLY one of:
 VERDICT: APPROVED
 or
@@ -1074,9 +1076,9 @@ CRITICAL ANTI-OMISSION, TESTABILITY & TRACEABILITY RULES:
    - If the item involves a hard-to-reach or late-game state (e.g., endgame when talon deck is empty and players have 1–2 cards left, Durak elimination in 3P/4P, forced surrender edge cases, reflection chains, or timeout behaviors), you MUST include an explicit requirement in the backend/frontend tickets to add or update a **1-Click QA Scenario Preset** (e.g., a "⚡ QA Scenarios" selector in the Lobby or Left Sidebar that creates/loads a match pre-populated in that exact state) so the human can test it immediately!
 3. **Step 3 — Verbatim Acceptance Checklists & End-to-End Wiring:**
    Inside every ticket, include a \`## Mandatory Acceptance Criteria Checklist\` copying the FULL, UNABRIDGED details of each item assigned to that ticket, and explicitly specify the exact frontend component (\`GamePage.tsx\`, \`GameTable.tsx\`, \`LobbyPage.tsx\`) and backend route/engine method where it must be wired into the live UI.
-4. **Wave Scheduling & Real-Time Docs:**
+4. **Wave Scheduling (NO Worker Doc Tickets):**
    - Assign independent subsystems to the SAME wave, and tickets touching the same files to sequential waves.
-   - Ensure the final wave updates \`./README.md\`, \`./ARCHITECTURE.md\`, and \`./play-local.sh\` (in a single ticket).
+- STRICT FORBIDDEN FILES: NEVER create worker tickets or acceptance criteria that edit \`README.md\` or \`ARCHITECTURE.md\` (the Orchestrator updates both automatically in Stage 3.6 after all waves pass). Only include \`./play-local.sh\` if server startup commands change.
 
 <agents_rules>
 $(cat AGENTS.md)
@@ -1096,7 +1098,7 @@ $(cat .reviews/active_feedback_resolved.md)
 </resolved_human_feedback>
 
 <existing_project_files>
-$(find backend/src frontend/src play-local.sh README.md ARCHITECTURE.md -type f 2>/dev/null | sort)
+$(find backend/src frontend/src play-local.sh -type f 2>/dev/null | sort)
 </existing_project_files>
 
 <current_code_context>
@@ -1196,6 +1198,7 @@ $(dump_changed_files_context)
 </modified_source_files_on_main>
 
 AUDIT INSTRUCTIONS:
+4. **Protected Documentation Rule:** NEVER generate remediation tickets for `README.md` or `ARCHITECTURE.md` (the Orchestrator updates those files automatically in Stage 3.6 after this audit passes).
 1. Output an \`===AUDIT_CHECKLIST===\` checking every numbered item and sub-point in <resolved_human_feedback> (ignoring items under DEFERRED ITEMS):
    - Mark it \`[VERIFIED LIVE IN UI]\` ONLY if it is both implemented in the engine/logic AND actively rendered/wired in the frontend pages (\`LobbyPage.tsx\`, \`GamePage.tsx\`, \`GameTable.tsx\`, \`table.css\`).
    - Mark it \`[MISSING / UNWIRED]\` if any part of the item was skipped, overwritten during a merge, or left unwired in the UI.
