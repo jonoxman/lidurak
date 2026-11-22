@@ -4292,7 +4292,7 @@ describe('T-90-feedback-20261105_183601-1: surrender throw-in outline placement 
     expect(sizeRule).toContain('max-height: var(--card-h, 140px)');
     expect(sizeRule).toContain('box-sizing: border-box');
     expect(sizeRule).toContain('margin: 0');
-    expect(tableCss).toMatch(/@media \(max-width: 900px\) \{[^}]*\.throw-in-outline \{[^}]*width: 48px;/);
+    expect(tableCss).toMatch(/@media \(max-width: 899px\) \{[^}]*\.throw-in-outline \{[^}]*width: 48px;/);
 
     const ranks = ['six', 'seven', 'eight', 'nine', 'ten'];
     for (const count of [1, 2, 3, 4, 5]) {
@@ -4457,8 +4457,77 @@ describe('T-90-feedback-20261105_221105-2: card size, hand overlap, contour and 
     expect(cssRule('.card-slot')).not.toMatch(/width:\s*(80|70)px/);
     expect(cssRule('.hand-card-wrapper')).toContain('width: var(--hand-card-width, 100px)');
     expect(tableCss).toMatch(
-      /@media \(max-width: 900px\)[\s\S]*?\.card-slot\s*{[^}]*--card-width: 48px;[^}]*--card-height: 68px;/,
+      /@media \(max-width: 899px\)[\s\S]*?\.card-slot\s*{[^}]*--card-width: 48px;[^}]*--card-height: 68px;/,
     );
+  });
+
+  it('T-95: cards, hand slots and both outlines share size, radius and no-shrink rules', () => {
+    // Desktop: every card-sized box resolves the same 100x140 footprint and the
+    // same Roundness-driven border radius as the outlines it is dragged onto.
+    const cardBlock = cssRule('.card-slot');
+    for (const declaration of [
+      'width: var(--card-width, 100px)',
+      'height: var(--card-height, 140px)',
+      'min-width: var(--card-width, 100px)',
+      'min-height: var(--card-height, 140px)',
+      'flex: 0 0 var(--card-width, 100px)',
+      'border-radius: var(--app-roundness, 8px)',
+    ]) {
+      expect(cardBlock, '.card-slot').toContain(declaration);
+    }
+
+    const throwInBlock =
+      (tableCss.match(/\.throw-in-outline \{[^}]*\}/g) ?? []).find((block) =>
+        block.includes('min-width: var(--card-width, 100px)'),
+      ) ?? '';
+    expect(throwInBlock).toContain('width: var(--card-width, 100px)');
+    expect(throwInBlock).toContain('height: var(--card-height, 140px)');
+    expect(throwInBlock).toContain('flex: 0 0 var(--card-width, 100px)');
+    expect(throwInBlock).toContain('border-radius: var(--app-roundness, 8px)');
+
+    for (const selector of ['.target-outline', '.redirect-outline']) {
+      const start = tableCss.indexOf(`\n${selector} {`);
+      const rule = tableCss.slice(start, tableCss.indexOf('}', start));
+      expect(rule, selector).toContain('width: var(--card-width, 100px)');
+      expect(rule, selector).toContain('height: var(--card-height, 140px)');
+      expect(rule, selector).toContain('border-radius: var(--app-roundness, 8px)');
+    }
+    expect(cssRule('.redirect-outline')).toContain('flex: 0 0 auto');
+
+    // The hand and the play area read the same card tokens, so a hand or table
+    // card can never render smaller than the outline it is dropped on.
+    const handZoneRule =
+      (tableCss.match(/\[data-zone='player-hand'\] \{[^}]*\}/g) ?? []).find((block) =>
+        block.includes('--hand-card-width: var(--card-width'),
+      ) ?? '';
+    expect(handZoneRule).toContain('--hand-card-width: var(--card-width, 100px)');
+    expect(handZoneRule).toContain('--hand-card-height: var(--card-height, 140px)');
+    expect(cssRule('.hand-card-wrapper')).toContain(
+      'flex: 0 0 var(--hand-card-width, 100px)',
+    );
+    expect(cssRule('.throw-in-slot')).toContain('flex: 0 0 auto');
+
+    // Below 900px every card-sized box steps down to 48x68 at the SAME 899px
+    // breakpoint the JS and the root card tokens use, so exactly 900px renders
+    // desktop cards and would never pair a 100px card with a 48px outline.
+    expect(tableCss).not.toMatch(/@media \(max-width: 900px\)/);
+    expect(tableCss).toMatch(
+      /@media \(max-width: 899px\)[\s\S]*?:root\s*{[^}]*--card-w: 48px;[^}]*--card-h: 68px;/,
+    );
+    expect(tableCss).toMatch(
+      /@media \(max-width: 899px\)[\s\S]*?\.card-slot\s*{[^}]*--card-width: 48px;[^}]*--card-height: 68px;/,
+    );
+    expect(tableCss).toMatch(
+      /@media \(max-width: 899px\)[\s\S]*?\.throw-in-outline\s*{[^}]*width: 48px;[^}]*height: 68px;/,
+    );
+    expect(tableCss).toMatch(
+      /@media \(max-width: 899px\)[\s\S]*?\.target-outline,\s*\.redirect-outline\s*{[^}]*width: 48px;[^}]*height: 68px;/,
+    );
+    expect(cardSizeForViewport(899)).toEqual({
+      width: MOBILE_CARD_WIDTH,
+      height: MOBILE_CARD_HEIGHT,
+    });
+    expect(cardSizeForViewport(900)).toEqual({ width: CARD_WIDTH, height: CARD_HEIGHT });
   });
 
   it('ITEM-4: stays inside the 20%-80% overlap band and never overflows', () => {
@@ -4633,10 +4702,10 @@ describe('T-90-feedback-20261105_221105-2: card size, hand overlap, contour and 
       'min-height: var(--hand-card-height, 140px)',
     );
     expect(tableCss).toMatch(
-      /@media \(max-width: 900px\)[\s\S]*?--hand-card-width: 48px;[\s\S]*?--hand-card-height: 68px;/,
+      /@media \(max-width: 899px\)[\s\S]*?--hand-card-width: 48px;[\s\S]*?--hand-card-height: 68px;/,
     );
     expect(tableCss).toMatch(
-      /@media \(max-width: 900px\)[\s\S]*?\.hand-card-wrapper,\s*\.bout-card,\s*\.bout-pair\s*{[^}]*min-width: 48px;[^}]*min-height: 68px;/,
+      /@media \(max-width: 899px\)[\s\S]*?\.hand-card-wrapper,\s*\.bout-card,\s*\.bout-pair\s*{[^}]*min-width: 48px;[^}]*min-height: 68px;/,
     );
   });
 

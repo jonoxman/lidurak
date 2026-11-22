@@ -670,6 +670,7 @@ describe('GamePage', () => {
       defenderDefenseless: false,
       // T-90: the backend projection now owns the throw-in gate (and glow).
       canThrowIn: true,
+      throwInCards: [{ suit: 'hearts', rank: 'seven' }],
     });
 
     const { container } = render(
@@ -3587,10 +3588,11 @@ describe('T-90-feedback-20261105_221105-3 round 2: throw-in gate precision', () 
     boutPhase: 'Defense',
     legalActions: ['throwIn', 'pass'],
     maxBoutAttacks: 6,
+    throwInCards: [{ suit: 'hearts', rank: 'seven' }],
   };
 
   it('ITEM-1a: draws no outline on a bot-locked seat, even with a matching card', async () => {
-    getGameView.mockResolvedValue({ ...baseView, isBot: true });
+    getGameView.mockResolvedValue({ ...baseView, isBot: true, canThrowIn: true });
     render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
 
     await screen.findByTestId('hand-turn-highlight');
@@ -3622,6 +3624,22 @@ describe('T-90-feedback-20261105_221105-3 round 2: throw-in gate precision', () 
     const outline = await screen.findByTestId('throw-in-outline');
     expect(outline.getAttribute('data-throw-in-enabled')).toBe('true');
   });
+
+  it('T-95: hides the outline when canThrowIn is true but no card is projected', async () => {
+    getGameView.mockResolvedValue({
+      ...baseView,
+      canThrowIn: true,
+      throwInCards: [],
+    });
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    await screen.findByTestId('hand-turn-highlight');
+    // The gate alone is not enough: an empty projected throw-in list hides the
+    // outline (and its drop zone) exactly like `canThrowIn: false`.
+    expect(screen.queryByTestId('throw-in-outline')).toBeNull();
+    expect(screen.queryByTestId('throw-in-slot')).toBeNull();
+    expect(document.querySelector('[data-drop-zone="throw-in"]')).toBeNull();
+  });
 });
 
 describe('T-90-feedback-20261106_111512-3: backend canThrowIn gate and new presets', () => {
@@ -3632,6 +3650,7 @@ describe('T-90-feedback-20261106_111512-3: backend canThrowIn gate and new prese
     tablePairs: [{ attack: { suit: 'spades', rank: 'seven' }, defense: null }],
     trumpSuit: 'clubs', attackerIdx: 0, defenderIdx: 1, boutPhase: 'Defense',
     legalActions: ['throwIn', 'pass'], maxBoutAttacks: 6,
+    throwInCards: [{ suit: 'hearts', rank: 'seven' }],
   };
   beforeEach(() => {
     getGameView.mockReset();
