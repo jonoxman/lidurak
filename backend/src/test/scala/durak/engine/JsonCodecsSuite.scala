@@ -266,9 +266,7 @@ class JsonCodecsSuite extends munit.FunSuite:
   // --- Throw-in projection (T-90-feedback-20261106_111512-1) ---
 
   test("the throw-in view fields round-trip and default when absent") {
-    val state = durak.server.GameManager.preset("throw-in-visibility-4p") match
-      case Right(game) => game.state
-      case Left(error) => fail(error)
+    val state = ThrowInFixtures.visibility4p
     val view = PlayerGameView.forViewer(state, "p0")
 
     assert(view.canThrowIn, view.throwInCards.toString)
