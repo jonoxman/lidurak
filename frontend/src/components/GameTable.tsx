@@ -296,8 +296,12 @@ export const BOUT_CARD_HEIGHT = CARD_HEIGHT;
 export const BOUT_MIN_VISIBLE_LEFT = CARD_INDEX_STRIP_WIDTH_PX;
 /** Comfortable gap between two cards in play while they still fit. */
 export const BOUT_MIN_GAP = 4;
-/** The defence card overhangs its attack card by this fraction of a card. */
-export const BOUT_DEFENSE_OVERHANG_RATIO = 0.25;
+/**
+ * The defence card overhangs its attack card by this fraction of a card.
+ * T-96: it is the shared 36px index strip (36% of the 100px desktop card), so
+ * a covered `10` always keeps both digits visible.
+ */
+export const BOUT_DEFENSE_OVERHANG_RATIO = CARD_INDEX_STRIP_WIDTH_PX / CARD_WIDTH;
 /** Used until the defender's play area has been measured (jsdom reports zero). */
 export const BOUT_FALLBACK_WIDTH = 420;
 

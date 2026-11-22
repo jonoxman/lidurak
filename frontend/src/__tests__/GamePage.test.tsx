@@ -2144,6 +2144,19 @@ describe('GamePage', () => {
       /\.status-badge\s*{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) auto minmax\(0, 1fr\)/,
     );
     expect(appCss).toMatch(/\.status-cards\s*{[^}]*justify-self:\s*center/);
+
+    // T-96: `Alice (You)` overflows into `N cards` unless Column 1 clips its
+    // content, so the name track is contained in both stylesheets and the
+    // left sidebar is wide enough for the longest POV label.
+    expect(cssRule(appCss, '.status-player')).toContain('max-width: 100%');
+    expect(cssRule(appCss, '.status-player')).toContain('overflow: hidden');
+    expect(cssRule(appCss, '.status-name')).toContain('min-width: 0');
+    expect(cssRule(appCss, '.status-name')).toContain('flex: 1 1 auto');
+    expect(cssRule(tableCss, '.status-player')).toContain('max-width: 100%');
+    expect(cssRule(tableCss, '.status-player')).toContain('overflow: hidden');
+    expect(cssRule(appCss, '.game-shell')).toContain(
+      'grid-template-columns: 272px minmax(640px, 1fr) 260px',
+    );
   });
 
   it('T-90-3: darkens the sidebar, clock, POV and hand-sorting glows in light mode', async () => {

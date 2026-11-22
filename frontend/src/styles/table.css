@@ -583,8 +583,10 @@
 }
 
 .table-pair {
-  /* T-90: the pair owns its defence overhang, so wrapping never overlaps. */
-  --pair-defense-offset: 20px;
+  /* T-90: the pair owns its defence overhang, so wrapping never overlaps.
+     T-96: the overhang is the full shared index strip (36px), so the covering
+     card can never clip the `0` of a `10` rank on the card underneath. */
+  --pair-defense-offset: var(--card-index-strip-width, 36px);
   display: grid;
   grid-template-columns: var(--pair-card-w, var(--card-w, 100px));
   grid-template-rows: var(--pair-card-h, var(--card-h, 140px));
@@ -597,7 +599,7 @@
   /* ITEM-NEW-2b: only the card itself is reserved horizontally; the defence
      card overhangs to the right, and the compact row spacing comes from the
      inline `margin-left` on every slot. */
-  padding: 0 var(--pair-defense-offset, 20px) var(--bout-card-offset, 18px) 0;
+  padding: 0 var(--pair-defense-offset, 36px) var(--bout-card-offset, 18px) 0;
   box-sizing: border-box;
 }
 
@@ -610,7 +612,7 @@
 
 /* The defender's card overlaps its attack card. */
 .table-pair-defense {
-  margin: 15px 0 0 var(--pair-defense-offset, 20px);
+  margin: 15px 0 0 var(--pair-defense-offset, 36px);
 }
 
 /* An uncovered attack that can be clicked to cover it. */
@@ -1753,10 +1755,11 @@
   }
 
   .table-pair {
-    --pair-defense-offset: 14px;
+    /* T-96: proportional to the 48px mobile card (`ceil(36 * 48 / 100) = 18`). */
+    --pair-defense-offset: 18px;
     grid-template-columns: var(--card-w, 48px);
     grid-template-rows: var(--card-h, 68px);
-    padding: 0 var(--pair-defense-offset, 14px) var(--bout-card-offset, 10px) 0;
+    padding: 0 var(--pair-defense-offset, 18px) var(--bout-card-offset, 10px) 0;
   }
 
   .bout-area[data-anchor] {
@@ -1775,7 +1778,7 @@
   }
 
   .table-pair-defense {
-    margin: 10px 0 0 var(--pair-defense-offset, 14px);
+    margin: 10px 0 0 var(--pair-defense-offset, 18px);
   }
 
   .action-button {
@@ -2105,6 +2108,10 @@
   align-items: center;
   gap: 7px;
   min-width: 0;
+  /* T-96: keep the `app.css` containment — the name track clips its content
+     instead of painting over the `N cards` column. */
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .presence-dot {
