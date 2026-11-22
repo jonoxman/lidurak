@@ -2497,7 +2497,14 @@ body[data-dragging='true'] *,
   flex: 0 0 0;
   width: 0;
   min-width: 0;
-  margin-left: 0 !important;
+  /* T-95 #3: the collapsed slot MUST keep its inline gap-closing margin
+     (`compactStep - cardWidth`, a negative value). Forcing `margin-left: 0`
+     here left a `cardWidth - compactStep` hole in the row, which pushed every
+     card right of the dragged one outward and gave the dragged card exactly
+     that horizontal offset from the pointer (20px on a 6-card hand, ~58px on
+     a 14/30-card hand). A zero-width slot plus the inline margin is what keeps
+     the dragged card's own left edge on its compacted slot position, so the
+     captured drag origin stays the card's true position. */
   pointer-events: none;
   overflow: visible;
   opacity: 1;

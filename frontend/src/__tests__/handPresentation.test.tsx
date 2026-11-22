@@ -7,6 +7,7 @@ import {
   HAND_CONTOUR_PADDING,
   HAND_FALLBACK_WIDTH,
   HAND_FALLBACK_WIDTH_MOBILE,
+  HAND_LANE_MARGIN_PX,
   HAND_MAX_OVERLAP_RATIO,
   HAND_MIN_OVERLAP_RATIO,
   HAND_RAISED_OFFSET,
@@ -17,8 +18,12 @@ import {
   type GameTableProps,
   type OpponentSummary,
 } from '../components/GameTable';
-import type { CardData } from '../components/Card';
-import { ELIGIBLE_LIFT_PX, SELECTED_LIFT_PX } from '../utils/handLayout';
+import { CARD_INDEX_STRIP_WIDTH_PX, type CardData } from '../components/Card';
+import {
+  ELIGIBLE_LIFT_PX,
+  SELECTED_LIFT_PX,
+  computeHandLayout,
+} from '../utils/handLayout';
 import tableCss from '../styles/table.css?raw';
 
 /**
@@ -98,6 +103,23 @@ function cssRule(css: string, selector: string): string {
 function handWrappers(): HTMLElement[] {
   const box = screen.getByTestId('hand-turn-highlight');
   return Array.from(box.querySelectorAll('.hand-card-wrapper')) as HTMLElement[];
+}
+
+/**
+ * T-95 #3: the flex row's real left edges, modelled from the DOM contract the
+ * hand actually uses — each slot is `CARD_WIDTH` wide (a collapsed drag slot is
+ * zero wide) and its inline `margin-left` positions it. Unlike `data-card-x`,
+ * this model exposes a stylesheet rule that overrides the inline margin, which
+ * is exactly what previously left every card after the dragged one offset.
+ */
+function flexRowLefts(wrappers: HTMLElement[]): number[] {
+  let cursor = 0;
+  return wrappers.map((wrapper) => {
+    cursor += Number.parseFloat(wrapper.style.marginLeft || '0') || 0;
+    const left = cursor;
+    if (wrapper.getAttribute('data-collapsed') !== 'true') cursor += CARD_WIDTH;
+    return left;
+  });
 }
 
 describe('T-95 #2: card dimensions match the throw-in and redirect outlines', () => {
@@ -513,7 +535,10 @@ describe('T-90-feedback-5 ITEM-3: zero horizontal drag drift', () => {
         [startX + 220, startY + 120],
       ]) {
         fireEvent.mouseMove(document, { clientX, clientY });
-        const currentBaseX = Number(wrapper.getAttribute('data-card-x'));
+        // T-95 #3: resolve the live left edge from the real flex contract, not
+        // from the reported `data-card-x`, so a stylesheet margin override can
+        // never hide a horizontal offset.
+        const currentBaseX = flexRowLefts(handWrappers())[index];
         const renderedLeft =
           stageLeft + currentBaseX + translateX(wrapper.style.transform);
         // ITEM-3: the rendered card stays under the mouse's grab point.
@@ -523,5 +548,65 @@ describe('T-90-feedback-5 ITEM-3: zero horizontal drag drift', () => {
       fireEvent.mouseUp(document, { clientX: startX + 220, clientY: startY + 120 });
       view.unmount();
     }
+  });
+});
+
+describe('T-95 #3: the collapsed drag slot closes the gap exactly', () => {
+  const compactPositions = (cardCount: number): readonly number[] =>
+    computeHandLayout({
+      cardCount,
+      containerWidth: HAND_FALLBACK_WIDTH - HAND_CONTOUR_PADDING * 2,
+      baseCardWidth: CARD_WIDTH,
+      baseCardHeight: CARD_HEIGHT,
+      minVisibleStripPx: CARD_INDEX_STRIP_WIDTH_PX,
+      maximalBoxWidth: HAND_FALLBACK_WIDTH - HAND_LANE_MARGIN_PX * 2,
+    }).cardPositions;
+
+  it('keeps the negative gap-closing margin that anchors the drag origin', () => {
+    for (const { count, index } of [
+      { count: 6, index: 1 },
+      { count: 14, index: 7 },
+      { count: 30, index: 15 },
+    ]) {
+      const view = mountTable(DECK.slice(0, count), { onReorderHand: vi.fn() });
+      const wrappers = handWrappers();
+      const compact = compactPositions(count - 1);
+      const expectedMargin =
+        compact[Math.min(index, compact.length - 1)] -
+        compact[Math.max(0, index - 1)] -
+        CARD_WIDTH;
+
+      fireEvent.mouseDown(wrappers[index], { button: 0, clientX: 40, clientY: 80 });
+      fireEvent.mouseMove(document, { clientX: 260, clientY: 160 });
+
+      const collapsed = handWrappers()[index];
+      expect(collapsed.getAttribute('data-collapsed')).toBe('true');
+      // A zero-width slot in the compacted row needs one negative stride of
+      // margin; forcing it to `0` would leave exactly that much of a hole.
+      expect(expectedMargin).toBeLessThan(0);
+      expect(Number.parseFloat(collapsed.style.marginLeft)).toBeCloseTo(expectedMargin, 2);
+
+      // Every real left edge matches the x the drag math and contour use.
+      const actual = flexRowLefts(handWrappers());
+      const reported = handWrappers().map((node) =>
+        Number(node.getAttribute('data-card-x')),
+      );
+      actual.forEach((left, cardIndex) => {
+        expect(left, `card ${cardIndex}`).toBeCloseTo(reported[cardIndex], 2);
+      });
+      // The compacted row stays strictly inside the maximal hand box.
+      expect(actual[actual.length - 1] + CARD_WIDTH).toBeLessThanOrEqual(
+        HAND_FALLBACK_WIDTH - HAND_LANE_MARGIN_PX * 2 + 0.01,
+      );
+
+      fireEvent.mouseUp(document, { clientX: 260, clientY: 160 });
+      view.unmount();
+    }
+  });
+
+  it('never overrides the inline gap-closing margin in the stylesheet', () => {
+    const collapsed = cssRule(tableCss, ".hand-card-wrapper[data-collapsed='true'] {");
+    expect(collapsed).toContain('overflow: visible');
+    expect(collapsed).not.toMatch(/margin-left:\s*0\s*!important/);
   });
 });
