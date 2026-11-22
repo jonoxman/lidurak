@@ -5451,10 +5451,20 @@ describe('T-90-feedback-20261122_171451-6 ITEM-4/ITEM-7: tabletimer clearance & 
     expect(rule("[data-zone='player-hand'] > .hand-clock")).toContain('grid-row: 1;');
     expect(rule("[data-zone='player-hand'] > .hand-cards")).toContain('grid-row: 2;');
 
-    // The reserved gap covers the full raise + contour pad + stroke + breathing
-    // room, which is exactly what a fully raised card needs to clear.
-    const clearance = -HAND_SELECTED_RAISED_OFFSET + HAND_CONTOUR_PADDING + 2.5 + 8;
-    expect(clearance).toBeGreaterThan(
+    // The reserved row gap (the timer -> card-stage clearance) covers the full
+    // Tier 2 raise + contour pad + contour stroke + breathing room, measured
+    // from the CSS fallbacks themselves, so a fully raised selected card and its
+    // non-rectangular contour can never reach the clock track.
+    const liftFallback = Number(
+      /var\(--hand-selected-lift,\s*(\d+)px\)/.exec(zoneRule)?.[1],
+    );
+    const padFallback = Number(
+      /var\(--hand-contour-padding,\s*(\d+)px\)/.exec(zoneRule)?.[1],
+    );
+    expect(liftFallback).toBe(-HAND_SELECTED_RAISED_OFFSET);
+    expect(padFallback).toBe(HAND_CONTOUR_PADDING);
+    const reservedGap = liftFallback + padFallback + 2.5 + 8;
+    expect(reservedGap).toBeGreaterThanOrEqual(
       -HAND_SELECTED_RAISED_OFFSET + HAND_CONTOUR_PADDING + 2.5,
     );
     // ... and the hand row itself reserves the timer plus that clearance.

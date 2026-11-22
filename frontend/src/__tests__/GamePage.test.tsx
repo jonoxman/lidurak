@@ -3550,7 +3550,7 @@ describe('T-90-feedback-20261105_221105-3: throw-in gate, multi-card throw-in an
     ]);
   });
 
-  it('ITEM-6/7: renders compact icon-only Surrender and Pass buttons in the table corner', async () => {
+  it('ITEM-6/7: renders compact icon-only Surrender and Pass buttons in the lower table band', async () => {
     renderGame({
       ...throwInView,
       // `cover` disarms the client auto-surrender and `throwIn` the auto-pass,
@@ -3585,11 +3585,15 @@ describe('T-90-feedback-20261105_221105-3: throw-in gate, multi-card throw-in an
     // There is no "Throw In" button even while the server lists throw-ins.
     expect(screen.queryByRole('button', { name: /throw in/i })).toBeNull();
 
-    // Both stay in the bottom-right controls column of the felt table.
+    // Both stay in the lower-table control band (Row 4 of the felt arena), never
+    // in the old bottom-right corner.
     const controls = surrender.closest('[data-zone="player-controls"]');
     expect(controls).not.toBeNull();
+    expect(controls?.getAttribute('data-placement')).toBe('lower-table-controls');
     expect(controls?.contains(pass)).toBe(true);
     expect(surrender.closest('[data-zone="table-arena"]')).not.toBeNull();
+    expect(surrender.closest('[data-zone="player-hand"]')).toBeNull();
+    expect(surrender.closest('[data-zone="table-deck"]')).toBeNull();
   });
 
 });
