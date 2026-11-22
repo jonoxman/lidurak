@@ -1,12 +1,12 @@
 /**
- * T-90-feedback-20261122_011021-2 ITEM-8: the Pass glyph in the exact visual
- * language of [[SurrenderIcon]] — the same `0 0 48 48` grid, the same 2.2-unit
+ * T-90-feedback-20261122_121105-2 ITEM-NEW6: the Pass glyph in the exact visual
+ * language of [[SurrenderIcon]] — the same `0 0 48 48` grid, the same 2-unit
  * round-capped `currentColor` stroke, and the same palm/finger/thumb geometry.
  *
  * The cards are swept off to the upper left (`data-part="cards"`), a calm arc
- * carries the turn onwards past them (`data-part="pass-indicator"`), and a
- * single open palm — one hand, not the two raised in surrender — sits where the
- * player lets the turn go (`data-part="hand"`).
+ * carries the turn onwards past them (`data-part="pass-symbol"`), and a single
+ * open palm — one hand, not the two raised in surrender — sits where the player
+ * lets the turn go (`data-part="hand"`).
  */
 export function PassIcon() {
   return (
@@ -19,7 +19,7 @@ export function PassIcon() {
       focusable="false"
       fill="none"
       stroke="currentColor"
-      stroke-width="2.2"
+      stroke-width="2"
       stroke-linecap="round"
       stroke-linejoin="round"
     >
@@ -58,7 +58,7 @@ export function PassIcon() {
       </g>
 
       {/* The turn skips onward: an arc leaving the cards with a forward head. */}
-      <g data-part="pass-indicator" data-icon-part="arrow-pass">
+      <g data-part="pass-symbol" data-icon-part="arrow-pass">
         <path d="M7 20.4 C15.4 22.6 25 22 32 17.2" />
         <path d="M28.6 16.2 L32.2 17.2 L31.2 20.8" />
       </g>

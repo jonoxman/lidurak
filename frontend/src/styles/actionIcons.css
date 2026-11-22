@@ -1,39 +1,43 @@
-/* --- T-90-feedback-20261122_011021-2 ITEM-7/8: compact, icon-only,
+/* --- T-90-feedback-20261122_121105-2 ITEM-NEW5/6: compact, icon-only,
    theme-matched Surrender and Pass controls -------------------------------- */
 
-/* Backwards-compatible baseline. The shared family class keeps the historical
-   compact square (40px, 32px below 900px) for any markup that carries only the
-   family class. The scoped `.action-bar` rule below is more specific, so the
-   live controls always render at the new 52px / 42px size. */
+/* Backwards-compatible baseline: markup that carries only the shared family
+   class keeps the historical compact square (40px, 32px below 900px) and its
+   neutral panel surface. The scoped `.action-bar` rule below is more specific,
+   so the live controls always render at the new compact squircle size. */
 .action-button.action-icon-btn {
   width: 40px;
   height: 40px;
   min-width: 40px;
   max-width: 40px;
+  border: 1px solid var(--durak-border, rgba(214, 199, 170, 0.34));
+  border-radius: 8px;
+  background: var(--bg-elevated, rgba(24, 34, 29, 0.85));
 }
 
-/* The buttons themselves: a compact rounded square on the dark slate surface,
-   parchment ink and a muted durak border — the same tokens the deck box and
-   SortBar use, so the controls sit inside the felt theme instead of shouting. */
+/* The buttons themselves: a compact rounded squircle on the dark-felt surface,
+   warm ivory ink and a muted antique-gold border — the same palette as the deck
+   box and SortBar, so the controls sit inside the felt theme instead of
+   shouting. Icon-only, zero label padding, and never bright red. */
 .action-bar .action-button.action-icon-btn {
   display: grid;
   grid-template-areas: 'icon';
   place-items: center;
   flex: 0 0 auto;
-  width: 52px;
-  height: 52px;
-  min-width: 52px;
-  max-width: 52px;
+  width: 50px;
+  height: 50px;
+  min-width: 50px;
+  max-width: 50px;
   padding: 0;
-  box-sizing: border-box;
-  border: 1px solid var(--durak-border, rgba(214, 199, 170, 0.34));
-  border-radius: 8px;
-  background: var(--bg-elevated, rgba(24, 34, 29, 0.85));
-  color: var(--durak-text, #e8e4d8);
+  border: 1px solid rgba(212, 184, 122, 0.35);
+  border-radius: 12px;
+  background: var(--bg-elevated, rgba(18, 28, 23, 0.86));
+  color: #e8e2d2;
   font-size: 0;
   line-height: 0;
+  box-sizing: border-box;
   box-shadow:
-    inset 0 1px 0 rgba(232, 228, 217, 0.06),
+    inset 0 1px 0 rgba(232, 226, 210, 0.06),
     0 2px 6px rgba(0, 0, 0, 0.28);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
@@ -45,30 +49,34 @@
     filter 150ms ease;
 }
 
-/* Surrender: a warm amber/bronze accent (muted gold border, bronze hover glow).
-   Pass: the cool emerald/sage counterpart. Both stay desaturated so neither
-   reads as an alarm; the bright red surrender button is gone for good. */
+/* Surrender: a warm amber/bronze accent (antique-gold border, bronze hover
+   tint). Pass: the cool sage/emerald counterpart. Both stay desaturated so
+   neither reads as an alarm; the bright red surrender button is gone for good. */
 .action-bar .action-button.action-icon-btn.action-icon-btn--surrender,
 .action-bar .action-button.action-icon-btn.action-icon-surrender {
   --icon-accent: #b98a5e;
-  --icon-border-accent: rgba(212, 175, 55, 0.35);
+  --icon-border-accent: rgba(212, 184, 122, 0.35);
+  --icon-hover-bg: rgba(54, 42, 30, 0.9);
+  --icon-hover-border: #b98a5e;
   border-color: var(--icon-border-accent);
 }
 
 .action-bar .action-button.action-icon-btn.action-icon-btn--pass,
 .action-bar .action-button.action-icon-btn.action-icon-pass {
   --icon-accent: #7d9e83;
-  --icon-border-accent: rgba(110, 231, 183, 0.35);
+  --icon-border-accent: rgba(146, 176, 152, 0.35);
+  --icon-hover-bg: rgba(28, 44, 36, 0.92);
+  --icon-hover-border: #7d9e83;
   border-color: var(--icon-border-accent);
 }
 
 .action-bar .action-button.action-icon-btn:hover:not(:disabled) {
   filter: brightness(1.1);
   transform: translateY(-1px);
-  border-color: var(--icon-accent, var(--durak-border, rgba(214, 199, 170, 0.34)));
-  background: var(--bg-elevated-hover, rgba(32, 44, 38, 0.92));
+  border-color: var(--icon-hover-border, var(--durak-border, rgba(214, 199, 170, 0.34)));
+  background: var(--icon-hover-bg, var(--bg-elevated-hover, rgba(32, 44, 38, 0.92)));
   box-shadow:
-    inset 0 1px 0 rgba(232, 228, 217, 0.08),
+    inset 0 1px 0 rgba(232, 226, 210, 0.08),
     0 6px 14px rgba(0, 0, 0, 0.32);
 }
 
@@ -78,7 +86,7 @@
 }
 
 .action-bar .action-button.action-icon-btn:focus-visible {
-  outline: 2px solid var(--icon-accent, var(--durak-text, #e8e4d8));
+  outline: 2px solid var(--icon-accent, var(--durak-text, #e8e2d2));
   outline-offset: 2px;
 }
 
@@ -87,15 +95,15 @@
   cursor: not-allowed;
 }
 
-/* The glyph is ~62% of the 52px button: legible without a label, and at 48px
-   (the smallest compact size) it still fills the square. */
+/* The glyph is 60% of the 50px squircle: legible without a label, and at the
+   44px mobile size it still fills the square. */
 .action-icon {
   grid-area: icon;
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   fill: none;
   stroke: currentColor;
-  stroke-width: 2.2;
+  stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
   opacity: 0.95;
@@ -143,12 +151,12 @@
     max-width: 32px;
   }
 
-  /* The live 42px mobile control overrides it by specificity. */
+  /* The live 44px mobile control overrides it by specificity. */
   .action-bar .action-button.action-icon-btn {
-    width: 42px;
-    height: 42px;
-    min-width: 42px;
-    max-width: 42px;
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    max-width: 44px;
   }
 
   .action-icon {
