@@ -481,10 +481,11 @@
 /* T-90 ITEM-1b: a legal attack target belongs to the Attacker (emerald) family,
    so it reads as gameplay rather than as a UI menu selection. */
 .target-outline {
-  width: var(--card-width, 100px);
-  height: var(--card-height, 140px);
+  /* Legacy aliases first; the canonical tokens win the cascade (ITEM-2). */
   width: var(--card-w, 100px);
   height: var(--card-h, 140px);
+  width: var(--card-width, 100px);
+  height: var(--card-height, 140px);
   margin-top: 10px;
   border: 2px dashed var(--role-attacker-border);
   border-radius: var(--app-roundness, 8px);
@@ -507,10 +508,10 @@
   place-items: center;
   flex: 0 0 auto;
   align-self: flex-start;
-  width: var(--card-width, 100px);
-  height: var(--card-height, 140px);
   width: var(--card-w, 100px);
   height: var(--card-h, 140px);
+  width: var(--card-width, 100px);
+  height: var(--card-height, 140px);
   margin: 0 0 var(--bout-card-offset, 18px) 0;
   border: 2px dashed var(--redirect-border);
   border-radius: var(--app-roundness, 8px);
@@ -552,10 +553,10 @@
 .table-card-base,
 .table-card-cover,
 .drag-ghost {
-  width: var(--card-width, 100px);
-  height: var(--card-height, 140px);
   width: var(--bout-card-width, 100px);
   height: var(--bout-card-height, 140px);
+  width: var(--card-width, 100px);
+  height: var(--card-height, 140px);
   box-sizing: border-box;
 }
 
@@ -1163,6 +1164,7 @@
 /* ITEM-3: the card row lives in the same grid cell as the contour. */
 .hand-row {
   grid-area: 1 / 1;
+  align-self: start;
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
@@ -2462,10 +2464,10 @@ body[data-dragging='true'] *,
   display: grid;
   flex: 0 0 auto;
   align-self: flex-start;
-  width: var(--card-width, 100px);
-  height: var(--card-height, 140px);
   width: var(--card-w, 100px);
   height: var(--card-h, 140px);
+  width: var(--card-width, 100px);
+  height: var(--card-height, 140px);
   margin: 0;
   padding: 0;
   box-sizing: border-box;
@@ -2479,10 +2481,10 @@ body[data-dragging='true'] *,
   display: grid;
   justify-self: center;
   align-self: end;
-  width: var(--card-width, 100px);
-  height: var(--card-height, 140px);
   width: var(--card-w, 100px);
   height: var(--card-h, 140px);
+  width: var(--card-width, 100px);
+  height: var(--card-height, 140px);
   margin: 0;
   padding: 0;
   box-sizing: border-box;
@@ -2518,14 +2520,20 @@ body[data-dragging='true'] *,
   place-items: center;
   flex: 0 0 var(--card-w, 100px);
   align-self: flex-start;
-  width: var(--card-width, 100px);
-  height: var(--card-height, 140px);
   width: var(--card-w, 100px);
   height: var(--card-h, 140px);
   min-width: var(--card-w, 100px);
   max-width: var(--card-w, 100px);
   min-height: var(--card-h, 140px);
   max-height: var(--card-h, 140px);
+  /* ITEM-2: the canonical card tokens win the cascade. */
+  flex: 0 0 var(--card-width, 100px);
+  width: var(--card-width, 100px);
+  height: var(--card-height, 140px);
+  min-width: var(--card-width, 100px);
+  max-width: var(--card-width, 100px);
+  min-height: var(--card-height, 140px);
+  max-height: var(--card-height, 140px);
   margin: 0;
   border: 2px dashed var(--role-attacker-border);
   border-radius: var(--app-roundness, 8px);

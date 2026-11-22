@@ -6,8 +6,8 @@ import { SurrenderIcon } from '../components/icons/SurrenderIcon';
 import actionBarSource from '../components/ActionBar.tsx?raw';
 import actionIconsCss from '../styles/actionIcons.css?raw';
 
-const SURRENDER_LABEL = 'Surrender — take the cards';
-const PASS_LABEL = 'Pass — done throwing in';
+const SURRENDER_LABEL = 'Surrender';
+const PASS_LABEL = 'Pass';
 
 const viewBoxOf = (element: Element): string | null =>
   element.getAttribute('viewBox') ?? element.getAttribute('viewbox');
@@ -233,11 +233,10 @@ describe('T-90-feedback-20261122_011021-2 ITEM-7/8: themed icon-only Surrender &
     expect(pass.classList.contains('action-icon-pass')).toBe(true);
     expect(surrender.classList.contains('action-icon-surrender')).toBe(true);
 
-    // No bare one-word "Surrender" / "Pass" accessible name survives anywhere.
+    // The exact one-word accessible names are the ticket's contract; no visible
+    // text node carries the word.
     expect(screen.getByRole('button', { name: SURRENDER_LABEL })).toBe(surrender);
     expect(screen.getByRole('button', { name: PASS_LABEL })).toBe(pass);
-    expect(screen.queryByRole('button', { name: 'Surrender' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Pass' })).toBeNull();
   });
 
   it('dispatches DeclareSurrender and PassTurn through the existing action path', () => {

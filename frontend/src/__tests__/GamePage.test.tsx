@@ -1354,7 +1354,7 @@ describe('GamePage', () => {
     // ITEM-7: the button is icon-only, so the action is carried by its label
     // and the painted number never leaks into textContent.
     expect(countdown.closest('button')?.textContent).toBe('');
-    expect(countdown.closest('button')?.getAttribute('aria-label')).toBe('Pass — done throwing in');
+    expect(countdown.closest('button')?.getAttribute('aria-label')).toBe('Pass');
   });
 
   it('puts a return-to-lobby button inside the game-over banner', async () => {
@@ -3511,8 +3511,8 @@ describe('T-90-feedback-20261105_221105-3: throw-in gate, multi-card throw-in an
     const surrender = await screen.findByTestId('surrender-button');
     const pass = screen.getByTestId('pass-button');
     for (const [button, label, iconId, iconName] of [
-      [surrender, 'Surrender — take the cards', 'surrender-icon', 'surrender-hands-cards'],
-      [pass, 'Pass — done throwing in', 'pass-icon', 'pass-wave-cards'],
+      [surrender, 'Surrender', 'surrender-icon', 'surrender-hands-cards'],
+      [pass, 'Pass', 'pass-icon', 'pass-wave-cards'],
     ] as const) {
       expect(button.tagName).toBe('BUTTON');
       expect(button.textContent).toBe('');
@@ -3678,5 +3678,65 @@ describe('T-90-feedback-20261106_111512-3: backend canThrowIn gate and new prese
     createPresetGameMock.mockResolvedValue({ gameId: 'preset-new', defaultPlayerId: 'p0' });
     fireEvent.click(multi);
     await waitFor(() => expect(createPresetGameMock).toHaveBeenCalledWith('throw-in-multi-qa'));
+  });
+
+  it('ITEM-5/ITEM-6: clamps multi-selection to the projected capacity and batch-deploys', async () => {
+    const batchView: PlayerGameView = {
+      ...t90View,
+      myHand: [
+        { suit: 'hearts', rank: 'seven' },
+        { suit: 'clubs', rank: 'seven' },
+        { suit: 'diamonds', rank: 'nine' },
+      ],
+      throwInCards: [
+        { suit: 'hearts', rank: 'seven' },
+        { suit: 'clubs', rank: 'seven' },
+      ],
+      throwInCapacity: 1,
+      canThrowIn: true,
+    };
+    renderT90(batchView);
+    sendAction.mockResolvedValue(batchView);
+    await screen.findByTestId('throw-in-outline');
+
+    const handCard = (label: string): HTMLElement =>
+      screen.getByLabelText(label).closest('.card-slot') as HTMLElement;
+    fireEvent.click(handCard('seven of hearts'));
+    fireEvent.click(handCard('seven of clubs'));
+
+    // Capacity 1 accepts only the first card, and the raised card steps the
+    // tight contour.
+    await waitFor(
+      () =>
+        expect(
+          document.querySelectorAll('.hand-card-wrapper[data-selected="true"]'),
+        ).toHaveLength(1),
+    );
+    expect(screen.getByTestId('hand-highlight-contour').getAttribute('data-contour-shape')).toBe(
+      'stepped',
+    );
+
+    // Double-clicking the selected card deploys the capacity-limited batch.
+    fireEvent.dblClick(handCard('seven of hearts'));
+    await waitFor(() => expect(sendAction).toHaveBeenCalledTimes(1));
+    const action = sendAction.mock.calls[0][1] as { type: string; cards: unknown[] };
+    expect(action.type).toBe('throwInCards');
+    expect(action.cards).toHaveLength(1);
+
+    // A new server projection clears any stale selection.
+    fireEvent.click(handCard('seven of clubs'));
+    await waitFor(
+      () =>
+        expect(
+          document.querySelectorAll('.hand-card-wrapper[data-selected="true"]'),
+        ).toHaveLength(1),
+    );
+    act(() => wsState.onUpdate?.({ ...batchView, myHasPassed: true }));
+    await waitFor(
+      () =>
+        expect(
+          document.querySelectorAll('.hand-card-wrapper[data-selected="true"]'),
+        ).toHaveLength(0),
+    );
   });
 });

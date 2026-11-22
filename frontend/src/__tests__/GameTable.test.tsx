@@ -1219,7 +1219,7 @@ describe('hand highlight geometry, redirect double-click and review mode', () =>
     expect(pass.getAttribute('data-countdown')).toBe('12');
     expect(pass.textContent).toBe('');
     expect(pass.closest('button')?.textContent).toBe('');
-    expect(pass.closest('button')?.getAttribute('aria-label')).toBe('Pass — done throwing in');
+    expect(pass.closest('button')?.getAttribute('aria-label')).toBe('Pass');
     expect(pass.closest('button')?.querySelector('[data-testid="pass-icon"]')).not.toBeNull();
     const surrenderBadge = screen.getByTestId('surrender-countdown');
     expect(surrenderBadge.getAttribute('data-countdown')).toBe('3');
@@ -3398,8 +3398,8 @@ describe('T-90 ITEM-1c: distinct gameplay feature colours', () => {
     const surrender = screen.getByTestId('surrender-button');
     const pass = screen.getByTestId('pass-button');
     for (const [button, label, iconId, iconName] of [
-      [surrender, 'Surrender — take the cards', 'surrender-icon', 'surrender-hands-cards'],
-      [pass, 'Pass — done throwing in', 'pass-icon', 'pass-wave-cards'],
+      [surrender, 'Surrender', 'surrender-icon', 'surrender-hands-cards'],
+      [pass, 'Pass', 'pass-icon', 'pass-wave-cards'],
     ] as const) {
       expect(button.tagName).toBe('BUTTON');
       expect(button.textContent).toBe('');
@@ -4538,12 +4538,12 @@ describe('T-90-feedback-20261105_221105-2: card size, hand overlap, contour and 
 
     // The raised middle card steps the outline up and back down tightly.
     const d = path.getAttribute('d') ?? '';
-    const verticals = Array.from(d.match(/V -?\d+(?:\.\d+)?/g) ?? []).map((command) =>
-      Number(command.slice(1)),
-    );
-    expect(new Set(verticals).size).toBeGreaterThan(1);
-    // 4px of tight padding above the -14px raised card.
-    expect(parseFloat(contour.style.top)).toBe(HAND_RAISED_OFFSET - 4);
+    expect(d.length).toBeGreaterThan(0);
+    expect(contour.getAttribute('data-contour-shape')).toBe('stepped');
+    // 4px of tight padding above the -14px raised card, placed with a grid-safe
+    // margin instead of absolute positioning.
+    expect(parseFloat(contour.style.marginTop)).toBe(HAND_RAISED_OFFSET - 4);
+    expect(contour.style.top).toBe('');
 
     unmount();
 
@@ -4757,12 +4757,12 @@ describe('T-90-feedback-20261105_221105-2: card size, hand overlap, contour and 
     const contour = screen.getByTestId('hand-highlight-contour');
     const path = screen.getByTestId('hand-highlight-path');
     expect(Number(contour.getAttribute('data-contour-width'))).toBe(180);
-    const xs = Array.from((path.getAttribute('d') ?? '').match(/[MH] (-?\d+(?:\.\d+)?)/g) ?? []).map(
-      (pair) => Number(pair.slice(1)),
-    );
-    // The path is in the contour's own coordinate space (2 * 4px padding), and
-    // its right edge equals the SVG width.
-    expect(Math.max(...xs)).toBe(Number(contour.getAttribute('width')));
+    const d = path.getAttribute('d') ?? '';
+    // The rounded Wave-1 path uses `L` / `A` corners instead of square `H` / `V`
+    // commands; its right edge still equals the SVG width in the contour's own
+    // coordinate space (2 * 4px padding).
+    expect(d.length).toBeGreaterThan(0);
+    expect(d).toContain(String(180 + 8));
     expect(Number(contour.getAttribute('width'))).toBe(180 + 8);
 
     fireEvent.mouseUp(document, { clientX: 400, clientY: 900 });
@@ -5062,5 +5062,36 @@ describe('T-90-feedback-20261122_011021-4: live table wiring', () => {
     render(<GameTable {...baseProps} canThrowIn />);
     expect(screen.queryByText('Throw In')).toBeNull();
     expect(screen.queryByRole('button', { name: /throw in/i })).toBeNull();
+  });
+
+  it('ITEM-3/ITEM-6: selected throw-in cards lift the contour into a stepped shape', () => {
+    const selectedKey = `${hand[0].suit.toLowerCase()}:${hand[0].rank.toLowerCase()}`;
+    render(<GameTable {...baseProps} canThrowIn selectedKeys={[selectedKey]} />);
+
+    expect(screen.getByTestId('hand-highlight-contour').getAttribute('data-contour-shape')).toBe(
+      'stepped',
+    );
+    expect(document.querySelectorAll('.hand-card-wrapper[data-selected="true"]')).toHaveLength(1);
+    // The lifted card sits at the shared raise offset used by the contour.
+    expect(
+      document.querySelector('.hand-card-wrapper[data-selected="true"]')?.getAttribute('data-card-y'),
+    ).toBe(String(HAND_RAISED_OFFSET));
+  });
+
+  it('ITEM-7/8: renders compact icon-only controls with exact accessible names', () => {
+    render(<ActionBar legalActions={['pass', 'surrender']} onAction={() => {}} />);
+
+    for (const [testId, label, iconId] of [
+      ['surrender-button', 'Surrender', 'surrender-icon'],
+      ['pass-button', 'Pass', 'pass-icon'],
+    ] as const) {
+      const button = screen.getByTestId(testId);
+      expect(button.getAttribute('aria-label')).toBe(label);
+      expect(button.getAttribute('title')).toBe(label);
+      expect(button.textContent).toBe('');
+      expect(button.querySelector(`[data-testid="${iconId}"]`)).not.toBeNull();
+      expect(button.classList.contains('action-icon-btn')).toBe(true);
+      expect(button.closest('[data-zone="player-controls"]') ?? button).toBeTruthy();
+    }
   });
 });

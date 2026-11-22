@@ -972,10 +972,15 @@ export function GamePage({
   const remainingBoutCapacity = view.maxBoutAttacks - view.tablePairs.length;
   // ITEM-5: a throw-in never exceeds the bout capacity, and during `Defense`
   // every added uncovered card must still be coverable by the defender.
+  // T-90-feedback review round 1: the server-projected throw-in capacity is part
+  // of the clamp, so a click selection can never exceed what the engine accepts.
+  const projectedThrowInCapacity =
+    view.throwInCapacity == null ? remainingBoutCapacity : view.throwInCapacity;
   const maxThrowInCount = Math.max(
     0,
     Math.min(
       remainingBoutCapacity,
+      projectedThrowInCapacity,
       boutPhaseToken === 'defense'
         ? defenderCardCount - uncoveredCount
         : remainingBoutCapacity,

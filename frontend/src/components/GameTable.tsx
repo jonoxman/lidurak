@@ -12,6 +12,10 @@ import {
   buildRedirectAttack,
   type GameAction,
 } from '../types';
+import {
+  buildHandContourPath,
+  computeHandLayout as computeUtilsHandLayout,
+} from '../utils/handLayout';
 import '../styles/table.css';
 
 export interface OpponentSummary {
@@ -432,6 +436,32 @@ export function handLayout(
   const scale = available > 0 && totalWidth > available ? available / totalWidth : 1;
   const overlap = width - stride;
 
+  // T-90-feedback review round 1: `utils/handLayout.ts` is the source of truth
+  // for a hand that fits one row. Its 20%-80% band and stage width match the
+  // formula above exactly; the extreme full-deck pickup keeps the legacy row
+  // scaling below (the module scales the cards instead, which would break the
+  // fit-scaled `transform` the table uses).
+  if (available >= width && scale === 1) {
+    const official = computeUtilsHandLayout({
+      cardCount: count,
+      containerWidth: available,
+      baseCardWidth: width,
+      maxRows: 1,
+    });
+    if (official.rows === 1 && official.scale === 1) {
+      return {
+        overlap: official.overlap,
+        overlapRatio: official.overlapRatio,
+        stride: official.step,
+        totalWidth: official.stageWidth,
+        scale: 1,
+        visibleCount: count,
+        hiddenLeft: 0,
+        hiddenRight: 0,
+      };
+    }
+  }
+
   return {
     overlap,
     overlapRatio: overlap / width,
@@ -580,61 +610,25 @@ export function computeHandContour(
     return { d: '', left: 0, top: 0, width: 0, height: 0, nonRectangular: false };
   }
 
-  const rects = cards.map((card) => ({
-    left: card.x - pad,
-    right: card.x + cardWidth + pad,
-    top: card.y - pad,
-    bottom: card.y + cardHeight + pad,
-  }));
-  const left = Math.min(...rects.map((rect) => rect.left));
-  const top = Math.min(...rects.map((rect) => rect.top));
-  const right = Math.max(...rects.map((rect) => rect.right));
-  const bottom = Math.max(...rects.map((rect) => rect.bottom));
-  const xs = Array.from(new Set(rects.flatMap((rect) => [rect.left, rect.right]))).sort(
-    (a, b) => a - b,
+  // T-90-feedback review round 1: delegate the tight, rounded union trace to the
+  // Wave-1 `buildHandContourPath` module. The returned `d`, padded bounds and
+  // `isNonRectangular` flag map 1:1 onto this component's DOM contract.
+  const official = buildHandContourPath(
+    cards.map((card) => ({
+      x: card.x,
+      y: card.y,
+      width: cardWidth,
+      height: cardHeight,
+    })),
+    { padding: pad },
   );
-
-  // One envelope value per x interval; `xs` holds the shared breakpoints.
-  const tops: number[] = [];
-  const bottoms: number[] = [];
-  for (let index = 0; index < xs.length - 1; index += 1) {
-    const start = xs[index];
-    const end = xs[index + 1];
-    const middle = (start + end) / 2;
-    const covering = rects.filter((rect) => rect.left <= middle && rect.right >= middle);
-    tops.push(Math.min(...covering.map((rect) => rect.top)));
-    bottoms.push(Math.max(...covering.map((rect) => rect.bottom)));
-  }
-
-  const x = (value: number): number => round2(value - left);
-  const y = (value: number): number => round2(value - top);
-  const last = xs.length - 1;
-  const parts: string[] = [`M ${x(xs[0])} ${y(tops[0])}`];
-
-  // Upper envelope, left to right.
-  for (let index = 1; index < last; index += 1) {
-    parts.push(`H ${x(xs[index])}`);
-    if (tops[index] !== tops[index - 1]) parts.push(`V ${y(tops[index])}`);
-  }
-  parts.push(`H ${x(xs[last])}`);
-  // Right edge, then the lower envelope right-to-left.
-  parts.push(`V ${y(bottoms[bottoms.length - 1])}`);
-  for (let index = bottoms.length - 1; index >= 0; index -= 1) {
-    parts.push(`H ${x(xs[index])}`);
-    if (index > 0 && bottoms[index - 1] !== bottoms[index]) {
-      parts.push(`V ${y(bottoms[index - 1])}`);
-    }
-  }
-  parts.push('Z');
-
-  const nonRectangular = new Set(cards.map((card) => card.y)).size > 1;
   return {
-    d: parts.join(' '),
-    left,
-    top,
-    width: right - left,
-    height: bottom - top,
-    nonRectangular,
+    d: official.pathD,
+    left: official.left,
+    top: official.top,
+    width: official.width,
+    height: official.height,
+    nonRectangular: official.isNonRectangular,
   };
 }
 
@@ -2505,8 +2499,6 @@ export function GameTable({
             // without any absolute positioning.
             marginLeft: `${handContour.left}px`,
             marginTop: `${handContour.top}px`,
-            left: `${handContour.left}px`,
-            top: `${handContour.top}px`,
             width: `${handContour.width}px`,
             height: `${handContour.height}px`,
           }}
