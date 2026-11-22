@@ -81,7 +81,24 @@ export interface CardBackProps {
   class?: string;
   /** Which design fills the back; defaults to the user's saved preference. */
   pattern?: CardBackPattern;
+  /**
+   * T-90-feedback-20261122 ITEM-2: `full` (the default) reports the canonical
+   * `100x140` card footprint, matching the throw-in / redirect outlines (and the
+   * `48x68` mobile size from the stylesheet). `mini` is the explicitly compact
+   * variant reserved for the miniature opponent card fans in Row 1.
+   */
+  size?: 'full' | 'mini';
+  /** Explicit width in px; layout CSS still wins for the talon deck. */
+  width?: number;
+  height?: number;
 }
+
+/** Canonical full card footprint the back reports. */
+export const CARD_BACK_DEFAULT_WIDTH = 100;
+export const CARD_BACK_DEFAULT_HEIGHT = 140;
+/** Compact opponent-fan footprint, matching `.opponent-cards .playing-card`. */
+export const CARD_BACK_MINI_WIDTH = 22;
+export const CARD_BACK_MINI_HEIGHT = 32;
 
 /** Active theme a monochrome card back paints itself for. */
 export type CardBackTheme = 'light' | 'dark';
@@ -405,7 +422,14 @@ function PatternTile({
 }
 
 /** The back of a playing card, sized like a [[Card]]. */
-export function CardBack({ class: className, pattern }: CardBackProps) {
+export function CardBack({ class: className, pattern, size = 'full', width, height }: CardBackProps) {
+  // T-90-feedback-20261122 ITEM-2: a full back always reports the canonical
+  // 100x140 card (48x68 mobile via the shared tokens), while `size="mini"` is
+  // the compact opponent-fan variant. Without an explicit size the box is left
+  // to the layout CSS (the talon deck keeps its own deck-card dimensions).
+  const mini = size === 'mini';
+  const cardWidth = width ?? (mini ? CARD_BACK_MINI_WIDTH : CARD_BACK_DEFAULT_WIDTH);
+  const cardHeight = height ?? (mini ? CARD_BACK_MINI_HEIGHT : CARD_BACK_DEFAULT_HEIGHT);
   // Without an explicit pattern, follow the user's Card Back preference, so the
   // header setting reaches every face-down card in the app.
   const settings = useSettings();
@@ -438,11 +462,19 @@ export function CardBack({ class: className, pattern }: CardBackProps) {
       role="img"
       aria-label="Card back"
       data-pattern={activePattern}
+      data-card-size={mini ? 'mini' : 'full'}
+      data-card-width={cardWidth}
+      data-card-height={cardHeight}
       data-colorful={design ? 'true' : 'false'}
       data-card-back-theme={design ? undefined : theme}
       data-card-back-outline={theme === 'dark' ? 'bright' : 'crisp'}
       data-roundness={roundness}
-      style={{ borderRadius: 'var(--app-roundness, 8px)' }}
+      style={{
+        borderRadius: 'var(--app-roundness, 8px)',
+        ...(width != null || height != null || mini
+          ? { width: `${cardWidth}px`, height: `${cardHeight}px` }
+          : {}),
+      }}
     >
       <defs>
         {design ? (

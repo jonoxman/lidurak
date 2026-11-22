@@ -78,6 +78,11 @@ export function TablePair({
       <div
         class="table-pair-attack table-card-attack table-card-base"
         data-card-align="top"
+        // T-90-feedback-20261122 ITEM-2: the attack card is never shrunk inside
+        // the pair — it keeps the full canonical card footprint.
+        data-card-size="full"
+        data-card-width={cardWidth}
+        data-card-height={cardHeight}
         data-uncovered-highlighted={uncoveredHighlighted ? 'true' : 'false'}
         data-drop-zone={dropZone}
         onDragOver={onDragOverCard}
@@ -92,7 +97,15 @@ export function TablePair({
         />
       </div>
       {defense ? (
-        <div class="table-pair-defense table-card-cover" data-card-align="overlap">
+        <div
+          class="table-pair-defense table-card-cover"
+          data-card-align="overlap"
+          // T-90-feedback-20261122 ITEM-2: the staggered defence card is the
+          // same full-size card as the attack it covers.
+          data-card-size="full"
+          data-card-width={cardWidth}
+          data-card-height={cardHeight}
+        >
           <Card
             suit={defense.suit}
             rank={defense.rank}

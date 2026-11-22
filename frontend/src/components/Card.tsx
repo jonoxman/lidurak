@@ -25,6 +25,25 @@ export const CARD_MOBILE_BREAKPOINT_PX = 899;
 export const CARD_MOBILE_WIDTH = 48;
 export const CARD_MOBILE_HEIGHT = 68;
 
+/**
+ * T-90-feedback-20261122 ITEM-5: hand cards may overlap by up to 80% of their
+ * width, so the leftmost `20px` of a 100px desktop card is always uncovered.
+ * The top-left corner index is structured as one vertical rank+suit stack that
+ * lives entirely inside that strip.
+ */
+export const CARD_CORNER_STRIP_PX = 20;
+/** Minimum ink-free padding between the card's left edge and the corner index. */
+export const CARD_CORNER_PADDING_LEFT_PX = 3;
+
+/**
+ * T-90-feedback-20261122 ITEM-4: clean fallback cursor offsets for the native
+ * drag image, used when the dragging element reports no measurable box.
+ */
+export const CARD_DRAG_IMAGE_OFFSET = {
+  x: CARD_DEFAULT_WIDTH / 2,
+  y: CARD_DEFAULT_HEIGHT / 2,
+} as const;
+
 export interface CardProps {
   suit: string;
   rank: string;
@@ -111,19 +130,24 @@ export const CARD_BORDER_RADIUS = 'var(--app-roundness, 8px)';
  * 100px card width), so an 80% overlap — which leaves the leftmost 20px of
  * every card uncovered — can never hide a card's rank or suit.
  *
- * The two-character `"10"` is drawn at `twoDigitFontSize = 9` so its ink stays
- * inside that same strip; `2`–`9`, `J`, `Q`, `K`, `A` keep the larger `15`.
+ * The two-character `"10"` is drawn at `twoDigitFontSize = 8.5` so its ink
+ * starts ≈`3.2px` from the left edge and stays inside that same 20px strip;
+ * `2`–`9`, `J`, `Q`, `K`, `A` keep the larger `15` (ink from ≈`4px` to
+ * ≈`17.4px`). The whole index is rendered as one `card-corner-index` group.
  * The 12pt suit pip fits naturally (`≈2.7`–`12.3`), the rank band still ends at
  * `y = 21`, and the face grid starts at the leftmost pip column `x = 22.5`.
  */
 export const CARD_INDEX = {
-  topRank: { x: 7.5, y: 21, fontSize: 15, twoDigitFontSize: 9 },
+  // T-90-feedback-20261122 ITEM-5: the two-character `"10"` is drawn at 8.5 so
+  // its ink starts at least 3px from the left edge of a 100px card while still
+  // ending inside the 20px (14 viewBox unit) strip an 80% overlap leaves clear.
+  topRank: { x: 7.5, y: 21, fontSize: 15, twoDigitFontSize: 8.5 },
   topSuit: { x: 7.5, y: 34, fontSize: 12 },
   // T-90-2 ITEM-11: the bottom-right corner is the exact 180° rotation of the
   // top-left one around the `(35, 50)` card centre, so the upside-down rank
   // sits nearest the corner (`70 - 7.5`, `100 - 21`) and the upside-down suit
   // directly above it (`70 - 7.5`, `100 - 34`).
-  bottomRank: { x: 62.5, y: 79, fontSize: 15, twoDigitFontSize: 9 },
+  bottomRank: { x: 62.5, y: 79, fontSize: 15, twoDigitFontSize: 8.5 },
   bottomSuit: { x: 62.5, y: 66, fontSize: 12 },
 } as const;
 
@@ -407,7 +431,10 @@ function useCardFrontTheme(theme: ThemeMode): CardFrontTheme {
   return resolveCardFrontTheme(theme);
 }
 
-/** An inline SVG playing card, roughly 80x114px and scalable via CSS. */
+/**
+ * An inline SVG playing card at the canonical `100x140` footprint (`48x68`
+ * below the mobile breakpoint), matching the throw-in / redirect outlines.
+ */
 export function Card({
   suit,
   rank,
@@ -437,6 +464,9 @@ export function Card({
     height ?? (mobileViewport ? CARD_MOBILE_HEIGHT : CARD_DEFAULT_HEIGHT);
   const widthCss = width == null ? `var(--card-w, ${CARD_DEFAULT_WIDTH}px)` : `${width}px`;
   const heightCss = height == null ? `var(--card-h, ${CARD_DEFAULT_HEIGHT}px)` : `${height}px`;
+  // T-90-feedback-20261122 ITEM-4: the card is explicitly fully visible at all
+  // times — before, during and after a drag — so no rule or transient drag
+  // class can ever blank it out.
   const cardStyle = {
     borderRadius: CARD_BORDER_RADIUS,
     width: widthCss,
@@ -444,6 +474,8 @@ export function Card({
     minWidth: widthCss,
     minHeight: heightCss,
     flex: `0 0 ${widthCss}`,
+    opacity: 1,
+    visibility: 'visible' as const,
   };
   // The face where the pips are drawn is theme-dependent: white on the light
   // theme, grey on the dark theme.
@@ -455,11 +487,63 @@ export function Card({
   const svgCorner = svgCornerRadius(settings.roundness);
   const roundness = String(settings.roundness);
 
+  // T-90-feedback-20261122 ITEM-4: the drag highlight never hides the card; it
+  // only marks the gesture, and every terminal event clears it.
+  const [isDragging, setIsDragging] = useState(false);
+  const clearDragging = () => setIsDragging((dragging) => (dragging ? false : dragging));
+  const handleDragStart = (event: DragEvent) => {
+    setIsDragging(true);
+    const source = event.currentTarget as HTMLElement | null;
+    const transfer = event.dataTransfer;
+    // Guarded for jsdom / environments without a native drag image: the source
+    // card stays painted either way. A caller that supplies its own
+    // `onDragStart` owns the drag image (GameTable paints it from the live
+    // hand card), so the card never installs a second, competing image.
+    if (!onDragStart && source && transfer && typeof transfer.setDragImage === 'function') {
+      const rect =
+        typeof source.getBoundingClientRect === 'function'
+          ? source.getBoundingClientRect()
+          : null;
+      const offsetX = rect && rect.width > 0 ? rect.width / 2 : CARD_DRAG_IMAGE_OFFSET.x;
+      const offsetY = rect && rect.height > 0 ? rect.height / 2 : CARD_DRAG_IMAGE_OFFSET.y;
+      try {
+        transfer.setDragImage(source, offsetX, offsetY);
+      } catch {
+        // The browser rejected the image; the live card is still visible.
+      }
+    }
+    onDragStart?.(event);
+  };
+  const handleDragEnd = () => {
+    clearDragging();
+    onDragEnd?.();
+  };
+
   const classes = ['card-slot'];
   if (selected) classes.push('selected');
   if (playable) classes.push('legal-playable');
   if (trump) classes.push('trump');
   if (onClick) classes.push('clickable');
+  if (isDragging) classes.push('is-dragging');
+
+  // T-90-feedback-20261122 ITEM-4: a live drag never hides the source card.
+  // `onDragStart` only records the gesture (the highlight class is purely
+  // additive) and hands the browser a guaranteed-visible drag image with clean
+  // cursor offsets; the caller's handlers still run, and every way the gesture
+  // can end (`dragend`, pointer up / cancel) clears the highlight again.
+  const dragHandlers = {
+    draggable,
+    onDragStart: handleDragStart,
+    onDragEnd: handleDragEnd,
+    onPointerUp: clearDragging,
+    onPointerCancel: clearDragging,
+  };
+  const visibilityAttrs = {
+    'data-card-width': resolvedWidth,
+    'data-card-height': resolvedHeight,
+    'data-dragging': isDragging ? 'true' : 'false',
+    'data-card-visible': 'true',
+  };
 
   if (!faceUp) {
     return (
@@ -467,11 +551,11 @@ export function Card({
         class={classes.join(' ')}
         data-selected={selected ? 'true' : 'false'}
         data-roundness={roundness}
-        data-card-width={resolvedWidth}
-        data-card-height={resolvedHeight}
+        {...visibilityAttrs}
         style={cardStyle}
         onClick={onClick}
         onDblClick={onDoubleClick}
+        {...dragHandlers}
       >
         <CardBack />
       </div>
@@ -498,14 +582,11 @@ export function Card({
       data-card-theme={theme}
       data-roundness={roundness}
       data-trump-glow="false"
-      data-card-width={resolvedWidth}
-      data-card-height={resolvedHeight}
+      {...visibilityAttrs}
       style={cardStyle}
       onClick={onClick}
       onDblClick={onDoubleClick}
-      draggable={draggable}
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
+      {...dragHandlers}
     >
       <svg
         class={trump ? 'playing-card card-face trump-card' : 'playing-card card-face'}
@@ -536,42 +617,54 @@ export function Card({
           stroke-width={1.5}
         />
 
-        {/* Top-left index, kept inside its own narrow corner band. */}
-        <text
-          class="card-rank-index"
-          data-index="top-rank"
-          data-testid="card-rank-top"
-          data-font-style="sans-serif"
-          data-inverted="false"
-          x={CARD_INDEX.topRank.x}
-          y={CARD_INDEX.topRank.y}
-          font-size={
-            label.length > 1
-              ? CARD_INDEX.topRank.twoDigitFontSize
-              : CARD_INDEX.topRank.fontSize
-          }
-          font-family={CARD_CORNER_FONT_FAMILY}
-          font-weight="700"
-          text-anchor="middle"
-          fill={color}
+        {/* T-90-feedback-20261122 ITEM-5: one vertical rank+suit stack anchored
+            inside the leftmost 20px strip, so an 80% overlap by the adjacent
+            hand card can never cover either glyph. */}
+        <g
+          class="card-corner-index"
+          data-corner="top-left"
+          data-testid="card-corner-top-left"
+          data-stack="vertical"
+          data-strip="left"
+          data-strip-width-px={CARD_CORNER_STRIP_PX}
+          data-padding-left-px={CARD_CORNER_PADDING_LEFT_PX}
         >
-          {label}
-        </text>
-        {/* T-90 ITEM-3a: the corner suit shares the rank's `x` and horizontal
-            centre axis, so it sits exactly centred beneath the rank text. */}
-        <text
-          class="card-suit-index"
-          data-index="top-suit"
-          data-testid="card-suit-top"
-          data-inverted="false"
-          x={CARD_INDEX.topSuit.x}
-          y={CARD_INDEX.topSuit.y}
-          font-size={CARD_INDEX.topSuit.fontSize}
-          text-anchor="middle"
-          fill={color}
-        >
-          {symbol}
-        </text>
+          <text
+            class="card-rank-index"
+            data-index="top-rank"
+            data-testid="card-rank-top"
+            data-font-style="sans-serif"
+            data-inverted="false"
+            x={CARD_INDEX.topRank.x}
+            y={CARD_INDEX.topRank.y}
+            font-size={
+              label.length > 1
+                ? CARD_INDEX.topRank.twoDigitFontSize
+                : CARD_INDEX.topRank.fontSize
+            }
+            font-family={CARD_CORNER_FONT_FAMILY}
+            font-weight="700"
+            text-anchor="middle"
+            fill={color}
+          >
+            {label}
+          </text>
+          {/* T-90 ITEM-3a: the corner suit shares the rank's `x` and horizontal
+              centre axis, so it sits exactly centred beneath the rank text. */}
+          <text
+            class="card-suit-index"
+            data-index="top-suit"
+            data-testid="card-suit-top"
+            data-inverted="false"
+            x={CARD_INDEX.topSuit.x}
+            y={CARD_INDEX.topSuit.y}
+            font-size={CARD_INDEX.topSuit.fontSize}
+            text-anchor="middle"
+            fill={color}
+          >
+            {symbol}
+          </text>
+        </g>
 
         {/* Center face: repeating pips, one ornate ace pip, or a face letter. */}
         {pips ? (
