@@ -11,10 +11,7 @@ import {
 } from '../api/client';
 import { GameWebSocket } from '../api/websocket';
 import { soundEngine } from '../audio/SoundEngine';
-import { getStoredSortMode, setSettings } from '../state/settings';
-
-/** One-click Light-theme preset; it only repaints, so no new room is created. */
-export const LIGHT_THEME_PRESET_ID = 'light-theme-gradient';
+import { getStoredSortMode } from '../state/settings';
 import {
   buildCoverCard,
   buildDeclareSurrender,
@@ -269,22 +266,15 @@ export function playReplayFrameSound(frames: ReplayFrame[], targetIdx: number): 
   }
 }
 
-/** One-click scripted positions offered in the lobby and the game sidebar. */
+/**
+ * The four current-round scripted positions offered in the lobby and the game
+ * sidebar. Obsolete presets of previous rounds are pruned.
+ */
 export const QA_SCENARIOS: { id: string; label: string }[] = [
-  { id: 'throw-in-visibility-4p', label: 'Throw-In Visibility (4P)' },
-  { id: 'throw-in-capacity-cap', label: 'Throw-In Capacity Cap' },
-  { id: 'huge-hand-36', label: 'Huge Hand (36)' },
-  { id: 'huge-hand-52', label: 'Huge Hand (52)' },
-  { id: '3p-redirect-bob', label: '3P Redirect (Bob POV)' },
-  { id: 'chaos-4p', label: '4P Chaos Targets' },
-  { id: 'surrender-half-off', label: 'Surrender Half-Off' },
-  { id: 'full-hand-pickup', label: 'Full Hand Pickup (30 Cards)' },
-  { id: 'defenseless-surrender', label: 'Defenseless Auto-Surrender' },
-  { id: 'discard-and-endgame', label: 'Discard & Endgame Durak' },
-  { id: 'throw-in-multi-qa', label: 'Throw-In & Multi-Card QA' },
-  { id: 'large-hand-stress', label: 'Large Hand (30+ Cards)' },
-  { id: 'transparent-mode', label: 'Transparent Mode' },
-  { id: LIGHT_THEME_PRESET_ID, label: 'Light Theme Header' },
+  { id: 'qa-normal-6-actions', label: '6-Card 10s & Actions' },
+  { id: 'qa-medium-14-expand', label: '14-Card Expand Box' },
+  { id: 'qa-large-30-compress', label: '30-Card Compress & Part' },
+  { id: 'qa-single-card', label: '1-Card Hand (No Part)' },
 ];
 
 /**
@@ -1695,12 +1685,6 @@ export function GamePage({
 
   // QA presets: one click drops the reviewer into a scripted position.
   const startPreset = (presetId: string) => {
-    // T-90-feedback-4: the Light theme check repaints this live table in place
-    // (darker grey page + inverse header gradient) without leaving the game.
-    if (presetId === LIGHT_THEME_PRESET_ID) {
-      setSettings({ theme: 'light' });
-      return;
-    }
     if (presetPending) return;
     setPresetPending(true);
     setPresetError(null);

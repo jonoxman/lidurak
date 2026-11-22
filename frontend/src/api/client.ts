@@ -106,29 +106,21 @@ export interface CreatedPresetGame {
   defaultPlayerId: string;
 }
 
-/** Every scripted position offered in the lobby and the game's left sidebar. */
+/**
+ * Every scripted position offered in the lobby and the game's left sidebar:
+ * exactly the four curated scenarios of the current QA round.
+ */
 export const QA_SCENARIOS: { id: string; label: string }[] = [
-  { id: 'throw-in-visibility-4p', label: 'Throw-In Visibility (4P)' },
-  { id: 'throw-in-capacity-cap', label: 'Throw-In Capacity Cap' },
-  { id: 'huge-hand-36', label: 'Huge Hand (36)' },
-  { id: 'huge-hand-52', label: 'Huge Hand (52)' },
-  { id: '3p-redirect-bob', label: '3P Redirect (Bob POV)' },
-  { id: 'chaos-4p', label: '4P Chaos Targets' },
-  { id: 'surrender-half-off', label: 'Surrender Half-Off' },
-  { id: 'full-hand-pickup', label: 'Full Hand Pickup (30 Cards)' },
-  { id: 'defenseless-surrender', label: 'Defenseless Auto-Surrender' },
-  { id: 'discard-and-endgame', label: 'Discard & Endgame Durak' },
-  { id: 'throw-in-multi-qa', label: 'Throw-In & Multi-Card QA' },
-  { id: 'large-hand-stress', label: 'Large Hand (30+ Cards)' },
-  { id: 'transparent-mode', label: 'Transparent Mode' },
-  { id: 'light-theme-gradient', label: 'Light Theme Header' },
+  { id: 'qa-normal-6-actions', label: '6-Card 10s & Actions' },
+  { id: 'qa-medium-14-expand', label: '14-Card Expand Box' },
+  { id: 'qa-large-30-compress', label: '30-Card Compress & Part' },
+  { id: 'qa-single-card', label: '1-Card Hand (No Part)' },
 ];
 
 /**
- * Starts one of the scripted QA positions (`3p-redirect-bob`, `chaos-4p`,
- * `throw-in-multi-qa`, `large-hand-stress`, `surrender-half-off`,
- * `discard-and-endgame`) so a reviewer can jump straight to that exact table
- * state in one click.
+ * Starts one of the four scripted QA positions (`qa-normal-6-actions`,
+ * `qa-medium-14-expand`, `qa-large-30-compress`, `qa-single-card`) so a
+ * reviewer can jump straight to that exact table state in one click.
  */
 export async function createPresetGame(preset: string): Promise<CreatedPresetGame> {
   const response = await fetch('/api/games/preset', {
