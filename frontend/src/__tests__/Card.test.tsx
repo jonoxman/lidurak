@@ -3,8 +3,11 @@ import { act, fireEvent, render, screen } from '@testing-library/preact';
 import {
   ACE_PIP,
   CARD_CORNER_FONT_FAMILY,
+  CARD_CORNER_PADDING_LEFT_PX,
+  CARD_CORNER_STRIP_PX,
   CARD_DEFAULT_HEIGHT,
   CARD_DEFAULT_WIDTH,
+  CARD_DRAG_IMAGE_OFFSET,
   CARD_INDEX,
   CARD_SERIF_FONT_FAMILY,
   Card,
@@ -25,6 +28,7 @@ import {
   resolveCardBackTheme,
   svgCornerRadius,
 } from '../components/CardBack';
+import { TablePair } from '../components/TablePair';
 import { resetSettings, setSettings } from '../state/settings';
 import tableCss from '../styles/table.css?raw';
 
@@ -1471,5 +1475,204 @@ describe('T-90-feedback-20261106_111512-3: token-sized cards', () => {
     expect(tableCss).toMatch(/\.card-slot\s*{[^}]*--card-width: var\(--card-w, 100px\);/);
     expect(tableCss).toMatch(/@media \(max-width: 899px\)\s*{\s*:root\s*{[^}]*--card-w: 48px;/);
     unmount();
+  });
+});
+
+describe('T-90-feedback-20261122_011021-3: full-size cards and always-visible drag', () => {
+  afterEach(() => {
+    resetSettings();
+  });
+
+  it('ITEM-2: renders the canonical 100x140 card box with no smaller inline override', () => {
+    const { container } = render(<Card suit="hearts" rank="ten" />);
+    const slot = container.querySelector('.card-slot') as HTMLElement;
+    const face = container.querySelector('svg.card-face') as SVGElement;
+
+    expect([CARD_DEFAULT_WIDTH, CARD_DEFAULT_HEIGHT]).toEqual([100, 140]);
+    expect(slot.getAttribute('data-card-width')).toBe('100');
+    expect(slot.getAttribute('data-card-height')).toBe('140');
+    // The footprint is the shared token (`100x140` desktop / `48x68` mobile),
+    // never a hardcoded smaller pixel box on the hand or table card.
+    expect(slot.style.width).toBe('var(--card-w, 100px)');
+    expect(slot.style.height).toBe('var(--card-h, 140px)');
+    expect(slot.style.minWidth).toBe('var(--card-w, 100px)');
+    expect(slot.style.minHeight).toBe('var(--card-h, 140px)');
+    expect(slot.style.width).not.toMatch(/^\d+px$/);
+    expect(slot.style.height).not.toMatch(/^\d+px$/);
+    // The artwork fills the whole canonical box rather than a shrunken inner SVG.
+    expect(face.getAttribute('width')).toBeNull();
+    expect(face.getAttribute('height')).toBeNull();
+    expect(tableCss).toMatch(/\.playing-card\s*{[^}]*width: 100%;[^}]*height: 100%;/);
+  });
+
+  it('ITEM-2: keeps the card back and both cards of a table pair at the canonical size', () => {
+    const back = render(<CardBack />);
+    const backSvg = back.container.querySelector('svg.card-back') as SVGElement;
+    expect(backSvg.getAttribute('data-card-size')).toBe('full');
+    expect(backSvg.getAttribute('data-card-width')).toBe('100');
+    expect(backSvg.getAttribute('data-card-height')).toBe('140');
+    // The talon deck's own layout CSS still owns the drawn box.
+    expect(backSvg.style.width).toBe('');
+    back.unmount();
+
+    const mini = render(<CardBack size="mini" />);
+    const miniSvg = mini.container.querySelector('svg.card-back') as SVGElement;
+    expect(miniSvg.getAttribute('data-card-size')).toBe('mini');
+    expect([miniSvg.style.width, miniSvg.style.height]).toEqual(['22px', '32px']);
+    mini.unmount();
+
+    const { container } = render(
+      <TablePair
+        attack={{ suit: 'hearts', rank: 'six' }}
+        defense={{ suit: 'spades', rank: 'seven' }}
+      />,
+    );
+    const cards = Array.from(container.querySelectorAll('.card-slot')) as HTMLElement[];
+    expect(cards).toHaveLength(2);
+    for (const card of cards) {
+      expect(card.getAttribute('data-card-width')).toBe('100');
+      expect(card.getAttribute('data-card-height')).toBe('140');
+      expect(card.style.width).toBe('var(--card-w, 100px)');
+      expect(card.style.height).toBe('var(--card-h, 140px)');
+    }
+    const wrappers = Array.from(
+      container.querySelectorAll('.table-pair-attack, .table-pair-defense'),
+    );
+    expect(wrappers).toHaveLength(2);
+    for (const wrapper of wrappers) {
+      expect(wrapper.getAttribute('data-card-size')).toBe('full');
+      expect(wrapper.getAttribute('data-card-width')).toBe('100');
+      expect(wrapper.getAttribute('data-card-height')).toBe('140');
+    }
+    expect(container.querySelector('.table-pair')!.getAttribute('data-card-width')).toBe('100');
+  });
+
+  it('ITEM-5: stacks the rank and suit in the leftmost 20px corner strip on every rank', () => {
+    for (const rank of ['six', 'ten', 'ace', 'king']) {
+      const { container, unmount } = render(<Card suit="spades" rank={rank} />);
+      const corner = container.querySelector('[data-testid="card-corner-top-left"]')!;
+      const rankNode = corner.querySelector('[data-testid="card-rank-top"]')!;
+      const suitNode = corner.querySelector('[data-testid="card-suit-top"]')!;
+
+      expect(corner.getAttribute('data-corner'), rank).toBe('top-left');
+      expect(corner.getAttribute('data-stack'), rank).toBe('vertical');
+      expect(corner.getAttribute('data-strip'), rank).toBe('left');
+      expect(Number(corner.getAttribute('data-strip-width-px')), rank).toBe(
+        CARD_CORNER_STRIP_PX,
+      );
+      expect(Number(corner.getAttribute('data-padding-left-px')), rank).toBe(
+        CARD_CORNER_PADDING_LEFT_PX,
+      );
+      // Both corner glyphs are stacked vertically (`y` grows downward).
+      expect(Number(suitNode.getAttribute('y')), rank).toBeGreaterThan(
+        Number(rankNode.getAttribute('y')),
+      );
+
+      // The painted ink starts at least 3px from the left edge and ends inside
+      // the 20px strip an 80% overlap always leaves uncovered.
+      for (const node of [rankNode, suitNode]) {
+        const box = textBox(node);
+        const leftPx = (box.left * CARD_DEFAULT_WIDTH) / 70;
+        const rightPx = (box.right * CARD_DEFAULT_WIDTH) / 70;
+        expect(leftPx, `${rank} padding-left`).toBeGreaterThanOrEqual(
+          CARD_CORNER_PADDING_LEFT_PX,
+        );
+        expect(leftPx, `${rank} padding-left max`).toBeLessThanOrEqual(4.5);
+        expect(rightPx, `${rank} strip`).toBeLessThanOrEqual(CARD_CORNER_STRIP_PX);
+      }
+
+      unmount();
+    }
+  });
+
+  it('ITEM-4: keeps a dragged card visible and clears the drag highlight on dragEnd', () => {
+    const setDragImage = vi.fn();
+    const dataTransfer = {
+      setDragImage,
+      effectAllowed: 'move',
+      setData: vi.fn(),
+      getData: vi.fn(),
+    };
+    const onDragEnd = vi.fn();
+    const onClick = vi.fn();
+    const onDoubleClick = vi.fn();
+    const { container } = render(
+      <Card
+        suit="hearts"
+        rank="six"
+        draggable
+        onClick={onClick}
+        onDoubleClick={onDoubleClick}
+        onDragEnd={onDragEnd}
+      />,
+    );
+    const slot = container.querySelector('.card-slot') as HTMLElement;
+
+    expect(slot.style.opacity).toBe('1');
+    expect(slot.style.visibility).toBe('visible');
+
+    fireEvent.dragStart(slot, { dataTransfer });
+
+    expect(slot.getAttribute('data-dragging')).toBe('true');
+    expect(slot.getAttribute('data-card-visible')).toBe('true');
+    expect(slot.classList.contains('is-dragging')).toBe(true);
+    // Never invisible mid-gesture: no fade, no hidden state, no hidden class.
+    expect(slot.style.opacity).toBe('1');
+    expect(slot.style.opacity).not.toBe('0');
+    expect(slot.style.visibility).toBe('visible');
+    expect(slot.className).not.toMatch(/hidden|invisible|ghost/);
+    expect(slot.getAttribute('data-card-width')).toBe('100');
+    expect(slot.getAttribute('data-card-height')).toBe('140');
+
+    // The drag image is the live, guaranteed-visible card with clean offsets.
+    expect(setDragImage).toHaveBeenCalledTimes(1);
+    const [image, offsetX, offsetY] = setDragImage.mock.calls[0];
+    expect(image).toBe(slot);
+    expect([offsetX, offsetY]).toEqual([CARD_DRAG_IMAGE_OFFSET.x, CARD_DRAG_IMAGE_OFFSET.y]);
+
+    fireEvent.dragEnd(slot);
+
+    expect(onDragEnd).toHaveBeenCalledTimes(1);
+    expect(slot.getAttribute('data-dragging')).toBe('false');
+    expect(slot.classList.contains('is-dragging')).toBe(false);
+    expect(slot.style.opacity).toBe('1');
+    expect(slot.style.visibility).toBe('visible');
+
+    // Click to select and double-click to throw in stay usable while draggable.
+    fireEvent.click(slot);
+    fireEvent.dblClick(slot);
+    expect(onClick).toHaveBeenCalledTimes(1);
+    expect(onDoubleClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('ITEM-4: delegates to caller drag handlers and lets them own the drag image', () => {
+    const setDragImage = vi.fn();
+    const onDragStart = vi.fn();
+    const { container } = render(
+      <Card suit="diamonds" rank="eight" draggable onDragStart={onDragStart} />,
+    );
+    const slot = container.querySelector('.card-slot') as HTMLElement;
+
+    fireEvent.dragStart(slot, { dataTransfer: { setDragImage } });
+
+    expect(onDragStart).toHaveBeenCalledTimes(1);
+    expect(setDragImage).not.toHaveBeenCalled();
+    expect(slot.style.opacity).toBe('1');
+    expect(slot.style.visibility).toBe('visible');
+  });
+
+  it('ITEM-4: survives a drag with no native setDragImage and clears on pointer cancel', () => {
+    const { container } = render(<Card suit="clubs" rank="two" draggable />);
+    const slot = container.querySelector('.card-slot') as HTMLElement;
+
+    expect(() => fireEvent.dragStart(slot, { dataTransfer: {} })).not.toThrow();
+    expect(slot.getAttribute('data-dragging')).toBe('true');
+    expect(slot.style.opacity).toBe('1');
+    expect(slot.style.visibility).toBe('visible');
+
+    fireEvent.pointerCancel(slot);
+    expect(slot.getAttribute('data-dragging')).toBe('false');
+    expect(slot.style.opacity).toBe('1');
+    expect(slot.style.visibility).toBe('visible');
   });
 });
