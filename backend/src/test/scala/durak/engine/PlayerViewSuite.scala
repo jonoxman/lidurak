@@ -1,5 +1,6 @@
 package durak.engine
 
+import durak.server.GameManager
 import io.circe.syntax.*
 import JsonCodecs.given
 
@@ -699,4 +700,53 @@ class PlayerViewSuite extends munit.FunSuite:
     // Every seat that can still act is on the clock together.
     assertEquals(gs.promptedPlayerIds, Set("p0", "p2", "p3"))
     assertEquals(PlayerGameView.forViewer(gs, "p2").promptedPlayerIds, Vector("p0", "p2", "p3"))
+  }
+
+  // --- T-90-feedback-20261122_121105-1: strict throw-in projection ---
+
+  private def presetState(presetId: String): GameState =
+    GameManager.preset(presetId) match
+      case Right(game) => game.state
+      case Left(error) => fail(error)
+
+  test("throw-in-visibility-3p projects the outline only to a legal thrower") {
+    val gs = presetState("throw-in-visibility-3p")
+
+    val alice = PlayerGameView.forViewer(gs, "p0")
+    assertEquals(alice.myId, "p0")
+    assertEquals(alice.myHasPassed, false)
+    assertEquals(alice.throwInCards.size, 3)
+    assertEquals(alice.throwInCapacity, 3)
+    assertEquals(alice.canThrowIn, true)
+
+    // The defender and the matching-less non-defender carry no capacity.
+    assertEquals(PlayerGameView.forViewer(gs, "p1").canThrowIn, false)
+    assertEquals(PlayerGameView.forViewer(gs, "p2").canThrowIn, false)
+  }
+
+  test("a pass clears the throw-in projection for the rest of the bout") {
+    val gs = presetState("throw-in-visibility-3p")
+    val passed = GameEngine
+      .applyAction(gs, GameAction.PassTurn("p0"))
+      .getOrElse(fail("expected a legal pass"))
+
+    val view = PlayerGameView.forViewer(passed, "p0")
+    assertEquals(view.myHasPassed, true)
+    assertEquals(view.throwInCards, Nil)
+    assertEquals(view.throwInCapacity, 0)
+    assertEquals(view.canThrowIn, false)
+  }
+
+  test("mega-hand-30 projects a 30-card hand without any throw-in offer") {
+    val gs = presetState("mega-hand-30")
+    val alice = PlayerGameView.forViewer(gs, "p0")
+
+    assertEquals(alice.myHand.size, 30)
+    assertEquals(alice.talonCount, 0)
+    assertEquals(alice.bottomTrumpCard, None)
+    assertEquals(alice.throwInCards, Nil)
+    assertEquals(alice.throwInCapacity, 0)
+    assertEquals(alice.canThrowIn, false)
+    // A defender is never a thrower, whatever it holds.
+    assertEquals(PlayerGameView.forViewer(gs, "p1").canThrowIn, false)
   }

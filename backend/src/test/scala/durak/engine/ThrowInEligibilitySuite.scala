@@ -286,3 +286,105 @@ class ThrowInEligibilitySuite extends munit.FunSuite:
     assertEquals(bob.myHand.size, 5)
     assertEquals(bob.canThrowIn, false)
   }
+
+  // --- T-90-feedback-20261122_121105-1: the two 1-click QA tables ---
+
+  test("throw-in-visibility-3p offers three cards to Alice and nothing to Bob or Carol") {
+    val visibility3p = preset("throw-in-visibility-3p")
+    val alice = PlayerGameView.forViewer(visibility3p, "p0")
+
+    assertEquals(alice.myName, "Alice")
+    assertEquals(alice.myHand.size, 5)
+    assertEquals(
+      alice.tablePairs.map(pair => (pair.attack, pair.defense)),
+      Vector((card(Rank.Seven, Suit.Spades), Some(card(Rank.Eight, Suit.Spades))))
+    )
+    assertEquals(alice.throwInCards, List(sevenHearts, sevenDiamonds, sevenClubs))
+    assertEquals(alice.throwInCapacity, 3)
+    assertEquals(alice.canThrowIn, true)
+    assert(alice.legalActions.contains("throwIn"), alice.legalActions.toString)
+    assert(alice.legalActions.contains("pass"), alice.legalActions.toString)
+
+    // The defender never sees the outline, even holding a rank on the table.
+    val bob = PlayerGameView.forViewer(visibility3p, "p1")
+    assertEquals(bob.myName, "Bob")
+    assertEquals(bob.myHand.size, 5)
+    assertEquals(bob.throwInCards, Nil)
+    assertEquals(bob.throwInCapacity, 0)
+    assertEquals(bob.canThrowIn, false)
+
+    // A non-defender with no rank on the table sees no outline either.
+    val carol = PlayerGameView.forViewer(visibility3p, "p2")
+    assertEquals(carol.myName, "Carol")
+    assertEquals(carol.myHand.size, 4)
+    assert(
+      !carol.myHand.exists(held => held.rank == Rank.Seven || held.rank == Rank.Eight),
+      carol.myHand.toString
+    )
+    assertEquals(carol.throwInCards, Nil)
+    assertEquals(carol.throwInCapacity, 0)
+    assertEquals(carol.canThrowIn, false)
+  }
+
+  test("throw-in-visibility-3p deploys three cards at once and clears on a pass") {
+    val visibility3p = preset("throw-in-visibility-3p")
+    val multi = GameEngine
+      .applyAction(
+        visibility3p,
+        GameAction.ThrowInCards("p0", List(sevenHearts, sevenDiamonds, sevenClubs))
+      )
+      .getOrElse(fail("expected a legal three-card throw-in"))
+
+    assertEquals(multi.tablePairs.size, 4)
+    assertEquals(
+      multi.tablePairs.map(_.attack).takeRight(3),
+      Vector(sevenHearts, sevenDiamonds, sevenClubs)
+    )
+    // Alice spent every matching card, so her outline disappears.
+    assertEquals(PlayerGameView.forViewer(multi, "p0").canThrowIn, false)
+    assertEquals(PlayerGameView.forViewer(multi, "p0").throwInCards, Nil)
+
+    val passed = GameEngine
+      .applyAction(visibility3p, GameAction.PassTurn("p0"))
+      .getOrElse(fail("expected a legal pass"))
+    val passedView = PlayerGameView.forViewer(passed, "p0")
+    assertEquals(passedView.myHasPassed, true)
+    assertEquals(passedView.throwInCards, Nil)
+    assertEquals(passedView.throwInCapacity, 0)
+    assertEquals(passedView.canThrowIn, false)
+  }
+
+  test("mega-hand-30 keeps a 30-card defender out of the throw-in outline") {
+    val megaHand = preset("mega-hand-30")
+    val alice = PlayerGameView.forViewer(megaHand, "p0")
+
+    assertEquals(alice.myName, "Alice")
+    assertEquals(alice.myHand.size, 30)
+    assertEquals(alice.attackerIdx, 1)
+    assertEquals(alice.defenderIdx, 0)
+    assertEquals(alice.trumpSuit, Suit.Hearts)
+    assertEquals(alice.tablePairs, Vector(TablePair(card(Rank.Seven, Suit.Spades))))
+    assertEquals(alice.canThrowIn, false)
+    assertEquals(alice.throwInCards, Nil)
+    assertEquals(alice.throwInCapacity, 0)
+    assert(alice.legalActions.contains("cover"), alice.legalActions.toString)
+    assert(!alice.legalActions.contains("throwIn"), alice.legalActions.toString)
+
+    // 12 cards cover the 7♠ (8♠ 9♠ A♠ plus every heart trump); 18 do not.
+    val attack = alice.tablePairs.head.attack
+    assertEquals(alice.myHand.count(held => held.covers(attack, alice.trumpSuit)), 12)
+    assertEquals(alice.myHand.count(held => !held.covers(attack, alice.trumpSuit)), 18)
+    List(
+      card(Rank.Eight, Suit.Spades),
+      card(Rank.Nine, Suit.Spades),
+      card(Rank.Ace, Suit.Spades),
+      card(Rank.Six, Suit.Hearts),
+      card(Rank.Nine, Suit.Hearts)
+    ).foreach(held => assert(alice.myHand.contains(held), s"missing $held: ${alice.myHand}"))
+
+    val bob = PlayerGameView.forViewer(megaHand, "p1")
+    assertEquals(bob.myName, "Bob")
+    assertEquals(bob.myHand.size, 5)
+    assertEquals(bob.canThrowIn, false)
+    assertEquals(bob.throwInCards, Nil)
+  }
