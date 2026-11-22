@@ -89,9 +89,9 @@ trap cleanup_on_interrupt INT TERM
 ./agent-orchestration/start-workspace.sh "$INITIAL_WORKERS"
 
 # === THREE-POOL ANTIGRAVITY MODEL ROUTING ===
-ARCHITECT_CHAIN=("gemini-4-neon-high" "claude-opus-5-5-high" "claude-sonnet-5-5-high")
-REVIEWER_R1_CHAIN=("gemini-4-neon-high" "claude-sonnet-5-5-high" "claude-opus-5-5-high")
-REVIEWER_ESCALATED_CHAIN=("gemini-4-neon-high" "claude-opus-5-5-high" "claude-sonnet-5-5-high")
+ARCHITECT_CHAIN=("gemini-4-neon-high" "claude-opus-5-5-high" "gemini-4-argon-high" "claude-sonnet-5-5-high")
+REVIEWER_R1_CHAIN=("gemini-4-argon-high" "gemini-4-neon-medium" "claude-sonnet-5-5-high" "gemini-4-neon-high")
+REVIEWER_ESCALATED_CHAIN=("gemini-4-neon-high" "claude-opus-5-5-high" "claude-sonnet-5-5-high" "gemini-4-argon-high")
 FLASH_PRIMARY_CHAIN=("gemini-4-hydrogen-high")
 
 AGY_TIMEOUT_SEC=600
