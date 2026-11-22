@@ -89,10 +89,10 @@ trap cleanup_on_interrupt INT TERM
 ./agent-orchestration/start-workspace.sh "$INITIAL_WORKERS"
 
 # === THREE-POOL ANTIGRAVITY MODEL ROUTING ===
-ARCHITECT_CHAIN=("gemini-4-argon-high" "claude-opus-5-5-high" "claude-sonnet-5-5-high")
-REVIEWER_R1_CHAIN=("gemini-4-argon-high" "claude-sonnet-5-5-high" "claude-opus-5-5-high")
-REVIEWER_ESCALATED_CHAIN=("gemini-4-argon-high" "claude-opus-5-5-high" "claude-sonnet-5-5-high")
-FLASH_PRIMARY_CHAIN=("gemini-3.8-flash-high")
+ARCHITECT_CHAIN=("gemini-4-neon-high" "claude-opus-5-5-high" "claude-sonnet-5-5-high")
+REVIEWER_R1_CHAIN=("gemini-4-neon-high" "claude-sonnet-5-5-high" "claude-opus-5-5-high")
+REVIEWER_ESCALATED_CHAIN=("gemini-4-neon-high" "claude-opus-5-5-high" "claude-sonnet-5-5-high")
+FLASH_PRIMARY_CHAIN=("gemini-4-hydrogen-high")
 
 AGY_TIMEOUT_SEC=600
 SESSION_TIMEOUT_SEC=3300
@@ -115,6 +115,7 @@ echo "⚙️  Bot Git Identity   : ${AGENT_GIT_NAME} <${AGENT_GIT_EMAIL}>"
 echo "⚙️  Architect Pool     : ${ARCHITECT_CHAIN[*]}"
 echo "⚙️  Reviewer R1 Pool   : ${REVIEWER_R1_CHAIN[*]}"
 echo "⚙️  Escalation Pool    : ${REVIEWER_ESCALATED_CHAIN[*]}"
+echo "⚙️  Repetitive Pool    : ${FLASH_PRIMARY_CHAIN[*]}"
 echo "=================================================================="
 
 git checkout main 2>/dev/null || true
@@ -1245,7 +1246,7 @@ export async function runCustomSteps(page, captureStep) {
 // ===END_OF_FILES===
 PROMPT_EOF
 
-  try_agy_call "gemini-3.8-flash-high" ".reviews/gen_playwright_steps_prompt.txt" ".reviews/custom_qa_steps.raw.mjs" "runCustomSteps" "// ===END_OF_FILES===" || true
+  try_agy_call "gemini-4-hydrogen-high" ".reviews/gen_playwright_steps_prompt.txt" ".reviews/custom_qa_steps.raw.mjs" "runCustomSteps" "// ===END_OF_FILES===" || true
   sed '/^```/d; /===END_OF_FILES===/d' .reviews/custom_qa_steps.raw.mjs > .reviews/custom_qa_steps.mjs 2>/dev/null || true
 
   # Run Headless Chromium inside freebuff_worker
