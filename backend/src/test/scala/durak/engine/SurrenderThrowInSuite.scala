@@ -678,6 +678,43 @@ class SurrenderThrowInSuite extends munit.FunSuite:
     assertEquals(next.players(0).hasPassed, false)
   }
 
+  test("a throw-in deploys cards of different table ranks in one atomic action") {
+    val seven = card(Rank.Seven, Suit.Hearts)
+    val eight = card(Rank.Eight, Suit.Hearts)
+    val offRank = card(Rank.King, Suit.Clubs)
+    val gs = threePlayer(
+      attackerHand = List(seven, eight, offRank),
+      defenderHand = List(
+        card(Rank.Nine, Suit.Spades),
+        card(Rank.Ten, Suit.Spades),
+        card(Rank.Jack, Suit.Spades),
+        card(Rank.Queen, Suit.Spades)
+      ),
+      thirdHand = List(card(Rank.Ten, Suit.Clubs)),
+      tablePairs = Vector(
+        TablePair(card(Rank.Seven, Suit.Spades), Some(card(Rank.Eight, Suit.Spades)))
+      )
+    )
+
+    // 7♥ matches the attack's rank and 8♥ the covering card's rank.
+    assertEquals(GameEngine.throwInCapacity(gs, "p0"), 2)
+    val multi = GameEngine
+      .applyAction(gs, GameAction.ThrowInCards("p0", List(seven, eight)))
+      .getOrElse(fail("expected a legal mixed-rank throw-in"))
+    assertEquals(multi.tablePairs.size, 3)
+    assertEquals(multi.tablePairs.map(_.attack).takeRight(2), Vector(seven, eight))
+    assertEquals(multi.players(0).hand.toList, List(offRank))
+
+    // One off-rank card rejects the whole batch without mutating the position.
+    val rejected = GameEngine.applyAction(
+      gs,
+      GameAction.ThrowInCards("p0", List(seven, offRank))
+    )
+    assert(rejected.isLeft, rejected)
+    assertEquals(gs.tablePairs.size, 1)
+    assertEquals(gs.players(0).hand.size, 3)
+  }
+
   test("a multi-card throw-in containing an off-rank card is rejected") {
     val attack = card(Rank.Seven, Suit.Spades)
     val first = card(Rank.Seven, Suit.Hearts)
