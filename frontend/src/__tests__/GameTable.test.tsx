@@ -35,6 +35,7 @@ import {
   SEAT_BOX,
   TableDeck,
   assignSeats,
+  boutLayout,
   clockwiseOffset,
   discardLayout,
   handLayout,
@@ -56,6 +57,7 @@ import {
   type TablePairData,
 } from '../components/GameTable';
 import { ActionBar } from '../components/ActionBar';
+import { CARD_INDEX_STRIP_WIDTH_PX } from '../components/Card';
 import { DEFAULT_SETTINGS, setSettings } from '../state/settings';
 import type { CardData } from '../components/Card';
 import tableCss from '../styles/table.css?raw';
@@ -1856,6 +1858,22 @@ describe('feedback 7: tight glow, discard pile and reflection alignment', () => 
     }
   });
 
+  it('T-95 item #2: leaves the full "10" index strip uncovered on an overlapped discard row', () => {
+    for (const count of [2, 6, 18, 36, 52]) {
+      for (const available of [160, DISCARD_FALLBACK_WIDTH, 720]) {
+        const layout = discardLayout(count, available, 0.5, DECK_CARD_WIDTH);
+        // Whenever cards overlap at all, the exposed strip is still the
+        // shared 36px index strip — never the old 28% guess.
+        expect(DECK_CARD_WIDTH - layout.overlap).toBeGreaterThanOrEqual(
+          CARD_INDEX_STRIP_WIDTH_PX - 1e-9,
+        );
+        expect(rowWidth(layout, DECK_CARD_WIDTH)).toBeLessThanOrEqual(
+          Math.max(available, DECK_CARD_WIDTH),
+        );
+      }
+    }
+  });
+
   it('ITEM-7b: slides the discarded overflow stack with the cursor like a hand', () => {
     render(
       <TableDeck
@@ -2589,6 +2607,28 @@ describe('T-90-3 ITEM-NEW: compact single-row play area and roundness', () => {
     expect(outline.style.marginLeft).toBe(pairs[pairs.length - 1].style.marginLeft);
     expect(Number(group.getAttribute('data-overlap'))).toBeLessThanOrEqual(
       BOUT_CARD_WIDTH - BOUT_MIN_VISIBLE_LEFT,
+    );
+  });
+
+  it('T-95 item #2: keeps the full "10" index strip on every overlapped bout row', () => {
+    expect(BOUT_MIN_VISIBLE_LEFT).toBe(CARD_INDEX_STRIP_WIDTH_PX);
+
+    for (const width of [240, 320, 420, 640, 960]) {
+      for (let slots = 2; slots <= 9; slots += 1) {
+        const layout = boutLayout(slots, width, BOUT_CARD_WIDTH);
+        // The exposed left strip of every card is never narrower than the
+        // strip that carries the full-size `10` and the enlarged suit pip.
+        expect(BOUT_CARD_WIDTH - layout.overlap).toBeGreaterThanOrEqual(
+          CARD_INDEX_STRIP_WIDTH_PX - 1e-9,
+        );
+        expect(layout.step).toBeGreaterThanOrEqual(CARD_INDEX_STRIP_WIDTH_PX - 1e-9);
+      }
+    }
+
+    // The responsive 48px mobile card keeps the same proportional strip.
+    const mobile = boutLayout(6, 300, MOBILE_CARD_WIDTH);
+    expect(MOBILE_CARD_WIDTH - mobile.overlap).toBeGreaterThanOrEqual(
+      Math.ceil((CARD_INDEX_STRIP_WIDTH_PX * MOBILE_CARD_WIDTH) / CARD_WIDTH) - 1e-9,
     );
   });
 
