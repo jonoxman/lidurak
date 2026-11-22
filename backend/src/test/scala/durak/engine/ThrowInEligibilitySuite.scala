@@ -1,11 +1,14 @@
 package durak.engine
 
-import durak.server.GameManager
-
 /**
  * T-90-feedback-20261106_111512-1: the backend is the single source of truth for
  * throw-in eligibility (QA Playbook #1) and for the largest atomic multi-card
  * throw-in a seat may deploy (new #4).
+ *
+ * T-90-feedback-20261122_171451-1 ITEM-9: the positions these tests reason about
+ * used to be production QA presets; they are now the local engine fixtures in
+ * [[ThrowInFixtures]], because the preset catalog only carries the four curated
+ * scenarios of the current round.
  */
 class ThrowInEligibilitySuite extends munit.FunSuite:
 
@@ -17,13 +20,8 @@ class ThrowInEligibilitySuite extends munit.FunSuite:
   private val nineDiamonds = card(Rank.Nine, Suit.Diamonds)
   private val kingSpades = card(Rank.King, Suit.Spades)
 
-  private def preset(presetId: String): GameState =
-    GameManager.preset(presetId) match
-      case Right(game) => game.state
-      case Left(error) => fail(error)
-
-  private val visibility = preset("throw-in-visibility-4p")
-  private val capacityCap = preset("throw-in-capacity-cap")
+  private val visibility = ThrowInFixtures.visibility4p
+  private val capacityCap = ThrowInFixtures.capacityCap
 
   // --- QA Playbook #1: who sees the throw-in outline ---
 
@@ -166,7 +164,7 @@ class ThrowInEligibilitySuite extends munit.FunSuite:
 
   test("a multi-card throw-in equals one-by-one throw-ins while surrendering") {
     val surrendered = GameEngine
-      .applyAction(preset("surrender-half-off"), GameAction.DeclareSurrender("p1"))
+      .applyAction(ThrowInFixtures.surrenderHalfOff, GameAction.DeclareSurrender("p1"))
       .getOrElse(fail("expected a legal surrender"))
     assertEquals(surrendered.boutPhase, BoutPhase.SurrenderThrowIn)
     // Three cards sit on the table, so the bout has exactly three free slots.
@@ -190,8 +188,8 @@ class ThrowInEligibilitySuite extends munit.FunSuite:
 
   // --- T-90-feedback-20261122_011021-1: the two new 1-click QA tables ---
 
-  test("throw-in-multi-qa offers the outline to Alice only") {
-    val multiQa = preset("throw-in-multi-qa")
+  test("the 3p throw-in table offers the outline to Alice only") {
+    val multiQa = ThrowInFixtures.multiQa
     val alice = PlayerGameView.forViewer(multiQa, "p0")
 
     assertEquals(
@@ -216,8 +214,8 @@ class ThrowInEligibilitySuite extends munit.FunSuite:
     assertEquals(PlayerGameView.forViewer(multiQa, "p2").canThrowIn, false)
   }
 
-  test("throw-in-multi-qa deploys three cards atomically and rejects a bad batch") {
-    val multiQa = preset("throw-in-multi-qa")
+  test("the 3p throw-in table deploys three cards atomically and rejects a bad batch") {
+    val multiQa = ThrowInFixtures.multiQa
     val cards = List(sevenHearts, sevenDiamonds, sevenClubs)
 
     val next = GameEngine
@@ -263,8 +261,8 @@ class ThrowInEligibilitySuite extends munit.FunSuite:
     )
   }
 
-  test("large-hand-stress keeps a 30-card defender out of the throw-in outline") {
-    val largeHand = preset("large-hand-stress")
+  test("a 30-card defender never sees the throw-in outline") {
+    val largeHand = ThrowInFixtures.largeHand30
     val alice = PlayerGameView.forViewer(largeHand, "p0")
 
     assertEquals(alice.myHand.size, 30)
@@ -289,8 +287,8 @@ class ThrowInEligibilitySuite extends munit.FunSuite:
 
   // --- T-90-feedback-20261122_121105-1: the two 1-click QA tables ---
 
-  test("throw-in-visibility-3p offers three cards to Alice and nothing to Bob or Carol") {
-    val visibility3p = preset("throw-in-visibility-3p")
+  test("the 3p visibility table offers three cards to Alice and nothing to Bob or Carol") {
+    val visibility3p = ThrowInFixtures.visibility3p
     val alice = PlayerGameView.forViewer(visibility3p, "p0")
 
     assertEquals(alice.myName, "Alice")
@@ -326,8 +324,8 @@ class ThrowInEligibilitySuite extends munit.FunSuite:
     assertEquals(carol.canThrowIn, false)
   }
 
-  test("throw-in-visibility-3p deploys three cards at once and clears on a pass") {
-    val visibility3p = preset("throw-in-visibility-3p")
+  test("the 3p visibility table deploys three cards at once and clears on a pass") {
+    val visibility3p = ThrowInFixtures.visibility3p
     val multi = GameEngine
       .applyAction(
         visibility3p,
@@ -354,8 +352,8 @@ class ThrowInEligibilitySuite extends munit.FunSuite:
     assertEquals(passedView.canThrowIn, false)
   }
 
-  test("mega-hand-30 keeps a 30-card defender out of the throw-in outline") {
-    val megaHand = preset("mega-hand-30")
+  test("a 30-card defender against a lone 7♠ never sees the throw-in outline") {
+    val megaHand = ThrowInFixtures.megaHand30
     val alice = PlayerGameView.forViewer(megaHand, "p0")
 
     assertEquals(alice.myName, "Alice")

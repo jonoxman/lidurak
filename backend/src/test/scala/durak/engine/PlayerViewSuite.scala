@@ -1,6 +1,5 @@
 package durak.engine
 
-import durak.server.GameManager
 import io.circe.syntax.*
 import JsonCodecs.given
 
@@ -431,9 +430,7 @@ class PlayerViewSuite extends munit.FunSuite:
   // --- Throw-in projection (T-90-feedback-20261106_111512-1) ---
 
   test("the throw-in projection is populated live and cleared in review mode") {
-    val gs = durak.server.GameManager.preset("throw-in-visibility-4p") match
-      case Right(game) => game.state
-      case Left(error) => fail(error)
+    val gs = ThrowInFixtures.visibility4p
 
     val live = PlayerGameView.forViewer(gs, "p0")
     assertEquals(
@@ -704,13 +701,8 @@ class PlayerViewSuite extends munit.FunSuite:
 
   // --- T-90-feedback-20261122_121105-1: strict throw-in projection ---
 
-  private def presetState(presetId: String): GameState =
-    GameManager.preset(presetId) match
-      case Right(game) => game.state
-      case Left(error) => fail(error)
-
-  test("throw-in-visibility-3p projects the outline only to a legal thrower") {
-    val gs = presetState("throw-in-visibility-3p")
+  test("the 3p visibility table projects the outline only to a legal thrower") {
+    val gs = ThrowInFixtures.visibility3p
 
     val alice = PlayerGameView.forViewer(gs, "p0")
     assertEquals(alice.myId, "p0")
@@ -725,7 +717,7 @@ class PlayerViewSuite extends munit.FunSuite:
   }
 
   test("a pass clears the throw-in projection for the rest of the bout") {
-    val gs = presetState("throw-in-visibility-3p")
+    val gs = ThrowInFixtures.visibility3p
     val passed = GameEngine
       .applyAction(gs, GameAction.PassTurn("p0"))
       .getOrElse(fail("expected a legal pass"))
@@ -737,8 +729,8 @@ class PlayerViewSuite extends munit.FunSuite:
     assertEquals(view.canThrowIn, false)
   }
 
-  test("mega-hand-30 projects a 30-card hand without any throw-in offer") {
-    val gs = presetState("mega-hand-30")
+  test("a 30-card hand is projected without any throw-in offer") {
+    val gs = ThrowInFixtures.megaHand30
     val alice = PlayerGameView.forViewer(gs, "p0")
 
     assertEquals(alice.myHand.size, 30)
