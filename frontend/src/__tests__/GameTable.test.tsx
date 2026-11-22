@@ -23,6 +23,7 @@ import {
   HAND_MIN_OVERLAP_RATIO,
   HAND_MIN_VISIBLE_LEFT,
   HAND_RAISED_OFFSET,
+  HAND_SELECTED_RAISED_OFFSET,
   MOBILE_BREAKPOINT_PX,
   MOBILE_CARD_HEIGHT,
   MOBILE_CARD_WIDTH,
@@ -38,6 +39,7 @@ import {
   discardLayout,
   handLayout,
   handMargins,
+  opponentIndexStripWidth,
   opponentOverlap,
   rowWidth,
   seatForOffset,
@@ -827,10 +829,12 @@ describe('single-row hand overlap', () => {
     expect(Number(row.getAttribute('data-overlap'))).toBeGreaterThanOrEqual(HAND_MIN_OVERLAP);
     // T-95 #3: the unscaled row keeps the 20% stride; the scaled width is what
     // has to stay inside the hand column.
-    expect(Number(row.getAttribute('data-overlap-ratio'))).toBeLessThanOrEqual(
-      HAND_MAX_OVERLAP_RATIO + 1e-9,
+    // T-90-feedback-5 ITEM-5a/5b: a 36-card hand is never scaled down; the
+    // Option B row compresses inside the maximal box instead.
+    expect(Number(row.getAttribute('data-fit-scale'))).toBe(1);
+    expect(Number(row.getAttribute('data-rendered-hand-width'))).toBeLessThanOrEqual(
+      HAND_FALLBACK_WIDTH + 1e-9,
     );
-    expect(Number(row.getAttribute('data-rendered-hand-width'))).toBeLessThanOrEqual(720);
   });
 
   it('T-95 #3: keeps the overlap inside 20%-80% for every large hand size', () => {
@@ -880,20 +884,20 @@ describe('single-row hand overlap', () => {
         />,
       );
       const box = screen.getByTestId('hand-turn-highlight') as HTMLElement;
-      const layout = handLayout(count, available, 0.5, HAND_CARD_WIDTH);
       expect(box.querySelectorAll('.hand-card-wrapper')).toHaveLength(count);
-      expect(Number(box.getAttribute('data-overlap-ratio'))).toBeGreaterThanOrEqual(
-        HAND_MIN_OVERLAP_RATIO - 1e-9,
-      );
-      expect(Number(box.getAttribute('data-overlap-ratio'))).toBeLessThanOrEqual(
-        HAND_MAX_OVERLAP_RATIO + 1e-9,
-      );
+      // T-90-feedback-5 ITEM-5a/5b: every card keeps its full footprint inside
+      // the maximal box; the row is never scaled.
+      expect(Number(box.getAttribute('data-fit-scale'))).toBe(1);
       expect(Number(box.getAttribute('data-rendered-hand-width'))).toBe(
-        Math.round(layout.totalWidth * layout.scale),
+        Number(box.getAttribute('data-hand-width')),
       );
       expect(Number(box.getAttribute('data-rendered-hand-width'))).toBeLessThanOrEqual(
         available + 1e-9,
       );
+      for (const card of Array.from(box.querySelectorAll('.card-slot')) as HTMLElement[]) {
+        expect(card.getAttribute('data-card-width')).toBe(String(HAND_CARD_WIDTH));
+        expect(card.getAttribute('data-card-height')).toBe(String(HAND_CARD_HEIGHT));
+      }
       // The tight contour still spans the whole overlapped row.
       const contour = screen.getByTestId('hand-highlight-contour');
       expect(Number(contour.getAttribute('data-contour-width'))).toBe(
@@ -926,15 +930,11 @@ describe('single-row hand overlap', () => {
 
     const box = screen.getByTestId('hand-turn-highlight') as HTMLElement;
     const contour = screen.getByTestId('hand-highlight-contour');
-    const layout = handLayout(30, HAND_FALLBACK_WIDTH - HAND_CONTOUR_PADDING * 2);
-    // The row sits at the 80% overlap cap, yet the contour still spans its
-    // exact width and steps over the raised cards.
-    expect(Number(box.getAttribute('data-overlap-ratio'))).toBeCloseTo(
-      HAND_MAX_OVERLAP_RATIO,
-      5,
-    );
+    // The full-size row compresses inside the maximal box, yet the contour
+    // still spans its exact width and steps over the raised cards.
+    expect(Number(box.getAttribute('data-fit-scale'))).toBe(1);
     expect(Number(contour.getAttribute('data-contour-width'))).toBe(
-      Math.round(layout.totalWidth),
+      Number(box.getAttribute('data-hand-width')),
     );
     expect(contour.getAttribute('data-contour-shape')).toBe('stepped');
     const ys = new Set(
@@ -966,6 +966,16 @@ describe('single-row hand overlap', () => {
       expect(card.style.marginLeft).toBe(`-${opponentOverlap(12)}px`);
     }
     expect(opponentOverlap(12)).toBeGreaterThanOrEqual(OPPONENT_MIN_OVERLAP);
+    // T-90-feedback-5 ITEM-2c: the opponent overlap ceiling leaves the mini
+    // index strip (scaled from CARD_INDEX_STRIP_WIDTH_PX) fully visible.
+    const strip = opponentIndexStripWidth(LOW_DETAIL_CARD_WIDTH);
+    expect(strip).toBeGreaterThanOrEqual(
+      Math.ceil((36 * LOW_DETAIL_CARD_WIDTH) / CARD_WIDTH),
+    );
+    for (const count of [6, 12, 18, 30]) {
+      const overlap = opponentOverlap(count, 208, LOW_DETAIL_CARD_WIDTH);
+      expect(LOW_DETAIL_CARD_WIDTH - overlap).toBeGreaterThanOrEqual(strip - 1e-9);
+    }
     expect(container.querySelector('[data-zone="table-arena"]')).not.toBeNull();
   });
 });
@@ -1602,7 +1612,7 @@ describe('feedback 7: tight glow, discard pile and reflection alignment', () => 
     expect(rule).toContain('display: grid');
     expect(rule).toContain('flex: 0 0 auto');
     expect(rule).toContain('width: fit-content');
-    expect(rule).toContain('max-width: 100%');
+    expect(rule).toContain('max-width: none');
     expect(rule).toContain('align-items: center');
     expect(rule).toContain('justify-content: center');
     expect(rule).toContain('padding: 0;');
@@ -2057,10 +2067,15 @@ describe('T-90-3: outline lift, discard stack, chaos targets, deflect arrow and 
     expect(Number(contour.getAttribute('data-contour-width'))).toBe(
       Number(highlight.getAttribute('data-hand-width')),
     );
+    // T-90-feedback-5 ITEM-8: every eligible card sits on the half-raise tier,
+    // rendered as a transform on the wrapper so the contour follows it.
     for (const slot of Array.from(
       highlight.querySelectorAll('.hand-card-wrapper'),
     ) as HTMLElement[]) {
-      expect(slot.style.transform).toBe('');
+      expect(slot.getAttribute('data-card-y')).toBe(String(HAND_RAISED_OFFSET));
+      expect(slot.style.transform).toBe(
+        `translate3d(0px, ${HAND_RAISED_OFFSET}px, 0)`,
+      );
     }
   });
 
@@ -4849,68 +4864,49 @@ describe('T-90-feedback-20261105_221105-2: card size, hand overlap, contour and 
     );
 
     const box = screen.getByTestId('hand-turn-highlight') as HTMLElement;
-    // The hand reserves the contour's 4px padding on both sides.
-    const layout = handLayout(
-      fullDeck.length,
-      HAND_FALLBACK_WIDTH - HAND_CONTOUR_PADDING * 2,
-    );
-    expect(layout.scale).toBeLessThan(1);
-    expect(Number(box.getAttribute('data-fit-scale'))).toBeCloseTo(layout.scale, 2);
+    // T-90-feedback-5 ITEM-5a/5b: the 52-card row compresses inside the maximal
+    // box at full card size; it is never scaled down.
+    const stride = Number(box.getAttribute('data-stride-px'));
+    const totalWidth = Number(box.getAttribute('data-hand-width'));
+    expect(Number(box.getAttribute('data-fit-scale'))).toBe(1);
+    expect(stride).toBeGreaterThan(0);
+    expect(totalWidth).toBeGreaterThanOrEqual(100);
+    expect(totalWidth).toBeLessThanOrEqual(HAND_FALLBACK_WIDTH + 1e-9);
+    expect(Number(box.getAttribute('data-rendered-hand-width'))).toBe(totalWidth);
+    expect(box.style.width).toBe(`${Math.round(totalWidth)}px`);
+    expect(box.style.transform).toBe('');
 
-    // The rendered box is exactly the scaled natural row, and the children are
-    // laid out from the left edge before the same transform shrinks them into
-    // that box, so the cards, the box and the contour share one origin.
-    expect(Number(box.getAttribute('data-rendered-hand-width'))).toBe(
-      Math.round(layout.totalWidth * layout.scale),
-    );
-    expect(box.style.width).toBe(
-      `${Math.round(layout.totalWidth * layout.scale)}px`,
-    );
-    expect(box.style.justifyContent).toBe('flex-start');
-    expect(box.style.transformOrigin).toBe('left center');
-    expect(box.style.transform).toBe(`scale(${layout.scale})`);
-
-    // `data-hand-width` and `data-contour-width` are in the SAME unscaled row
-    // coordinate space as the contour path; the scaled width is separate.
+    // `data-hand-width` and the contour share the same full-size row space.
     const contour = screen.getByTestId('hand-highlight-contour');
-    expect(Number(contour.getAttribute('data-contour-width'))).toBe(
-      Number(box.getAttribute('data-hand-width')),
-    );
-    expect(Number(contour.getAttribute('data-contour-width'))).toBe(
-      Math.round(layout.totalWidth),
-    );
+    expect(Number(contour.getAttribute('data-contour-width'))).toBe(totalWidth);
     expect(Number(contour.getAttribute('data-contour-rendered-width'))).toBe(
-      Math.round(layout.totalWidth * layout.scale),
+      totalWidth,
     );
 
     const cards = Array.from(box.querySelectorAll('.hand-card-wrapper')) as HTMLElement[];
     expect(cards).toHaveLength(fullDeck.length);
-    expect(cards[fullDeck.length - 1].getAttribute('data-card-x')).toBe(
-      String(Math.round((fullDeck.length - 1) * layout.stride)),
+    expect(Number(cards[fullDeck.length - 1].getAttribute('data-card-x'))).toBeCloseTo(
+      (fullDeck.length - 1) * stride,
+      0,
     );
     // ITEM-4g: every slot reports its vertical offset.
     for (const card of cards) expect(card.getAttribute('data-card-y')).toBe('0');
+    for (const card of cards) {
+      const slot = card.querySelector('.card-slot') as HTMLElement;
+      expect(slot.getAttribute('data-card-width')).toBe(String(CARD_WIDTH));
+      expect(slot.getAttribute('data-card-height')).toBe(String(CARD_HEIGHT));
+    }
 
-    // ITEM-3c: under a fit scale the dragged card counter-scales and divides
-    // the pointer delta, so it tracks the cursor at its full 100x140 size.
+    // ITEM-3: the dragged card tracks the pointer 1:1 at full size — there is
+    // no fit scale left to counter-scale.
     fireEvent.mouseDown(within(cards[0]).getByLabelText('six of spades'), {
       button: 0,
       clientX: 10,
       clientY: 20,
     });
     fireEvent.mouseMove(document, { clientX: 70, clientY: 50 });
-    // Once the drag starts the row switches to the compacted N-1 layout, so the
-    // counter-scale uses that layout's scale.
-    const dragLayout = handLayout(
-      fullDeck.length - 1,
-      HAND_FALLBACK_WIDTH - HAND_CONTOUR_PADDING * 2,
-    );
-    expect(cards[0].style.transform).toBe(
-      `translate3d(${60 / dragLayout.scale}px, ${30 / dragLayout.scale}px, 0) scale(${
-        1 / dragLayout.scale
-      })`,
-    );
-    expect(cards[0].style.transformOrigin).toBe('left top');
+    expect(cards[0].style.transform).toBe('translate3d(60px, 30px, 0)');
+    expect(cards[0].style.transformOrigin).toBe('');
     expect(cards[0].style.zIndex).toBe('1000');
     fireEvent.mouseUp(document, { clientX: 70, clientY: 50 });
   });
@@ -5015,12 +5011,12 @@ describe('T-90-feedback-20261105_221105-2: card size, hand overlap, contour and 
     const wrappers = Array.from(box.querySelectorAll('.hand-card-wrapper')) as HTMLElement[];
     expect(wrappers[0].getAttribute('data-card-y')).toBe(String(HAND_RAISED_OFFSET));
     expect(wrappers[1].getAttribute('data-card-y')).toBe('0');
+    // ITEM-8: the tier lift lives on the wrapper (transform), never on the card
+    // itself, so hover and the tight contour stay in sync.
     expect(cssRule('.hand-cards .card-slot.legal-playable')).toContain(
-      'translateY(var(--hand-raise, -14px))',
+      'transform: none',
     );
-    expect(cssRule('.hand-cards .card-slot.selected')).toContain(
-      'translateY(var(--hand-raise, -14px))',
-    );
+    expect(cssRule('.hand-cards .card-slot.selected')).toContain('transform: none');
     // The old all-legal translate-the-whole-box rule is gone, not just unused.
     expect(tableCss).not.toContain(
       "[data-all-legal='true'][data-active='true'] .card-slot.legal-playable",
@@ -5274,7 +5270,7 @@ describe('T-90-feedback-20261122_011021-4: live table wiring', () => {
     // The lifted card sits at the shared raise offset used by the contour.
     expect(
       document.querySelector('.hand-card-wrapper[data-selected="true"]')?.getAttribute('data-card-y'),
-    ).toBe(String(HAND_RAISED_OFFSET));
+    ).toBe(String(HAND_SELECTED_RAISED_OFFSET));
   });
 
   it('ITEM-7/8: renders compact icon-only controls with exact accessible names', () => {
