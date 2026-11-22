@@ -281,6 +281,8 @@ export const QA_SCENARIOS: { id: string; label: string }[] = [
   { id: 'full-hand-pickup', label: 'Full Hand Pickup (30 Cards)' },
   { id: 'defenseless-surrender', label: 'Defenseless Auto-Surrender' },
   { id: 'discard-and-endgame', label: 'Discard & Endgame Durak' },
+  { id: 'throw-in-multi-qa', label: 'Throw-In & Multi-Card QA' },
+  { id: 'large-hand-stress', label: 'Large Hand (30+ Cards)' },
   { id: 'transparent-mode', label: 'Transparent Mode' },
   { id: LIGHT_THEME_PRESET_ID, label: 'Light Theme Header' },
 ];
@@ -1851,6 +1853,9 @@ export function GamePage({
           defenderDefenseless={defenderDefenseless}
           canRedirect={!reviewMode && hasLegalAction(displayedView.legalActions, 'redirect')}
           canThrowIn={canThrowInOutline}
+          throwInCards={displayedView.throwInCards}
+          throwInCapacity={displayedView.throwInCapacity}
+          myHasPassed={displayedView.myHasPassed === true}
           isReviewMode={reviewMode}
           isBot={isBotViewer}
           turnPlayerId={turnPlayerIdFor(displayedView)}

@@ -100,6 +100,12 @@ export interface GameTableProps {
   canRedirect?: boolean;
   /** T-90: backend-owned gate; `true` only when this seat may throw in. */
   canThrowIn?: boolean;
+  /** Backend projection of the cards this seat may legally throw in. */
+  throwInCards?: CardData[];
+  /** Remaining throw-in capacity for this seat (`0` hides the outline). */
+  throwInCapacity?: number;
+  /** True once this seat has passed on the current bout. */
+  myHasPassed?: boolean;
   /** Id of the player whose turn clock is running. */
   turnPlayerId?: string;
   /** Seconds left on the active turn clock (0..15). */
@@ -194,7 +200,8 @@ export function cardSizeForViewport(viewportWidth: number): {
   width: number;
   height: number;
 } {
-  return viewportWidth > 0 && viewportWidth <= MOBILE_BREAKPOINT_PX
+  // ITEM-2: `>= 900px` is desktop, `< 900px` is mobile.
+  return viewportWidth > 0 && viewportWidth < MOBILE_BREAKPOINT_PX
     ? { width: MOBILE_CARD_WIDTH, height: MOBILE_CARD_HEIGHT }
     : { width: CARD_WIDTH, height: CARD_HEIGHT };
 }
@@ -222,17 +229,26 @@ export const HAND_MAX_OVERLAP = Math.round(HAND_CARD_WIDTH * HAND_MAX_OVERLAP_RA
  */
 export const HAND_MIN_VISIBLE_LEFT = 15;
 /** Used until the hand has been measured (jsdom reports zero widths). */
-export const HAND_FALLBACK_WIDTH = 720;
+export const HAND_FALLBACK_WIDTH = 640;
+/** Mobile/SSR fallback width, below the 900px breakpoint. */
+export const HAND_FALLBACK_WIDTH_MOBILE = 300;
+
+/** ITEM-3: the hand stage width used before a `ResizeObserver` reports one. */
+export function handFallbackWidth(viewportWidth: number): number {
+  return viewportWidth > 0 && viewportWidth < MOBILE_BREAKPOINT_PX
+    ? HAND_FALLBACK_WIDTH_MOBILE
+    : HAND_FALLBACK_WIDTH;
+}
 /** T-90-feedback-2 ITEM-2: `.hand-cards` now wraps the exact card footprint. */
 export const HAND_BOX_PADDING = 0;
 /** T-90-feedback-2 ITEM-2: how far a playable / selected card rises. */
 export const HAND_RAISED_OFFSET = -14;
 /** T-90-feedback-2 ITEM-2: tight padding between the cards and the contour. */
 export const HAND_CONTOUR_PADDING = 4;
-/** Width of one talon deck card; the discard pile reuses the exact same size. */
-export const DECK_CARD_WIDTH = 80;
-/** Height of one talon deck card; the discard pile reuses the exact same size. */
-export const DECK_CARD_HEIGHT = 114;
+/** ITEM-2: the talon deck card is the same 100x140 card as the table/hand. */
+export const DECK_CARD_WIDTH = CARD_WIDTH;
+/** ITEM-2: the talon deck card is the same 100x140 card as the table/hand. */
+export const DECK_CARD_HEIGHT = CARD_HEIGHT;
 /** Inner width of the sidebar DECK box, used until the pile has been measured. */
 export const DISCARD_FALLBACK_WIDTH = 236;
 /**
@@ -1329,6 +1345,9 @@ export function GameTable({
   boutPhase,
   canRedirect = false,
   canThrowIn = false,
+  throwInCards,
+  throwInCapacity,
+  myHasPassed = false,
   turnPlayerId,
   turnSecondsRemaining = 15,
   sortMode = 'rank',
@@ -1474,9 +1493,12 @@ export function GameTable({
   // T-90-feedback-2 ITEM-4 (review round 2): reserve the contour's 4px padding
   // on both sides, so a fit-scaled full-deck row and its outline can never
   // bleed into the talon or the Surrender / Pass column.
+  const fallbackHandWidth = handFallbackWidth(
+    typeof window === 'undefined' ? 0 : window.innerWidth,
+  );
   const handAvailableWidth = Math.max(
     0,
-    (handWidth > 0 ? handWidth : HAND_FALLBACK_WIDTH) - HAND_CONTOUR_PADDING * 2,
+    (handWidth > 0 ? handWidth : fallbackHandWidth) - HAND_CONTOUR_PADDING * 2,
   );
   const handLayoutState = handLayout(
     hand.length,
@@ -1715,8 +1737,21 @@ export function GameTable({
     !reviewMode &&
     Boolean(onAttackDrop || onCoverDrop || onThrowInDrop || onRedirectDrop || onReorderHand);
   const throwInEnabled = !reviewMode && canThrowIn;
-  // T-90: backend projection is the only gate; false/missing = not in the DOM.
-  const showThrowInOutline = !reviewMode && canThrowIn === true;
+  // T-90-feedback ITEM-1: the throw-in outline exists ONLY for a seat that can
+  // legally play into it. Every condition is checked independently, so a
+  // defender, a seat that has already passed, a hand with no legal throw-in
+  // card, or a full bout removes the outline from the DOM entirely (inline and
+  // surrendered placements alike).
+  const viewerIsDefender = defenderId != null && defenderId === myId;
+  const hasLegalThrowInCard = throwInCards == null ? true : throwInCards.length > 0;
+  const throwInCapacityLeft = throwInCapacity == null ? 1 : throwInCapacity;
+  const showThrowInOutline =
+    !reviewMode &&
+    canThrowIn === true &&
+    !viewerIsDefender &&
+    myHasPassed !== true &&
+    hasLegalThrowInCard &&
+    throwInCapacityLeft > 0;
 
   // ITEM-7: the whole page keeps the link pointer finger for the entire drag,
   // including outside the arena where the browser would paint its own cursor.
@@ -2458,12 +2493,18 @@ export function GameTable({
           class="hand-highlight-contour"
           data-testid="hand-highlight-contour"
           data-non-rectangular={handContour.nonRectangular ? 'true' : 'false'}
+          data-contour-shape={handContour.nonRectangular ? 'stepped' : 'uniform'}
           data-contour-width={Math.round(totalHandWidth)}
           data-contour-rendered-width={Math.round(totalHandWidth * handFitScale)}
           width={handContour.width}
           height={handContour.height}
           viewBox={`0 0 ${handContour.width} ${handContour.height}`}
           style={{
+            // The SVG is a CSS Grid layer (`grid-area: 1 / 1`) stacked over the
+            // hand row; negative margins place it around the real card boxes
+            // without any absolute positioning.
+            marginLeft: `${handContour.left}px`,
+            marginTop: `${handContour.top}px`,
             left: `${handContour.left}px`,
             top: `${handContour.top}px`,
             width: `${handContour.width}px`,
@@ -2479,6 +2520,9 @@ export function GameTable({
             stroke-linecap="round"
           />
         </svg>
+        {/* ITEM-3: the contour and the card row share one CSS Grid cell, so the
+            outline layers tightly over the exact hand pixels. */}
+        <div class="hand-row" data-testid="hand-row">
         {hand.map((card, index) => {
           const hidden =
             index < handLayoutState.hiddenLeft ||
@@ -2608,6 +2652,7 @@ export function GameTable({
             </div>
           );
         })}
+        </div>
         </div>
       </section>
 

@@ -106,10 +106,29 @@ export interface CreatedPresetGame {
   defaultPlayerId: string;
 }
 
+/** Every scripted position offered in the lobby and the game's left sidebar. */
+export const QA_SCENARIOS: { id: string; label: string }[] = [
+  { id: 'throw-in-visibility-4p', label: 'Throw-In Visibility (4P)' },
+  { id: 'throw-in-capacity-cap', label: 'Throw-In Capacity Cap' },
+  { id: 'huge-hand-36', label: 'Huge Hand (36)' },
+  { id: 'huge-hand-52', label: 'Huge Hand (52)' },
+  { id: '3p-redirect-bob', label: '3P Redirect (Bob POV)' },
+  { id: 'chaos-4p', label: '4P Chaos Targets' },
+  { id: 'surrender-half-off', label: 'Surrender Half-Off' },
+  { id: 'full-hand-pickup', label: 'Full Hand Pickup (30 Cards)' },
+  { id: 'defenseless-surrender', label: 'Defenseless Auto-Surrender' },
+  { id: 'discard-and-endgame', label: 'Discard & Endgame Durak' },
+  { id: 'throw-in-multi-qa', label: 'Throw-In & Multi-Card QA' },
+  { id: 'large-hand-stress', label: 'Large Hand (30+ Cards)' },
+  { id: 'transparent-mode', label: 'Transparent Mode' },
+  { id: 'light-theme-gradient', label: 'Light Theme Header' },
+];
+
 /**
  * Starts one of the scripted QA positions (`3p-redirect-bob`, `chaos-4p`,
- * `surrender-half-off`, `discard-and-endgame`) so a reviewer can jump straight
- * to that exact table state in one click.
+ * `throw-in-multi-qa`, `large-hand-stress`, `surrender-half-off`,
+ * `discard-and-endgame`) so a reviewer can jump straight to that exact table
+ * state in one click.
  */
 export async function createPresetGame(preset: string): Promise<CreatedPresetGame> {
   const response = await fetch('/api/games/preset', {

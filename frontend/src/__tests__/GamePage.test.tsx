@@ -3665,4 +3665,18 @@ describe('T-90-feedback-20261106_111512-3: backend canThrowIn gate and new prese
     fireEvent.click(within(panel).getByTestId('preset-btn-huge-hand-52'));
     await waitFor(() => expect(createPresetGameMock).toHaveBeenCalledWith('huge-hand-52'));
   });
+
+  it('ITEM-QA: offers the two new Wave 1 presets in the left sidebar', async () => {
+    renderT90({ ...t90View, canThrowIn: false });
+    const panel = await screen.findByTestId('qa-scenarios');
+    expect(panel.closest('[data-zone="sidebar-left"]')).not.toBeNull();
+    const multi = within(panel).getByTestId('preset-btn-throw-in-multi-qa');
+    expect(multi.textContent).toBe('Throw-In & Multi-Card QA');
+    const large = within(panel).getByTestId('preset-btn-large-hand-stress');
+    expect(large.textContent).toBe('Large Hand (30+ Cards)');
+
+    createPresetGameMock.mockResolvedValue({ gameId: 'preset-new', defaultPlayerId: 'p0' });
+    fireEvent.click(multi);
+    await waitFor(() => expect(createPresetGameMock).toHaveBeenCalledWith('throw-in-multi-qa'));
+  });
 });

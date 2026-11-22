@@ -558,4 +558,21 @@ describe('T-90-feedback-20261106_111512-3: new QA scenario presets', () => {
     fireEvent.click(within(panel).getByTestId('preset-btn-throw-in-visibility-4p'));
     await waitFor(() => expect(createPresetGame).toHaveBeenCalledWith('throw-in-visibility-4p'));
   });
+
+  it('lists and launches the two new Wave 1 presets', async () => {
+    createPresetGame.mockReset();
+    createPresetGame.mockResolvedValue({ gameId: 'preset-new', defaultPlayerId: 'p0' });
+    render(<LobbyPage initialServerReady />);
+    const panel = screen.getByTestId('qa-scenarios');
+
+    const multi = within(panel).getByTestId('preset-btn-throw-in-multi-qa');
+    expect(multi.textContent).toBe('Throw-In & Multi-Card QA');
+    expect(multi.getAttribute('data-preset')).toBe('throw-in-multi-qa');
+    const large = within(panel).getByTestId('preset-btn-large-hand-stress');
+    expect(large.textContent).toBe('Large Hand (30+ Cards)');
+    expect(large.getAttribute('data-preset')).toBe('large-hand-stress');
+
+    fireEvent.click(large);
+    await waitFor(() => expect(createPresetGame).toHaveBeenCalledWith('large-hand-stress'));
+  });
 });
