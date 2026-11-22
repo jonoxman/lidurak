@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
-import { Card, isRedSuit, suitSymbol, type CardData } from './Card';
+import {
+  CARD_INDEX_STRIP_WIDTH_PX,
+  Card,
+  isRedSuit,
+  suitSymbol,
+  type CardData,
+} from './Card';
 import { CardBack } from './CardBack';
 import type { SortMode } from './SortBar';
 import { TablePair } from './TablePair';
@@ -15,6 +21,10 @@ import {
 import {
   buildHandContourPath,
   computeHandLayout as computeUtilsHandLayout,
+  computePartedCardPositions,
+  getCardVerticalLiftPx,
+  ELIGIBLE_LIFT_PX,
+  SELECTED_LIFT_PX,
 } from '../utils/handLayout';
 import '../styles/table.css';
 
@@ -246,8 +256,17 @@ export function handFallbackWidth(viewportWidth: number): number {
 }
 /** T-90-feedback-2 ITEM-2: `.hand-cards` now wraps the exact card footprint. */
 export const HAND_BOX_PADDING = 0;
-/** T-90-feedback-2 ITEM-2: how far a playable / selected card rises. */
-export const HAND_RAISED_OFFSET = -14;
+/**
+ * T-90-feedback-5 ITEM-5b: the small horizontal margin the Option B maximal box
+ * keeps on both sides of `[data-zone="table-arena"]`.
+ */
+export const HAND_LANE_MARGIN_PX = 16;
+/**
+ * T-90-feedback-5 ITEM-8: how far a playable (half raise) / selected (full
+ * raise) card rises. The magnitudes come straight from Wave 1's tier constants.
+ */
+export const HAND_RAISED_OFFSET = -ELIGIBLE_LIFT_PX;
+export const HAND_SELECTED_RAISED_OFFSET = -SELECTED_LIFT_PX;
 /** T-90-feedback-2 ITEM-2: tight padding between the cards and the contour. */
 export const HAND_CONTOUR_PADDING = 4;
 /** ITEM-2: the talon deck card is the same 100x140 card as the table/hand. */
@@ -638,6 +657,19 @@ export const computeHandLayout = handLayout;
 /** ITEM-13: documented alias of [[boutLayout]] used by the play-area spec. */
 export const computeBoutLayout = boutLayout;
 
+/**
+ * T-90-feedback-5 ITEM-2c audit: the exposed strip of an overlapping mini-card,
+ * derived from `CARD_INDEX_STRIP_WIDTH_PX` instead of a private 28% guess. The
+ * low-detail transparent-mode cards use the same proportional strip, so their
+ * full-size `"10"` rank can never be covered by the next card.
+ */
+export function opponentIndexStripWidth(cardWidth = LOW_DETAIL_CARD_WIDTH): number {
+  return Math.max(
+    Math.round(cardWidth * 0.28),
+    Math.ceil((CARD_INDEX_STRIP_WIDTH_PX * cardWidth) / CARD_WIDTH),
+  );
+}
+
 /** Overlap for a fixed-width opponent card row; never reacts to the cursor. */
 export function opponentOverlap(
   count: number,
@@ -649,11 +681,12 @@ export function opponentOverlap(
   // ITEM-13c: adjacent opponent mini-cards never sit flush or apart — they
   // always overlap by at least 10% of their own width (`>= 10px` on a 100px
   // card, `>= 4px` on the 22/26px opponent boxes), then tighten further as the
-  // hand grows so the whole row stays centred inside the seat box.
+  // hand grows so the whole row stays centred inside the seat box. ITEM-2c: the
+  // overlap ceiling always leaves the index strip fully visible.
   const minOverlap = Math.max(OPPONENT_MIN_OVERLAP, Math.round(cardWidth * 0.1));
   const maxOverlap = Math.max(
     minOverlap,
-    cardWidth - Math.max(6, Math.round(cardWidth * 0.28)),
+    cardWidth - opponentIndexStripWidth(cardWidth),
   );
   return Math.min(maxOverlap, Math.max(minOverlap, needed));
 }
@@ -1368,17 +1401,35 @@ export function GameTable({
     startY: number;
     active: boolean;
   } | null>(null);
+  /**
+   * T-90-feedback-5 ITEM-3: the exact pointer grab offset captured from the live
+   * card rectangle at `pointerdown`, plus the stage origin at that moment. Every
+   * pointermove is resolved from these constants, so the card's index, overlap
+   * step or row compaction can never add horizontal drift.
+   */
+  const pointerDragOriginRef = useRef<{
+    grabOffsetX: number;
+    grabOffsetY: number;
+    stageLeft: number;
+    stageTop: number;
+  } | null>(null);
   const suppressClickRef = useRef(false);
+  // T-90-feedback-5 ITEM-6a/6b: the hand card currently under the pointer, or
+  // `null` when the pointer is outside the hand / a drag is running.
+  const [hoveredCardIndex, setHoveredCardIndex] = useState<number | null>(null);
   const [handWidth, setHandWidth] = useState(0);
+  // Live width of `[data-zone="table-arena"]`, i.e. the Option B maximal box.
+  const [arenaWidth, setArenaWidth] = useState(0);
   const [cardWidth, setCardWidth] = useState(
     () => cardSizeForViewport(typeof window === 'undefined' ? 0 : window.innerWidth).width,
   );
   const [cardHeight, setCardHeight] = useState(
     () => cardSizeForViewport(typeof window === 'undefined' ? 0 : window.innerWidth).height,
   );
-  // T-90-feedback-2 ITEM-3: the dragged card's pointer offset. It is applied as
-  // a `translate3d` on the card's own wrapper, which stays fully visible.
-  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  // T-90-feedback-5 ITEM-3: the live viewport pointer position during a drag.
+  // The translate is derived from it at render time, so a row re-layout can
+  // never leave the card behind the pointer.
+  const [dragPointer, setDragPointer] = useState<{ x: number; y: number } | null>(null);
   const [boutWidth, setBoutWidth] = useState(0);
   const [boutCardWidth, setBoutCardWidth] = useState(
     () => cardSizeForViewport(typeof window === 'undefined' ? 0 : window.innerWidth).width,
@@ -1393,6 +1444,32 @@ export function GameTable({
   const settings = useSettings();
 
   const hand = sortHand(myHand, sortMode, trumpSuit);
+
+  /** Index of the hand card under a pointer event, or `null`. */
+  const handPointerIndex = (event: Event): number | null => {
+    const target = event.target as HTMLElement | null;
+    const wrapper = target?.closest?.('.hand-card-wrapper') as HTMLElement | null;
+    if (!wrapper) return null;
+    const raw = wrapper.getAttribute('data-index');
+    const index = raw == null ? NaN : Number(raw);
+    return Number.isInteger(index) ? index : null;
+  };
+
+  /**
+   * ITEM-6a/6b/6c: hover-parting is tracked on the whole hand lane, but it is
+   * frozen while a card is dragged and never runs for a single-card hand.
+   */
+  const handleHandPointerMove = (event: Event) => {
+    if (dragCard !== null || hand.length <= 1) {
+      if (hoveredCardIndex !== null) setHoveredCardIndex(null);
+      return;
+    }
+    const index = handPointerIndex(event);
+    if (index !== hoveredCardIndex) setHoveredCardIndex(index);
+  };
+  const clearHandHover = () => {
+    if (hoveredCardIndex !== null) setHoveredCardIndex(null);
+  };
   // ITEM-ADD-1: seats are resolved from the viewer's own canonical index, so
   // the opponent row stays realistic from any player's point of view.
   const seats = assignSeats(opponents, myId);
@@ -1425,6 +1502,28 @@ export function GameTable({
     if (typeof ResizeObserver !== 'undefined' && zone) {
       const observer = new ResizeObserver(measure);
       observer.observe(zone);
+      return () => observer.disconnect();
+    }
+    if (typeof window !== 'undefined') {
+      window.addEventListener('resize', measure);
+      return () => window.removeEventListener('resize', measure);
+    }
+    return undefined;
+  }, []);
+
+  // T-90-feedback-5 ITEM-5b: measure the play area that caps the hand. The
+  // Option B maximal box is almost the full width of `[data-zone="table-arena"]`,
+  // measured live so a resize re-lays the hand; JSDOM/SSR keep the responsive
+  // hand fallback because `clientWidth` is zero there.
+  useEffect(() => {
+    const measure = () => {
+      const width = arenaRef.current?.clientWidth ?? 0;
+      if (width > 0) setArenaWidth(width);
+    };
+    measure();
+    if (typeof ResizeObserver !== 'undefined' && arenaRef.current) {
+      const observer = new ResizeObserver(measure);
+      observer.observe(arenaRef.current);
       return () => observer.disconnect();
     }
     if (typeof window !== 'undefined') {
@@ -1485,13 +1584,40 @@ export function GameTable({
     0,
     (handWidth > 0 ? handWidth : fallbackHandWidth) - HAND_CONTOUR_PADDING * 2,
   );
-  const handLayoutState = handLayout(
-    hand.length,
-    handAvailableWidth,
-    0.5,
+  // T-90-feedback-5 ITEM-5b: the Option B maximal box is almost the full width
+  // of the measured arena, with a small margin on both sides.
+  const maximalBoxWidth = Math.max(
     cardWidth,
+    (arenaWidth > 0 ? arenaWidth : fallbackHandWidth) - HAND_LANE_MARGIN_PX * 2,
   );
-  const handMarginList = handMargins(handLayoutState, hand.length, cardWidth);
+  const reviewMode = isReviewMode || isBotView;
+  // ITEM-PB-3 / T-90-feedback-2 ITEM-2: review mode never lifts a card, so the
+  // playable-key set is empty there.
+  const activePlayableKeys = reviewMode ? [] : playableKeys;
+  const activePlayableIndices = hand.reduce<number[]>((indices, card, index) => {
+    if (activePlayableKeys.includes(cardKey(card))) indices.push(index);
+    return indices;
+  }, []);
+  const selectedIndices = hand.reduce<number[]>((indices, card, index) => {
+    if (selectedKeys.includes(cardKey(card))) indices.push(index);
+    return indices;
+  }, []);
+  // T-90-feedback-5 ITEM-2c/5a/5b: Wave 1's Option B geometry is the single
+  // source of truth. Every card keeps its full 100x140 footprint — the row
+  // expands to the maximal box, then compresses up to (and past) the maximal
+  // allowable overlap while the full `'10'` index strip stays visible.
+  const buildHandLayoutState = (cardCount: number) =>
+    computeUtilsHandLayout({
+      cardCount,
+      containerWidth: handAvailableWidth,
+      baseCardWidth: cardWidth,
+      baseCardHeight: cardHeight,
+      liftedIndices: activePlayableIndices,
+      selectedIndices,
+      minVisibleStripPx: CARD_INDEX_STRIP_WIDTH_PX,
+      maximalBoxWidth,
+    });
+  const handLayoutState = buildHandLayoutState(hand.length);
 
   // T-90-2 ITEM-6a: while a card is dragged out of the hand, the remaining
   // N - 1 cards compact into the sequence without it, so the original slot
@@ -1503,58 +1629,66 @@ export function GameTable({
       : -1;
   const gapClosed = draggedCardIndex >= 0;
   const compactHandLayoutState = gapClosed
-    ? handLayout(
-        Math.max(0, hand.length - 1),
-        handAvailableWidth,
-        0.5,
-        cardWidth,
-      )
+    ? buildHandLayoutState(Math.max(0, hand.length - 1))
     : handLayoutState;
-  const compactHandMargins = handMargins(
-    compactHandLayoutState,
-    Math.max(0, hand.length - 1),
-    cardWidth,
-  );
   const activeHandLayoutState = gapClosed ? compactHandLayoutState : handLayoutState;
-  const handSlotMargin = (index: number): string => {
-    if (!gapClosed) return `${handMarginList[index]}px`;
-    if (index === draggedCardIndex) return '0px';
+  const compactCardPositions = compactHandLayoutState.cardPositions;
+  // ITEM-3/ITEM-5b: the exact left edge of every card in the row currently
+  // rendered. While a card is dragged its own slot collapses (zero width) and
+  // every later card shifts left, so the remaining row closes over it exactly
+  // like an item removal — without any index-based offset accumulation.
+  const baseCardPositions = hand.map((_, index) => {
+    if (!gapClosed) return handLayoutState.cardPositions[index] ?? 0;
+    const last = Math.max(0, compactCardPositions.length - 1);
+    if (index === draggedCardIndex) {
+      return compactCardPositions[Math.min(index, last)] ?? 0;
+    }
     const compactIndex = index > draggedCardIndex ? index - 1 : index;
-    return `${compactIndex === 0 ? 0 : compactHandMargins[compactIndex]}px`;
+    return compactCardPositions[Math.min(compactIndex, last)] ?? 0;
+  });
+  const handSlotMargin = (index: number): string => {
+    if (index === 0) return `${baseCardPositions[0] ?? 0}px`;
+    const previousX = baseCardPositions[index - 1] ?? 0;
+    // The dragged card's slot keeps zero width, so the next card closes over it.
+    if (gapClosed && index - 1 === draggedCardIndex) return '0px';
+    const x = baseCardPositions[index] ?? previousX;
+    return `${x - previousX - cardWidth}px`;
   };
 
   // Rhythm nudges go only to the client that has to act: uncovered attacks for
   // the defender, the whole hand for the attacker who owes a play. The pulse
   // sits on the cards container so the highlight hugs the cards tightly.
-  const reviewMode = isReviewMode || isBotView;
-  // ITEM-PB-3 / T-90-feedback-2 ITEM-2: `data-all-legal` no longer translates
-  // the whole box. The contour steps over the raised cards instead, because
-  // every legal card is lifted by the shared `--hand-raise` offset.
-  const activePlayableKeys = reviewMode ? [] : playableKeys;
   const allCardsLegal =
     !reviewMode &&
     hand.length > 0 &&
     hand.every((card) => activePlayableKeys.includes(cardKey(card)));
-  // T-90-feedback-2 ITEM-2/ITEM-4: the exact footprint of every card in the
-  // hand. `x` follows the overlapped stride, `y` drops to `-14px` for a card
-  // that is raised because it is playable or selected. The SVG contour below is
-  // built from these rectangles, so it always wraps the real cards tightly and
-  // distorts non-rectangularly when only some of them are raised.
-  // The x of every card is accumulated from the SAME inline margins the row
-  // renders, so the contour matches the compacted N-1 layout while a card is
-  // dragged out of the hand (its collapsed slot contributes zero width).
-  const handCardPositions: HandCardPosition[] = [];
-  let runningX = 0;
-  hand.forEach((card, index) => {
-    if (index > 0) {
-      const previousWidth = gapClosed && index - 1 === draggedCardIndex ? 0 : cardWidth;
-      runningX += previousWidth + (parseFloat(handSlotMargin(index)) || 0);
-    }
-    const key = cardKey(card);
-    const raised =
-      !reviewMode && (activePlayableKeys.includes(key) || selectedKeys.includes(key));
-    handCardPositions.push({ x: runningX, y: raised ? HAND_RAISED_OFFSET : 0 });
-  });
+  // ITEM-6a/6b/6c: hover-parting only ever runs for a hand of two or more cards
+  // and never while a card is dragged, so the pointer track stays lag-free. The
+  // solver pins the hovered card's own left edge.
+  const partingActive =
+    dragCard === null && hand.length > 1 && hoveredCardIndex !== null;
+  const renderedCardPositions: readonly number[] = partingActive
+    ? computePartedCardPositions(
+        baseCardPositions,
+        cardWidth,
+        maximalBoxWidth,
+        hoveredCardIndex,
+        CARD_INDEX_STRIP_WIDTH_PX,
+      )
+    : baseCardPositions;
+  // ITEM-8: two vertical tiers — eligible cards rise halfway, selected cards
+  // rise fully, everything else stays at the baseline.
+  const liftForCard = (card: CardData): number =>
+    getCardVerticalLiftPx({
+      isEligible: activePlayableKeys.includes(cardKey(card)),
+      isSelected: selectedKeys.includes(cardKey(card)),
+    });
+  // The contour is built from the exact rendered x of every card (hover-parted
+  // positions included) and the real two-tier lift, so it always hugs the hand.
+  const handCardPositions: HandCardPosition[] = hand.map((card, index) => ({
+    x: renderedCardPositions[index] ?? 0,
+    y: -liftForCard(card),
+  }));
   // The dragged card floats under the pointer, so it is not part of the hand
   // contour; the outline wraps the real, remaining row.
   const contourCards = gapClosed
@@ -1562,16 +1696,29 @@ export function GameTable({
     : handCardPositions;
   const handContour = computeHandContour(contourCards, cardWidth, cardHeight);
   const totalHandWidth = activeHandLayoutState.totalWidth;
-  const handFitScale = activeHandLayoutState.scale;
-  // T-90-feedback-2 ITEM-3: the dragged card sits inside the fit-scaled row.
-  // Counter-scale it and divide the pointer delta, so it tracks the cursor at
-  // its full 100x140 size instead of moving at `scale x` pointer speed.
-  const dragFitScale = handFitScale > 0 ? handFitScale : 1;
-  const draggedTransform =
-    dragFitScale === 1
-      ? `translate3d(${dragOffset.x}px, ${dragOffset.y}px, 0)`
-      : `translate3d(${dragOffset.x / dragFitScale}px, ${dragOffset.y / dragFitScale}px, 0) scale(${1 / dragFitScale})`;
-  const handRenderedWidth = Math.max(0, Math.round(totalHandWidth * handFitScale));
+  // ITEM-5a: the row is never scaled down any more — the Option B geometry
+  // compresses the overlap instead, so the cards keep their exact footprint.
+  const handFitScale = 1;
+  const handRenderedWidth = Math.max(0, Math.round(totalHandWidth));
+  // ITEM-3: exact 1:1 pointer tracking. The grabbed card is placed at
+  // `(clientX - grabOffsetX, clientY - grabOffsetY)` in viewport coordinates,
+  // expressed as a translate from its own live layout slot. The card's index,
+  // overlap step, hover state or row compaction never enter the formula.
+  const dragOrigin = pointerDragOriginRef.current;
+  const draggedTranslate =
+    dragPointer && dragOrigin
+      ? {
+          x:
+            dragPointer.x -
+            dragOrigin.grabOffsetX -
+            dragOrigin.stageLeft -
+            (baseCardPositions[draggedCardIndex] ?? 0),
+          y: dragPointer.y - dragOrigin.grabOffsetY - dragOrigin.stageTop,
+        }
+      : { x: 0, y: 0 };
+  const roundedDragX = Math.round(draggedTranslate.x * 100) / 100;
+  const roundedDragY = Math.round(draggedTranslate.y * 100) / 100;
+  const draggedTransform = `translate3d(${roundedDragX}px, ${roundedDragY}px, 0)`;
   // T-90 ITEM-PREV-4a/4b: the highlight data attributes are mirrored onto the
   // outer `[data-zone="player-hand"]` wrapper for testability only. Every
   // visual glow rule is scoped to `.hand-cards`, and the wrapper is pinned to
@@ -1842,14 +1989,14 @@ export function GameTable({
         }
         pointer.active = true;
         setDragCard(pointer.card);
-        setDragOffset({ x: 0, y: 0 });
+        setHoveredCardIndex(null);
+        setDragPointer({ x: event.clientX, y: event.clientY });
       }
-      // T-90-feedback-2 ITEM-3: the dragged card follows the pointer at its full
-      // 100x140 size, so it is never invisible during the gesture.
-      setDragOffset({
-        x: event.clientX - pointer.startX,
-        y: event.clientY - pointer.startY,
-      });
+      // T-90-feedback-5 ITEM-3: store the live viewport pointer position only.
+      // The translate is derived from the captured grab offset at render time,
+      // so the dragged card tracks the mouse 1:1 at its full 100x140 size and
+      // is never invisible during the gesture.
+      setDragPointer({ x: event.clientX, y: event.clientY });
       event.preventDefault();
       const box = handRef.current;
       if (!box) return;
@@ -1887,7 +2034,7 @@ export function GameTable({
       // Stop the click that follows a completed drag from selecting the card.
       suppressClickRef.current = true;
       setDragCard(null);
-      setDragOffset({ x: 0, y: 0 });
+      setDragPointer(null);
       setSnapZone(null);
       setReorderIndex(null);
     };
@@ -1930,7 +2077,7 @@ export function GameTable({
     const targetIndex =
       reorderIndex ?? (element ? reorderIndexFromClientX(event.clientX, element) : 0);
     setDragCard(null);
-    setDragOffset({ x: 0, y: 0 });
+    setDragPointer(null);
     setSnapZone(null);
     setReorderIndex(null);
     if (!card) return;
@@ -2070,6 +2217,25 @@ export function GameTable({
   // non-primary buttons are ignored so they keep their read-only behaviour.
   const beginPointerDrag = (card: CardData) => (event: MouseEvent) => {
     if (reviewMode || event.button !== 0) return;
+    const cardEl = (event.currentTarget as HTMLElement | null) ?? null;
+    const cardRect =
+      cardEl && typeof cardEl.getBoundingClientRect === 'function'
+        ? cardEl.getBoundingClientRect()
+        : null;
+    const stageRect =
+      handRef.current && typeof handRef.current.getBoundingClientRect === 'function'
+        ? handRef.current.getBoundingClientRect()
+        : null;
+    // ITEM-3: capture the exact grab offset from the LIVE card rectangle once.
+    // Every later pointermove resolves the card from these constants, so the
+    // hand index / overlap step / compaction can never add horizontal drift.
+    pointerDragOriginRef.current = {
+      grabOffsetX: cardRect ? event.clientX - cardRect.left : 0,
+      grabOffsetY: cardRect ? event.clientY - cardRect.top : 0,
+      stageLeft: stageRect?.left ?? 0,
+      stageTop: stageRect?.top ?? 0,
+    };
+    setHoveredCardIndex(null);
     pointerDragRef.current = {
       card,
       startX: event.clientX,
@@ -2154,6 +2320,12 @@ export function GameTable({
                       : OPPONENT_CARD_WIDTH
                   }
                   data-min-overlap-ratio="0.10"
+                  // ITEM-2c: the same widened index strip drives the overlap.
+                  data-index-strip-px={opponentIndexStripWidth(
+                    opponent.cards && opponent.cards.length > 0
+                      ? LOW_DETAIL_CARD_WIDTH
+                      : OPPONENT_CARD_WIDTH,
+                  )}
                   data-overlap={opponentOverlap(
                     opponent.cards && opponent.cards.length > 0
                       ? opponent.cards.length
@@ -2400,7 +2572,12 @@ export function GameTable({
         data-highlight-role={handHighlightVariant}
         data-surrendering={surrenderingHand ? 'true' : 'false'}
         data-defenseless={defenderDefenseless ? 'true' : 'false'}
+        data-hovered-card-index={hoveredCardIndex === null ? undefined : hoveredCardIndex}
+        data-parting-active={partingActive ? 'true' : 'false'}
         ref={handZoneRef}
+        onPointerEnter={handleHandPointerMove}
+        onPointerMove={handleHandPointerMove}
+        onPointerLeave={clearHandHover}
         onDragOver={draggable && onReorderHand ? hoverHandZone : undefined}
         onDrop={draggable && onReorderHand ? dropOnHand : undefined}
       >
@@ -2440,30 +2617,29 @@ export function GameTable({
           data-overlap={activeHandLayoutState.overlap}
           data-overlap-px={activeHandLayoutState.overlap}
           data-overlap-ratio={activeHandLayoutState.overlapRatio}
-          data-stride-px={activeHandLayoutState.stride}
+          data-stride-px={activeHandLayoutState.cardStep}
           // Both widths below are reported in the SAME unscaled row coordinate
           // space as the contour; the on-screen width is `data-rendered-hand-width`.
           data-hand-width={Math.round(totalHandWidth)}
           data-rendered-hand-width={handRenderedWidth}
           data-fit-scale={handFitScale}
-          data-hidden-left={handLayoutState.hiddenLeft}
-          data-hidden-right={handLayoutState.hiddenRight}
+          // Option B never hides a card: every card in the hand is rendered.
+          data-hidden-left={0}
+          data-hidden-right={0}
           data-reorder-target-index={reorderIndex === null ? undefined : reorderIndex}
           // T-90-feedback-2 ITEM-2: `.hand-cards` is exactly the overlapped card
           // footprint; the contour SVG is anchored to this box.
           style={{
-            // T-90-feedback-2 ITEM-2: the CSS lift reads this exact constant, so
-            // the contour and the raised cards can never disagree.
+            // T-90-feedback-2 ITEM-2: the CSS lift tokens mirror the two tiers
+            // so the contour and the raised cards can never disagree.
             '--hand-raise': `${HAND_RAISED_OFFSET}px`,
-            // The row lays out at its natural `totalWidth`; when the fit scale
-            // is below 1 the box is the scaled width and the whole row is
-            // scaled from its LEFT edge, so the cards and the contour SVG (a
-            // child of this same box) scale together into exactly that width.
-            width: `${handRenderedWidth}px`,
-            height: `${Math.round(cardHeight * handFitScale)}px`,
-            justifyContent: handFitScale < 1 ? 'flex-start' : undefined,
-            transform: handFitScale < 1 ? `scale(${handFitScale})` : undefined,
-            transformOrigin: handFitScale < 1 ? 'left center' : undefined,
+            '--hand-raise-selected': `${HAND_SELECTED_RAISED_OFFSET}px`,
+            // T-90-feedback-5 ITEM-5a/5b: full-size cards are never scaled.
+            // The stage keeps the FULL hand width even while a dragged card's
+            // slot is collapsed, so its left edge (and therefore the captured
+            // drag origin) never shifts mid-gesture.
+            width: `${Math.round(handLayoutState.totalWidth)}px`,
+            height: `${Math.round(cardHeight)}px`,
           }}
           ref={handRef}
           onDragOver={draggable && onReorderHand ? hoverHandZone : undefined}
@@ -2507,9 +2683,8 @@ export function GameTable({
             outline layers tightly over the exact hand pixels. */}
         <div class="hand-row" data-testid="hand-row">
         {hand.map((card, index) => {
-          const hidden =
-            index < handLayoutState.hiddenLeft ||
-            index >= handLayoutState.hiddenLeft + handLayoutState.visibleCount;
+          // Option B renders every card in the hand; nothing is ever hidden.
+          const hidden = false;
           const draggedIndex = dragCard
             ? hand.findIndex((candidate) => cardKey(candidate) === cardKey(dragCard))
             : -1;
@@ -2532,8 +2707,14 @@ export function GameTable({
               class="hand-slot hand-card-wrapper"
               data-hidden={hidden ? 'true' : 'false'}
               data-index={index}
-              data-card-x={Math.round(handCardPositions[index].x)}
-              data-card-y={handCardPositions[index].y}
+              data-card-x={handCardPositions[index].x}
+              data-card-y={Math.round(handCardPositions[index].y)}
+              data-lift-px={Math.round(-handCardPositions[index].y)}
+              data-eligible={
+                !reviewMode && activePlayableKeys.includes(cardKey(card))
+                  ? 'true'
+                  : 'false'
+              }
               data-part-direction={partDirection}
               data-collapsed={index === draggedCardIndex ? 'true' : 'false'}
               // ITEM-5: the click-selected throw-in / attack cards are marked
@@ -2547,17 +2728,31 @@ export function GameTable({
               // browser can never swap the pointer finger for its arrow.
               draggable={false}
               aria-hidden={hidden ? 'true' : undefined}
-              style={
-                index === draggedCardIndex
-                  ? {
-                      marginLeft: handSlotMargin(index),
-                      transform: draggedTransform,
-                      transformOrigin: dragFitScale === 1 ? undefined : 'left top',
-                      zIndex: 1000,
-                      transition: 'none',
-                    }
-                  : { marginLeft: handSlotMargin(index) }
-              }
+              style={(() => {
+                const baseX = baseCardPositions[index] ?? 0;
+                const renderedX = handCardPositions[index]?.x ?? baseX;
+                const lift = -handCardPositions[index]?.y!;
+                const deltaX = Math.round((renderedX - baseX) * 100) / 100;
+                if (index === draggedCardIndex) {
+                  return {
+                    marginLeft: handSlotMargin(index),
+                    transform: draggedTransform,
+                    zIndex: 1000,
+                    // Zero lag: the dragged card must not animate behind the
+                    // pointer.
+                    transition: 'none',
+                  };
+                }
+                return {
+                  marginLeft: handSlotMargin(index),
+                  // ITEM-6a/6b/8: hover-parting offsets and the two-tier raise
+                  // are pure GPU-friendly transforms, so CSS can animate them.
+                  transform:
+                    deltaX !== 0 || lift !== 0
+                      ? `translate3d(${deltaX}px, ${-lift}px, 0)`
+                      : undefined,
+                };
+              })()}
               onMouseDown={beginPointerDrag(card)}
               onDragStart={(event) => event.preventDefault()}
               onClickCapture={(event) => {
@@ -2623,11 +2818,11 @@ export function GameTable({
                   event.preventDefault();
                   pointerDragRef.current = null;
                   setDragCard(card);
-                  setDragOffset({ x: 0, y: 0 });
+                  setDragPointer({ x: event.clientX, y: event.clientY });
                 }}
                 onDragEnd={() => {
                   setDragCard(null);
-                  setDragOffset({ x: 0, y: 0 });
+                  setDragPointer(null);
                   setSnapZone(null);
                   setReorderIndex(null);
                 }}

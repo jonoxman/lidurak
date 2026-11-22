@@ -18,6 +18,7 @@ import {
   type OpponentSummary,
 } from '../components/GameTable';
 import type { CardData } from '../components/Card';
+import { ELIGIBLE_LIFT_PX, SELECTED_LIFT_PX } from '../utils/handLayout';
 import tableCss from '../styles/table.css?raw';
 
 /**
@@ -190,7 +191,7 @@ describe('T-95 #3: active hand overlap stays inside 20%-80% and the zone', () =>
     }
   });
 
-  it('contains the 30 / 34 / 46-card QA stress hands at the 80% cap', () => {
+  it('T-90-feedback-5 ITEM-5a/5b: keeps the 30 / 34 / 46-card stress hands at full size', () => {
     for (const count of [30, 34, 46]) {
       const view = mountTable(DECK.slice(0, count), { awaitingAttack: true });
       const box = screen.getByTestId('hand-turn-highlight') as HTMLElement;
@@ -199,26 +200,26 @@ describe('T-95 #3: active hand overlap stays inside 20%-80% and the zone', () =>
       const renderedWidth = Number(box.getAttribute('data-rendered-hand-width'));
       const stride = Number(box.getAttribute('data-stride-px'));
 
-      // Every card is rendered: nothing is hidden, stacked or removed.
+      // Every card is rendered: nothing is hidden, stacked, removed or shrunk.
       expect(wrappers).toHaveLength(count);
       expect(wrappers.filter((node) => node.getAttribute('data-hidden') === 'true')).toHaveLength(
         0,
       );
-      expect(Number(box.getAttribute('data-overlap-ratio'))).toBeCloseTo(
-        HAND_MAX_OVERLAP_RATIO,
-        5,
-      );
-      expect(stride).toBeGreaterThanOrEqual(CARD_WIDTH * 0.2 - 1e-9);
+      expect(Number(box.getAttribute('data-fit-scale'))).toBe(1);
+      for (const wrapper of wrappers) {
+        const card = wrapper.querySelector('.card-slot') as HTMLElement;
+        expect(card.getAttribute('data-card-width')).toBe(String(CARD_WIDTH));
+        expect(card.getAttribute('data-card-height')).toBe(String(CARD_HEIGHT));
+      }
 
-      // The last card's right edge is exactly the row width, and the row is
-      // scaled into the hand zone, so it can never reach the deck or controls.
-      const last = wrappers[wrappers.length - 1];
-      expect(Number(last.getAttribute('data-card-x')) + CARD_WIDTH).toBeCloseTo(
-        layoutWidth,
-        5,
-      );
+      // Option B: the row compresses inside the maximal box (never beyond it),
+      // and every card stays distinct and left-to-right ordered.
+      expect(stride).toBeGreaterThan(0);
       expect(renderedWidth).toBeLessThanOrEqual(available + 1e-9);
-      expect(Number(box.getAttribute('data-fit-scale'))).toBeLessThan(1);
+      const last = wrappers[wrappers.length - 1];
+      expect(
+        Math.abs(Number(last.getAttribute('data-card-x')) + CARD_WIDTH - layoutWidth),
+      ).toBeLessThanOrEqual(1);
       view.unmount();
     }
   });
@@ -232,13 +233,14 @@ describe('T-95 #3: active hand overlap stays inside 20%-80% and the zone', () =>
       HAND_FALLBACK_WIDTH_MOBILE - HAND_CONTOUR_PADDING * 2;
 
     expect(wrappers).toHaveLength(46);
-    expect(Number(box.getAttribute('data-overlap-ratio'))).toBeCloseTo(
-      HAND_MAX_OVERLAP_RATIO,
-      5,
-    );
+    // ITEM-5a: the mobile cards keep their 48x68 footprint too.
+    expect(Number(box.getAttribute('data-fit-scale'))).toBe(1);
     expect(Number(box.getAttribute('data-rendered-hand-width'))).toBeLessThanOrEqual(
       availableMobile + 1e-9,
     );
+    const mobileCard = wrappers[0].querySelector('.card-slot') as HTMLElement;
+    expect(mobileCard.getAttribute('data-card-width')).toBe(String(MOBILE_CARD_WIDTH));
+    expect(mobileCard.getAttribute('data-card-height')).toBe(String(MOBILE_CARD_HEIGHT));
   });
 });
 
@@ -358,5 +360,168 @@ describe('T-95 #2: a dragged hand card stays visible for the whole gesture', () 
     expect(wrapper.getAttribute('data-dragging')).toBe('false');
     expect(card.style.opacity).toBe('1');
     expect(card.style.visibility).toBe('visible');
+  });
+});
+
+describe('T-90-feedback-5 ITEM-8: two-tier card raise', () => {
+  it('raises eligible cards halfway and selected cards fully, others at baseline', () => {
+    const myHand = DECK.slice(0, 3);
+    mountTable(myHand, {
+      awaitingAttack: true,
+      playableKeys: [cardKey(myHand[0])],
+      selectedKeys: [cardKey(myHand[1])],
+    });
+
+    const wrappers = handWrappers();
+    expect(wrappers).toHaveLength(3);
+
+    // Eligible -> half raise.
+    expect(wrappers[0].getAttribute('data-eligible')).toBe('true');
+    expect(wrappers[0].getAttribute('data-lift-px')).toBe(String(ELIGIBLE_LIFT_PX));
+    expect(wrappers[0].getAttribute('data-card-y')).toBe(String(-ELIGIBLE_LIFT_PX));
+    expect(wrappers[0].style.transform).toBe(
+      `translate3d(0px, ${-ELIGIBLE_LIFT_PX}px, 0)`,
+    );
+
+    // Selected -> full raise, even though it is also playable.
+    expect(wrappers[1].getAttribute('data-selected')).toBe('true');
+    expect(wrappers[1].getAttribute('data-lift-px')).toBe(String(SELECTED_LIFT_PX));
+    expect(wrappers[1].getAttribute('data-card-y')).toBe(String(-SELECTED_LIFT_PX));
+    expect(wrappers[1].style.transform).toBe(
+      `translate3d(0px, ${-SELECTED_LIFT_PX}px, 0)`,
+    );
+
+    // Neither eligible nor selected -> baseline.
+    expect(wrappers[2].getAttribute('data-eligible')).toBe('false');
+    expect(wrappers[2].getAttribute('data-card-y')).toBe('0');
+    expect(wrappers[2].style.transform).toBe('');
+
+    // The contour hugs all three tiers non-rectangularly.
+    expect(
+      screen.getByTestId('hand-highlight-contour').getAttribute('data-contour-shape'),
+    ).toBe('stepped');
+  });
+});
+
+describe('T-90-feedback-5 ITEM-6a/6b/6c: smooth hover parting', () => {
+  it('parts the hand around the hovered card without moving that card', () => {
+    mountTable(DECK.slice(0, 8), { awaitingAttack: true });
+    const zone = document.querySelector('[data-zone="player-hand"]') as HTMLElement;
+    const wrappers = handWrappers();
+    const before = wrappers.map((wrapper) => Number(wrapper.getAttribute('data-card-x')));
+
+    fireEvent.pointerMove(wrappers[4], { bubbles: true });
+
+    // ITEM-6a: the lane reports the hovered card and the parting state.
+    expect(zone.getAttribute('data-hovered-card-index')).toBe('4');
+    expect(zone.getAttribute('data-parting-active')).toBe('true');
+
+    const after = handWrappers().map((wrapper) =>
+      Number(wrapper.getAttribute('data-card-x')),
+    );
+    // ITEM-6b: the hovered card is pinned exactly where it was.
+    expect(after[4]).toBe(before[4]);
+    // ITEM-6a: near neighbours part outward, the rest compress smoothly.
+    expect(after[3]).toBeLessThan(before[3]);
+    expect(after[5]).toBeGreaterThan(before[5]);
+    expect(after[0]).toBeLessThanOrEqual(before[0]);
+    expect(after[7]).toBeGreaterThanOrEqual(before[0]);
+
+    // The contour follows the parted positions.
+    expect(
+      Number(screen.getByTestId('hand-highlight-contour').getAttribute('data-contour-width')),
+    ).toBeGreaterThan(0);
+
+    // ITEM-6a: leaving the lane clears the hover and returns the row.
+    fireEvent.pointerLeave(zone);
+    expect(zone.getAttribute('data-hovered-card-index')).toBeNull();
+    expect(zone.getAttribute('data-parting-active')).toBe('false');
+    expect(
+      handWrappers().map((wrapper) => Number(wrapper.getAttribute('data-card-x'))),
+    ).toEqual(before);
+  });
+
+  it('ITEM-6c: never parts a single-card hand', () => {
+    mountTable(DECK.slice(0, 1), { awaitingAttack: true });
+    const zone = document.querySelector('[data-zone="player-hand"]') as HTMLElement;
+    const wrapper = handWrappers()[0];
+    const beforeX = wrapper.getAttribute('data-card-x');
+
+    fireEvent.pointerMove(wrapper, { bubbles: true });
+
+    expect(zone.getAttribute('data-hovered-card-index')).toBeNull();
+    expect(zone.getAttribute('data-parting-active')).toBe('false');
+    expect(handWrappers()[0].getAttribute('data-card-x')).toBe(beforeX);
+    expect(handWrappers()[0].style.transform).toBe('');
+  });
+});
+
+describe('T-90-feedback-5 ITEM-3: zero horizontal drag drift', () => {
+  function fakeRect(left: number, top: number): DOMRect {
+    return {
+      left,
+      top,
+      right: left + 100,
+      bottom: top + 140,
+      width: 100,
+      height: 140,
+      x: left,
+      y: top,
+      toJSON: () => ({}),
+    } as DOMRect;
+  }
+
+  const translateX = (value: string): number => {
+    const match = value.match(/translate3d\((-?[\d.]+)px,/);
+    return match ? Number(match[1]) : 0;
+  };
+
+  it('tracks 1-card, 6-card, 14-card and 30-card hands with no drift', () => {
+    const cases: Array<{ count: number; index: number }> = [
+      { count: 1, index: 0 },
+      { count: 6, index: 0 },
+      { count: 6, index: 5 },
+      { count: 14, index: 0 },
+      { count: 14, index: 7 },
+      { count: 14, index: 13 },
+      { count: 30, index: 0 },
+      { count: 30, index: 15 },
+      { count: 30, index: 29 },
+    ];
+
+    for (const { count, index } of cases) {
+      const view = mountTable(DECK.slice(0, count), { onReorderHand: vi.fn() });
+      const box = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+      const stageLeft = 120;
+      const stageTop = 60;
+      vi.spyOn(box, 'getBoundingClientRect').mockReturnValue(fakeRect(stageLeft, stageTop));
+
+      const wrapper = handWrappers()[index];
+      const layoutX = Number(wrapper.getAttribute('data-card-x'));
+      const cardLeft = stageLeft + layoutX;
+      vi.spyOn(wrapper, 'getBoundingClientRect').mockReturnValue(
+        fakeRect(cardLeft, stageTop),
+      );
+
+      const startX = 40;
+      const startY = 80;
+      fireEvent.mouseDown(wrapper, { button: 0, clientX: startX, clientY: startY });
+
+      for (const [clientX, clientY] of [
+        [startX + 4, startY],
+        [startX + 90, startY + 60],
+        [startX + 220, startY + 120],
+      ]) {
+        fireEvent.mouseMove(document, { clientX, clientY });
+        const currentBaseX = Number(wrapper.getAttribute('data-card-x'));
+        const renderedLeft =
+          stageLeft + currentBaseX + translateX(wrapper.style.transform);
+        // ITEM-3: the rendered card stays under the mouse's grab point.
+        expect(renderedLeft).toBeCloseTo(cardLeft + (clientX - startX), 5);
+      }
+
+      fireEvent.mouseUp(document, { clientX: startX + 220, clientY: startY + 120 });
+      view.unmount();
+    }
   });
 });

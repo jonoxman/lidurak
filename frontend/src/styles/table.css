@@ -1137,7 +1137,10 @@
      footprint (`width: totalHandWidth; height: cardHeight`) and no longer pads
      the row. `position: relative` anchors the SVG contour. */
   width: fit-content;
-  max-width: 100%;
+  /* T-90-feedback-5 ITEM-5b: the Option B maximal box may be wider than the
+     hand column (it is measured from the whole play area); the lane never
+     clips or caps it, so full-size cards always fit without shrinking. */
+  max-width: none;
   min-width: 0;
   align-self: center;
   height: fit-content;
@@ -2004,21 +2007,20 @@
   transform: none;
 }
 
-/* T-90-feedback-2 ITEM-2: a playable / selected card lifts by the exact offset
-   the SVG contour uses (`--hand-raise`, written from `HAND_RAISED_OFFSET` on
-   `.hand-cards`), so the tight outline steps up over exactly the raised cards. */
+/* T-90-feedback-2 ITEM-2: the two-tier raise (eligible = half, selected = full)
+   is rendered as a `translateY` on the card WRAPPER, so the tight outline and
+   the card can never disagree. The card itself never lifts (and especially
+   never on hover), which is what keeps the hovered card stationary. */
 .hand-cards .card-slot.legal-playable {
-  transform: translateY(var(--hand-raise, -14px));
+  transform: none;
 }
 
-/* T-95 #1: hovering never adds an extra lift, so the tight SVG contour keeps
-   wrapping the exact rendered geometry of every card at all times. */
 .hand-cards .card-slot.legal-playable:hover {
-  transform: translateY(var(--hand-raise, -14px));
+  transform: none;
 }
 
 .hand-cards .card-slot.selected {
-  transform: translateY(var(--hand-raise, -14px));
+  transform: none;
 }
 
 /* Item 19: the whole gesture keeps the pointer finger, never the slashed
@@ -2431,11 +2433,14 @@ body[data-dragging='true'] *,
      is `100 + (visibleCount - 1) * step`. */
   flex: 0 0 var(--hand-card-width, 100px);
   box-sizing: border-box;
-  /* T-90-2 ITEM-6a: opening / closing the insertion gap is smooth, including
-     the compacting margin change when the dragged card leaves its slot. */
+  /* T-90-2 ITEM-6a / T-90-feedback-5 ITEM-6a: opening / closing the insertion
+     gap, the hover-parting offsets and the two-tier raise are all smooth,
+     GPU-friendly transform / margin transitions. The actively dragged card
+     opts out inline (`transition: none`) so pointer tracking has zero lag. */
+  will-change: transform;
   transition:
-    transform 160ms cubic-bezier(0.22, 1, 0.36, 1),
-    margin-left 160ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    margin-left 180ms cubic-bezier(0.22, 1, 0.36, 1),
     opacity 120ms ease;
 }
 
@@ -2454,11 +2459,14 @@ body[data-dragging='true'] *,
   visibility: visible;
 }
 
+/* T-90-feedback-5 ITEM-3/6a: the dragged card rides the pointer with no
+   animation lag, while the parted hand around it animates. */
 .hand-card-wrapper[data-dragging='true'] {
   opacity: 1;
   visibility: visible;
   overflow: visible;
   z-index: 1000;
+  transition: none;
 }
 
 /* T-90-feedback-2 ITEM-3: the dragged card never intercepts hit-testing, so it
