@@ -129,7 +129,9 @@ object GameManager:
     ThrowInVisibility4p,
     ThrowInCapacityCap,
     HugeHand36,
-    HugeHand52
+    HugeHand52,
+    ThrowInMultiQa,
+    LargeHandStress
   )
 
   /** Three-player deflection: Alice attacked, Bob holds the matching six. */
@@ -183,6 +185,21 @@ object GameManager:
    */
   val HugeHand52: String = "huge-hand-52"
 
+  /**
+   * Three-player throw-in table (T-90 ITEM-1 & ITEM-6): every table card is
+   * covered, Alice holds three sevens and may throw them in or pass, Bob defends
+   * without a matching rank, and Charlie holds no rank on the table either, so
+   * only Alice ever sees the throw-in outline.
+   */
+  val ThrowInMultiQa: String = "throw-in-multi-qa"
+
+  /**
+   * Two-player stress table (T-90 ITEM-5): Alice defends a lone `9♣` with 30
+   * cards — a deliberate mix of playable covers and unplayable low clubs,
+   * spades and diamonds — while Bob keeps the other five.
+   */
+  val LargeHandStress: String = "large-hand-stress"
+
   /** The scripted position called `presetId`, or an error naming the unknown one. */
   def preset(presetId: String): Either[String, PresetGame] =
     Option(presetId).map(_.trim.toLowerCase).getOrElse("") match
@@ -197,6 +214,8 @@ object GameManager:
       case ThrowInCapacityCap => Right(throwInCapacityCapPreset)
       case HugeHand36         => Right(hugeHand36Preset)
       case HugeHand52         => Right(hugeHand52Preset)
+      case ThrowInMultiQa     => Right(throwInMultiQaPreset)
+      case LargeHandStress    => Right(largeHandStressPreset)
       case other =>
         Left(
           s"Unknown preset: $other (expected one of ${Presets.mkString(", ")})"
@@ -706,8 +725,16 @@ object GameManager:
    * last, exactly like a dealt game.
    */
   private def clubBottomTalon(playerCount: Int, used: Vector[Card]): Vector[Card] =
+    suitBottomTalon(playerCount, used, Suit.Clubs)
+
+  /** The same trump-last ordering for any trump suit. */
+  private def suitBottomTalon(
+      playerCount: Int,
+      used: Vector[Card],
+      trumpSuit: Suit
+  ): Vector[Card] =
     val remaining = Deck.forPlayerCount(playerCount).filterNot(used.contains)
-    remaining.filterNot(_.suit == Suit.Clubs) ++ remaining.filter(_.suit == Suit.Clubs)
+    remaining.filterNot(_.suit == trumpSuit) ++ remaining.filter(_.suit == trumpSuit)
 
   /**
    * `throw-in-visibility-4p` (ITEM-1a): Bob (`p1`) has covered Alice's (`p0`)
@@ -881,4 +908,121 @@ object GameManager:
         defenderInitialHandSize = bobHand.size
       ),
       defaultPlayerId = "p1"
+    )
+
+  /**
+   * `throw-in-multi-qa` (T-90 ITEM-1 & ITEM-6): a three-player table whose only
+   * covered pair is `7♠`/`8♠` at `trumpSuit = Hearts`. Alice (`p0`, the default
+   * POV) holds `7♥ 7♦ 7♣` — the rank on the table — plus `K♠` and `Q♣`, so she
+   * sees the throw-in outline, may deploy all three matching cards in one
+   * action, and may also pass. Bob (`p1`) defends and Charlie (`p2`) holds no
+   * `7` or `8`, so neither of them ever sees the outline. All 36 cards stay
+   * distinct (16 in hands and on the table, 20 in the talon with a heart at the
+   * bottom).
+   */
+  private def throwInMultiQaPreset: PresetGame =
+    val aliceHand = Vector(
+      card(Rank.Seven, Suit.Hearts),
+      card(Rank.Seven, Suit.Diamonds),
+      card(Rank.Seven, Suit.Clubs),
+      card(Rank.King, Suit.Spades),
+      card(Rank.Queen, Suit.Clubs)
+    )
+    val bobHand = Vector(
+      card(Rank.Nine, Suit.Spades),
+      card(Rank.Ten, Suit.Spades),
+      card(Rank.Jack, Suit.Diamonds),
+      card(Rank.Queen, Suit.Diamonds),
+      card(Rank.Ace, Suit.Clubs)
+    )
+    val charlieHand = Vector(
+      card(Rank.Nine, Suit.Clubs),
+      card(Rank.Ten, Suit.Clubs),
+      card(Rank.Jack, Suit.Spades),
+      card(Rank.Ace, Suit.Diamonds)
+    )
+    val tablePairs = Vector(
+      TablePair(card(Rank.Seven, Suit.Spades), Some(card(Rank.Eight, Suit.Spades)))
+    )
+    val used = aliceHand ++ bobHand ++ charlieHand ++
+      tablePairs.flatMap(pair => pair.attack :: pair.defense.toList)
+    val talon = suitBottomTalon(3, used, Suit.Hearts)
+    PresetGame(
+      state = presetState(
+        names = Vector("Alice", "Bob", "Charlie"),
+        hands = Vector(aliceHand, bobHand, charlieHand),
+        talon = talon,
+        trumpSuit = Suit.Hearts,
+        bottomTrumpCard = talon.lastOption,
+        tablePairs = tablePairs,
+        attackerIdx = 0,
+        defenderIdx = 1,
+        boutPhase = BoutPhase.Defense,
+        defenderInitialHandSize = 6,
+        allowRedirect = true,
+        devMode = true
+      ),
+      defaultPlayerId = "p0"
+    )
+
+  /**
+   * `large-hand-stress` (T-90 ITEM-5): Bob (`p1`) has attacked with a lone
+   * uncovered `9♣` at `trumpSuit = Hearts`, the talon is empty, and Alice
+   * (`p0`, the default POV) defends with 30 of the 36 cards. Her hand mixes 14
+   * playable covers (the clubs above the nine and every heart trump) with 16
+   * unplayable cards (the low clubs `6♣ 7♣ 8♣`, the four low spades and all nine
+   * diamonds), so the reviewer can check the tight non-rectangular hand contour
+   * around the raised playable cards in one click. Bob keeps the remaining five
+   * spades and holds no rank on the table.
+   */
+  private def largeHandStressPreset: PresetGame =
+    val bobHand = Vector(
+      card(Rank.Ten, Suit.Spades),
+      card(Rank.Jack, Suit.Spades),
+      card(Rank.Queen, Suit.Spades),
+      card(Rank.King, Suit.Spades),
+      card(Rank.Ace, Suit.Spades)
+    )
+    val attack = card(Rank.Nine, Suit.Clubs)
+    val aliceClubs = Vector(
+      card(Rank.Six, Suit.Clubs),
+      card(Rank.Ten, Suit.Clubs),
+      card(Rank.Seven, Suit.Clubs),
+      card(Rank.Jack, Suit.Clubs),
+      card(Rank.Eight, Suit.Clubs),
+      card(Rank.Queen, Suit.Clubs),
+      card(Rank.King, Suit.Clubs),
+      card(Rank.Ace, Suit.Clubs)
+    )
+    val aliceHearts = Vector(
+      Rank.Six, Rank.Seven, Rank.Eight, Rank.Nine, Rank.Ten,
+      Rank.Jack, Rank.Queen, Rank.King, Rank.Ace
+    ).map(rank => card(rank, Suit.Hearts))
+    val aliceSpades = Vector(
+      card(Rank.Six, Suit.Spades),
+      card(Rank.Seven, Suit.Spades),
+      card(Rank.Eight, Suit.Spades),
+      card(Rank.Nine, Suit.Spades)
+    )
+    val aliceDiamonds = Vector(
+      Rank.Six, Rank.Seven, Rank.Eight, Rank.Nine, Rank.Ten,
+      Rank.Jack, Rank.Queen, Rank.King, Rank.Ace
+    ).map(rank => card(rank, Suit.Diamonds))
+    val aliceHand = aliceClubs ++ aliceHearts ++ aliceSpades ++ aliceDiamonds
+    PresetGame(
+      state = presetState(
+        names = Vector("Alice", "Bob"),
+        hands = Vector(aliceHand, bobHand),
+        talon = Vector.empty,
+        trumpSuit = Suit.Hearts,
+        bottomTrumpCard = None,
+        tablePairs = Vector(TablePair(attack)),
+        attackerIdx = 1,
+        defenderIdx = 0,
+        boutPhase = BoutPhase.Defense,
+        defenderInitialHandSize = aliceHand.size,
+        allowRedirect = true,
+        devMode = true
+      ),
+      defaultPlayerId = "p0"
     )

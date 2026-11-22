@@ -187,3 +187,102 @@ class ThrowInEligibilitySuite extends munit.FunSuite:
     // The surrendered defender picks up exactly the cards of both variants.
     assertEquals(multi.players(1).hand, sequential.players(1).hand)
   }
+
+  // --- T-90-feedback-20261122_011021-1: the two new 1-click QA tables ---
+
+  test("throw-in-multi-qa offers the outline to Alice only") {
+    val multiQa = preset("throw-in-multi-qa")
+    val alice = PlayerGameView.forViewer(multiQa, "p0")
+
+    assertEquals(
+      alice.myHand,
+      List(sevenHearts, sevenDiamonds, sevenClubs, kingSpades, card(Rank.Queen, Suit.Clubs))
+    )
+    assertEquals(alice.throwInCards, List(sevenHearts, sevenDiamonds, sevenClubs))
+    assertEquals(alice.throwInCapacity, 3)
+    assertEquals(alice.canThrowIn, true)
+    assert(alice.legalActions.contains("throwIn"), alice.legalActions.toString)
+    assert(alice.legalActions.contains("pass"), alice.legalActions.toString)
+
+    // Bob defends and Charlie holds no 7 or 8: neither sees the outline.
+    val bob = PlayerGameView.forViewer(multiQa, "p1")
+    assertEquals(bob.throwInCards, Nil)
+    assertEquals(bob.throwInCapacity, 0)
+    assertEquals(bob.canThrowIn, false)
+    assertEquals(bob.legalActions, List.empty)
+
+    assertEquals(GameEngine.legalThrowInCards(multiQa, "p2"), Nil)
+    assertEquals(GameEngine.throwInCapacity(multiQa, "p2"), 0)
+    assertEquals(PlayerGameView.forViewer(multiQa, "p2").canThrowIn, false)
+  }
+
+  test("throw-in-multi-qa deploys three cards atomically and rejects a bad batch") {
+    val multiQa = preset("throw-in-multi-qa")
+    val cards = List(sevenHearts, sevenDiamonds, sevenClubs)
+
+    val next = GameEngine
+      .applyAction(multiQa, GameAction.ThrowInCards("p0", cards))
+      .getOrElse(fail("expected a legal three-card throw-in"))
+    assertEquals(next.tablePairs.size, multiQa.tablePairs.size + 3)
+    assertEquals(next.tablePairs.map(_.attack).takeRight(3), cards.toVector)
+    assertEquals(
+      next.players(0).hand.toList,
+      List(kingSpades, card(Rank.Queen, Suit.Clubs))
+    )
+    assertEquals(next.players(0).hasPassed, false)
+
+    val rejected = GameEngine.applyAction(
+      multiQa,
+      GameAction.ThrowInCards("p0", cards :+ kingSpades)
+    )
+    assert(rejected.isLeft, rejected)
+    // Nothing partial happened on the rejected batch.
+    assertEquals(multiQa.tablePairs.size, 1)
+    assertEquals(multiQa.players(0).hand.size, 5)
+  }
+
+  test("a full bout leaves a matching seat with no capacity and no outline") {
+    val sixPairs = Vector(
+      TablePair(sevenDiamonds, Some(card(Rank.Eight, Suit.Diamonds))),
+      TablePair(sevenClubs, Some(card(Rank.Eight, Suit.Clubs))),
+      TablePair(card(Rank.Six, Suit.Spades), Some(card(Rank.Nine, Suit.Spades))),
+      TablePair(card(Rank.Six, Suit.Hearts), Some(card(Rank.Nine, Suit.Hearts))),
+      TablePair(card(Rank.Ten, Suit.Spades), Some(card(Rank.Jack, Suit.Spades))),
+      TablePair(card(Rank.Ten, Suit.Clubs), Some(card(Rank.Jack, Suit.Clubs)))
+    )
+    val full = visibility.copy(tablePairs = sixPairs, defenderInitialHandSize = 7)
+
+    assertEquals(full.maxBoutAttacks, 6)
+    assert(full.players(0).hand.exists(_.rank == Rank.Seven), full.players(0).hand.toString)
+    assertEquals(GameEngine.throwInCapacity(full, "p0"), 0)
+    assertEquals(GameEngine.legalThrowInCards(full, "p0"), Nil)
+    assertEquals(GameEngine.canPlayerThrowIn(full, 0), false)
+    assertEquals(PlayerGameView.forViewer(full, "p0").canThrowIn, false)
+    assert(
+      GameEngine.applyAction(full, GameAction.ThrowInCards("p0", List(sevenHearts))).isLeft
+    )
+  }
+
+  test("large-hand-stress keeps a 30-card defender out of the throw-in outline") {
+    val largeHand = preset("large-hand-stress")
+    val alice = PlayerGameView.forViewer(largeHand, "p0")
+
+    assertEquals(alice.myHand.size, 30)
+    assertEquals(alice.tablePairs, Vector(TablePair(Card(Suit.Clubs, Rank.Nine))))
+    assertEquals(alice.attackerIdx, 1)
+    assertEquals(alice.defenderIdx, 0)
+    assertEquals(alice.canThrowIn, false)
+    assertEquals(alice.throwInCards, Nil)
+    assertEquals(alice.throwInCapacity, 0)
+    assert(alice.legalActions.contains("cover"), alice.legalActions.toString)
+    assert(!alice.legalActions.contains("throwIn"), alice.legalActions.toString)
+
+    // 14 cards cover the 9♣ (higher clubs plus every trump), 16 do not.
+    val attack = alice.tablePairs.head.attack
+    assertEquals(alice.myHand.count(card => card.covers(attack, alice.trumpSuit)), 14)
+    assertEquals(alice.myHand.count(card => !card.covers(attack, alice.trumpSuit)), 16)
+
+    val bob = PlayerGameView.forViewer(largeHand, "p1")
+    assertEquals(bob.myHand.size, 5)
+    assertEquals(bob.canThrowIn, false)
+  }
