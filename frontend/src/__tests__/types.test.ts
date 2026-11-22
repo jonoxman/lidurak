@@ -453,12 +453,12 @@ describe('QA scenario presets', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const created = await createPresetGame('3p-redirect-bob');
+    const created = await createPresetGame('qa-single-card');
 
     expect(fetchMock).toHaveBeenCalledWith('/api/games/preset', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ preset: '3p-redirect-bob' }),
+      body: JSON.stringify({ preset: 'qa-single-card' }),
     });
     expect(created).toEqual({
       gameId: 'g1',

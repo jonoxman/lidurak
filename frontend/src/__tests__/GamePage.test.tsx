@@ -2435,6 +2435,8 @@ describe('GamePage', () => {
 
     const panel = await screen.findByTestId('qa-scenarios');
     expect(panel.closest('[data-zone="sidebar-left"]')).not.toBeNull();
+    // ITEM-9: exactly four presets — no legacy scenario can hide in the list.
+    expect(within(panel).getAllByRole('button')).toHaveLength(4);
     expect(
       within(panel).getAllByRole('button').map((button) => button.getAttribute('data-preset')),
     ).toEqual([
@@ -2466,6 +2468,8 @@ describe('GamePage', () => {
       'discard-and-endgame',
       'throw-in-multi-qa',
       'large-hand-stress',
+      'throw-in-visibility-3p',
+      'mega-hand-30',
       'transparent-mode',
       'light-theme-gradient',
     ]) {
