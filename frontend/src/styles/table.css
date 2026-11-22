@@ -976,8 +976,20 @@
    in Card.tsx), so they read like the rest of the app shell. This rule is more
    specific than the shared `.playing-card text` rule above, so it wins for
    every corner index. */
+/* T-90-feedback-20261122_171451-2 ITEM-2a: the two digits of `10` are drawn at
+   the same 15pt rank size as every other rank, never wrap onto a second line,
+   and are never squished with negative tracking. */
 .playing-card .card-rank-index {
   font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  white-space: nowrap;
+  letter-spacing: normal;
+}
+
+/* T-90-feedback-20261122_171451-2 ITEM-2b: the widened corner index strip from
+   `Card.tsx` (`CARD_INDEX_STRIP_WIDTH_PX`) mirrored as a custom property, so
+   the hand layout and the table can stay on the exact same geometry. */
+:root {
+  --card-index-strip-width: 36px;
 }
 
 /* T-90 ITEM-3b: the fancy serif font is reserved for the large `J`, `Q` and
