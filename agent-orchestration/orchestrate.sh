@@ -101,18 +101,36 @@ retry_git_push() {
   return 1
 }
 
+kill_descendant_tree() {
+  local parent=$1
+  local children
+  children=$(pgrep -P "$parent" 2>/dev/null || true)
+  for child in $children; do
+    kill_descendant_tree "$child"
+  done
+  if [ "$parent" != "$$" ]; then
+    kill -9 "$parent" 2>/dev/null || true
+  fi
+}
+
 cleanup_on_interrupt() {
+  trap - INT TERM HUP
   echo ""
-  echo "🛑 Interrupted by user (Ctrl+C). Terminating active worker jobs safely..."
-  pkill -9 -P $$ 2>/dev/null || true
+  echo "🛑 Stopping orchestrator (INT/TERM/HUP). Terminating active workers and container sessions safely..."
+  kill_descendant_tree $$
+  for c in $(docker ps --format '{{.Names}}' 2>/dev/null | grep -E '^freebuff_worker_[0-9]+$' || true); do
+    docker exec "$c" tmux kill-session -t buff 2>/dev/null || true
+  done
+  docker exec freebuff_worker bash -c "pkill -9 -f 'sbt|java|chromium|vite|esbuild' 2>/dev/null || true" 2>/dev/null || true
   rm -f .reviews/worker_*.pid .reviews/worker_*.ticket .reviews/admission.lock
+  # Only restores FEEDBACK.md if interrupted BEFORE Stage 1.5B finished generating tickets
   if [ -f FEEDBACK.in_progress.md ]; then
     cp FEEDBACK.in_progress.md FEEDBACK.md
     rm -f FEEDBACK.in_progress.md
   fi
   exit 130
 }
-trap cleanup_on_interrupt INT TERM
+trap cleanup_on_interrupt INT TERM HUP
 
 ./agent-orchestration/start-workspace.sh "$INITIAL_WORKERS"
 
@@ -293,23 +311,6 @@ dump_full_codebase_context() {
     echo "===SOURCE_FILE:${f}==="
     grep -vE '^[[:space:]]*(//|/\*|\*|$)' "$f" | head -n 220
   done | head -c 38000
-}
-
-dump_changed_files_context() {
-  # Ultra-lean post-wave context (~20KB max): ONLY outputs files actually modified in this round!
-  local BASE_C
-  BASE_C=$(cat .reviews/feedback_base_commit 2>/dev/null || git rev-parse HEAD~1 2>/dev/null || echo "HEAD")
-  local CHANGED_LIST
-  CHANGED_LIST=$(git diff --name-only "${BASE_C}...HEAD" -- backend/ frontend/ play-local.sh 2>/dev/null || true)
-  if [ -z "$CHANGED_LIST" ]; then
-    dump_full_codebase_context | head -c 22000
-    return 0
-  fi
-  for f in $CHANGED_LIST; do
-    [ -f "$f" ] || continue
-    echo "===MODIFIED_FILE:${f}==="
-    grep -vE '^[[:space:]]*$' "$f" | head -n 260
-  done | head -c 26000
 }
 
 dump_changed_files_context() {
@@ -791,7 +792,7 @@ STRICT COMPLETENESS & WIRING REVIEW GUIDELINES:
 3. **Zero Tolerance for Partial Implementations:** Verify against <git_diff>, not <implementer_notes_and_rebuttals>. If ANY requirement in <ticket_specification> is marked \`[MISSING]\`, \`[PARTIAL]\`, or \`[UNWIRED DEAD CODE]\`, you MUST output \`VERDICT: CHANGES_REQUESTED\`.
 4. Only output \`VERDICT: APPROVED\` when 100% of requirements in <ticket_specification> are verified \`[IMPLEMENTED & WIRED]\` in <git_diff>.
 
-5. **Protected Documentation Rule (CRITICAL):** Worker agents are STRICTLY FORBIDDEN from editing `README.md` or `ARCHITECTURE.md` (the Orchestrator updates them exclusively in Stage 3.6, and any worker edits to those files are automatically discarded by git). NEVER request changes for missing `README.md` or `ARCHITECTURE.md` edits—even if a ticket mistakenly mentions them, ignore doc edits when deciding your verdict.
+5. **Protected Documentation Rule (CRITICAL):** Worker agents are STRICTLY FORBIDDEN from editing \`README.md\` or \`ARCHITECTURE.md\` (the Orchestrator updates them exclusively in Stage 3.6, and any worker edits to those files are automatically discarded by git). NEVER request changes for missing \`README.md\` or \`ARCHITECTURE.md\` edits—even if a ticket mistakenly mentions them, ignore doc edits when deciding your verdict.
 
 End your response with EXACTLY one of:
 VERDICT: APPROVED
@@ -959,6 +960,17 @@ PROMPT_EOF
 
 # === PHASE 1.5: HUMAN FEEDBACK AMBIGUITY TRIAGE + TRACEABLE WAVE GENERATION ===
 check_and_compile_human_feedback() {
+  # If an active wave still has unfinished tickets (e.g., resuming after Ctrl+C or quota shutdown),
+  # finish those tickets first instead of recompiling FEEDBACK.md into duplicate tickets.
+  for existing_tf in .tickets/T-*.md; do
+    [ -e "$existing_tf" ] || continue
+    local existing_name
+    existing_name=$(basename "$existing_tf" .md)
+    if [ ! -f ".tickets/.completed_${existing_name}" ]; then
+      return 0
+    fi
+  done
+
   if [ ! -f FEEDBACK.md ]; then return 0; fi
   local ACTIVE_FEEDBACK
   ACTIVE_FEEDBACK=$(sed '/<!--.*-->/d' FEEDBACK.md | tr -d '[:space:]')
@@ -1006,7 +1018,7 @@ RESET_EOF
   cp FEEDBACK.md FEEDBACK.backup.md
   cp FEEDBACK.md ".reviews/feedback_archive/FEEDBACK_${TIMESTAMP}.md"
   cp FEEDBACK.md FEEDBACK.in_progress.md
-  rm -f .reviews/deferred_feedback_items.md .reviews/ambiguity_questions_raw.txt
+  rm -f .reviews/deferred_feedback_items.md .reviews/ambiguity_questions_raw.txt .reviews/stage_holistic.done .reviews/stage_visual_qa.done .reviews/stage_docs.done
 
   # --- STAGE 1.5A: PRE-FLIGHT AMBIGUITY DETECTION & INTERACTIVE HUMAN Q&A ---
   echo "=================================================================="
@@ -1128,6 +1140,9 @@ PROMPT_EOF
 RESET_EOF
   fi
 
+  # Tickets are now durably on disk; clear FEEDBACK.in_progress.md so later interrupts never re-compile them
+  rm -f FEEDBACK.in_progress.md
+
   git checkout main 2>/dev/null || true
   git add .tickets/ FEEDBACK.md FEEDBACK.backup.md 2>/dev/null || true
   agent_git commit -m "chore(tickets): add feedback wave tickets ${TIMESTAMP}" >/dev/null 2>&1 || true
@@ -1140,41 +1155,38 @@ run_holistic_feedback_audit() {
     return 0
   fi
 
-  local PASS_COUNT
-  PASS_COUNT=$(cat .reviews/feedback_audit_passes 2>/dev/null || echo "0")
-  if [ "$PASS_COUNT" -ge "$MAX_HOLISTIC_AUDIT_PASSES" ]; then
-    echo "ℹ️  Reached max holistic audit passes (${MAX_HOLISTIC_AUDIT_PASSES}); generating QA Playbook."
-    generate_qa_playbook
-    rm -f .reviews/feedback_base_commit .reviews/feedback_audit_passes
-    return 0
-  fi
+  if [ ! -f .reviews/stage_holistic.done ]; then
+    local PASS_COUNT
+    PASS_COUNT=$(cat .reviews/feedback_audit_passes 2>/dev/null || echo "0")
+    if [ "$PASS_COUNT" -ge "$MAX_HOLISTIC_AUDIT_PASSES" ]; then
+      echo "ℹ️  Reached max holistic audit passes (${MAX_HOLISTIC_AUDIT_PASSES}); advancing to Visual QA & Playbook."
+      touch .reviews/stage_holistic.done
+    else
+      local NEXT_PASS
+      NEXT_PASS=$(expr "$PASS_COUNT" + 1)
+      local BASE_COMMIT
+      BASE_COMMIT=$(cat .reviews/feedback_base_commit 2>/dev/null || git rev-parse HEAD~1)
+      local TIMESTAMP
+      TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
-  PASS_COUNT=$(expr "$PASS_COUNT" + 1)
-  echo "$PASS_COUNT" > .reviews/feedback_audit_passes
+      echo "=================================================================="
+      echo "🕵️  Holistic Spec Audit (Pass ${NEXT_PASS}/${MAX_HOLISTIC_AUDIT_PASSES}): Verifying full codebase against FEEDBACK.md..."
+      echo "=================================================================="
 
-  local BASE_COMMIT
-  BASE_COMMIT=$(cat .reviews/feedback_base_commit 2>/dev/null || git rev-parse HEAD~1)
-  local TIMESTAMP
-  TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+      git diff "${BASE_COMMIT}...HEAD" -- . \
+        ':(exclude)*package-lock.json' \
+        ':(exclude)*/target/*' \
+        ':(exclude)*/node_modules/*' \
+        ':(exclude).reviews/*' \
+        ':(exclude).tickets/*' \
+        ':(exclude)agent-orchestration/*' \
+        ':(exclude)FEEDBACK*.md' | head -c 35000 > .reviews/holistic_cumulative.diff
 
-  echo "=================================================================="
-  echo "🕵️  Holistic Spec Audit (Pass ${PASS_COUNT}/${MAX_HOLISTIC_AUDIT_PASSES}): Verifying full codebase against FEEDBACK.md..."
-  echo "=================================================================="
-
-  git diff "${BASE_COMMIT}...HEAD" -- . \
-    ':(exclude)*package-lock.json' \
-    ':(exclude)*/target/*' \
-    ':(exclude)*/node_modules/*' \
-    ':(exclude).reviews/*' \
-    ':(exclude).tickets/*' \
-    ':(exclude)agent-orchestration/*' \
-    ':(exclude)FEEDBACK*.md' | head -c 35000 > .reviews/holistic_cumulative.diff
-
-  cat << PROMPT_EOF > .reviews/holistic_audit_prompt.txt
+      cat << PROMPT_EOF > .reviews/holistic_audit_prompt.txt
 You are a Principal QA & Systems Auditor conducting a final pre-release audit on the integrated 'main' branch.
 CRITICAL: DO NOT use any tools, DO NOT run bash commands, and DO NOT read external files.
 
-Compare EVERY single non-deferred numbered item, sub-bullet, UI detail, and QA Scenario Preset in <resolved_human_feedback> against <cumulative_git_diff_on_main> and the FULL source files in <current_main_source_files>.
+Compare EVERY single non-deferred numbered item, sub-bullet, UI detail, and QA Scenario Preset in <resolved_human_feedback> against <cumulative_git_diff_on_main> and the FULL source files in <modified_source_files_on_main>.
 
 <previous_round_human_feedback>
 $(cat .reviews/previous_round_feedback.md 2>/dev/null || echo "None")
@@ -1198,7 +1210,7 @@ $(dump_changed_files_context)
 </modified_source_files_on_main>
 
 AUDIT INSTRUCTIONS:
-4. **Protected Documentation Rule:** NEVER generate remediation tickets for `README.md` or `ARCHITECTURE.md` (the Orchestrator updates those files automatically in Stage 3.6 after this audit passes).
+4. **Protected Documentation Rule:** NEVER generate remediation tickets for \`README.md\` or \`ARCHITECTURE.md\` (the Orchestrator updates those files automatically in Stage 3.6 after this audit passes).
 1. Output an \`===AUDIT_CHECKLIST===\` checking every numbered item and sub-point in <resolved_human_feedback> (ignoring items under DEFERRED ITEMS):
    - Mark it \`[VERIFIED LIVE IN UI]\` ONLY if it is both implemented in the engine/logic AND actively rendered/wired in the frontend pages (\`LobbyPage.tsx\`, \`GamePage.tsx\`, \`GameTable.tsx\`, \`table.css\`).
    - Mark it \`[MISSING / UNWIRED]\` if any part of the item was skipped, overwritten during a merge, or left unwired in the UI.
@@ -1209,25 +1221,45 @@ AUDIT INSTRUCTIONS:
 ===END_OF_TICKETS===
 PROMPT_EOF
 
-  run_agy_pool "ARCHITECT" ".reviews/holistic_audit_prompt.txt" ".reviews/holistic_audit_out.txt" "===AUDIT_PASSED===|===TICKET:"
+      run_agy_pool "ARCHITECT" ".reviews/holistic_audit_prompt.txt" ".reviews/holistic_audit_out.txt" "===AUDIT_PASSED===|===TICKET:"
+      echo "$NEXT_PASS" > .reviews/feedback_audit_passes
 
-  if grep -q "===TICKET:" .reviews/holistic_audit_out.txt 2>/dev/null; then
-    echo "⚠️  Holistic Audit detected missing or unwired items from FEEDBACK.md! Generating remediation wave..."
-    extract_tickets_with_waves ".reviews/holistic_audit_out.txt"
-    git checkout main 2>/dev/null || true
-    git add .tickets/ 2>/dev/null || true
-    agent_git commit -m "chore(audit): add remediation tickets for missing feedback items ${TIMESTAMP}" >/dev/null 2>&1 || true
-    [ "$USE_GITHUB_PRS" -eq 1 ] && (retry_git_push origin main >/dev/null 2>&1 || true)
-    return 1
+      if grep -q "===TICKET:" .reviews/holistic_audit_out.txt 2>/dev/null; then
+        echo "⚠️  Holistic Audit detected missing or unwired items from FEEDBACK.md! Generating remediation wave..."
+        extract_tickets_with_waves ".reviews/holistic_audit_out.txt"
+        git checkout main 2>/dev/null || true
+        git add .tickets/ 2>/dev/null || true
+        agent_git commit -m "chore(audit): add remediation tickets for missing feedback items ${TIMESTAMP}" >/dev/null 2>&1 || true
+        [ "$USE_GITHUB_PRS" -eq 1 ] && (retry_git_push origin main >/dev/null 2>&1 || true)
+        return 1
+      fi
+
+      echo "✅ Holistic Spec Audit PASSED! 100% of non-deferred FEEDBACK.md items verified live on main."
+      touch .reviews/stage_holistic.done
+    fi
+  else
+    echo "⏭️  Holistic Spec Audit already passed for this batch (resuming from checkpoint)."
   fi
 
-  echo "✅ Holistic Spec Audit PASSED! 100% of non-deferred FEEDBACK.md items verified live on main."
-  if ! run_visual_ui_qa_gate; then
-    return 1
+  if [ ! -f .reviews/stage_visual_qa.done ]; then
+    if ! run_visual_ui_qa_gate; then
+      return 1
+    fi
+    touch .reviews/stage_visual_qa.done
+  else
+    echo "⏭️  Visual QA Gate already passed for this batch (resuming from checkpoint)."
   fi
-  update_docs_by_orchestrator
+
+  if [ ! -f .reviews/stage_docs.done ]; then
+    update_docs_by_orchestrator
+    touch .reviews/stage_docs.done
+  else
+    echo "⏭️  Public docs already updated for this batch (resuming from checkpoint)."
+  fi
+
   generate_qa_playbook
-  rm -f .reviews/feedback_base_commit .reviews/feedback_audit_passes
+  rm -f .reviews/feedback_base_commit .reviews/feedback_audit_passes .reviews/visual_qa_passes \
+        .reviews/stage_holistic.done .reviews/stage_visual_qa.done .reviews/stage_docs.done
   return 0
 }
 
@@ -1246,8 +1278,9 @@ run_visual_ui_qa_gate() {
     rm -f .reviews/visual_qa_passes
     return 0
   fi
-  V_PASS=$(expr "$V_PASS" + 1)
-  echo "$V_PASS" > .reviews/visual_qa_passes
+  local NEXT_V_PASS
+  NEXT_V_PASS=$(expr "$V_PASS" + 1)
+  V_PASS="$NEXT_V_PASS"
 
   local TIMESTAMP
   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
@@ -1321,6 +1354,7 @@ VISUAL AUDIT RULES:
 PROMPT_EOF
 
   run_agy_pool "FLASH_PRIMARY" ".reviews/visual_audit_prompt.txt" ".reviews/visual_audit_out.txt" "===VISUAL_QA_PASSED===|===TICKET:"
+  echo "$V_PASS" > .reviews/visual_qa_passes
 
   if grep -q "===TICKET:" .reviews/visual_audit_out.txt 2>/dev/null; then
     echo "⚠️  Visual QA Gate caught objective UI/layout/border issues in the live browser! Dispatching remediation wave..."
@@ -1474,7 +1508,7 @@ advance_to_next_milestone() {
   mkdir -p "$ARCHIVE_DIR"
   mv .tickets/T-*.md "$ARCHIVE_DIR"/ 2>/dev/null || true
   mv .tickets/.completed_* "$ARCHIVE_DIR"/ 2>/dev/null || true
-  rm -f .reviews/raw_tickets.txt .tickets/STATUS .reviews/feedback_base_commit .reviews/feedback_audit_passes
+  rm -f .reviews/raw_tickets.txt .tickets/STATUS .reviews/feedback_base_commit .reviews/feedback_audit_passes .reviews/visual_qa_passes .reviews/stage_holistic.done .reviews/stage_visual_qa.done .reviews/stage_docs.done
 
   if grep -q "CURRENT ACTIVE MILESTONE:" SPEC.md 2>/dev/null; then
     sed -i "s/CURRENT ACTIVE MILESTONE: M[0-9]\+/CURRENT ACTIVE MILESTONE: ${NEXT_M}/g" SPEC.md
