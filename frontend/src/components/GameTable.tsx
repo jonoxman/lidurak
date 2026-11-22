@@ -2013,9 +2013,9 @@ export function GameTable({
   // ITEM-8: the throw-in outline takes the next slot right after the cards in
   // play, so the single compact row still never wraps with six pairs + both
   // outlines.
-  // T-90-2 ITEM-8: an ongoing attack ALWAYS shows the next-card throw-in slot,
-  // even when nobody holds a legal throw-in card (or the viewer is the
-  // defender / a spectator). The drop itself is still validated on play.
+  // T-95 #1: the slot exists only under the same legal throw-in gate that
+  // renders the outline, so a defender, a passed seat, a seat with no projected
+  // throw-in card and a bout at its six-pair cap all remove it from the DOM.
   const gameOverPhase =
     (boutPhase ?? '').replace(/[^a-z]/gi, '').toLowerCase() === 'gameover';
   const throwInSlot =

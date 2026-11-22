@@ -5194,6 +5194,13 @@ describe('T-90-feedback-20261122_011021-4: live table wiring', () => {
       { myHasPassed: true },
       { throwInCards: [] },
       { throwInCapacity: 0 },
+      // T-95 #1: a bout at its six-pair cap has no throw-in slot left.
+      {
+        tablePairs: Array.from({ length: 6 }, () => ({
+          attack: { suit: 'spades', rank: 'seven' },
+          defense: null,
+        })),
+      },
     ];
     for (const overrides of blocked) {
       const view = render(<GameTable {...baseProps} canThrowIn {...overrides} />);
