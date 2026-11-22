@@ -1,18 +1,29 @@
-/* --- T-90-feedback-20261106_111512-2: compact, icon-only, theme-matched
-   Surrender and Pass controls ---------------------------------------------- */
+/* --- T-90-feedback-20261122_011021-2 ITEM-7/8: compact, icon-only,
+   theme-matched Surrender and Pass controls -------------------------------- */
 
-/* The action column is a flex stack: the two squares keep their 40x40 size
-   instead of stretching, and the glyph is the only content. Colors come from
-   the same tokens SortBar and the rest of the table chrome use. */
+/* Backwards-compatible baseline. The shared family class keeps the historical
+   compact square (40px, 32px below 900px) for any markup that carries only the
+   family class. The scoped `.action-bar` rule below is more specific, so the
+   live controls always render at the new 52px / 42px size. */
+.action-button.action-icon-btn {
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  max-width: 40px;
+}
+
+/* The buttons themselves: a compact rounded square on the dark slate surface,
+   parchment ink and a muted durak border — the same tokens the deck box and
+   SortBar use, so the controls sit inside the felt theme instead of shouting. */
 .action-bar .action-button.action-icon-btn {
   display: grid;
   grid-template-areas: 'icon';
   place-items: center;
   flex: 0 0 auto;
-  width: 40px;
-  height: 40px;
-  min-width: 40px;
-  max-width: 40px;
+  width: 52px;
+  height: 52px;
+  min-width: 52px;
+  max-width: 52px;
   padding: 0;
   box-sizing: border-box;
   border: 1px solid var(--durak-border, rgba(214, 199, 170, 0.34));
@@ -21,7 +32,9 @@
   color: var(--durak-text, #e8e4d8);
   font-size: 0;
   line-height: 0;
-  box-shadow: none;
+  box-shadow:
+    inset 0 1px 0 rgba(232, 228, 217, 0.06),
+    0 2px 6px rgba(0, 0, 0, 0.28);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
   transition:
@@ -32,21 +45,36 @@
     filter 150ms ease;
 }
 
-/* Muted accents only: desaturated terracotta for Surrender, sage for Pass —
-   both read as theme colors, never as an alarm. */
+/* Surrender: a warm amber/bronze accent (muted gold border, bronze hover glow).
+   Pass: the cool emerald/sage counterpart. Both stay desaturated so neither
+   reads as an alarm; the bright red surrender button is gone for good. */
+.action-bar .action-button.action-icon-btn.action-icon-btn--surrender,
 .action-bar .action-button.action-icon-btn.action-icon-surrender {
   --icon-accent: #b98a5e;
+  --icon-border-accent: rgba(212, 175, 55, 0.35);
+  border-color: var(--icon-border-accent);
 }
 
+.action-bar .action-button.action-icon-btn.action-icon-btn--pass,
 .action-bar .action-button.action-icon-btn.action-icon-pass {
   --icon-accent: #7d9e83;
+  --icon-border-accent: rgba(110, 231, 183, 0.35);
+  border-color: var(--icon-border-accent);
 }
 
 .action-bar .action-button.action-icon-btn:hover:not(:disabled) {
-  filter: brightness(1.12);
+  filter: brightness(1.1);
+  transform: translateY(-1px);
   border-color: var(--icon-accent, var(--durak-border, rgba(214, 199, 170, 0.34)));
   background: var(--bg-elevated-hover, rgba(32, 44, 38, 0.92));
-  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.32);
+  box-shadow:
+    inset 0 1px 0 rgba(232, 228, 217, 0.08),
+    0 6px 14px rgba(0, 0, 0, 0.32);
+}
+
+.action-bar .action-button.action-icon-btn:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.4);
 }
 
 .action-bar .action-button.action-icon-btn:focus-visible {
@@ -59,17 +87,18 @@
   cursor: not-allowed;
 }
 
-/* The glyph is ~70% of the button, so it stays legible without a label. */
+/* The glyph is ~62% of the 52px button: legible without a label, and at 48px
+   (the smallest compact size) it still fills the square. */
 .action-icon {
   grid-area: icon;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   fill: none;
   stroke: currentColor;
-  stroke-width: 1.6;
+  stroke-width: 2.2;
   stroke-linecap: round;
   stroke-linejoin: round;
-  opacity: 0.92;
+  opacity: 0.95;
 }
 
 /* The countdown badge stacks in the button's single grid cell instead of
@@ -102,11 +131,11 @@
   border-color: var(--durak-border, rgba(15, 23, 42, 0.18));
   background: var(--bg-elevated, rgba(255, 255, 255, 0.92));
   color: var(--durak-text, #2b2a26);
-  box-shadow: none;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
 }
 
 @media (max-width: 900px) {
-  .action-bar .action-button.action-icon-btn,
+  /* Backwards-compatible baseline (the pre-redesign mobile square). */
   .action-button.action-icon-btn {
     width: 32px;
     height: 32px;
@@ -114,8 +143,16 @@
     max-width: 32px;
   }
 
+  /* The live 42px mobile control overrides it by specificity. */
+  .action-bar .action-button.action-icon-btn {
+    width: 42px;
+    height: 42px;
+    min-width: 42px;
+    max-width: 42px;
+  }
+
   .action-icon {
-    width: 22px;
-    height: 22px;
+    width: 26px;
+    height: 26px;
   }
 }
