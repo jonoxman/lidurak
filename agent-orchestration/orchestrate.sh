@@ -1464,26 +1464,33 @@ generate_technical_qa_playbook() {
   echo "🤖 Generating Technical LLM QA Playbook (.reviews/QA_PLAYBOOK_TECH.md)..."
   echo "=================================================================="
 
-  cat << PROMPT_EOF > .reviews/qa_playbook_tech_prompt.txt
+  {
+    cat << 'PROMPT_HEAD_EOF'
 You are the Lead QA Automation Engineer preparing a strict, machine-executable Technical QA Playbook for LLM QA agents (Playwright runners and future-round Architect/Auditor agents).
 CRITICAL: DO NOT use any tools, DO NOT run bash commands, and DO NOT read external files.
 
-For EVERY numbered item in <implemented_feedback>, write exact, concrete verification steps targeting \`http://localhost:5173\` after running \`./play-local.sh\`.
+For EVERY numbered item in <implemented_feedback>, write exact, concrete verification steps targeting `http://localhost:5173` after running `./play-local.sh`.
 
 TECHNICAL QA RULES:
-1. **Be Explicitly Technical:** Cite exact \`data-testid\` selectors, \`data-*\` attributes, CSS classes, component names, exact pixel/layout expectations, and exact QA Scenario Preset labels/IDs found in <current_codebase>.
+1. **Be Explicitly Technical:** Cite exact `data-testid` selectors, `data-*` attributes, CSS classes, component names, exact pixel/layout expectations, and exact QA Scenario Preset labels/IDs found in <current_codebase>.
 2. **NO Optional Steps (MANDATORY):** NEVER write "(Optional)", "if desired", or conditional branches. Every single step must be a concrete, mandatory, unambiguous end-to-end instruction that an automated agent can execute deterministically.
-3. Cover every non-deferred requirement completely. If any items were deferred, list them at the bottom under \`## Deferred Items\`.
+3. Cover every non-deferred requirement completely. If any items were deferred, list them at the bottom under `## Deferred Items`.
 
 <implemented_feedback>
-$(cat "$SOURCE_SPEC")
+PROMPT_HEAD_EOF
+    cat "$SOURCE_SPEC"
+    cat << 'PROMPT_MID_EOF'
+
 </implemented_feedback>
 
 <current_codebase>
-$(dump_changed_files_context)
+PROMPT_MID_EOF
+    dump_changed_files_context
+    cat << 'PROMPT_TAIL_EOF'
+
 </current_codebase>
 
-Output clean Markdown (no preamble) and end with \`===END_OF_FILES===\`:
+Output clean Markdown (no preamble) and end with `===END_OF_FILES===`:
 # Technical QA Playbook (Agent Reference)
 ## Item #1: [Title]
 - **Technical Summary:** [Exact behavior, selectors, CSS/state assertions]
@@ -1491,7 +1498,8 @@ Output clean Markdown (no preamble) and end with \`===END_OF_FILES===\`:
   1. [Exact deterministic step with selector/preset ID and expected DOM/visual assertion]
   2. [Next deterministic step]
 ===END_OF_FILES===
-PROMPT_EOF
+PROMPT_TAIL_EOF
+  } > .reviews/qa_playbook_tech_prompt.txt
 
   run_agy_pool "FLASH_PRIMARY" ".reviews/qa_playbook_tech_prompt.txt" ".reviews/QA_PLAYBOOK_TECH.raw.md" "===END_OF_FILES==="
   sed '/===END_OF_FILES===/d' .reviews/QA_PLAYBOOK_TECH.raw.md > .reviews/QA_PLAYBOOK_TECH.md
@@ -1499,28 +1507,32 @@ PROMPT_EOF
 }
 
 generate_human_qa_playbook() {
-  if [ ! -f .reviews/QA_PLAYBOOK_TECH.md ]; then
+  if [ ! -s .reviews/QA_PLAYBOOK_TECH.md ]; then
     generate_technical_qa_playbook
   fi
-  [ ! -f .reviews/QA_PLAYBOOK_TECH.md ] && return 0
+  [ ! -s .reviews/QA_PLAYBOOK_TECH.md ] && return 0
 
   echo "=================================================================="
   echo "📋 Distilling Plain-Text Human QA Playbook (.reviews/QA_PLAYBOOK_HUMAN.txt)..."
   echo "=================================================================="
 
-  cat << PROMPT_EOF > .reviews/qa_playbook_human_prompt.txt
+  {
+    cat << 'PROMPT_HEAD_EOF'
 You are rewriting a technical QA checklist into an ultra-clean, plain-text verification guide for a human reviewer reading in a terminal.
 CRITICAL: DO NOT use any tools, DO NOT run bash commands, and DO NOT read external files.
 
 Rewrite <technical_qa_playbook> following ALL FIVE STRICT RULES:
-1. **Single-Line Headers (MAX 72 CHARACTERS):** Every header line—especially every "Item #N: <Short Title>" line—MUST be 72 characters or fewer so it never wraps onto a second line in an 80-column terminal.
-2. **ZERO Technical Code References:** NEVER mention any data-testid, data-* attributes, CSS class names, CSS properties (like flex or box-sizing), pixel dimensions, breakpoint widths, internal preset slugs (like surrender-half-off), file names, or component/function names. Refer ONLY to what a human sees and clicks on screen (visible button labels, colors, card ranks/suits, and screen areas like "the shaded play area").
-3. **Concise Descriptions:** Keep "What Changed:" to ONE short plain-English sentence. Keep each numbered step to 1–2 short, direct sentences (action first, then what to verify visually).
-4. **Pure Plain Text (ZERO Markdown):** NEVER use Markdown syntax anywhere—no asterisks (* or **), no backticks, no hash symbols (#), no underscores for emphasis, and no square-bracket links.
-5. **ZERO Optional Steps:** Every step must be a concrete, mandatory action. Never include the word "Optional" or suggest optional checks.
+1. Single-Line Headers (MAX 72 CHARACTERS): Every header line—especially every "Item #N: <Short Title>" line—MUST be 72 characters or fewer so it never wraps onto a second line in an 80-column terminal.
+2. ZERO Technical Code References: NEVER mention any data-testid, data-* attributes, CSS class names, CSS properties (like flex or box-sizing), pixel dimensions, breakpoint widths, internal preset slugs (like surrender-half-off), file names, or component/function names. Refer ONLY to what a human sees and clicks on screen (visible button labels, colors, card ranks/suits, and screen areas like "the shaded play area").
+3. Concise Descriptions: Keep "What Changed:" to ONE short plain-English sentence. Keep each numbered step to 1–2 short, direct sentences (action first, then what to verify visually).
+4. Pure Plain Text (ZERO Markdown): NEVER use Markdown syntax anywhere—no asterisks (* or **), no backticks, no hash symbols (#), no underscores for emphasis, and no square-bracket links.
+5. ZERO Optional Steps: Every step must be a concrete, mandatory action. Never include the word "Optional" or suggest optional checks.
 
 <technical_qa_playbook>
-\$(cat .reviews/QA_PLAYBOOK_TECH.md)
+PROMPT_HEAD_EOF
+    cat .reviews/QA_PLAYBOOK_TECH.md
+    cat << 'PROMPT_TAIL_EOF'
+
 </technical_qa_playbook>
 
 Output ONLY the plain-text guide in this exact layout and end with ===END_OF_FILES===:
@@ -1542,7 +1554,8 @@ Steps:
 
 Deferred Items: None.
 ===END_OF_FILES===
-PROMPT_EOF
+PROMPT_TAIL_EOF
+  } > .reviews/qa_playbook_human_prompt.txt
 
   run_agy_pool "FLASH_PRIMARY" ".reviews/qa_playbook_human_prompt.txt" ".reviews/QA_PLAYBOOK_HUMAN.raw.txt" "===END_OF_FILES==="
 
@@ -1552,23 +1565,21 @@ import re
 
 raw = Path(".reviews/QA_PLAYBOOK_HUMAN.raw.txt").read_text(encoding="utf-8", errors="replace")
 raw = raw.split("===END_OF_FILES===")[0]
+fence = chr(96) * 3
 
 clean_lines = []
 for line in raw.splitlines():
-    stripped = line.strip()
-    if stripped.startswith("```"):
+    if line.strip().startswith(fence):
         continue
-    # Strip any stray Markdown headings, bold/italic markers, backticks, or "(Optional)" tags
     line = re.sub(r'^\s*#{1,6}\s+', '', line)
     line = re.sub(r'\*\*([^*]+)\*\*', r'\1', line)
     line = re.sub(r'__([^_]+)__', r'\1', line)
     line = re.sub(r'(?<!\w)\*([^*\n]+)\*(?!\w)', r'\1', line)
-    line = line.replace('`', '')
+    line = line.replace(chr(96), '')
     line = re.sub(r'\(\s*Optional\s*\)\s*', '', line, flags=re.IGNORECASE)
     line = re.sub(r'\bOptional:\s*', '', line, flags=re.IGNORECASE)
     line = line.rstrip()
 
-    # Enforce strict single-line terminal limit (<= 74 chars) on Item #N headers
     if re.match(r'^Item\s+#\d+:', line) and len(line) > 74:
         cut = line[:71].rsplit(' ', 1)[0].rstrip(' ,;:-')
         line = cut + "..."
@@ -1584,14 +1595,14 @@ SANITIZE_PY
 
 generate_qa_playbook() {
   local FORCE="${1:-}"
-  if [ "$FORCE" = "--force" ] || [ ! -f .reviews/stage_tech_qa.done ] || [ ! -f .reviews/QA_PLAYBOOK_TECH.md ]; then
+  if [ "$FORCE" = "--force" ] || [ ! -f .reviews/stage_tech_qa.done ] || [ ! -s .reviews/QA_PLAYBOOK_TECH.md ]; then
     generate_technical_qa_playbook
   fi
   generate_human_qa_playbook
 }
 
 show_human_qa_playbook() {
-  if [ -f .reviews/QA_PLAYBOOK_HUMAN.txt ]; then
+  if [ -s .reviews/QA_PLAYBOOK_HUMAN.txt ]; then
     echo ""
     cat .reviews/QA_PLAYBOOK_HUMAN.txt
     echo ""
