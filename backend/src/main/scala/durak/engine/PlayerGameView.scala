@@ -125,14 +125,31 @@ object PlayerGameView:
     // Bots compute their own moves from `GameState`; a client looking at a bot
     // seat must never be offered (or be able to send) a move for it.
     val isBotSeat = state.config.isBotSeat(viewerIdx)
-    // Throw-in eligibility is computed once, from the engine helpers, so the
-    // table's outline and the multi-select cap can never disagree with the
-    // moves the engine actually accepts (ITEM-1a). A replay review exposes
+    // Throw-in eligibility is the engine's own answer, never a re-derivation:
+    // a card is offered only when `ThrowInCards(viewer, List(card))` is accepted
+    // right now, so the table's outline and the multi-select cap can never
+    // disagree with the moves the engine actually accepts (ITEM-1). The defender,
+    // a seat that already passed, a seat holding no rank on the table, a seat
+    // that cannot act (a bot) and a full bout therefore all project an empty
+    // list, zero capacity and `canThrowIn = false`, and a replay review exposes
     // nothing to throw in.
     val throwInCards =
-      if reviewMode then Nil else GameEngine.legalThrowInCards(state, viewer.id)
+      if reviewMode || isBotSeat then Nil
+      else
+        GameEngine
+          .legalThrowInCards(state, viewer.id)
+          .filter(card =>
+            GameEngine
+              .applyAction(
+                state,
+                viewer.id,
+                GameAction.ThrowInCards(viewer.id, List(card))
+              )
+              .isRight
+          )
     val throwInCapacity =
-      if reviewMode then 0 else GameEngine.throwInCapacity(state, viewer.id)
+      if throwInCards.isEmpty then 0
+      else GameEngine.throwInCapacity(state, viewer.id)
 
     PlayerGameView(
       myId = viewer.id,
