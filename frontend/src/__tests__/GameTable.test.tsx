@@ -825,7 +825,127 @@ describe('single-row hand overlap', () => {
     expect(row.querySelectorAll('.card-slot')).toHaveLength(36);
     expect(row.querySelectorAll('.hand-slot[data-hidden="true"]')).toHaveLength(0);
     expect(Number(row.getAttribute('data-overlap'))).toBeGreaterThanOrEqual(HAND_MIN_OVERLAP);
-    expect(Number(row.getAttribute('data-hand-width'))).toBeLessThanOrEqual(720);
+    // T-95 #3: the unscaled row keeps the 20% stride; the scaled width is what
+    // has to stay inside the hand column.
+    expect(Number(row.getAttribute('data-overlap-ratio'))).toBeLessThanOrEqual(
+      HAND_MAX_OVERLAP_RATIO + 1e-9,
+    );
+    expect(Number(row.getAttribute('data-rendered-hand-width'))).toBeLessThanOrEqual(720);
+  });
+
+  it('T-95 #3: keeps the overlap inside 20%-80% for every large hand size', () => {
+    for (const [cardWidth, cardHeight] of [
+      [HAND_CARD_WIDTH, HAND_CARD_HEIGHT],
+      [MOBILE_CARD_WIDTH, MOBILE_CARD_HEIGHT],
+    ] as const) {
+      for (const available of [240, 420, 640, 900]) {
+        for (const count of [20, 25, 30, 36, 44, 52]) {
+          const layout = handLayout(count, available, 0.5, cardWidth);
+          expect(layout.visibleCount).toBe(count);
+          expect(layout.hiddenLeft + layout.hiddenRight).toBe(0);
+          expect(layout.overlapRatio).toBeGreaterThanOrEqual(
+            HAND_MIN_OVERLAP_RATIO - 1e-9,
+          );
+          expect(layout.overlapRatio).toBeLessThanOrEqual(
+            HAND_MAX_OVERLAP_RATIO + 1e-9,
+          );
+          // The uncovered left strip always keeps the rank/suit index.
+          expect(cardWidth - layout.overlap).toBeGreaterThanOrEqual(
+            cardWidth * HAND_MIN_OVERLAP_RATIO - 1e-9,
+          );
+          expect(layout.totalWidth * layout.scale).toBeLessThanOrEqual(available + 1e-9);
+          expect(cardHeight).toBeGreaterThan(0);
+        }
+      }
+    }
+  });
+
+  it('T-95 #3: renders a 30/36/52-card pickup inside the hand zone', () => {
+    const ranks = ['six', 'seven', 'eight', 'nine', 'ten', 'jack', 'queen', 'king', 'ace'];
+    const suits = ['spades', 'hearts', 'clubs', 'diamonds'];
+    const available = HAND_FALLBACK_WIDTH - HAND_CONTOUR_PADDING * 2;
+    for (const count of [30, 36, 52]) {
+      const bigHand: CardData[] = Array.from({ length: count }, (_, index) => ({
+        suit: suits[index % suits.length],
+        rank: ranks[index % ranks.length],
+      }));
+      const view = render(
+        <GameTable
+          myId="p0"
+          myHand={bigHand}
+          opponents={[opponents[0]]}
+          tablePairs={[]}
+          trumpSuit="diamonds"
+          defenderId="p1"
+        />,
+      );
+      const box = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+      const layout = handLayout(count, available, 0.5, HAND_CARD_WIDTH);
+      expect(box.querySelectorAll('.hand-card-wrapper')).toHaveLength(count);
+      expect(Number(box.getAttribute('data-overlap-ratio'))).toBeGreaterThanOrEqual(
+        HAND_MIN_OVERLAP_RATIO - 1e-9,
+      );
+      expect(Number(box.getAttribute('data-overlap-ratio'))).toBeLessThanOrEqual(
+        HAND_MAX_OVERLAP_RATIO + 1e-9,
+      );
+      expect(Number(box.getAttribute('data-rendered-hand-width'))).toBe(
+        Math.round(layout.totalWidth * layout.scale),
+      );
+      expect(Number(box.getAttribute('data-rendered-hand-width'))).toBeLessThanOrEqual(
+        available + 1e-9,
+      );
+      // The tight contour still spans the whole overlapped row.
+      const contour = screen.getByTestId('hand-highlight-contour');
+      expect(Number(contour.getAttribute('data-contour-width'))).toBe(
+        Number(box.getAttribute('data-hand-width')),
+      );
+      view.unmount();
+    }
+  });
+
+  it('T-95 #1: hugs a tightly overlapped hand when only some cards are raised', () => {
+    const ranks = ['six', 'seven', 'eight', 'nine', 'ten', 'jack', 'queen', 'king', 'ace'];
+    const suits = ['spades', 'hearts', 'clubs', 'diamonds'];
+    const bigHand: CardData[] = Array.from({ length: 30 }, (_, index) => ({
+      suit: suits[index % suits.length],
+      rank: ranks[index % ranks.length],
+    }));
+    const liftedKeys = bigHand.filter((_, index) => index % 3 === 0).map(cardKey);
+    render(
+      <GameTable
+        myId="p0"
+        myHand={bigHand}
+        opponents={[opponents[0]]}
+        tablePairs={[]}
+        trumpSuit="diamonds"
+        defenderId="p1"
+        awaitingAttack
+        playableKeys={liftedKeys}
+      />,
+    );
+
+    const box = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+    const contour = screen.getByTestId('hand-highlight-contour');
+    const layout = handLayout(30, HAND_FALLBACK_WIDTH - HAND_CONTOUR_PADDING * 2);
+    // The row sits at the 80% overlap cap, yet the contour still spans its
+    // exact width and steps over the raised cards.
+    expect(Number(box.getAttribute('data-overlap-ratio'))).toBeCloseTo(
+      HAND_MAX_OVERLAP_RATIO,
+      5,
+    );
+    expect(Number(contour.getAttribute('data-contour-width'))).toBe(
+      Math.round(layout.totalWidth),
+    );
+    expect(contour.getAttribute('data-contour-shape')).toBe('stepped');
+    const ys = new Set(
+      Array.from(box.querySelectorAll('.hand-card-wrapper')).map((wrapper) =>
+        wrapper.getAttribute('data-card-y'),
+      ),
+    );
+    expect(ys).toEqual(new Set([String(HAND_RAISED_OFFSET), '0']));
+    const path = screen.getByTestId('hand-highlight-path').getAttribute('d') ?? '';
+    expect(path).not.toMatch(/NaN|Infinity|undefined/);
+    expect(path.endsWith('Z')).toBe(true);
   });
 
   it('overlaps opponent card backs inside a fixed box without cursor input', () => {
@@ -4853,12 +4973,15 @@ describe('T-90-feedback-20261105_221105-2: card size, hand overlap, contour and 
     expect(dragged).toContain('visibility: visible');
     expect(dragged).toContain('z-index: 1000');
   });
-  it('ITEM-4: compresses a mobile full deck with a card-scaled readable strip', () => {
+  it('T-95 #3: scales a mobile full deck instead of exceeding the 80% overlap cap', () => {
     const layout = handLayout(36, 300, 0.5, MOBILE_CARD_WIDTH);
-    // 20% of 48px is 9.6px, so the desktop 15px floor must not widen the row.
-    expect(layout.stride).toBeCloseTo((300 - MOBILE_CARD_WIDTH) / 35, 5);
+    // 20% of 48px is 9.6px, so the whole row scales down rather than packing
+    // the cards tighter than the readable strip allows.
+    expect(layout.stride).toBeCloseTo(MOBILE_CARD_WIDTH * HAND_MIN_OVERLAP_RATIO, 5);
+    expect(layout.overlapRatio).toBeCloseTo(HAND_MAX_OVERLAP_RATIO, 5);
     expect(layout.stride).toBeLessThan(HAND_MIN_VISIBLE_LEFT);
-    expect(layout.totalWidth * layout.scale).toBeLessThanOrEqual(300 + 1e-9);
+    expect(layout.scale).toBeLessThan(1);
+    expect(layout.totalWidth * layout.scale).toBeCloseTo(300, 5);
     expect(layout.hiddenLeft + layout.hiddenRight).toBe(0);
   });
 

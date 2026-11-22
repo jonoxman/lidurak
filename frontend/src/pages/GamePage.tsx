@@ -958,6 +958,16 @@ export function GamePage({
     if (pair.defense) tableRanks.add(pair.defense.rank.toLowerCase());
   });
 
+  // T-95 #4: the server's `throwInCards` projection is the ONLY set of cards a
+  // click, a drag drop or a double-click may throw in. An empty projection
+  // (older fixtures that never send the list) falls back to the matching-rank
+  // rule, and an explicit empty list means nothing can be thrown in.
+  const projectedThrowInKeys = new Set((view.throwInCards ?? []).map(cardKey));
+  const isLegalThrowInCard = (card: GameCard): boolean =>
+    projectedThrowInKeys.size > 0
+      ? projectedThrowInKeys.has(cardKey(card))
+      : tableRanks.has(card.rank.toLowerCase());
+
   const viewerIndex = viewerSeatIndex(view);
   const isDefender = view.defenderIdx === viewerIndex;
 
@@ -985,6 +995,12 @@ export function GamePage({
         ? defenderCardCount - uncoveredCount
         : remainingBoutCapacity,
     ),
+  );
+  // T-95 #4: a click selection is also capped by the server's projected
+  // `throwInCapacity`, so it can never ask for a batch the engine rejects.
+  const throwInSelectionCap = Math.max(
+    0,
+    Math.min(maxThrowInCount, view.throwInCapacity ?? maxThrowInCount),
   );
   const handMatchesTableRank = view.myHand.some((card) =>
     tableRanks.has(card.rank.toLowerCase()),
@@ -1048,9 +1064,7 @@ export function GamePage({
         .map(cardKey);
     }
     if (canCurrentPlayerThrowIn) {
-      return view.myHand
-        .filter((card) => tableRanks.has(card.rank.toLowerCase()))
-        .map(cardKey);
+      return view.myHand.filter(isLegalThrowInCard).map(cardKey);
     }
     return [];
   })();
@@ -1125,11 +1139,11 @@ export function GamePage({
       selectIndices(next);
       return;
     }
-    // ITEM-5: only cards that match a rank on the table may join a throw-in
-    // selection, and never more cards than the bout can still accept.
+    // T-95 #4: only cards the server projects in `throwInCards` may join a
+    // throw-in selection, and never more cards than the projected capacity.
     if (canCurrentPlayerThrowIn) {
-      if (!tableRanks.has(card.rank.toLowerCase())) return;
-      if (next.size >= maxThrowInCount) return;
+      if (!isLegalThrowInCard(card)) return;
+      if (next.size >= throwInSelectionCap) return;
     }
     next.add(index);
     selectIndices(next);
@@ -1179,11 +1193,11 @@ export function GamePage({
   ): GameCard[] => {
     const chosen: GameCard[] = [card];
     pool.forEach((candidate) => {
-      if (!tableRanks.has(candidate.rank.toLowerCase())) return;
+      if (!isLegalThrowInCard(candidate)) return;
       if (chosen.some((entry) => cardKey(entry) === cardKey(candidate))) return;
       chosen.push(candidate);
     });
-    return chosen.slice(0, Math.max(1, maxThrowInCount));
+    return chosen.slice(0, Math.max(1, throwInSelectionCap));
   };
 
   /** True when this exact card is in the pooled selection (default: live). */
@@ -1223,7 +1237,7 @@ export function GamePage({
 
     // ITEM-5: a double-click throws in the clicked card together with every
     // other selected legal throw-in card, in one single command.
-    if (canCurrentPlayerThrowIn && tableRanks.has(card.rank.toLowerCase())) {
+    if (canCurrentPlayerThrowIn && isLegalThrowInCard(card)) {
       const cards = throwInGroup(card, selectionPool);
       dispatch(buildThrowInCards(playerId, cards.length > 1 ? cards : [card]));
       return;
@@ -1308,6 +1322,11 @@ export function GamePage({
   const playThrowInDrop = (card: GameCard) => {
     if (!canCurrentPlayerThrowIn) {
       console.warn('Ignored throw-in drop: throwing in is not legal');
+      return;
+    }
+    // T-95 #4: a dropped card must be one of the server-projected throw-ins.
+    if (!isLegalThrowInCard(card)) {
+      console.warn('Ignored throw-in drop: the card is not a projected throw-in');
       return;
     }
     // ITEM-5: a dragged card that belongs to a multi-card legal throw-in
