@@ -314,20 +314,41 @@ dump_full_codebase_context() {
 }
 
 dump_changed_files_context() {
-  # Ultra-lean post-wave context (~20KB max): ONLY outputs files actually modified in this round!
+  # Post-wave modified source context (~45KB max): excludes tests/lockfiles and prioritizes frontend/ before backend/
   local BASE_C
   BASE_C=$(cat .reviews/feedback_base_commit 2>/dev/null || git rev-parse HEAD~1 2>/dev/null || echo "HEAD")
-  local CHANGED_LIST
-  CHANGED_LIST=$(git diff --name-only "${BASE_C}...HEAD" -- backend/ frontend/ play-local.sh 2>/dev/null || true)
+  local FE_CHANGED BE_CHANGED CHANGED_LIST
+  FE_CHANGED=$(git diff --name-only "${BASE_C}...HEAD" -- frontend/src/ \
+    ':(exclude)*.test.*' ':(exclude)*.spec.*' ':(exclude)*__tests__*' 2>/dev/null || true)
+  BE_CHANGED=$(git diff --name-only "${BASE_C}...HEAD" -- backend/src/main/ play-local.sh \
+    ':(exclude)*Test.scala' ':(exclude)*Spec.scala' 2>/dev/null || true)
+  CHANGED_LIST=$(printf '%s\n%s\n' "$FE_CHANGED" "$BE_CHANGED" | awk 'NF && !seen[$0]++')
   if [ -z "$CHANGED_LIST" ]; then
-    dump_full_codebase_context | head -c 22000
+    dump_full_codebase_context | head -c 35000
     return 0
   fi
-  for f in $CHANGED_LIST; do
+  while IFS= read -r f; do
     [ -f "$f" ] || continue
     echo "===MODIFIED_FILE:${f}==="
-    grep -vE '^[[:space:]]*$' "$f" | head -n 260
-  done | head -c 26000
+    (grep -vE '^[[:space:]]*$' "$f" || true) | head -n 240
+  done <<< "$CHANGED_LIST" | head -c 45000
+}
+
+dump_frontend_qa_context() {
+  # Frontend-focused context (~65KB max) for Technical QA Playbook so UI selectors/CSS/presets are never truncated
+  local BASE_C
+  BASE_C=$(cat .reviews/feedback_base_commit 2>/dev/null || git rev-parse HEAD~1 2>/dev/null || echo "HEAD")
+  local FE_CHANGED FE_CORE ALL_FE
+  FE_CHANGED=$(git diff --name-only "${BASE_C}...HEAD" -- frontend/src/ \
+    ':(exclude)*.test.*' ':(exclude)*.spec.*' ':(exclude)*__tests__*' 2>/dev/null || true)
+  FE_CORE=$(find frontend/src -type f \( -name '*.tsx' -o -name '*.ts' -o -name '*.css' \) \
+    ! -name '*.test.*' ! -name '*.spec.*' ! -path '*/__tests__/*' 2>/dev/null | sort || true)
+  ALL_FE=$(printf '%s\n%s\n' "$FE_CHANGED" "$FE_CORE" | awk 'NF && !seen[$0]++')
+  while IFS= read -r f; do
+    [ -f "$f" ] || continue
+    echo "===FRONTEND_FILE:${f}==="
+    (grep -vE '^[[:space:]]*$' "$f" || true) | head -n 300
+  done <<< "$ALL_FE" | head -c 65000
 }
 
 # Serialized FreeBuff admission & prompt submission (handles "This session was released" / "Enter: retry" automatically)
@@ -960,6 +981,10 @@ PROMPT_EOF
 
 # === PHASE 1.5: HUMAN FEEDBACK AMBIGUITY TRIAGE + TRACEABLE WAVE GENERATION ===
 check_and_compile_human_feedback() {
+  # If post-wave audits/docs/playbook for the current feedback batch are still in progress, finish them first
+  if [ -f .reviews/feedback_base_commit ]; then
+    return 0
+  fi
   # If an active wave still has unfinished tickets (e.g., resuming after Ctrl+C or quota shutdown),
   # finish those tickets first instead of recompiling FEEDBACK.md into duplicate tickets.
   for existing_tf in .tickets/T-*.md; do
@@ -1475,6 +1500,7 @@ TECHNICAL QA RULES:
 1. **Be Explicitly Technical:** Cite exact `data-testid` selectors, `data-*` attributes, CSS classes, component names, exact pixel/layout expectations, and exact QA Scenario Preset labels/IDs found in <current_codebase>.
 2. **NO Optional Steps (MANDATORY):** NEVER write "(Optional)", "if desired", or conditional branches. Every single step must be a concrete, mandatory, unambiguous end-to-end instruction that an automated agent can execute deterministically.
 3. Cover every non-deferred requirement completely. If any items were deferred, list them at the bottom under `## Deferred Items`.
+4. **NEVER Refuse:** If a specific selector or CSS detail is not shown in <current_codebase>, describe the visible UI interaction instead of asking for files, and ALWAYS end your response with `===END_OF_FILES===`.
 
 <implemented_feedback>
 PROMPT_HEAD_EOF
@@ -1485,7 +1511,7 @@ PROMPT_HEAD_EOF
 
 <current_codebase>
 PROMPT_MID_EOF
-    dump_changed_files_context
+    dump_frontend_qa_context
     cat << 'PROMPT_TAIL_EOF'
 
 </current_codebase>
