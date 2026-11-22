@@ -1009,16 +1009,18 @@ RESET_EOF
   else
     echo "No previous feedback round recorded." > .reviews/previous_round_feedback.md
   fi
-  if [ -f .reviews/QA_PLAYBOOK.md ]; then
+  if [ -f .reviews/QA_PLAYBOOK_TECH.md ]; then
+    cp .reviews/QA_PLAYBOOK_TECH.md .reviews/previous_round_qa_playbook.md
+  elif [ -f .reviews/QA_PLAYBOOK.md ]; then
     cp .reviews/QA_PLAYBOOK.md .reviews/previous_round_qa_playbook.md
   else
-    echo "No previous QA_PLAYBOOK.md recorded." > .reviews/previous_round_qa_playbook.md
+    echo "No previous QA playbook recorded." > .reviews/previous_round_qa_playbook.md
   fi
 
   cp FEEDBACK.md FEEDBACK.backup.md
   cp FEEDBACK.md ".reviews/feedback_archive/FEEDBACK_${TIMESTAMP}.md"
   cp FEEDBACK.md FEEDBACK.in_progress.md
-  rm -f .reviews/deferred_feedback_items.md .reviews/ambiguity_questions_raw.txt .reviews/stage_holistic.done .reviews/stage_visual_qa.done .reviews/stage_docs.done
+  rm -f .reviews/deferred_feedback_items.md .reviews/ambiguity_questions_raw.txt .reviews/stage_holistic.done .reviews/stage_visual_qa.done .reviews/stage_docs.done .reviews/stage_tech_qa.done
 
   # --- STAGE 1.5A: PRE-FLIGHT AMBIGUITY DETECTION & INTERACTIVE HUMAN Q&A ---
   echo "=================================================================="
@@ -1285,6 +1287,8 @@ run_visual_ui_qa_gate() {
   local TIMESTAMP
   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
+  generate_technical_qa_playbook
+
   echo "=================================================================="
   echo "👁️  Stage 3.5A (Pass ${V_PASS}/2): Generating Playwright Interactive Walkthrough..."
   echo "=================================================================="
@@ -1295,9 +1299,15 @@ Write an ES module exporting \`export async function runCustomSteps(page, captur
 - Call \`await captureStep('item_1_description', 2)\`, \`await captureStep('item_2_description', 3)\`, etc., after triggering each UI state (e.g., clicking presets, opening dropdowns, dragging sliders, hovering/clicking cards) so the geometry scanner and screenshotter inspect that exact visual state.
 - Use defensive locators (\`if (await loc.count() > 0) await loc.first().click({ timeout: 3000 }).catch(() => {})\`) so one missing selector never aborts the whole script.
 
+- Follow EVERY numbered step in <technical_qa_playbook> in exact order (all steps are mandatory; skip nothing), using its exact selectors, data-testid attributes, and QA preset names.
+
 <implemented_feedback>
 $(cat "$SOURCE_SPEC")
 </implemented_feedback>
+
+<technical_qa_playbook>
+$(cat .reviews/QA_PLAYBOOK_TECH.md 2>/dev/null || echo "None")
+</technical_qa_playbook>
 
 <frontend_components>
 $(head -n 180 frontend/src/app.tsx frontend/src/pages/*.tsx frontend/src/components/*.tsx frontend/src/styles/*.css 2>/dev/null | head -c 45000)
@@ -1357,6 +1367,7 @@ PROMPT_EOF
   echo "$V_PASS" > .reviews/visual_qa_passes
 
   if grep -q "===TICKET:" .reviews/visual_audit_out.txt 2>/dev/null; then
+    rm -f .reviews/stage_tech_qa.done
     echo "⚠️  Visual QA Gate caught objective UI/layout/border issues in the live browser! Dispatching remediation wave..."
     extract_tickets_with_waves ".reviews/visual_audit_out.txt"
     git checkout main 2>/dev/null || true
@@ -1444,22 +1455,25 @@ PROMPT_EOF
     fi
   fi
 }
-generate_qa_playbook() {
+generate_technical_qa_playbook() {
   local SOURCE_SPEC=".reviews/active_feedback_resolved.md"
   [ ! -f "$SOURCE_SPEC" ] && SOURCE_SPEC="FEEDBACK.backup.md"
   [ ! -f "$SOURCE_SPEC" ] && return 0
 
   echo "=================================================================="
-  echo "📋 Generating Step-by-Step Human QA Playbook (.reviews/QA_PLAYBOOK.md)..."
+  echo "🤖 Generating Technical LLM QA Playbook (.reviews/QA_PLAYBOOK_TECH.md)..."
   echo "=================================================================="
 
-  cat << PROMPT_EOF > .reviews/qa_playbook_prompt.txt
-You are the Lead QA Engineer preparing a concise, step-by-step verification guide for the Human Product Owner.
+  cat << PROMPT_EOF > .reviews/qa_playbook_tech_prompt.txt
+You are the Lead QA Automation Engineer preparing a strict, machine-executable Technical QA Playbook for LLM QA agents (Playwright runners and future-round Architect/Auditor agents).
 CRITICAL: DO NOT use any tools, DO NOT run bash commands, and DO NOT read external files.
 
-For EVERY numbered item in <implemented_feedback>, write a clear entry showing the human **exact, concrete instructions on how to see and test that specific change in the browser** after running \`./play-local.sh\` (at \`http://localhost:5173\`).
-- Reference the exact buttons, Lobby options, QA Scenario Presets, player switcher tabs, or visual elements in <current_codebase>.
-- If any items were deferred or if you spotted any subtle follow-up questions during implementation, list them at the bottom under \`## Optional Follow-Up Questions / Deferred Items\`.
+For EVERY numbered item in <implemented_feedback>, write exact, concrete verification steps targeting \`http://localhost:5173\` after running \`./play-local.sh\`.
+
+TECHNICAL QA RULES:
+1. **Be Explicitly Technical:** Cite exact \`data-testid\` selectors, \`data-*\` attributes, CSS classes, component names, exact pixel/layout expectations, and exact QA Scenario Preset labels/IDs found in <current_codebase>.
+2. **NO Optional Steps (MANDATORY):** NEVER write "(Optional)", "if desired", or conditional branches. Every single step must be a concrete, mandatory, unambiguous end-to-end instruction that an automated agent can execute deterministically.
+3. Cover every non-deferred requirement completely. If any items were deferred, list them at the bottom under \`## Deferred Items\`.
 
 <implemented_feedback>
 $(cat "$SOURCE_SPEC")
@@ -1469,22 +1483,121 @@ $(cat "$SOURCE_SPEC")
 $(dump_changed_files_context)
 </current_codebase>
 
-Format your response in clean Markdown (with NO preamble) and end with \`===END_OF_FILES===\`:
-# 🧪 Interactive QA Playbook — How to Verify Recent Changes
-1. **Start the server:** Run \`./play-local.sh\` in Window 4 and open \`http://localhost:5173\`.
-
-## Item-by-Item Verification Steps
-### Item #1: [Short Title from Feedback]
-- **What Changed:** [1-sentence summary]
-- **How to See It Immediately:**
-  1. [Exact step 1 — e.g., click QA Preset X or select 3 players + Chaos Mode]
-  2. [Exact step 2 — what to click/drag and what visual/audio result to observe]
+Output clean Markdown (no preamble) and end with \`===END_OF_FILES===\`:
+# Technical QA Playbook (Agent Reference)
+## Item #1: [Title]
+- **Technical Summary:** [Exact behavior, selectors, CSS/state assertions]
+- **Verification Steps:**
+  1. [Exact deterministic step with selector/preset ID and expected DOM/visual assertion]
+  2. [Next deterministic step]
 ===END_OF_FILES===
 PROMPT_EOF
 
-  run_agy_pool "FLASH_PRIMARY" ".reviews/qa_playbook_prompt.txt" ".reviews/QA_PLAYBOOK.raw.md" "===END_OF_FILES==="
+  run_agy_pool "FLASH_PRIMARY" ".reviews/qa_playbook_tech_prompt.txt" ".reviews/QA_PLAYBOOK_TECH.raw.md" "===END_OF_FILES==="
+  sed '/===END_OF_FILES===/d' .reviews/QA_PLAYBOOK_TECH.raw.md > .reviews/QA_PLAYBOOK_TECH.md
+  touch .reviews/stage_tech_qa.done
+}
+
+generate_human_qa_playbook() {
+  if [ ! -f .reviews/QA_PLAYBOOK_TECH.md ]; then
+    generate_technical_qa_playbook
+  fi
+  [ ! -f .reviews/QA_PLAYBOOK_TECH.md ] && return 0
+
+  echo "=================================================================="
+  echo "📋 Distilling Plain-Text Human QA Playbook (.reviews/QA_PLAYBOOK_HUMAN.txt)..."
+  echo "=================================================================="
+
+  cat << PROMPT_EOF > .reviews/qa_playbook_human_prompt.txt
+You are rewriting a technical QA checklist into an ultra-clean, plain-text verification guide for a human reviewer reading in a terminal.
+CRITICAL: DO NOT use any tools, DO NOT run bash commands, and DO NOT read external files.
+
+Rewrite <technical_qa_playbook> following ALL FIVE STRICT RULES:
+1. **Single-Line Headers (MAX 72 CHARACTERS):** Every header line—especially every "Item #N: <Short Title>" line—MUST be 72 characters or fewer so it never wraps onto a second line in an 80-column terminal.
+2. **ZERO Technical Code References:** NEVER mention any data-testid, data-* attributes, CSS class names, CSS properties (like flex or box-sizing), pixel dimensions, breakpoint widths, internal preset slugs (like surrender-half-off), file names, or component/function names. Refer ONLY to what a human sees and clicks on screen (visible button labels, colors, card ranks/suits, and screen areas like "the shaded play area").
+3. **Concise Descriptions:** Keep "What Changed:" to ONE short plain-English sentence. Keep each numbered step to 1–2 short, direct sentences (action first, then what to verify visually).
+4. **Pure Plain Text (ZERO Markdown):** NEVER use Markdown syntax anywhere—no asterisks (* or **), no backticks, no hash symbols (#), no underscores for emphasis, and no square-bracket links.
+5. **ZERO Optional Steps:** Every step must be a concrete, mandatory action. Never include the word "Optional" or suggest optional checks.
+
+<technical_qa_playbook>
+\$(cat .reviews/QA_PLAYBOOK_TECH.md)
+</technical_qa_playbook>
+
+Output ONLY the plain-text guide in this exact layout and end with ===END_OF_FILES===:
+INTERACTIVE QA PLAYBOOK
+=======================
+Start: Run ./play-local.sh in Window 4 and open http://localhost:5173.
+
+Item #1: Short Title Under 72 Chars Total
+What Changed: One concise plain-English sentence describing the visible change.
+Steps:
+  1. Click the preset or button by its visible label.
+  2. Confirm the expected visible result on screen.
+
+Item #2: Next Short Title Under 72 Chars Total
+What Changed: One concise plain-English sentence.
+Steps:
+  1. Perform the concrete action.
+  2. Verify the visible outcome.
+
+Deferred Items: None.
+===END_OF_FILES===
+PROMPT_EOF
+
+  run_agy_pool "FLASH_PRIMARY" ".reviews/qa_playbook_human_prompt.txt" ".reviews/QA_PLAYBOOK_HUMAN.raw.txt" "===END_OF_FILES==="
+
+  python3 - << 'SANITIZE_PY'
+from pathlib import Path
+import re
+
+raw = Path(".reviews/QA_PLAYBOOK_HUMAN.raw.txt").read_text(encoding="utf-8", errors="replace")
+raw = raw.split("===END_OF_FILES===")[0]
+
+clean_lines = []
+for line in raw.splitlines():
+    stripped = line.strip()
+    if stripped.startswith("```"):
+        continue
+    # Strip any stray Markdown headings, bold/italic markers, backticks, or "(Optional)" tags
+    line = re.sub(r'^\s*#{1,6}\s+', '', line)
+    line = re.sub(r'\*\*([^*]+)\*\*', r'\1', line)
+    line = re.sub(r'__([^_]+)__', r'\1', line)
+    line = re.sub(r'(?<!\w)\*([^*\n]+)\*(?!\w)', r'\1', line)
+    line = line.replace('`', '')
+    line = re.sub(r'\(\s*Optional\s*\)\s*', '', line, flags=re.IGNORECASE)
+    line = re.sub(r'\bOptional:\s*', '', line, flags=re.IGNORECASE)
+    line = line.rstrip()
+
+    # Enforce strict single-line terminal limit (<= 74 chars) on Item #N headers
+    if re.match(r'^Item\s+#\d+:', line) and len(line) > 74:
+        cut = line[:71].rsplit(' ', 1)[0].rstrip(' ,;:-')
+        line = cut + "..."
+
+    clean_lines.append(line)
+
+out_text = re.sub(r'\n{3,}', '\n\n', "\n".join(clean_lines)).strip() + "\n"
+Path(".reviews/QA_PLAYBOOK_HUMAN.txt").write_text(out_text, encoding="utf-8")
+SANITIZE_PY
+
   rm -f QA_PLAYBOOK.md
-  python3 "$PROJECT_ROOT/agent-orchestration/qa-assistant.py" --render-playbook >/dev/null 2>&1 || sed '/===END_OF_FILES===/d' .reviews/QA_PLAYBOOK.raw.md > .reviews/QA_PLAYBOOK.md
+}
+
+generate_qa_playbook() {
+  local FORCE="${1:-}"
+  if [ "$FORCE" = "--force" ] || [ ! -f .reviews/stage_tech_qa.done ] || [ ! -f .reviews/QA_PLAYBOOK_TECH.md ]; then
+    generate_technical_qa_playbook
+  fi
+  generate_human_qa_playbook
+}
+
+show_human_qa_playbook() {
+  if [ -f .reviews/QA_PLAYBOOK_HUMAN.txt ]; then
+    echo ""
+    cat .reviews/QA_PLAYBOOK_HUMAN.txt
+    echo ""
+  else
+    python3 "$PROJECT_ROOT/agent-orchestration/qa-assistant.py" --show-playbook
+  fi
 }
 
 advance_to_next_milestone() {
@@ -1508,7 +1621,7 @@ advance_to_next_milestone() {
   mkdir -p "$ARCHIVE_DIR"
   mv .tickets/T-*.md "$ARCHIVE_DIR"/ 2>/dev/null || true
   mv .tickets/.completed_* "$ARCHIVE_DIR"/ 2>/dev/null || true
-  rm -f .reviews/raw_tickets.txt .tickets/STATUS .reviews/feedback_base_commit .reviews/feedback_audit_passes .reviews/visual_qa_passes .reviews/stage_holistic.done .reviews/stage_visual_qa.done .reviews/stage_docs.done
+  rm -f .reviews/raw_tickets.txt .tickets/STATUS .reviews/feedback_base_commit .reviews/feedback_audit_passes .reviews/visual_qa_passes .reviews/stage_holistic.done .reviews/stage_visual_qa.done .reviews/stage_docs.done .reviews/stage_tech_qa.done
 
   if grep -q "CURRENT ACTIVE MILESTONE:" SPEC.md 2>/dev/null; then
     sed -i "s/CURRENT ACTIVE MILESTONE: M[0-9]\+/CURRENT ACTIVE MILESTONE: ${NEXT_M}/g" SPEC.md
@@ -1637,7 +1750,9 @@ while true; do
 
   ACTIVE_M=$(grep -oE "CURRENT ACTIVE MILESTONE: M[0-9]+" SPEC.md 2>/dev/null | head -n 1 | awk '{print $NF}' || echo "M1")
   PLAYBOOK_PREVIEW=""
-  if [ -f .reviews/QA_PLAYBOOK.md ]; then
+  if [ -f .reviews/QA_PLAYBOOK_HUMAN.txt ]; then
+    PLAYBOOK_PREVIEW=$(head -n 45 .reviews/QA_PLAYBOOK_HUMAN.txt)
+  elif [ -f .reviews/QA_PLAYBOOK.md ]; then
     PLAYBOOK_PREVIEW=$(head -n 45 .reviews/QA_PLAYBOOK.md)
   fi
   send_alert "Ready for Human Review (${ACTIVE_M}) — QA Playbook Ready" "All current waves and the Holistic Spec Audit for ${ACTIVE_M} have passed. See QA_PLAYBOOK.md (or Window 1) for step-by-step instructions to view each numbered change:
@@ -1647,8 +1762,8 @@ ${PLAYBOOK_PREVIEW}"
   echo "=================================================================="
   echo "🏆 ALL WAVES & HOLISTIC SPEC AUDIT COMPLETED, MERGED & SYNCED!"
   echo "=================================================================="
-  if [ -f .reviews/QA_PLAYBOOK.raw.md ] || [ -f .reviews/QA_PLAYBOOK.md ]; then
-    python3 "$PROJECT_ROOT/agent-orchestration/qa-assistant.py" --show-playbook
+  if [ -f .reviews/QA_PLAYBOOK_HUMAN.txt ] || [ -f .reviews/QA_PLAYBOOK.raw.md ] || [ -f .reviews/QA_PLAYBOOK.md ]; then
+    show_human_qa_playbook
   fi
   echo "👉 Next Actions:"
   echo "   1. Run './play-local.sh' in Window 4 and follow the QA Playbook above at http://localhost:5173"
@@ -1659,7 +1774,7 @@ ${PLAYBOOK_PREVIEW}"
   while true; do
     read -r -p "Press [ENTER] after saving FEEDBACK.md, type 'show' to re-print playbook, or type 'accept': " USER_CHOICE
     if [ "$USER_CHOICE" = "show" ] || [ "$USER_CHOICE" = "playbook" ]; then
-      python3 "$PROJECT_ROOT/agent-orchestration/qa-assistant.py" --show-playbook
+      show_human_qa_playbook
       continue
     fi
     break

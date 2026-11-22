@@ -276,6 +276,13 @@ def render_playbook_to_terminal(raw_text: str):
     print(GREEN + "=" * width + RESET + "\n")
 
 if __name__ == "__main__":
+    import sys as _sys
+    from pathlib import Path as _Path
+    if "--show-playbook" in _sys.argv:
+        _human_pb = _Path(__file__).resolve().parent.parent / ".reviews" / "QA_PLAYBOOK_HUMAN.txt"
+        if _human_pb.exists():
+            print("\n" + _human_pb.read_text(encoding="utf-8").strip() + "\n")
+            _sys.exit(0)
     if len(sys.argv) > 1 and sys.argv[1] == "--render-playbook":
         raw_pb = ""
         if (REVIEWS_DIR / "QA_PLAYBOOK.raw.md").exists():
