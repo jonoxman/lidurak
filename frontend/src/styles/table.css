@@ -1985,6 +1985,13 @@
 
 /* --- Interaction polish (Items 11, 12, 18, 19) --- */
 
+/* T-95 #1: a hand card must never lift on hover — the SVG contour only models
+   the shared playable / selected raise below, so a hover-only 4px lift would
+   leave the hovered card poking out of the supposedly tight outline. */
+.hand-cards .card-slot:hover {
+  transform: none;
+}
+
 /* T-90-feedback-2 ITEM-2: a playable / selected card lifts by the exact offset
    the SVG contour uses (`--hand-raise`, written from `HAND_RAISED_OFFSET` on
    `.hand-cards`), so the tight outline steps up over exactly the raised cards. */
