@@ -32,13 +32,13 @@ export const ACTION_BUTTONS: readonly ActionButton[] = [
   {
     action: 'pass',
     type: 'passTurn',
-    label: 'Pass — done throwing in',
+    label: 'Pass',
     testId: 'pass-button',
   },
   {
     action: 'surrender',
     type: 'declareSurrender',
-    label: 'Surrender — take the cards',
+    label: 'Surrender',
     testId: 'surrender-button',
   },
 ];

@@ -6,10 +6,16 @@
   --durak-accent: #629924;
   --durak-danger: #c33;
   --durak-amber: #d9a326;
-  /* T-90: one source of truth for every card-sized box on the table. */
+  /* T-90-feedback ITEM-2: one source of truth for every card-sized box on the
+     table. `--card-width` / `--card-height` / `--card-radius` are the canonical
+     tokens; `--card-w` / `--card-h` remain compatibility aliases with the same
+     literal value (they are never chained to the canonical token, so a local
+     `--card-width` override can never form a custom-property cycle). */
+  --card-width: 100px;
+  --card-height: 140px;
+  --card-radius: 10px;
   --card-w: 100px;
   --card-h: 140px;
-  --card-radius: var(--app-roundness, 8px);
   /* T-90-feedback-2: highlight aura multiplier written inline by settings.ts.
      Every glow below multiplies its blur/spread by this factor, so the Theme ▸
      Highlights intensity slider retunes the live table in real time. */
@@ -475,8 +481,11 @@
 /* T-90 ITEM-1b: a legal attack target belongs to the Attacker (emerald) family,
    so it reads as gameplay rather than as a UI menu selection. */
 .target-outline {
+  /* Legacy aliases first; the canonical tokens win the cascade (ITEM-2). */
   width: var(--card-w, 100px);
   height: var(--card-h, 140px);
+  width: var(--card-width, 100px);
+  height: var(--card-height, 140px);
   margin-top: 10px;
   border: 2px dashed var(--role-attacker-border);
   border-radius: var(--app-roundness, 8px);
@@ -501,6 +510,8 @@
   align-self: flex-start;
   width: var(--card-w, 100px);
   height: var(--card-h, 140px);
+  width: var(--card-width, 100px);
+  height: var(--card-height, 140px);
   margin: 0 0 var(--bout-card-offset, 18px) 0;
   border: 2px dashed var(--redirect-border);
   border-radius: var(--app-roundness, 8px);
@@ -544,6 +555,8 @@
 .drag-ghost {
   width: var(--bout-card-width, 100px);
   height: var(--bout-card-height, 140px);
+  width: var(--card-width, 100px);
+  height: var(--card-height, 140px);
   box-sizing: border-box;
 }
 
@@ -675,17 +688,19 @@
    to the right of the deck with no absolute positioning. */
 .talon-deck {
   display: grid;
-  grid-template-columns: 114px;
-  grid-template-rows: 114px;
+  /* 100px deck + 40px of the rotated 140x100 bottom trump. */
+  grid-template-columns: 140px;
+  grid-template-rows: 140px;
   align-items: center;
   min-width: 0;
 }
 
-/* Req 7c: one source of truth for the deck card size. The talon and the
-   discard pile both read it, so a discarded card always matches the deck. */
+/* Req 7c / ITEM-2: the talon, the bottom trump and the discard pile all read
+   the canonical card tokens, so every deck card matches the 100x140 table
+   cards (48x68 below the mobile breakpoint). */
 [data-zone='table-deck'] {
-  --deck-card-width: 80px;
-  --deck-card-height: 114px;
+  --deck-card-width: var(--card-width, 100px);
+  --deck-card-height: var(--card-height, 140px);
 }
 
 .talon-stack {
@@ -877,8 +892,9 @@
   display: grid;
   place-items: center;
   flex: 0 0 auto;
-  width: 114px;
-  height: 80px;
+  /* The rotated 100x140 trump occupies a 140x100 footprint. */
+  width: 140px;
+  height: 100px;
 }
 
 /* Feedback #15: nudge the horizontal trump right and up so it tucks under the
@@ -1093,10 +1109,17 @@
    first card's left edge and ends at the last card's right edge — no guessed
    widths or offsets. Symmetric padding leaves headroom for lifted cards. */
 .hand-cards {
-  display: inline-flex;
+  /* ITEM-3: the stage is a single-cell CSS Grid. The contour SVG and the card
+     row are stacked in `grid-area: 1 / 1`, so no absolute positioning is ever
+     used to place the hand. */
+  display: grid;
+  grid-template-areas: 'hand';
+  grid-template-columns: auto;
+  grid-template-rows: auto;
+  justify-items: start;
+  align-items: center;
   flex: 0 0 auto;
   flex-wrap: nowrap;
-  align-items: center;
   justify-content: center;
   /* T-90-feedback-2 ITEM-2: the box is sized inline to the exact overlapped
      footprint (`width: totalHandWidth; height: cardHeight`) and no longer pads
@@ -1129,10 +1152,26 @@
 /* The contour is an SVG overlay anchored to `.hand-cards`; it never takes part
    in the card row's layout and never paints a rectangle of its own. */
 .hand-highlight-contour {
-  position: absolute;
+  /* ITEM-3: stacked over the hand row in the stage's single grid cell. */
+  grid-area: 1 / 1;
+  justify-self: start;
+  align-self: start;
   overflow: visible;
   pointer-events: none;
   z-index: 0;
+}
+
+/* ITEM-3: the card row lives in the same grid cell as the contour. */
+.hand-row {
+  grid-area: 1 / 1;
+  align-self: start;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  min-width: 0;
+  width: max-content;
 }
 
 .hand-highlight-path {
@@ -2325,8 +2364,8 @@
 
 /* T-90: hand cards read the same card tokens as the bout and outlines. */
 [data-zone='player-hand'] {
-  --hand-card-width: var(--card-w, 100px);
-  --hand-card-height: var(--card-h, 140px);
+  --hand-card-width: var(--card-width, 100px);
+  --hand-card-height: var(--card-height, 140px);
 }
 
 /* ITEM-7: the link pointer finger is enforced on every node of a hand card —
@@ -2427,6 +2466,8 @@ body[data-dragging='true'] *,
   align-self: flex-start;
   width: var(--card-w, 100px);
   height: var(--card-h, 140px);
+  width: var(--card-width, 100px);
+  height: var(--card-height, 140px);
   margin: 0;
   padding: 0;
   box-sizing: border-box;
@@ -2442,6 +2483,8 @@ body[data-dragging='true'] *,
   align-self: end;
   width: var(--card-w, 100px);
   height: var(--card-h, 140px);
+  width: var(--card-width, 100px);
+  height: var(--card-height, 140px);
   margin: 0;
   padding: 0;
   box-sizing: border-box;
@@ -2483,6 +2526,14 @@ body[data-dragging='true'] *,
   max-width: var(--card-w, 100px);
   min-height: var(--card-h, 140px);
   max-height: var(--card-h, 140px);
+  /* ITEM-2: the canonical card tokens win the cascade. */
+  flex: 0 0 var(--card-width, 100px);
+  width: var(--card-width, 100px);
+  height: var(--card-height, 140px);
+  min-width: var(--card-width, 100px);
+  max-width: var(--card-width, 100px);
+  min-height: var(--card-height, 140px);
+  max-height: var(--card-height, 140px);
   margin: 0;
   border: 2px dashed var(--role-attacker-border);
   border-radius: var(--app-roundness, 8px);
@@ -2601,6 +2652,9 @@ body[data-dragging='true'] *,
 /* T-90: one responsive breakpoint for every card-sized box (48x68). */
 @media (max-width: 899px) {
   :root {
+    --card-width: 48px;
+    --card-height: 68px;
+    --card-radius: 6px;
     --card-w: 48px;
     --card-h: 68px;
   }

@@ -12,6 +12,10 @@ import {
   buildRedirectAttack,
   type GameAction,
 } from '../types';
+import {
+  buildHandContourPath,
+  computeHandLayout as computeUtilsHandLayout,
+} from '../utils/handLayout';
 import '../styles/table.css';
 
 export interface OpponentSummary {
@@ -100,6 +104,12 @@ export interface GameTableProps {
   canRedirect?: boolean;
   /** T-90: backend-owned gate; `true` only when this seat may throw in. */
   canThrowIn?: boolean;
+  /** Backend projection of the cards this seat may legally throw in. */
+  throwInCards?: CardData[];
+  /** Remaining throw-in capacity for this seat (`0` hides the outline). */
+  throwInCapacity?: number;
+  /** True once this seat has passed on the current bout. */
+  myHasPassed?: boolean;
   /** Id of the player whose turn clock is running. */
   turnPlayerId?: string;
   /** Seconds left on the active turn clock (0..15). */
@@ -194,7 +204,8 @@ export function cardSizeForViewport(viewportWidth: number): {
   width: number;
   height: number;
 } {
-  return viewportWidth > 0 && viewportWidth <= MOBILE_BREAKPOINT_PX
+  // ITEM-2: `>= 900px` is desktop, `< 900px` is mobile.
+  return viewportWidth > 0 && viewportWidth < MOBILE_BREAKPOINT_PX
     ? { width: MOBILE_CARD_WIDTH, height: MOBILE_CARD_HEIGHT }
     : { width: CARD_WIDTH, height: CARD_HEIGHT };
 }
@@ -222,17 +233,26 @@ export const HAND_MAX_OVERLAP = Math.round(HAND_CARD_WIDTH * HAND_MAX_OVERLAP_RA
  */
 export const HAND_MIN_VISIBLE_LEFT = 15;
 /** Used until the hand has been measured (jsdom reports zero widths). */
-export const HAND_FALLBACK_WIDTH = 720;
+export const HAND_FALLBACK_WIDTH = 640;
+/** Mobile/SSR fallback width, below the 900px breakpoint. */
+export const HAND_FALLBACK_WIDTH_MOBILE = 300;
+
+/** ITEM-3: the hand stage width used before a `ResizeObserver` reports one. */
+export function handFallbackWidth(viewportWidth: number): number {
+  return viewportWidth > 0 && viewportWidth < MOBILE_BREAKPOINT_PX
+    ? HAND_FALLBACK_WIDTH_MOBILE
+    : HAND_FALLBACK_WIDTH;
+}
 /** T-90-feedback-2 ITEM-2: `.hand-cards` now wraps the exact card footprint. */
 export const HAND_BOX_PADDING = 0;
 /** T-90-feedback-2 ITEM-2: how far a playable / selected card rises. */
 export const HAND_RAISED_OFFSET = -14;
 /** T-90-feedback-2 ITEM-2: tight padding between the cards and the contour. */
 export const HAND_CONTOUR_PADDING = 4;
-/** Width of one talon deck card; the discard pile reuses the exact same size. */
-export const DECK_CARD_WIDTH = 80;
-/** Height of one talon deck card; the discard pile reuses the exact same size. */
-export const DECK_CARD_HEIGHT = 114;
+/** ITEM-2: the talon deck card is the same 100x140 card as the table/hand. */
+export const DECK_CARD_WIDTH = CARD_WIDTH;
+/** ITEM-2: the talon deck card is the same 100x140 card as the table/hand. */
+export const DECK_CARD_HEIGHT = CARD_HEIGHT;
 /** Inner width of the sidebar DECK box, used until the pile has been measured. */
 export const DISCARD_FALLBACK_WIDTH = 236;
 /**
@@ -416,6 +436,32 @@ export function handLayout(
   const scale = available > 0 && totalWidth > available ? available / totalWidth : 1;
   const overlap = width - stride;
 
+  // T-90-feedback review round 1: `utils/handLayout.ts` is the source of truth
+  // for a hand that fits one row. Its 20%-80% band and stage width match the
+  // formula above exactly; the extreme full-deck pickup keeps the legacy row
+  // scaling below (the module scales the cards instead, which would break the
+  // fit-scaled `transform` the table uses).
+  if (available >= width && scale === 1) {
+    const official = computeUtilsHandLayout({
+      cardCount: count,
+      containerWidth: available,
+      baseCardWidth: width,
+      maxRows: 1,
+    });
+    if (official.rows === 1 && official.scale === 1) {
+      return {
+        overlap: official.overlap,
+        overlapRatio: official.overlapRatio,
+        stride: official.step,
+        totalWidth: official.stageWidth,
+        scale: 1,
+        visibleCount: count,
+        hiddenLeft: 0,
+        hiddenRight: 0,
+      };
+    }
+  }
+
   return {
     overlap,
     overlapRatio: overlap / width,
@@ -564,61 +610,25 @@ export function computeHandContour(
     return { d: '', left: 0, top: 0, width: 0, height: 0, nonRectangular: false };
   }
 
-  const rects = cards.map((card) => ({
-    left: card.x - pad,
-    right: card.x + cardWidth + pad,
-    top: card.y - pad,
-    bottom: card.y + cardHeight + pad,
-  }));
-  const left = Math.min(...rects.map((rect) => rect.left));
-  const top = Math.min(...rects.map((rect) => rect.top));
-  const right = Math.max(...rects.map((rect) => rect.right));
-  const bottom = Math.max(...rects.map((rect) => rect.bottom));
-  const xs = Array.from(new Set(rects.flatMap((rect) => [rect.left, rect.right]))).sort(
-    (a, b) => a - b,
+  // T-90-feedback review round 1: delegate the tight, rounded union trace to the
+  // Wave-1 `buildHandContourPath` module. The returned `d`, padded bounds and
+  // `isNonRectangular` flag map 1:1 onto this component's DOM contract.
+  const official = buildHandContourPath(
+    cards.map((card) => ({
+      x: card.x,
+      y: card.y,
+      width: cardWidth,
+      height: cardHeight,
+    })),
+    { padding: pad },
   );
-
-  // One envelope value per x interval; `xs` holds the shared breakpoints.
-  const tops: number[] = [];
-  const bottoms: number[] = [];
-  for (let index = 0; index < xs.length - 1; index += 1) {
-    const start = xs[index];
-    const end = xs[index + 1];
-    const middle = (start + end) / 2;
-    const covering = rects.filter((rect) => rect.left <= middle && rect.right >= middle);
-    tops.push(Math.min(...covering.map((rect) => rect.top)));
-    bottoms.push(Math.max(...covering.map((rect) => rect.bottom)));
-  }
-
-  const x = (value: number): number => round2(value - left);
-  const y = (value: number): number => round2(value - top);
-  const last = xs.length - 1;
-  const parts: string[] = [`M ${x(xs[0])} ${y(tops[0])}`];
-
-  // Upper envelope, left to right.
-  for (let index = 1; index < last; index += 1) {
-    parts.push(`H ${x(xs[index])}`);
-    if (tops[index] !== tops[index - 1]) parts.push(`V ${y(tops[index])}`);
-  }
-  parts.push(`H ${x(xs[last])}`);
-  // Right edge, then the lower envelope right-to-left.
-  parts.push(`V ${y(bottoms[bottoms.length - 1])}`);
-  for (let index = bottoms.length - 1; index >= 0; index -= 1) {
-    parts.push(`H ${x(xs[index])}`);
-    if (index > 0 && bottoms[index - 1] !== bottoms[index]) {
-      parts.push(`V ${y(bottoms[index - 1])}`);
-    }
-  }
-  parts.push('Z');
-
-  const nonRectangular = new Set(cards.map((card) => card.y)).size > 1;
   return {
-    d: parts.join(' '),
-    left,
-    top,
-    width: right - left,
-    height: bottom - top,
-    nonRectangular,
+    d: official.pathD,
+    left: official.left,
+    top: official.top,
+    width: official.width,
+    height: official.height,
+    nonRectangular: official.isNonRectangular,
   };
 }
 
@@ -1329,6 +1339,9 @@ export function GameTable({
   boutPhase,
   canRedirect = false,
   canThrowIn = false,
+  throwInCards,
+  throwInCapacity,
+  myHasPassed = false,
   turnPlayerId,
   turnSecondsRemaining = 15,
   sortMode = 'rank',
@@ -1474,9 +1487,12 @@ export function GameTable({
   // T-90-feedback-2 ITEM-4 (review round 2): reserve the contour's 4px padding
   // on both sides, so a fit-scaled full-deck row and its outline can never
   // bleed into the talon or the Surrender / Pass column.
+  const fallbackHandWidth = handFallbackWidth(
+    typeof window === 'undefined' ? 0 : window.innerWidth,
+  );
   const handAvailableWidth = Math.max(
     0,
-    (handWidth > 0 ? handWidth : HAND_FALLBACK_WIDTH) - HAND_CONTOUR_PADDING * 2,
+    (handWidth > 0 ? handWidth : fallbackHandWidth) - HAND_CONTOUR_PADDING * 2,
   );
   const handLayoutState = handLayout(
     hand.length,
@@ -1715,8 +1731,21 @@ export function GameTable({
     !reviewMode &&
     Boolean(onAttackDrop || onCoverDrop || onThrowInDrop || onRedirectDrop || onReorderHand);
   const throwInEnabled = !reviewMode && canThrowIn;
-  // T-90: backend projection is the only gate; false/missing = not in the DOM.
-  const showThrowInOutline = !reviewMode && canThrowIn === true;
+  // T-90-feedback ITEM-1: the throw-in outline exists ONLY for a seat that can
+  // legally play into it. Every condition is checked independently, so a
+  // defender, a seat that has already passed, a hand with no legal throw-in
+  // card, or a full bout removes the outline from the DOM entirely (inline and
+  // surrendered placements alike).
+  const viewerIsDefender = defenderId != null && defenderId === myId;
+  const hasLegalThrowInCard = throwInCards == null ? true : throwInCards.length > 0;
+  const throwInCapacityLeft = throwInCapacity == null ? 1 : throwInCapacity;
+  const showThrowInOutline =
+    !reviewMode &&
+    canThrowIn === true &&
+    !viewerIsDefender &&
+    myHasPassed !== true &&
+    hasLegalThrowInCard &&
+    throwInCapacityLeft > 0;
 
   // ITEM-7: the whole page keeps the link pointer finger for the entire drag,
   // including outside the arena where the browser would paint its own cursor.
@@ -2458,14 +2487,18 @@ export function GameTable({
           class="hand-highlight-contour"
           data-testid="hand-highlight-contour"
           data-non-rectangular={handContour.nonRectangular ? 'true' : 'false'}
+          data-contour-shape={handContour.nonRectangular ? 'stepped' : 'uniform'}
           data-contour-width={Math.round(totalHandWidth)}
           data-contour-rendered-width={Math.round(totalHandWidth * handFitScale)}
           width={handContour.width}
           height={handContour.height}
           viewBox={`0 0 ${handContour.width} ${handContour.height}`}
           style={{
-            left: `${handContour.left}px`,
-            top: `${handContour.top}px`,
+            // The SVG is a CSS Grid layer (`grid-area: 1 / 1`) stacked over the
+            // hand row; negative margins place it around the real card boxes
+            // without any absolute positioning.
+            marginLeft: `${handContour.left}px`,
+            marginTop: `${handContour.top}px`,
             width: `${handContour.width}px`,
             height: `${handContour.height}px`,
           }}
@@ -2479,6 +2512,9 @@ export function GameTable({
             stroke-linecap="round"
           />
         </svg>
+        {/* ITEM-3: the contour and the card row share one CSS Grid cell, so the
+            outline layers tightly over the exact hand pixels. */}
+        <div class="hand-row" data-testid="hand-row">
         {hand.map((card, index) => {
           const hidden =
             index < handLayoutState.hiddenLeft ||
@@ -2608,6 +2644,7 @@ export function GameTable({
             </div>
           );
         })}
+        </div>
         </div>
       </section>
 

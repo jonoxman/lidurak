@@ -281,6 +281,8 @@ export const QA_SCENARIOS: { id: string; label: string }[] = [
   { id: 'full-hand-pickup', label: 'Full Hand Pickup (30 Cards)' },
   { id: 'defenseless-surrender', label: 'Defenseless Auto-Surrender' },
   { id: 'discard-and-endgame', label: 'Discard & Endgame Durak' },
+  { id: 'throw-in-multi-qa', label: 'Throw-In & Multi-Card QA' },
+  { id: 'large-hand-stress', label: 'Large Hand (30+ Cards)' },
   { id: 'transparent-mode', label: 'Transparent Mode' },
   { id: LIGHT_THEME_PRESET_ID, label: 'Light Theme Header' },
 ];
@@ -970,10 +972,15 @@ export function GamePage({
   const remainingBoutCapacity = view.maxBoutAttacks - view.tablePairs.length;
   // ITEM-5: a throw-in never exceeds the bout capacity, and during `Defense`
   // every added uncovered card must still be coverable by the defender.
+  // T-90-feedback review round 1: the server-projected throw-in capacity is part
+  // of the clamp, so a click selection can never exceed what the engine accepts.
+  const projectedThrowInCapacity =
+    view.throwInCapacity == null ? remainingBoutCapacity : view.throwInCapacity;
   const maxThrowInCount = Math.max(
     0,
     Math.min(
       remainingBoutCapacity,
+      projectedThrowInCapacity,
       boutPhaseToken === 'defense'
         ? defenderCardCount - uncoveredCount
         : remainingBoutCapacity,
@@ -1851,6 +1858,9 @@ export function GamePage({
           defenderDefenseless={defenderDefenseless}
           canRedirect={!reviewMode && hasLegalAction(displayedView.legalActions, 'redirect')}
           canThrowIn={canThrowInOutline}
+          throwInCards={displayedView.throwInCards}
+          throwInCapacity={displayedView.throwInCapacity}
+          myHasPassed={displayedView.myHasPassed === true}
           isReviewMode={reviewMode}
           isBot={isBotViewer}
           turnPlayerId={turnPlayerIdFor(displayedView)}
