@@ -22,7 +22,7 @@ if [ -n "$AUTH_B64" ]; then
 fi
 unset AUTH_B64
 
-grep -v '^FREEBUFF_AUTH_B64=' "$ENV_FILE" > "$CONTAINER_ENV_FILE" 2>/dev/null || true
+grep -vE '^(FREEBUFF_AUTH_B64|GITHUB_APP_|AGENT_GH_TOKEN)=' "$ENV_FILE" > "$CONTAINER_ENV_FILE" 2>/dev/null || true
 chmod 600 "$CONTAINER_ENV_FILE"
 
 if ! docker info >/dev/null 2>&1; then

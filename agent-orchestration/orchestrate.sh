@@ -29,8 +29,25 @@ if [ -f "$PROJECT_ROOT/agent-orchestration/.env" ]; then
   set +a
 fi
 
+# Resolve official GitHub App bot identity (<slug>[bot] & <id>+<slug>[bot]@users.noreply.github.com) if configured
+if [ -n "${GITHUB_APP_SLUG:-}" ] && [ -x "$PROJECT_ROOT/agent-orchestration/github-app-token.py" ]; then
+  BOT_ID_LINE=$(python3 "$PROJECT_ROOT/agent-orchestration/github-app-token.py" --identity 2>/dev/null || true)
+  if [ -n "$BOT_ID_LINE" ]; then
+    AGENT_GIT_NAME=$(printf '%s' "$BOT_ID_LINE" | cut -f1)
+    AGENT_GIT_EMAIL=$(printf '%s' "$BOT_ID_LINE" | cut -f2)
+  fi
+fi
+
 AGENT_GIT_NAME="${AGENT_GIT_NAME:-Lidurak Agent Bot}"
 AGENT_GIT_EMAIL="${AGENT_GIT_EMAIL:-agent-bot@lidurak.local}"
+
+get_agent_gh_token() {
+  if [ -n "${GITHUB_APP_ID:-}" ] && [ -x "$PROJECT_ROOT/agent-orchestration/github-app-token.py" ]; then
+    python3 "$PROJECT_ROOT/agent-orchestration/github-app-token.py" 2>/dev/null || true
+  elif [ -n "${AGENT_GH_TOKEN:-}" ]; then
+    printf '%s' "$AGENT_GH_TOKEN"
+  fi
+}
 
 agent_git() {
   GIT_AUTHOR_NAME="$AGENT_GIT_NAME" \
@@ -41,8 +58,10 @@ agent_git() {
 }
 
 agent_gh() {
-  if [ -n "${AGENT_GH_TOKEN:-}" ]; then
-    GH_TOKEN="$AGENT_GH_TOKEN" gh "$@"
+  local TOK
+  TOK=$(get_agent_gh_token)
+  if [ -n "$TOK" ]; then
+    GH_TOKEN="$TOK" gh "$@"
   else
     gh "$@"
   fi
@@ -62,12 +81,21 @@ reset_alert_latch() {
 
 retry_git_push() {
   local attempt=1
+  local TOK
+  TOK=$(get_agent_gh_token)
   while [ "$attempt" -le 4 ]; do
-    if git push "$@"; then return 0; fi
+    if [ -n "$TOK" ]; then
+      if GIT_TERMINAL_PROMPT=0          GIT_ASKPASS="$PROJECT_ROOT/agent-orchestration/git-askpass-bot.sh"          AGENT_PUSH_TOKEN="$TOK"          git -c credential.helper= push "$@"; then
+        return 0
+      fi
+    else
+      if git push "$@"; then return 0; fi
+    fi
     local wait_s
     wait_s=$(expr "$attempt" \* 4)
     echo "⚠️  git push failed (attempt ${attempt}/4). Retrying in ${wait_s}s..."
     sleep "$wait_s"
+    TOK=$(get_agent_gh_token)
     attempt=$(expr "$attempt" + 1)
   done
   return 1
@@ -101,7 +129,7 @@ MAX_REVIEW_ROUNDS=2
 MAX_HOLISTIC_AUDIT_PASSES=2
 
 USE_GITHUB_PRS=0
-if git remote get-url origin >/dev/null 2>&1 && agent_gh auth status >/dev/null 2>&1; then
+if git remote get-url origin >/dev/null 2>&1 && ( [ -n "$(get_agent_gh_token)" ] || agent_gh auth status >/dev/null 2>&1 ); then
   USE_GITHUB_PRS=1
   echo "🌐 GitHub Integration : ENABLED ($(git remote get-url origin))"
 else
@@ -842,7 +870,7 @@ $(cat "$REVIEW_FILE")" >/dev/null 2>&1 || true
     if [ "$USE_GITHUB_PRS" -eq 1 ]; then
       retry_git_push origin "$BRANCH_NAME" >/dev/null 2>&1 || true
       retry_git_push origin main >/dev/null 2>&1 || true
-      git push origin --delete "$BRANCH_NAME" >/dev/null 2>&1 || true
+      retry_git_push origin --delete "$BRANCH_NAME" >/dev/null 2>&1 || true
     fi
 
     git branch -D "$BRANCH_NAME" >/dev/null 2>&1 || true
