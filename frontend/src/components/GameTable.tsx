@@ -287,10 +287,13 @@ export const MIN_VISIBLE_CARD_LEFT_PX = MIN_VISIBLE_STRIP_PX;
 export const BOUT_CARD_WIDTH = CARD_WIDTH;
 export const BOUT_CARD_HEIGHT = CARD_HEIGHT;
 /**
- * ITEM-NEW-2b: however many cards are in play, the left strip of every card —
- * where the rank and suit index are drawn — stays visible.
+ * ITEM-NEW-2b / T-95 item #2: however many cards are in play, the full left
+ * strip of every card — where the two-digit `"10"` rank and the enlarged suit
+ * index are drawn — stays visible. Derived from the shared
+ * [[CARD_INDEX_STRIP_WIDTH_PX]] so the bout row, the hand and the mini-cards
+ * can never disagree; [[boutLayout]] scales it with the responsive card width.
  */
-export const BOUT_MIN_VISIBLE_LEFT = 22;
+export const BOUT_MIN_VISIBLE_LEFT = CARD_INDEX_STRIP_WIDTH_PX;
 /** Comfortable gap between two cards in play while they still fit. */
 export const BOUT_MIN_GAP = 4;
 /** The defence card overhangs its attack card by this fraction of a card. */
@@ -309,7 +312,8 @@ export interface BoutRowLayout {
  * ITEM-NEW-2a/2b single-row play-area geometry. Cards sit a small gap apart
  * while the whole bout fits in the defender's area, then tighten into a
  * negative `margin-left` overlap as pairs are added. The step never drops below
- * [[BOUT_MIN_VISIBLE_LEFT]], so the left rank/suit strip of every card stays
+ * [[BOUT_MIN_VISIBLE_LEFT]] (scaled with the card width), so the left
+ * rank/suit strip — including the full `"10"` and its enlarged suit pip — stays
  * readable even with six pairs plus the reflection outline on the table.
  */
 export function boutLayout(
@@ -321,7 +325,12 @@ export function boutLayout(
   const overhang = Math.round(cardWidth * BOUT_DEFENSE_OVERHANG_RATIO);
   const comfortable = cardWidth + overhang + BOUT_MIN_GAP;
   const needed = (availableWidth - cardWidth) / (slotCount - 1);
-  const step = Math.min(comfortable, Math.max(BOUT_MIN_VISIBLE_LEFT, needed));
+  // T-95 item #2: keep the strip proportional on the responsive 48px card.
+  const minVisibleLeft = Math.min(
+    cardWidth,
+    Math.ceil((BOUT_MIN_VISIBLE_LEFT * cardWidth) / CARD_WIDTH),
+  );
+  const step = Math.min(comfortable, Math.max(minVisibleLeft, needed));
   return { step, overlap: cardWidth - step };
 }
 /** Width of one opponent card back inside a seat box. */
@@ -528,9 +537,14 @@ export function rowWidth(layout: HandLayout, cardWidth = HAND_CARD_WIDTH): numbe
   return (layout.visibleCount - 1) * stride + cardWidth;
 }
 
-/** Narrowest left strip a clipped discard row keeps visible. */
+/**
+ * Narrowest left strip a clipped discard row keeps visible. T-95 item #2: it is
+ * the same shared index strip as the hand and the bout row, scaled with the
+ * card, so an overlapping discard never covers the full `"10"` rank or the
+ * enlarged suit pip.
+ */
 const readableEdge = (cardWidth: number): number =>
-  Math.max(12, Math.round(cardWidth * 0.28));
+  Math.max(12, Math.ceil((CARD_INDEX_STRIP_WIDTH_PX * cardWidth) / CARD_WIDTH));
 
 /**
  * The discard pile keeps its own clipped single-row geometry: unlike the
