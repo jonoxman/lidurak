@@ -118,8 +118,12 @@
      that runs out of cards or a hand that empties never resizes the table. */
   --seat-row-height: 150px;
   --battlefield-height: clamp(240px, 30vh, 320px);
-  --hand-row-height: calc(var(--hand-card-height, 140px) + 38px);
-  grid-template-rows: var(--seat-row-height) var(--battlefield-height) var(--hand-row-height);
+  /* ITEM-4: the hand row reserves the timer track AND the vertical clearance a
+     fully raised selected card needs, so the clock is never clipped. */
+  --hand-row-height: calc(var(--hand-card-height, 140px) + 66px);
+  /* ITEM-7: the dedicated lower-table control band (Row 4). */
+  --actions-row-height: 64px;
+  grid-template-rows: var(--seat-row-height) var(--battlefield-height) var(--hand-row-height) var(--actions-row-height);
   gap: 18px;
   min-width: 0;
   min-height: 700px;
@@ -1071,14 +1075,29 @@
 /* --- Row 3, column 2: the viewer's hand --- */
 
 [data-zone='player-hand'] {
-  grid-column: 2;
+  /* ITEM-4/ITEM-7: the hand owns the whole third row. Nothing else is placed in
+     this row any more (the Surrender / Pass controls moved to the Row 4 band and
+     the SortBar lives in its own sidebar box), so an Option B maximal hand can
+     expand to almost the full width of the play area without ever running into
+     another element. */
+  grid-column: 1 / -1;
   grid-row: 3;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 4px;
+  /* ITEM-4: two dedicated tracks — the timer row, then the card stage. The
+     clock therefore never shares a line box with the cards it has to clear. */
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  justify-items: center;
+  align-content: end;
+  column-gap: 0;
+  /* ITEM-4: the row gap is the full selected raise, plus the contour padding,
+     plus the contour stroke, plus breathing room. A fully raised selected card
+     and its outline can therefore never reach the timer above them. */
+  row-gap: calc(
+    var(--hand-selected-lift, 18px) + var(--hand-contour-padding, 4px) + 2.5px + 8px
+  );
   min-width: 0;
+  box-sizing: border-box;
   /* ITEM-ADD-6: a full card height (plus the clock) is always reserved, even
      when the viewer has run out of cards, so the felt never resizes. */
   min-height: var(--hand-row-height, calc(var(--hand-card-height, 114px) + 38px));
@@ -1151,6 +1170,22 @@
   /* The box never clips a lifted card or the dragged card on the felt. */
   overflow: visible;
   box-sizing: border-box;
+}
+
+/* ITEM-4: the timer keeps its own grid track, directly above the card stage and
+   anchored to the centre of the hand lane. */
+[data-zone='player-hand'] > .hand-clock {
+  grid-column: 1;
+  grid-row: 1;
+  justify-self: center;
+  align-self: end;
+}
+
+/* ITEM-4: the card stage — the only element carrying the two-tier raise
+   transform — sits in the second track, below the timer. */
+[data-zone='player-hand'] > .hand-cards {
+  grid-column: 1;
+  grid-row: 2;
 }
 
 /* --- T-90-feedback-2 ITEM-2: tight hand highlight contour ------------------ */
@@ -1316,17 +1351,25 @@
   outline: none;
 }
 
-/* --- Row 3, column 3: sort bar & contextual controls --- */
+/* --- Row 4: lower-table contextual controls (Surrender / Pass) --- */
 
+/* ITEM-7: the compact icon controls sit in their own full-width band directly
+   below the hand row — the lower part of the felt table — and never in the old
+   bottom-right corner. Grid/Flex placement only: no absolute positioning, an
+   explicit gap, `min-width: 0` and `box-sizing: border-box`, so the band can
+   never overlap the bout row, the outlines, the timer, the hand (even a 30-card
+   maximal box with fully raised cards) or the SortBar below the arena. */
 [data-zone='player-controls'] {
-  grid-column: 3;
-  grid-row: 3;
+  grid-column: 1 / -1;
+  grid-row: 4;
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: flex-end;
-  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
   min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
 }
 
 /* Feedback #9: the hand-sort dropdown lives in its own box in the right
@@ -1618,7 +1661,9 @@
   [data-zone='player-hand'] {
     grid-column: 1;
     grid-row: 4;
-    gap: 4px;
+    /* ITEM-4: the base rule's timer clearance is the row gap; the mobile
+       layout only resets the (unused) column gap. */
+    column-gap: 0;
   }
 
   [data-zone='player-controls'] {

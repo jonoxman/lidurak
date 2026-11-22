@@ -126,11 +126,13 @@
   content: attr(data-countdown);
 }
 
-/* The contextual cluster stays anchored in the bottom-right corner of the felt
-   table using grid/flex alignment only — no absolute positioning. */
+/* ITEM-7: the contextual cluster now lives in the dedicated lower-table control
+   band (Row 4 of the felt grid), centred under the hand and clear of the bout
+   cards, the outlines, the turn timer, the hand, the talon deck and the SortBar.
+   The band is placed with grid/flex alignment only — no absolute positioning. */
 [data-zone='table-arena'] [data-zone='player-controls'] {
-  justify-self: end;
-  align-self: end;
+  justify-self: stretch;
+  align-self: center;
   min-width: 0;
   box-sizing: border-box;
 }

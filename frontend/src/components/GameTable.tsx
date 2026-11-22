@@ -2574,6 +2574,13 @@ export function GameTable({
         data-defenseless={defenderDefenseless ? 'true' : 'false'}
         data-hovered-card-index={hoveredCardIndex === null ? undefined : hoveredCardIndex}
         data-parting-active={partingActive ? 'true' : 'false'}
+        // ITEM-4: the stylesheet's timer clearance is derived from the SAME
+        // Wave-1 tier constants the cards are raised by, so the clock track can
+        // never be tuned to a different lift than the cards actually use.
+        style={{
+          '--hand-selected-lift': `${SELECTED_LIFT_PX}px`,
+          '--hand-contour-padding': `${HAND_CONTOUR_PADDING}px`,
+        }}
         ref={handZoneRef}
         onPointerEnter={handleHandPointerMove}
         onPointerMove={handleHandPointerMove}
@@ -2581,9 +2588,13 @@ export function GameTable({
         onDragOver={draggable && onReorderHand ? hoverHandZone : undefined}
         onDrop={draggable && onReorderHand ? dropOnHand : undefined}
       >
+        {/* ITEM-4: the timer sits in its own grid track above the card stage
+            (see `[data-zone="player-hand"]` in table.css), so neither a
+            half-raised nor a fully raised selected card can ever clip it. */}
         <span
           class={`hand-clock${viewerOnClock ? ' active' : ''}`}
           data-testid="hand-clock"
+          data-slot="hand-timer"
           data-active={viewerOnClock ? 'true' : 'false'}
         >
           {formatSeatClock(viewerOnClock ? activeSeconds : 15)}
@@ -2834,11 +2845,20 @@ export function GameTable({
         </div>
       </section>
 
-      {/* Row 3, column 3 holds only the contextual action buttons; the hand
-          sorting dropdown lives in its own sidebar box under the deck. Review
-          mode renders no gameplay command at all. */}
+      {/* ITEM-7: the contextual Surrender / Pass controls live in their own
+          full-width band on Row 4 of the felt table — the lower part of the
+          game table area — directly below the hand row. They never sit in the
+          old bottom-right corner, and the band's explicit gap plus the row
+          tracks keep them clear of the bout cards, the outlines, the timer and
+          the hand. The hand sorting dropdown lives in its own sidebar box under
+          the arena. Review mode renders no gameplay command at all. */}
       {reviewMode ? null : (
-        <div class="player-controls" data-zone="player-controls" aria-label="Actions">
+        <div
+          class="player-controls"
+          data-zone="player-controls"
+          data-placement="lower-table-controls"
+          aria-label="Actions"
+        >
           {children}
         </div>
       )}
