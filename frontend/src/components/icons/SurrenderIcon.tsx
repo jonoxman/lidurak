@@ -1,20 +1,19 @@
 /**
- * T-90-feedback-20261122_011021-2 ITEM-7: the Surrender glyph, redrawn on a
- * 48x48 grid so it stays crisp at the 36-44px the compact button renders it at.
+ * T-90-feedback-20261122_121105-2 ITEM-NEW5: the Surrender glyph, drawn on a
+ * 48x48 grid so it stays crisp at the 30px the compact squircle renders it at.
  *
  * Reading order, top to bottom:
  * - a small fan of three playing cards (`data-part="cards"`),
- * - a downward arrow leaving the cards (`data-part="arrow"`),
+ * - a downward arrow leaving the cards (`data-part="down-arrow"`),
  * - two open palms raised in surrender beneath them, each with four fingers and
  *   an outward thumb, wrists resting on the bottom of the glyph
- *   (`data-part="hands"`).
+ *   (`data-part="raised-hands"`).
  *
- * Everything is stroked with `currentColor` (2.2 units, round caps/joins) so the
- * button's theme paints the glyph in parchment/emerald/gold rather than red.
+ * Everything is stroked with `currentColor` (2 units, round caps/joins) so the
+ * button's theme paints the glyph in warm ivory/parchment rather than red.
  *
- * `data-icon`, `data-icon-part` and the `data-testid` are the stable hooks the
- * table's Wave-1 assertions and Wave 2 wiring rely on; `data-part` is the
- * ticket's semantic grouping.
+ * `data-icon` and `data-icon-part` are the hooks earlier table assertions rely
+ * on; `data-part` is this ticket's semantic grouping.
  */
 export function SurrenderIcon() {
   return (
@@ -27,7 +26,7 @@ export function SurrenderIcon() {
       focusable="false"
       fill="none"
       stroke="currentColor"
-      stroke-width="2.2"
+      stroke-width="2"
       stroke-linecap="round"
       stroke-linejoin="round"
     >
@@ -66,13 +65,13 @@ export function SurrenderIcon() {
       </g>
 
       {/* The cards come down into the hands: a shaft with a chevron head. */}
-      <g data-part="arrow" data-icon-part="arrow-down">
+      <g data-part="down-arrow" data-icon-part="arrow-down">
         <path d="M24 17.2 V23.6" />
         <path d="M20.8 20.4 L24 23.6 L27.2 20.4" />
       </g>
 
       {/* Two mirrored open palms, fingers up and thumbs out, wrists low. */}
-      <g data-part="hands" data-icon-part="raised-hands">
+      <g data-part="raised-hands" data-icon-part="raised-hands">
         <path d="M5.4 30 v9.6 a2.4 2.4 0 0 0 2.4 2.4 h8.6 a2.4 2.4 0 0 0 2.4-2.4 V30" />
         <path d="M7.8 30 V24.6 M10.4 30 V22.6 M13 30 V23.6 M15.6 30 V25.6" />
         <path d="M5.4 31.4 l-2.2-1.6" />

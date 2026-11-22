@@ -68,13 +68,13 @@ describe('T-90-feedback-20261122_011021-2 ITEM-7/8: themed icon-only Surrender &
     expect(icon.getAttribute('fill')).toBe('none');
     expect(icon.getAttribute('stroke')).toBe('currentColor');
     // The ticket's single stroke weight, shared with PassIcon.
-    expect(icon.getAttribute('stroke-width')).toBe('2.2');
+    expect(icon.getAttribute('stroke-width')).toBe('2');
     expect(icon.getAttribute('stroke-linecap')).toBe('round');
     expect(icon.getAttribute('stroke-linejoin')).toBe('round');
 
     const cards = icon.querySelector('[data-part="cards"]')!;
-    const arrow = icon.querySelector('[data-part="arrow"]')!;
-    const hands = icon.querySelector('[data-part="hands"]')!;
+    const arrow = icon.querySelector('[data-part="down-arrow"]')!;
+    const hands = icon.querySelector('[data-part="raised-hands"]')!;
     expect(cards).not.toBeNull();
     expect(arrow).not.toBeNull();
     expect(hands).not.toBeNull();
@@ -153,7 +153,7 @@ describe('T-90-feedback-20261122_011021-2 ITEM-7/8: themed icon-only Surrender &
     expect(icon.getAttribute('fill')).toBe('none');
     expect(icon.getAttribute('stroke')).toBe('currentColor');
     // Exact same visual language as SurrenderIcon: grid + stroke weight.
-    expect(icon.getAttribute('stroke-width')).toBe('2.2');
+    expect(icon.getAttribute('stroke-width')).toBe('2');
     expect(icon.getAttribute('stroke-linecap')).toBe('round');
     expect(icon.getAttribute('stroke-linejoin')).toBe('round');
 
@@ -163,8 +163,8 @@ describe('T-90-feedback-20261122_011021-2 ITEM-7/8: themed icon-only Surrender &
       expect(Number(face.getAttribute('y'))).toBeLessThan(48 / 3);
     }
 
-    // The pass indicator is the arc + its forward head.
-    const indicator = icon.querySelector('[data-part="pass-indicator"]')!;
+    // The pass symbol is the arc + its forward head.
+    const indicator = icon.querySelector('[data-part="pass-symbol"]')!;
     expect(indicator).not.toBeNull();
     const [curve, head] = pathsOf(indicator);
     expect(curve).toMatch(/^M7 20\.4/);
@@ -197,13 +197,13 @@ describe('T-90-feedback-20261122_011021-2 ITEM-7/8: themed icon-only Surrender &
     const surrender = container.querySelector('[data-icon="surrender-hands-cards"]')!;
     const pass = container.querySelector('[data-icon="pass-wave-cards"]')!;
 
-    expect(surrender.querySelectorAll('[data-part="hands"]')).toHaveLength(1);
-    expect(pass.querySelectorAll('[data-part="hands"]')).toHaveLength(0);
-    expect(surrender.querySelectorAll('[data-part="arrow"]')).toHaveLength(1);
-    expect(pass.querySelectorAll('[data-part="arrow"]')).toHaveLength(0);
+    expect(surrender.querySelectorAll('[data-part="raised-hands"]')).toHaveLength(1);
+    expect(pass.querySelectorAll('[data-part="raised-hands"]')).toHaveLength(0);
+    expect(surrender.querySelectorAll('[data-part="down-arrow"]')).toHaveLength(1);
+    expect(pass.querySelectorAll('[data-part="down-arrow"]')).toHaveLength(0);
     expect(pass.querySelectorAll('[data-part="hand"]')).toHaveLength(1);
-    expect(pass.querySelectorAll('[data-part="pass-indicator"]')).toHaveLength(1);
-    expect(surrender.querySelectorAll('[data-part="pass-indicator"]')).toHaveLength(0);
+    expect(pass.querySelectorAll('[data-part="pass-symbol"]')).toHaveLength(1);
+    expect(surrender.querySelectorAll('[data-part="pass-symbol"]')).toHaveLength(0);
   });
 
   it('renders both buttons icon-only, with an aria-label, title and no text node', () => {
@@ -287,31 +287,34 @@ describe('T-90-feedback-20261122_011021-2 ITEM-7/8: themed icon-only Surrender &
     expect(screen.queryByRole('button')).toBeNull();
   });
 
-  it('styles compact 52px / 42px themed squares, with no red anywhere', () => {
+  it('styles compact 50px / 44px themed squircles, with no red anywhere', () => {
     const desktop = cssRule(actionIconsCss, '.action-bar .action-button.action-icon-btn');
-    // Noticeably compact, and inside the ticket's 48px-56px band.
+    // Compact icon-only square inside the ticket's 44px-52px band.
     const width = Number(/width: (\d+)px;/.exec(desktop)?.[1]);
     const height = Number(/height: (\d+)px;/.exec(desktop)?.[1]);
-    expect(width).toBeGreaterThanOrEqual(48);
-    expect(width).toBeLessThanOrEqual(56);
+    expect(width).toBeGreaterThanOrEqual(44);
+    expect(width).toBeLessThanOrEqual(52);
     expect(height).toBe(width);
     expect(desktop).toContain('min-width:');
     expect(desktop).toContain('max-width:');
     expect(desktop).toContain('padding: 0;'); // beats .action-button's 10px 22px
-    expect(desktop).toContain('border-radius: 8px;');
+    // 10px-12px squircle corners, not the old text-button radius.
+    expect(desktop).toContain('border-radius: 12px;');
     expect(desktop).toContain('box-sizing: border-box;');
-    // Dark-emerald/slate surface + parchment ink from the table's own tokens.
-    expect(desktop).toContain('var(--bg-elevated, rgba(24, 34, 29, 0.85))');
-    expect(desktop).toContain('var(--durak-border, rgba(214, 199, 170, 0.34))');
-    expect(desktop).toContain('var(--durak-text, #e8e4d8)');
+    // Dark-felt surface, muted antique-gold border, warm ivory ink.
+    expect(desktop).toContain('var(--bg-elevated, rgba(18, 28, 23, 0.86))');
+    expect(desktop).toContain('rgba(212, 184, 122, 0.35)');
+    expect(desktop).toContain('#e8e2d2');
     expect(desktop).toContain('backdrop-filter: blur(6px)');
 
-    // Muted gold for Surrender, muted emerald for Pass — never an alarm color.
-    expect(actionIconsCss).toContain('rgba(212, 175, 55, 0.35)');
-    expect(actionIconsCss).toContain('rgba(110, 231, 183, 0.35)');
+    // Muted gold for Surrender, muted sage-emerald for Pass — never an alarm color.
+    expect(actionIconsCss).toContain('rgba(212, 184, 122, 0.35)');
+    expect(actionIconsCss).toContain('rgba(146, 176, 152, 0.35)');
     expect(actionIconsCss).toContain('--icon-accent: #b98a5e');
     expect(actionIconsCss).toContain('--icon-accent: #7d9e83');
-    expect(actionIconsCss).not.toMatch(/#ef4444|#dc2626|#c33\b|rgb\(239, 68, 68\)/i);
+    expect(actionIconsCss).not.toMatch(
+      /#ef4444|#dc2626|#b91c1c|#ff0000|#c33\b|rgb\(239, 68, 68\)/i,
+    );
     expect(actionIconsCss).not.toMatch(/:\s*(red|crimson)\b/i);
 
     // The new class-name variants coexist with the Wave-1 names ActionBar uses.
@@ -320,17 +323,17 @@ describe('T-90-feedback-20261122_011021-2 ITEM-7/8: themed icon-only Surrender &
     expect(actionIconsCss).toContain('.action-icon-surrender');
     expect(actionIconsCss).toContain('.action-icon-pass');
 
-    // Glyph ~62% of the button; the artwork carries the same weight as the SVG.
+    // Glyph 60% of the button; the artwork carries the same weight as the SVG.
     const glyph = cssRule(actionIconsCss, '.action-icon');
-    expect(glyph).toMatch(/width: 32px;/);
-    expect(glyph).toMatch(/height: 32px;/);
-    expect(glyph).toContain('stroke-width: 2.2;');
+    expect(glyph).toMatch(/width: 30px;/);
+    expect(glyph).toMatch(/height: 30px;/);
+    expect(glyph).toContain('stroke-width: 2;');
 
-    // The 42px mobile square and the 26px glyph live inside the 900px block.
+    // The 44px mobile square and the 26px glyph live inside the 900px block.
     const mobile = mediaBlock(actionIconsCss, 'max-width: 900px');
     expect(mobile).not.toBe('');
-    expect(cssRule(mobile, '.action-bar .action-button.action-icon-btn')).toMatch(/width: 42px;/);
-    expect(cssRule(mobile, '.action-bar .action-button.action-icon-btn')).toMatch(/height: 42px;/);
+    expect(cssRule(mobile, '.action-bar .action-button.action-icon-btn')).toMatch(/width: 44px;/);
+    expect(cssRule(mobile, '.action-bar .action-button.action-icon-btn')).toMatch(/height: 44px;/);
     expect(cssRule(mobile, '.action-icon')).toMatch(/width: 26px;/);
     expect(cssRule(mobile, '.action-icon')).toMatch(/height: 26px;/);
 

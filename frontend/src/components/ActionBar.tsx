@@ -70,7 +70,7 @@ export function ActionBar({
         <button
           key={button.action}
           type="button"
-          class={`action-button action-icon-btn action-icon-${button.action}`}
+          class={`action-button action-icon-btn action-icon-btn--${button.action} action-icon-${button.action}`}
           data-testid={button.testId}
           aria-label={button.label}
           title={button.label}
