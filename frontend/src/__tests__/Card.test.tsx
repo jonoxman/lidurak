@@ -1424,7 +1424,7 @@ describe('T-90-feedback-20261105_221105-2: card footprint', () => {
       /\.card-slot\s*{[^}]*width: var\(--card-width, 100px\);[^}]*height: var\(--card-height, 140px\);/,
     );
     expect(tableCss).toMatch(
-      /@media \(max-width: 900px\)[\s\S]*?\.card-slot\s*{[^}]*--card-width: 48px;[^}]*--card-height: 68px;/,
+      /@media \(max-width: 899px\)[\s\S]*?\.card-slot\s*{[^}]*--card-width: 48px;[^}]*--card-height: 68px;/,
     );
     unmount();
 

@@ -1540,8 +1540,11 @@
 }
 
 /* --- Small screens: single-column arena --- */
+/* T-95: the mobile card layout starts below 900px, matching the JS
+   `cardSizeForViewport` and the root `--card-w` / `--card-h` tokens, so cards
+   and outlines can never disagree at exactly 900px. */
 
-@media (max-width: 900px) {
+@media (max-width: 899px) {
   [data-zone='table-arena'] {
     grid-template-columns: minmax(0, 1fr);
     /* Five tracks (seats, bout, spare, hand, controls). Each keeps its height
@@ -2630,8 +2633,10 @@ body[data-dragging='true'] *,
 }
 
 /* T-90 ITEM-2: below 900px the cards scale to 48x68, so the throw-in outline (and
-   its inline / surrender anchors) scale to the exact same card footprint. */
-@media (max-width: 900px) {
+   its inline / surrender anchors) scale to the exact same card footprint.
+   T-95: this breakpoint is the canonical 899px one, so it can never split from
+   the root card tokens or the JS card sizing. */
+@media (max-width: 899px) {
   .throw-in-outline {
     flex: 0 0 48px;
     width: 48px;

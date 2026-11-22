@@ -1013,7 +1013,13 @@ export function GamePage({
     serverAllowsThrowIn;
 
   // T-90: backend `canThrowIn` is the single source of truth for the outline.
-  const canThrowInOutline = !reviewMode && view.canThrowIn === true;
+  // T-95: the gate is strict — the outline also needs at least one projected
+  // legal throw-in card, and a review frame or a bot-locked seat never shows it.
+  const canThrowInOutline =
+    !reviewMode &&
+    !isBotViewer &&
+    view.canThrowIn === true &&
+    (view.throwInCards?.length ?? 0) > 0;
 
   const isAttackerTurn =
     isInitialAttackPhase(view.boutPhase) && hasLegalAction(view.legalActions, 'attack');

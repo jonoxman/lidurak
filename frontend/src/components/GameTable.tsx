@@ -189,7 +189,7 @@ export const SEAT_BOX = { width: 240, height: 140 } as const;
 /** ITEM-13: the single card size shared by the hand, the play area and the outlines. */
 export const CARD_WIDTH = 100;
 export const CARD_HEIGHT = 140;
-/** T-90-feedback-2 ITEM-1b: the `@media (max-width: 900px)` card size. */
+/** T-90-feedback-2 ITEM-1b: the `@media (max-width: 899px)` card size. */
 export const MOBILE_BREAKPOINT_PX = 900;
 export const MOBILE_CARD_WIDTH = 48;
 export const MOBILE_CARD_HEIGHT = 68;
