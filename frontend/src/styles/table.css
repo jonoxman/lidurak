@@ -1992,8 +1992,10 @@
   transform: translateY(var(--hand-raise, -14px));
 }
 
+/* T-95 #1: hovering never adds an extra lift, so the tight SVG contour keeps
+   wrapping the exact rendered geometry of every card at all times. */
 .hand-cards .card-slot.legal-playable:hover {
-  transform: translateY(calc(var(--hand-raise, -14px) - 2px));
+  transform: translateY(var(--hand-raise, -14px));
 }
 
 .hand-cards .card-slot.selected {

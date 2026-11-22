@@ -3452,6 +3452,95 @@ describe('T-90-feedback-20261105_221105-3: throw-in gate, multi-card throw-in an
     ]);
   });
 
+  it('T-95 #4: restricts the throw-in selection to the projected throwInCards', async () => {
+    const projected: PlayerGameView = {
+      ...throwInView,
+      myHand: [
+        { suit: 'hearts', rank: 'seven' },
+        { suit: 'clubs', rank: 'seven' },
+        { suit: 'diamonds', rank: 'seven' },
+      ],
+      // The server projects only two of the three matching sevens.
+      throwInCards: [
+        { suit: 'hearts', rank: 'seven' },
+        { suit: 'clubs', rank: 'seven' },
+      ],
+      throwInCapacity: 2,
+      canThrowIn: true,
+    };
+    renderGame(projected);
+    sendAction.mockResolvedValue(projected);
+    await screen.findByTestId('throw-in-outline');
+
+    // A matching rank that the server did not project can never be selected.
+    fireEvent.click(handCard('seven of diamonds'));
+    expect(
+      document.querySelectorAll('.hand-card-wrapper[data-selected="true"]'),
+    ).toHaveLength(0);
+
+    fireEvent.click(handCard('seven of hearts'));
+    await waitFor(() =>
+      expect(
+        document.querySelectorAll('.hand-card-wrapper[data-selected="true"]'),
+      ).toHaveLength(1),
+    );
+
+    // It cannot join the batch later either.
+    fireEvent.click(handCard('seven of diamonds'));
+    expect(
+      document.querySelectorAll('.hand-card-wrapper[data-selected="true"]'),
+    ).toHaveLength(1);
+
+    fireEvent.dblClick(handCard('seven of hearts'));
+    await waitFor(() => expect(sendAction).toHaveBeenCalledTimes(1));
+    const action = sendAction.mock.calls[0][1] as {
+      type: string;
+      cards: { suit: string; rank: string }[];
+    };
+    expect(action.type).toBe('throwInCards');
+    expect(action.cards).toEqual([{ suit: 'hearts', rank: 'seven' }]);
+  });
+
+  it('T-95 #4: drags a single legal throw-in card onto the outline', async () => {
+    renderGame(throwInView);
+    sendAction.mockResolvedValue(throwInView);
+    const outline = await screen.findByTestId('throw-in-outline');
+
+    fireEvent.drop(outline, {
+      dataTransfer: { getData: () => 'hearts:seven' },
+    });
+
+    await waitFor(() => expect(sendAction).toHaveBeenCalledTimes(1));
+    const action = sendAction.mock.calls[0][1] as {
+      type: string;
+      cards: { suit: string; rank: string }[];
+    };
+    expect(action.type).toBe('throwInCards');
+    expect(action.cards).toEqual([{ suit: 'hearts', rank: 'seven' }]);
+  });
+
+  it('T-95 #4: ignores a drop of a matching rank the server did not project', async () => {
+    renderGame({
+      ...throwInView,
+      myHand: [
+        { suit: 'hearts', rank: 'seven' },
+        { suit: 'diamonds', rank: 'seven' },
+      ],
+      throwInCards: [{ suit: 'hearts', rank: 'seven' }],
+      throwInCapacity: 1,
+      canThrowIn: true,
+    });
+    const outline = await screen.findByTestId('throw-in-outline');
+
+    fireEvent.drop(outline, {
+      dataTransfer: { getData: () => 'diamonds:seven' },
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(sendAction).not.toHaveBeenCalled();
+  });
+
   it('ITEM-5: reflects every selected same-rank card with one double-click', async () => {
     renderGame({
       ...throwInView,

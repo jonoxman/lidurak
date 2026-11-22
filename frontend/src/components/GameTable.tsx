@@ -228,8 +228,9 @@ export const HAND_MAX_OVERLAP_RATIO = 0.8;
 export const HAND_MIN_OVERLAP = Math.round(HAND_CARD_WIDTH * HAND_MIN_OVERLAP_RATIO);
 export const HAND_MAX_OVERLAP = Math.round(HAND_CARD_WIDTH * HAND_MAX_OVERLAP_RATIO);
 /**
- * Full-deck pickup safeguard (25-52 cards): the stride may compress to this
- * `15px` strip before the whole `.hand-cards` row is scaled to fit instead.
+ * Legacy readable-strip floor retained as a documented export for downstream
+ * consumers and tests. The active hand no longer compresses its stride below
+ * the 20% overlap floor: a hand that cannot fit is scaled down whole instead.
  */
 export const HAND_MIN_VISIBLE_LEFT = 15;
 /** Used until the hand has been measured (jsdom reports zero widths). */
@@ -382,14 +383,13 @@ export function clampBoutCardSize(
  *
  * For `N >= 2` cards of width `W` in `availableWidth`:
  * - the stride (left-edge distance) is clamped to `[0.20W, 0.80W]`, so the
- *   overlap ratio `(W - stride) / W` always stays within `[20%, 80%]`;
- * - when even the minimum `0.20W` stride cannot fit a picked-up full deck
- *   (25-52 cards), the stride may compress to a readable left strip that
- *   scales with the card (`15px` at 100px, `7.2px` at 48px mobile), never
- *   widening past the standard minimum stride;
- * - if the row still cannot fit, `scale` shrinks the whole hand so
- *   `totalWidth * scale` never exceeds `availableWidth` and never runs under
- *   the sidebar or the Surrender / Pass buttons.
+ *   overlap ratio `(W - stride) / W` always stays within `[20%, 80%]` for any
+ *   hand size (T-95 #3: the cap is absolute, never relaxed for a full deck);
+ * - when a picked-up full deck (25-52 cards) cannot fit at the tightest legal
+ *   overlap, `scale` shrinks the whole hand instead, so
+ *   `totalWidth * scale` never exceeds `availableWidth`, the left 20% rank /
+ *   suit strip of every card stays uncovered, and the row never runs under the
+ *   sidebar or the Surrender / Pass buttons.
  *
  * Every card stays visible: the old "hidden surplus stack" is gone.
  */
@@ -418,19 +418,10 @@ export function handLayout(
   const minStride = width * HAND_MIN_OVERLAP_RATIO;
   const maxStride = width * HAND_MAX_OVERLAP_RATIO;
   const idealStride = available > 0 ? (available - width) / (count - 1) : minStride;
-  let stride = Math.min(maxStride, Math.max(minStride, idealStride));
-
-  // Full-deck pickup safeguard: a 20% overlap can still overflow the column.
-  // The readable strip scales with the card, so a 48px mobile hand compresses
-  // to 7.2px instead of being widened back to the desktop 15px floor (which
-  // made the row wider and forced a needless scale-down).
-  if (width + (count - 1) * minStride > available) {
-    const readableStrip = Math.min(
-      minStride,
-      HAND_MIN_VISIBLE_LEFT * (width / HAND_CARD_WIDTH),
-    );
-    stride = Math.max(readableStrip, (available - width) / (count - 1));
-  }
+  // T-95 #3: the 80% overlap cap is absolute. A full-deck pickup that cannot
+  // fit at the minimum stride is scaled down whole below, instead of being
+  // pushed past 80% (which covered the left rank/suit index of every card).
+  const stride = Math.min(maxStride, Math.max(minStride, idealStride));
 
   const totalWidth = width + (count - 1) * stride;
   const scale = available > 0 && totalWidth > available ? available / totalWidth : 1;
