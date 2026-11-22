@@ -1,9 +1,20 @@
 /**
- * T-90-feedback-20261106_111512-2: a non-verbal surrender glyph on the same
- * 32x32 grid as the Pass icon — two small fanned cards in the upper third, an
- * arrow pointing down out of them, and two open hands raised in surrender whose
- * wrists rest on the bottom edge. Drawn with `currentColor` so the button's
- * theme colors the glyph.
+ * T-90-feedback-20261122_011021-2 ITEM-7: the Surrender glyph, redrawn on a
+ * 48x48 grid so it stays crisp at the 36-44px the compact button renders it at.
+ *
+ * Reading order, top to bottom:
+ * - a small fan of three playing cards (`data-part="cards"`),
+ * - a downward arrow leaving the cards (`data-part="arrow"`),
+ * - two open palms raised in surrender beneath them, each with four fingers and
+ *   an outward thumb, wrists resting on the bottom of the glyph
+ *   (`data-part="hands"`).
+ *
+ * Everything is stroked with `currentColor` (2.2 units, round caps/joins) so the
+ * button's theme paints the glyph in parchment/emerald/gold rather than red.
+ *
+ * `data-icon`, `data-icon-part` and the `data-testid` are the stable hooks the
+ * table's Wave-1 assertions and Wave 2 wiring rely on; `data-part` is the
+ * ticket's semantic grouping.
  */
 export function SurrenderIcon() {
   return (
@@ -11,54 +22,63 @@ export function SurrenderIcon() {
       class="action-icon"
       data-testid="surrender-icon"
       data-icon="surrender-hands-cards"
-      viewBox="0 0 32 32"
+      viewBox="0 0 48 48"
       aria-hidden="true"
       focusable="false"
       fill="none"
       stroke="currentColor"
-      stroke-width="1.6"
+      stroke-width="2.2"
       stroke-linecap="round"
       stroke-linejoin="round"
     >
-      {/* Two fanned playing cards, faintly filled so they read at 28px. */}
-      <g data-icon-part="cards">
+      {/* Three cards fanned in the upper third: two tilted outer cards behind a
+          centred upright one, faintly filled so they read as card silhouettes. */}
+      <g data-part="cards" data-icon-part="cards">
         <rect
-          x="10.4"
-          y="2.4"
-          width="6"
-          height="8.4"
-          rx="1.2"
+          x="14.8"
+          y="5.2"
+          width="7.6"
+          height="11.4"
+          rx="1.8"
+          transform="rotate(-14 18.6 10.9)"
           fill="currentColor"
-          fill-opacity="0.16"
-          transform="rotate(-12 13.4 6.6)"
+          fill-opacity="0.14"
         />
         <rect
-          x="14.6"
-          y="2.4"
-          width="6"
-          height="8.4"
-          rx="1.2"
+          x="25.6"
+          y="5.2"
+          width="7.6"
+          height="11.4"
+          rx="1.8"
+          transform="rotate(14 29.4 10.9)"
           fill="currentColor"
-          fill-opacity="0.16"
-          transform="rotate(10 17.6 6.6)"
+          fill-opacity="0.14"
+        />
+        <rect
+          x="20.2"
+          y="4"
+          width="7.6"
+          height="11.4"
+          rx="1.8"
+          fill="currentColor"
+          fill-opacity="0.18"
         />
       </g>
 
-      {/* The cards leave the hands: shaft plus chevron head, pointing down. */}
-      <g data-icon-part="arrow-down">
-        <path d="M16 13.2 V 17.2" />
-        <path d="M13.6 15 L16 17.4 L18.4 15" />
+      {/* The cards come down into the hands: a shaft with a chevron head. */}
+      <g data-part="arrow" data-icon-part="arrow-down">
+        <path d="M24 17.2 V23.6" />
+        <path d="M20.8 20.4 L24 23.6 L27.2 20.4" />
       </g>
 
-      {/* Two open palms facing the viewer, four fingers each and a thumb,
-          mirrored about the centre line, wrists on the bottom edge. */}
-      <g data-icon-part="raised-hands">
-        <path d="M3.4 22 v6.3 a1.9 1.9 0 0 0 1.9 1.9 h6.4 a1.9 1.9 0 0 0 1.9-1.9 V22" />
-        <path d="M5.1 22 V16.4 M6.9 22 V14.2 M8.8 22 V15.4 M10.6 22 V17.6" />
-        <path d="M3.4 23.4 l-1.6-1.2" />
-        <path d="M28.6 22 v6.3 a1.9 1.9 0 0 1-1.9 1.9 h-6.4 a1.9 1.9 0 0 1-1.9-1.9 V22" />
-        <path d="M26.9 22 V16.4 M25.1 22 V14.2 M23.2 22 V15.4 M21.4 22 V17.6" />
-        <path d="M28.6 23.4 l1.6-1.2" />
+      {/* Two mirrored open palms, fingers up and thumbs out, wrists low. */}
+      <g data-part="hands" data-icon-part="raised-hands">
+        <path d="M5.4 30 v9.6 a2.4 2.4 0 0 0 2.4 2.4 h8.6 a2.4 2.4 0 0 0 2.4-2.4 V30" />
+        <path d="M7.8 30 V24.6 M10.4 30 V22.6 M13 30 V23.6 M15.6 30 V25.6" />
+        <path d="M5.4 31.4 l-2.2-1.6" />
+        <path d="M42.6 30 v9.6 a2.4 2.4 0 0 1-2.4 2.4 h-8.6 a2.4 2.4 0 0 1-2.4-2.4 V30" />
+        <path d="M40.2 30 V24.6 M37.6 30 V22.6 M35 30 V23.6 M32.4 30 V25.6" />
+        <path d="M42.6 31.4 l2.2-1.6" />
       </g>
     </svg>
   );
