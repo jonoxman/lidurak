@@ -301,25 +301,44 @@ describe('LobbyPage', () => {
     );
   });
 
-  /** T-90-2 ITEM-10b: one click opens the backend's Transparent Mode scenario. */
-  it('starts the Transparent Mode QA scenario preset in one click', async () => {
-    createPresetGame.mockResolvedValue({
-      gameId: 'preset-t',
-      players: ['p0', 'p1', 'p2'],
-      playerTypes: ['human', 'human', 'human'],
-      defaultPlayerId: 'p0',
-    });
+  /** ITEM-9: the lobby lists exactly the four current-round QA scenarios. */
+  it('lists only the four current-round QA scenarios', () => {
     render(<LobbyPage initialServerReady />);
 
     const panel = screen.getByTestId('qa-scenarios');
-    const button = within(panel).getByTestId('preset-btn-transparent-mode');
-    expect(button.getAttribute('data-preset')).toBe('transparent-mode');
-    expect(button.textContent).toBe('Transparent Mode');
+    const buttons = within(panel).getAllByRole('button');
+    expect(buttons.map((button) => button.getAttribute('data-preset'))).toEqual([
+      'qa-normal-6-actions',
+      'qa-medium-14-expand',
+      'qa-large-30-compress',
+      'qa-single-card',
+    ]);
+    expect(buttons.map((button) => button.textContent)).toEqual([
+      '6-Card 10s & Actions',
+      '14-Card Expand Box',
+      '30-Card Compress & Part',
+      '1-Card Hand (No Part)',
+    ]);
 
-    fireEvent.click(button);
-
-    await waitFor(() => expect(createPresetGame).toHaveBeenCalledWith('transparent-mode'));
-    await waitFor(() => expect(window.location.hash).toBe('#/g/preset-t?player=p0'));
+    // Every preset of the previous rounds is gone from the panel.
+    for (const legacy of [
+      'throw-in-visibility-4p',
+      'throw-in-capacity-cap',
+      'huge-hand-36',
+      'huge-hand-52',
+      '3p-redirect-bob',
+      'chaos-4p',
+      'surrender-half-off',
+      'full-hand-pickup',
+      'defenseless-surrender',
+      'discard-and-endgame',
+      'throw-in-multi-qa',
+      'large-hand-stress',
+      'transparent-mode',
+      'light-theme-gradient',
+    ]) {
+      expect(within(panel).queryByTestId(`preset-btn-${legacy}`)).toBeNull();
+    }
   });
 
   it('shows a themed loading page until the backend answers its health check', async () => {
@@ -398,28 +417,31 @@ describe('LobbyPage', () => {
 
     const panel = screen.getByTestId('qa-scenarios');
     expect(within(panel).getByRole('heading', { name: '⚡ QA Scenarios' })).toBeTruthy();
-    for (const label of [
-      '3P Redirect (Bob POV)',
-      '4P Chaos Targets',
-      'Surrender Half-Off',
-      'Defenseless Auto-Surrender',
-      'Discard & Endgame Durak',
-    ]) {
-      expect(within(panel).getByRole('button', { name: label })).toBeTruthy();
+    const presets = {
+      'qa-normal-6-actions': '6-Card 10s & Actions',
+      'qa-medium-14-expand': '14-Card Expand Box',
+      'qa-large-30-compress': '30-Card Compress & Part',
+      'qa-single-card': '1-Card Hand (No Part)',
+    };
+    for (const [id, label] of Object.entries(presets)) {
+      const button = within(panel).getByTestId(`preset-btn-${id}`);
+      expect(button.textContent).toBe(label);
+      fireEvent.click(button);
+
+      await waitFor(() => expect(createPresetGame).toHaveBeenCalledWith(id));
+      // The preset opens on the seat that makes the scenario readable.
+      await waitFor(() => expect(window.location.hash).toBe('#/g/preset-1?player=p1'));
+      // Wait for the pending latch to drop before the next click.
+      await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+      window.location.hash = '';
     }
-
-    fireEvent.click(within(panel).getByRole('button', { name: '3P Redirect (Bob POV)' }));
-
-    await waitFor(() => expect(createPresetGame).toHaveBeenCalledWith('3p-redirect-bob'));
-    // The preset opens on the seat that makes the scenario readable.
-    await waitFor(() => expect(window.location.hash).toBe('#/g/preset-1?player=p1'));
   });
 
   it('surfaces a failed QA preset instead of navigating', async () => {
     createPresetGame.mockRejectedValue(new Error('Unknown preset'));
     render(<LobbyPage initialServerReady />);
 
-    fireEvent.click(screen.getByRole('button', { name: '4P Chaos Targets' }));
+    fireEvent.click(screen.getByRole('button', { name: '1-Card Hand (No Part)' }));
 
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('Unknown preset');
@@ -510,69 +532,3 @@ describe('LobbyPage', () => {
   });
 });
 
-/** T-90-feedback-20261105_221105-3: the 30-card pickup preset sits beside the
- *  surrender scenario so both new UI states are one click away. */
-describe('LobbyPage QA presets (T-90-feedback-20261105_221105-3)', () => {
-  beforeEach(() => {
-    createPresetGame.mockReset();
-    window.location.hash = '';
-  });
-
-  it('offers full-hand-pickup next to surrender-half-off in the QA panel', async () => {
-    createPresetGame.mockResolvedValue({
-      gameId: 'preset-f',
-      players: ['p0', 'p1'],
-      playerTypes: ['human', 'human'],
-      defaultPlayerId: 'p0',
-    });
-    render(<LobbyPage initialServerReady />);
-
-    const panel = screen.getByTestId('qa-scenarios');
-    expect(within(panel).getByTestId('preset-btn-surrender-half-off')).toBeTruthy();
-    const pickup = within(panel).getByTestId('preset-btn-full-hand-pickup');
-    expect(pickup.getAttribute('data-preset')).toBe('full-hand-pickup');
-    expect(pickup.textContent).toBe('Full Hand Pickup (30 Cards)');
-
-    fireEvent.click(pickup);
-
-    await waitFor(() => expect(createPresetGame).toHaveBeenCalledWith('full-hand-pickup'));
-    await waitFor(() => expect(window.location.hash).toBe('#/g/preset-f?player=p0'));
-  });
-});
-
-describe('T-90-feedback-20261106_111512-3: new QA scenario presets', () => {
-  it('lists and launches the four new presets in one click', async () => {
-    createPresetGame.mockReset();
-    render(<LobbyPage initialServerReady />);
-    const panel = screen.getByTestId('qa-scenarios');
-    const presets = {
-      'throw-in-visibility-4p': 'Throw-In Visibility (4P)',
-      'throw-in-capacity-cap': 'Throw-In Capacity Cap',
-      'huge-hand-36': 'Huge Hand (36)',
-      'huge-hand-52': 'Huge Hand (52)',
-    };
-    for (const [id, label] of Object.entries(presets)) {
-      expect(within(panel).getByTestId(`preset-btn-${id}`).textContent).toBe(label);
-    }
-    createPresetGame.mockResolvedValue({ gameId: 'preset-t90', defaultPlayerId: 'p0' });
-    fireEvent.click(within(panel).getByTestId('preset-btn-throw-in-visibility-4p'));
-    await waitFor(() => expect(createPresetGame).toHaveBeenCalledWith('throw-in-visibility-4p'));
-  });
-
-  it('lists and launches the two new Wave 1 presets', async () => {
-    createPresetGame.mockReset();
-    createPresetGame.mockResolvedValue({ gameId: 'preset-new', defaultPlayerId: 'p0' });
-    render(<LobbyPage initialServerReady />);
-    const panel = screen.getByTestId('qa-scenarios');
-
-    const multi = within(panel).getByTestId('preset-btn-throw-in-multi-qa');
-    expect(multi.textContent).toBe('Throw-In & Multi-Card QA');
-    expect(multi.getAttribute('data-preset')).toBe('throw-in-multi-qa');
-    const large = within(panel).getByTestId('preset-btn-large-hand-stress');
-    expect(large.textContent).toBe('Large Hand (30+ Cards)');
-    expect(large.getAttribute('data-preset')).toBe('large-hand-stress');
-
-    fireEvent.click(large);
-    await waitFor(() => expect(createPresetGame).toHaveBeenCalledWith('large-hand-stress'));
-  });
-});

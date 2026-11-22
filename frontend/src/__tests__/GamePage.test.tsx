@@ -2413,13 +2413,13 @@ describe('GamePage', () => {
     expect(screen.getByTestId('player-status-tag-p2').textContent).toBe('WINNER');
   });
 
-  it('opens a QA scenario preset from the left sidebar in one click', async () => {
+  it('ITEM-9: lists only the four current-round QA presets and opens one in a click', async () => {
     getGameView.mockResolvedValue(view);
     getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
     createPresetGameMock.mockResolvedValue({
       gameId: 'preset-1',
-      players: ['p0', 'p1'],
-      playerTypes: ['human', 'human'],
+      players: ['p0', 'p1', 'p2'],
+      playerTypes: ['human', 'human', 'human'],
       defaultPlayerId: 'p1',
     });
     const onNavigateGame = vi.fn();
@@ -2435,23 +2435,50 @@ describe('GamePage', () => {
 
     const panel = await screen.findByTestId('qa-scenarios');
     expect(panel.closest('[data-zone="sidebar-left"]')).not.toBeNull();
-    for (const label of [
-      '3P Redirect (Bob POV)',
-      '4P Chaos Targets',
-      'Surrender Half-Off',
-      'Defenseless Auto-Surrender',
-      'Discard & Endgame Durak',
+    expect(
+      within(panel).getAllByRole('button').map((button) => button.getAttribute('data-preset')),
+    ).toEqual([
+      'qa-normal-6-actions',
+      'qa-medium-14-expand',
+      'qa-large-30-compress',
+      'qa-single-card',
+    ]);
+    expect(
+      within(panel).getAllByRole('button').map((button) => button.textContent),
+    ).toEqual([
+      '6-Card 10s & Actions',
+      '14-Card Expand Box',
+      '30-Card Compress & Part',
+      '1-Card Hand (No Part)',
+    ]);
+
+    // Every preset of the previous rounds is pruned from the live UI.
+    for (const legacy of [
+      'throw-in-visibility-4p',
+      'throw-in-capacity-cap',
+      'huge-hand-36',
+      'huge-hand-52',
+      '3p-redirect-bob',
+      'chaos-4p',
+      'surrender-half-off',
+      'full-hand-pickup',
+      'defenseless-surrender',
+      'discard-and-endgame',
+      'throw-in-multi-qa',
+      'large-hand-stress',
+      'transparent-mode',
+      'light-theme-gradient',
     ]) {
-      expect(within(panel).getByRole('button', { name: label })).toBeTruthy();
+      expect(within(panel).queryByTestId(`preset-btn-${legacy}`)).toBeNull();
     }
 
-    fireEvent.click(within(panel).getByRole('button', { name: '3P Redirect (Bob POV)' }));
+    fireEvent.click(within(panel).getByRole('button', { name: '6-Card 10s & Actions' }));
 
-    await waitFor(() => expect(createPresetGameMock).toHaveBeenCalledWith('3p-redirect-bob'));
+    await waitFor(() => expect(createPresetGameMock).toHaveBeenCalledWith('qa-normal-6-actions'));
     await waitFor(() => expect(onNavigateGame).toHaveBeenCalledWith('preset-1', 'p1'));
   });
 
-  it('T-90-feedback-3: a light-mode QA preset paints the paler highlights live', async () => {
+  it('T-90-feedback-3: light mode paints the paler highlights live', async () => {
     setSettings({ theme: 'light' });
     const lightDefense: PlayerGameView = {
       ...view,
@@ -2469,28 +2496,10 @@ describe('GamePage', () => {
     };
     getGameView.mockResolvedValue(lightDefense);
     getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
-    createPresetGameMock.mockResolvedValue({
-      gameId: 'preset-3',
-      players: ['p0', 'p1'],
-      playerTypes: ['human', 'human'],
-      defaultPlayerId: 'p0',
-    });
-    const onNavigateGame = vi.fn();
 
-    render(
-      <GamePage
-        gameId="game-1"
-        playerId="p0"
-        onSwitchPlayer={() => {}}
-        onNavigateGame={onNavigateGame}
-      />,
-    );
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
 
-    const panel = await screen.findByTestId('qa-scenarios');
-    expect(panel.closest('[data-zone="sidebar-left"]')).not.toBeNull();
-    fireEvent.click(within(panel).getByRole('button', { name: 'Surrender Half-Off' }));
-    await waitFor(() => expect(createPresetGameMock).toHaveBeenCalledWith('surrender-half-off'));
-    await waitFor(() => expect(onNavigateGame).toHaveBeenCalledWith('preset-3', 'p0'));
+    await waitFor(() => expect(screen.getByTestId('hand-turn-highlight')).toBeTruthy());
 
     // The document tokens resolved from the paler Light palette...
     const root = document.documentElement;
@@ -2512,7 +2521,7 @@ describe('GamePage', () => {
     expect(document.querySelector('.table-card-uncovered')).not.toBeNull();
   });
 
-  it('T-90 ITEM-PREV-4a: the Defenseless Auto-Surrender preset shows one tight hand outline', async () => {
+  it('T-90 ITEM-PREV-4a: the defenseless defender shows one tight hand outline', async () => {
     const bobDefense: PlayerGameView = {
       ...view,
       myId: 'p1',
@@ -2538,28 +2547,10 @@ describe('GamePage', () => {
     };
     getGameView.mockResolvedValue(bobDefense);
     getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
-    createPresetGameMock.mockResolvedValue({
-      gameId: 'preset-2',
-      players: ['p0', 'p1', 'p2'],
-      playerTypes: ['human', 'human', 'human'],
-      defaultPlayerId: 'p1',
-    });
-    const onNavigateGame = vi.fn();
 
-    render(
-      <GamePage
-        gameId="game-1"
-        playerId="p1"
-        onSwitchPlayer={() => {}}
-        onNavigateGame={onNavigateGame}
-      />,
-    );
+    render(<GamePage gameId="game-1" playerId="p1" onSwitchPlayer={() => {}} />);
 
-    // One click on the left-sidebar preset jumps straight to Bob's hand.
-    const panel = await screen.findByTestId('qa-scenarios');
-    fireEvent.click(within(panel).getByRole('button', { name: 'Defenseless Auto-Surrender' }));
-    await waitFor(() => expect(createPresetGameMock).toHaveBeenCalledWith('defenseless-surrender'));
-    await waitFor(() => expect(onNavigateGame).toHaveBeenCalledWith('preset-2', 'p1'));
+    await waitFor(() => expect(screen.getByTestId('hand-turn-highlight')).toBeTruthy());
 
     const zone = document.querySelector('[data-zone="player-hand"]') as HTMLElement;
     const box = screen.getByTestId('hand-turn-highlight') as HTMLElement;
@@ -3056,71 +3047,7 @@ describe('T-90-feedback-2 live table highlight presets and intensity', () => {
   });
 });
 
-/**
- * T-90-feedback-4: the Light Theme Header QA preset repaints the live game in
- * place, so both page backgrounds and the inverse header gradient are one
- * click away from the lobby or the left sidebar.
- */
-describe('T-90-feedback-4 Light theme QA preset', () => {
-  beforeEach(() => {
-    resetSettings();
-    window.localStorage.clear();
-  });
-
-  afterEach(() => {
-    resetSettings();
-    window.localStorage.clear();
-  });
-
-  it('applies the light theme in one click without creating a room', async () => {
-    createPresetGameMock.mockClear();
-    getGameView.mockResolvedValue(view);
-    getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
-
-    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
-
-    const panel = await screen.findByTestId('qa-scenarios');
-    const button = within(panel).getByRole('button', { name: 'Light Theme Header' });
-    expect(button.getAttribute('data-preset')).toBe('light-theme-gradient');
-
-    fireEvent.click(button);
-
-    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
-    expect(getSettings().theme).toBe('light');
-    expect(createPresetGameMock).not.toHaveBeenCalled();
-  });
-});
-
 describe('T-90-4: Transparent Mode, POV gating and custom hand order', () => {
-  it('ITEM-10b: starts the Transparent Mode QA preset in one click', async () => {
-    getGameView.mockResolvedValue(view);
-    getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
-    createPresetGameMock.mockResolvedValue({
-      gameId: 'game-2',
-      players: ['p0', 'p1', 'p2'],
-      playerTypes: ['human', 'human', 'human'],
-      defaultPlayerId: 'p0',
-    });
-    const onNavigateGame = vi.fn();
-
-    render(
-      <GamePage
-        gameId="game-1"
-        playerId="p0"
-        onSwitchPlayer={() => {}}
-        onNavigateGame={onNavigateGame}
-      />,
-    );
-
-    const button = await screen.findByTestId('preset-btn-transparent-mode');
-    expect(button.getAttribute('data-preset')).toBe('transparent-mode');
-    expect(button.textContent).toBe('Transparent Mode');
-
-    fireEvent.click(button);
-    await waitFor(() => expect(createPresetGameMock).toHaveBeenCalledWith('transparent-mode'));
-    await waitFor(() => expect(onNavigateGame).toHaveBeenCalledWith('game-2', 'p0'));
-  });
-
   it('ITEM-14b: locks POV rows without Dev Mode, then unlocks them after game over', async () => {
     getGameView.mockResolvedValue({ ...view, devMode: false });
     getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
@@ -3661,19 +3588,6 @@ describe('T-90-feedback-20261105_221105-3: throw-in gate, multi-card throw-in an
     expect(surrender.closest('[data-zone="table-arena"]')).not.toBeNull();
   });
 
-  it('QA: offers the full-hand-pickup preset beside surrender-half-off in the left sidebar', async () => {
-    createPresetGameMock.mockResolvedValue({ gameId: 'preset-f', defaultPlayerId: 'p0' });
-    renderGame(view);
-
-    const panel = await screen.findByTestId('qa-scenarios');
-    expect(panel.closest('[data-zone="sidebar-left"]')).not.toBeNull();
-    expect(within(panel).getByTestId('preset-btn-surrender-half-off')).toBeTruthy();
-    const pickup = within(panel).getByTestId('preset-btn-full-hand-pickup');
-    expect(pickup.textContent).toBe('Full Hand Pickup (30 Cards)');
-
-    fireEvent.click(pickup);
-    await waitFor(() => expect(createPresetGameMock).toHaveBeenCalledWith('full-hand-pickup'));
-  });
 });
 
 /**
@@ -3761,7 +3675,7 @@ describe('T-90-feedback-20261105_221105-3 round 2: throw-in gate precision', () 
   });
 });
 
-describe('T-90-feedback-20261106_111512-3: backend canThrowIn gate and new presets', () => {
+describe('T-90-feedback-20261106_111512-3: backend canThrowIn gate', () => {
   const t90View: PlayerGameView = {
     ...view, myId: 'p0', myName: 'Alice',
     myHand: [{ suit: 'hearts', rank: 'seven' }, { suit: 'clubs', rank: 'nine' }],
@@ -3793,31 +3707,6 @@ describe('T-90-feedback-20261106_111512-3: backend canThrowIn gate and new prese
     expect(screen.queryByTestId('throw-in-outline')).toBeNull();
     expect(document.querySelector('[data-drop-zone="throw-in"]')).toBeNull();
   });
-  it('lists and launches the new presets from the left sidebar', async () => {
-    renderT90({ ...t90View, canThrowIn: false });
-    const panel = await screen.findByTestId('qa-scenarios');
-    for (const id of ['throw-in-visibility-4p', 'throw-in-capacity-cap', 'huge-hand-36', 'huge-hand-52']) {
-      expect(within(panel).getByTestId(`preset-btn-${id}`)).toBeTruthy();
-    }
-    createPresetGameMock.mockResolvedValue({ gameId: 'preset-t90', defaultPlayerId: 'p0' });
-    fireEvent.click(within(panel).getByTestId('preset-btn-huge-hand-52'));
-    await waitFor(() => expect(createPresetGameMock).toHaveBeenCalledWith('huge-hand-52'));
-  });
-
-  it('ITEM-QA: offers the two new Wave 1 presets in the left sidebar', async () => {
-    renderT90({ ...t90View, canThrowIn: false });
-    const panel = await screen.findByTestId('qa-scenarios');
-    expect(panel.closest('[data-zone="sidebar-left"]')).not.toBeNull();
-    const multi = within(panel).getByTestId('preset-btn-throw-in-multi-qa');
-    expect(multi.textContent).toBe('Throw-In & Multi-Card QA');
-    const large = within(panel).getByTestId('preset-btn-large-hand-stress');
-    expect(large.textContent).toBe('Large Hand (30+ Cards)');
-
-    createPresetGameMock.mockResolvedValue({ gameId: 'preset-new', defaultPlayerId: 'p0' });
-    fireEvent.click(multi);
-    await waitFor(() => expect(createPresetGameMock).toHaveBeenCalledWith('throw-in-multi-qa'));
-  });
-
   it('ITEM-5/ITEM-6: clamps multi-selection to the projected capacity and batch-deploys', async () => {
     const batchView: PlayerGameView = {
       ...t90View,

@@ -6,30 +6,16 @@ import {
   type CreatedGame,
 } from '../api/client';
 import type { PlayerType } from '../types';
-import { setSettings } from '../state/settings';
 import '../styles/table.css';
-
-/** One-click Light-theme preset; it only repaints, so no room is created. */
-export const LIGHT_THEME_PRESET_ID = 'light-theme-gradient';
 
 const DEFAULT_NAMES = ['Alice', 'Bob', 'Carol', 'Dave'];
 
-/** One-click scripted positions, mirrored in the game's left sidebar. */
+/** The four current-round scripted positions, mirrored in the game sidebar. */
 const QA_SCENARIOS: { id: string; label: string }[] = [
-  { id: 'throw-in-visibility-4p', label: 'Throw-In Visibility (4P)' },
-  { id: 'throw-in-capacity-cap', label: 'Throw-In Capacity Cap' },
-  { id: 'huge-hand-36', label: 'Huge Hand (36)' },
-  { id: 'huge-hand-52', label: 'Huge Hand (52)' },
-  { id: '3p-redirect-bob', label: '3P Redirect (Bob POV)' },
-  { id: 'chaos-4p', label: '4P Chaos Targets' },
-  { id: 'surrender-half-off', label: 'Surrender Half-Off' },
-  { id: 'full-hand-pickup', label: 'Full Hand Pickup (30 Cards)' },
-  { id: 'defenseless-surrender', label: 'Defenseless Auto-Surrender' },
-  { id: 'discard-and-endgame', label: 'Discard & Endgame Durak' },
-  { id: 'throw-in-multi-qa', label: 'Throw-In & Multi-Card QA' },
-  { id: 'large-hand-stress', label: 'Large Hand (30+ Cards)' },
-  { id: 'transparent-mode', label: 'Transparent Mode' },
-  { id: LIGHT_THEME_PRESET_ID, label: 'Light Theme Header' },
+  { id: 'qa-normal-6-actions', label: '6-Card 10s & Actions' },
+  { id: 'qa-medium-14-expand', label: '14-Card Expand Box' },
+  { id: 'qa-large-30-compress', label: '30-Card Compress & Part' },
+  { id: 'qa-single-card', label: '1-Card Hand (No Part)' },
 ];
 
 /** Seat choices offered per player row; values match the backend's `playerTypes`. */
@@ -178,13 +164,6 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
 
   // QA presets open a scripted position on the seat that makes it readable.
   const startPreset = (presetId: string) => {
-    // T-90-feedback-4: the Light theme check repaints the lobby in place; it
-    // is deliberately backend-free so a reviewer sees the new page/header
-    // gradient in one click even before creating a room.
-    if (presetId === LIGHT_THEME_PRESET_ID) {
-      setSettings({ theme: 'light' });
-      return;
-    }
     if (presetPending) return;
     setPresetPending(true);
     setPresetError(null);
