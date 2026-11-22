@@ -1035,7 +1035,10 @@ export function GamePage({
     !reviewMode &&
     !isBotViewer &&
     view.canThrowIn === true &&
-    (view.throwInCards?.length ?? 0) > 0;
+    (view.throwInCards?.length ?? 0) > 0 &&
+    // T-95 #1: an exhausted projection (`0` capacity) hides the outline even
+    // when a stale flag still says the seat may throw in.
+    (view.throwInCapacity == null || view.throwInCapacity > 0);
 
   const isAttackerTurn =
     isInitialAttackPhase(view.boutPhase) && hasLegalAction(view.legalActions, 'attack');

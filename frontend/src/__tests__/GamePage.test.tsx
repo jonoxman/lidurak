@@ -3383,6 +3383,36 @@ describe('T-90-feedback-20261105_221105-3: throw-in gate, multi-card throw-in an
     expect(screen.queryByTestId('throw-in-outline')).toBeNull();
   });
 
+  it('T-95 #1: hides the outline when the projected throw-in capacity is exhausted', async () => {
+    renderGame({ ...throwInView, throwInCapacity: 0 });
+
+    await screen.findByTestId('hand-turn-highlight');
+    expect(screen.queryByTestId('throw-in-outline')).toBeNull();
+    expect(document.querySelector('[data-drop-zone="throw-in"]')).toBeNull();
+  });
+
+  it('T-95 #1: hides the outline once the bout has reached six pairs', async () => {
+    renderGame({
+      ...throwInView,
+      tablePairs: Array.from({ length: 6 }, () => ({
+        attack: { suit: 'spades', rank: 'seven' },
+        defense: null,
+      })),
+    });
+
+    await screen.findByTestId('hand-turn-highlight');
+    expect(screen.queryByTestId('throw-in-outline')).toBeNull();
+    expect(document.querySelector('[data-drop-zone="throw-in"]')).toBeNull();
+  });
+
+  it('T-95 #1: hides the outline for a seat that already passed even if the server flag is stale', async () => {
+    renderGame({ ...throwInView, myHasPassed: true });
+
+    await screen.findByTestId('hand-turn-highlight');
+    expect(screen.queryByTestId('throw-in-outline')).toBeNull();
+    expect(document.querySelector('[data-drop-zone="throw-in"]')).toBeNull();
+  });
+
   it('ITEM-1a: hides the outline and the surrender anchor after this player passed', async () => {
     renderGame({
       ...throwInView,
