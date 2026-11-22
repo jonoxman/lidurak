@@ -5290,3 +5290,153 @@ describe('T-90-feedback-20261122_011021-4: live table wiring', () => {
     }
   });
 });
+
+describe('T-90-feedback-20261122_171451-6 ITEM-4/ITEM-7: tabletimer clearance & lower-table controls', () => {
+  const rule = (selector: string): string => cssRule(tableCss, selector);
+
+  const renderWithControls = (onAction: (action: { type: string }) => void = () => {}) =>
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={opponents}
+        tablePairs={tablePairs}
+        trumpSuit="diamonds"
+        attackerId="p1"
+        defenderId="p0"
+      >
+        <ActionBar legalActions={['pass', 'surrender']} onAction={onAction} />
+      </GameTable>,
+    );
+
+  it('ITEM-7: renders Surrender and Pass in the lower table band, not the bottom-right corner', () => {
+    const { container } = renderWithControls();
+
+    const controls = container.querySelector('[data-zone="player-controls"]') as HTMLElement;
+    expect(controls).not.toBeNull();
+    expect(controls.getAttribute('data-placement')).toBe('lower-table-controls');
+    // A direct child of the felt arena: never inside the hand, the deck or the
+    // hand-sort corner box.
+    expect(controls.parentElement?.getAttribute('data-zone')).toBe('table-arena');
+    expect(controls.closest('[data-zone="player-hand"]')).toBeNull();
+    expect(controls.closest('[data-zone="table-deck"]')).toBeNull();
+    expect(controls.closest('[data-zone="hand-sort-box"]')).toBeNull();
+    expect(controls.querySelector('.sort-bar')).toBeNull();
+
+    // Icon-only, themed, and both wired into the same band.
+    const bar = within(controls).getByTestId('action-bar');
+    expect(bar.getAttribute('data-placement')).toBe('lower-table-controls');
+    for (const testId of ['surrender-button', 'pass-button']) {
+      const button = within(controls).getByTestId(testId);
+      expect(button.textContent).toBe('');
+      expect(button.classList.contains('action-icon-btn')).toBe(true);
+      expect(bar.contains(button)).toBe(true);
+    }
+
+    // The band owns the full-width Row 4 track, after the hand row.
+    const controlsRule = rule("[data-zone='player-controls']");
+    expect(controlsRule).toContain('grid-column: 1 / -1;');
+    expect(controlsRule).toContain('grid-row: 4;');
+    expect(controlsRule).toContain('justify-content: center;');
+    expect(controlsRule).toContain('gap: 12px;');
+    expect(controlsRule).toContain('min-width: 0;');
+    expect(controlsRule).toContain('box-sizing: border-box;');
+    expect(controlsRule).not.toContain('position: absolute');
+    expect(controlsRule).not.toContain('position: fixed');
+    // The old bottom-right corner placement is gone for good.
+    expect(controlsRule).not.toContain('grid-column: 3;');
+    expect(tableCss).not.toMatch(
+      /\[data-zone='player-controls'\]\s*{[^}]*grid-row:\s*3;/,
+    );
+
+    // Row 3 is the hand's alone, so a maximal hand never meets a neighbour.
+    const handRule = rule("[data-zone='player-hand']");
+    expect(handRule).toContain('grid-column: 1 / -1;');
+    expect(handRule).toContain('grid-row: 3;');
+    expect(rule("[data-zone='table-arena']")).toContain('var(--actions-row-height)');
+  });
+
+  it('ITEM-4: gives the timer its own track with explicit clearance above raised cards', () => {
+    const { container } = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={opponents}
+        tablePairs={[]}
+        trumpSuit="diamonds"
+        attackerId="p0"
+        defenderId="p1"
+        awaitingAttack
+        selectedKeys={hand.map(cardKey)}
+        playableKeys={hand.map(cardKey)}
+        turnPlayerId="p0"
+      />,
+    );
+
+    const zone = container.querySelector('[data-zone="player-hand"]') as HTMLElement;
+    const clock = within(zone).getByTestId('hand-clock');
+    const cards = zone.querySelector('.hand-cards') as HTMLElement;
+
+    // The timer is a sibling of the card stage — never inside the container that
+    // carries the raise transform.
+    expect(clock.parentElement).toBe(zone);
+    expect(cards.parentElement).toBe(zone);
+    expect(clock.nextElementSibling).toBe(cards);
+    expect(cards.contains(clock)).toBe(false);
+    expect(clock.getAttribute('data-slot')).toBe('hand-timer');
+
+    // The stylesheet's clearance is driven by the SAME constants that raise the
+    // cards, so the two can never be tuned apart.
+    expect(zone.style.getPropertyValue('--hand-selected-lift')).toBe(
+      `${-HAND_SELECTED_RAISED_OFFSET}px`,
+    );
+    expect(zone.style.getPropertyValue('--hand-contour-padding')).toBe(
+      `${HAND_CONTOUR_PADDING}px`,
+    );
+
+    // Every card is fully raised inside the card stage.
+    for (const wrapper of Array.from(zone.querySelectorAll('.hand-card-wrapper'))) {
+      expect(wrapper.getAttribute('data-card-y')).toBe(String(HAND_SELECTED_RAISED_OFFSET));
+    }
+
+    const zoneRule = rule("[data-zone='player-hand']");
+    // Two dedicated tracks: timer, then card stage.
+    expect(zoneRule).toContain('grid-template-rows: auto auto;');
+    expect(zoneRule).toContain('row-gap: calc(');
+    expect(zoneRule).toContain('var(--hand-selected-lift, 18px)');
+    expect(zoneRule).toContain('var(--hand-contour-padding, 4px)');
+    expect(zoneRule).toContain('+ 2.5px + 8px');
+    expect(zoneRule).not.toContain('position: absolute');
+    // The clock and the stage are pinned to their own rows.
+    expect(rule("[data-zone='player-hand'] > .hand-clock")).toContain('grid-row: 1;');
+    expect(rule("[data-zone='player-hand'] > .hand-cards")).toContain('grid-row: 2;');
+
+    // The reserved gap covers the full raise + contour pad + stroke + breathing
+    // room, which is exactly what a fully raised card needs to clear.
+    const clearance = -HAND_SELECTED_RAISED_OFFSET + HAND_CONTOUR_PADDING + 2.5 + 8;
+    expect(clearance).toBeGreaterThan(
+      -HAND_SELECTED_RAISED_OFFSET + HAND_CONTOUR_PADDING + 2.5,
+    );
+    // ... and the hand row itself reserves the timer plus that clearance.
+    expect(rule("[data-zone='table-arena']")).toContain(
+      '--hand-row-height: calc(var(--hand-card-height, 140px) + 66px);',
+    );
+    expect(66).toBeGreaterThan(-HAND_SELECTED_RAISED_OFFSET + 20);
+  });
+
+  it('ITEM-7: dispatches Surrender and Pass from the new lower-table location', () => {
+    const onAction = vi.fn();
+    renderWithControls(onAction);
+
+    const surrender = screen.getByTestId('surrender-button');
+    expect(surrender.closest('[data-zone="player-controls"]')).not.toBeNull();
+    fireEvent.click(surrender);
+    expect(onAction).toHaveBeenNthCalledWith(1, { type: 'declareSurrender' });
+
+    const pass = screen.getByTestId('pass-button');
+    expect(pass.closest('[data-zone="player-controls"]')).not.toBeNull();
+    fireEvent.click(pass);
+    expect(onAction).toHaveBeenNthCalledWith(2, { type: 'passTurn' });
+    expect(onAction).toHaveBeenCalledTimes(2);
+  });
+});

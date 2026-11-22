@@ -47,7 +47,12 @@ export const ACTION_BUTTONS: readonly ActionButton[] = [
  * Minimalist contextual bout controls: the Pass glyph for attackers waiting on
  * throw-ins, the Surrender glyph for a defender facing uncovered cards. Only
  * actions the server lists as legal are rendered, and both are compact,
- * theme-matched, icon-only squares in the table's bottom-right corner.
+ * theme-matched, icon-only squares.
+ *
+ * ITEM-7: the bar is rendered inside the lower-table control band of
+ * `[data-zone="table-arena"]` (Row 4 of the felt grid), never in the old
+ * bottom-right corner, so the two buttons can never overlap the bout cards, the
+ * outlines, the turn timer, the hand or the SortBar.
  */
 export function ActionBar({
   legalActions,
@@ -65,7 +70,7 @@ export function ActionBar({
   if (buttons.length === 0) return null;
 
   return (
-    <div class="action-bar">
+    <div class="action-bar" data-testid="action-bar" data-placement="lower-table-controls">
       {buttons.map((button) => (
         <button
           key={button.action}

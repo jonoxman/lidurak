@@ -356,15 +356,32 @@ describe('T-90-feedback-20261122_011021-2 ITEM-7/8: themed icon-only Surrender &
     );
     expect(actionIconsCss).toContain('content: attr(data-countdown)');
 
-    // Grid/Flex placement only, anchored bottom-right inside the arena.
+    // ITEM-7: Grid/Flex placement only, inside the dedicated lower-table control
+    // band — the old bottom-right corner anchoring is gone.
     const cluster = cssRule(
       actionIconsCss,
       "[data-zone='table-arena'] [data-zone='player-controls']",
     );
-    expect(cluster).toContain('justify-self: end;');
-    expect(cluster).toContain('align-self: end;');
+    expect(cluster).toContain('justify-self: stretch;');
+    expect(cluster).toContain('align-self: center;');
     expect(cluster).toContain('min-width: 0;');
     expect(cluster).toContain('box-sizing: border-box;');
+    expect(cluster).not.toContain('justify-self: end;');
+    expect(cluster).not.toContain('align-self: end;');
     expect(actionIconsCss).not.toMatch(/position:\s*(absolute|fixed)/);
+  });
+
+  it('ITEM-7: marks the bar as the lower-table control cluster, with no sort corner inside', () => {
+    const { container } = render(
+      <ActionBar legalActions={['pass', 'surrender']} onAction={() => {}} />,
+    );
+
+    const bar = container.querySelector('.action-bar') as HTMLElement;
+    expect(bar).not.toBeNull();
+    expect(bar.getAttribute('data-testid')).toBe('action-bar');
+    expect(bar.getAttribute('data-placement')).toBe('lower-table-controls');
+    expect(bar.querySelector('.sort-bar')).toBeNull();
+    expect(within(bar).getByTestId('surrender-button')).toBeTruthy();
+    expect(within(bar).getByTestId('pass-button')).toBeTruthy();
   });
 });
