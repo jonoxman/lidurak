@@ -307,6 +307,8 @@ describe('LobbyPage', () => {
 
     const panel = screen.getByTestId('qa-scenarios');
     const buttons = within(panel).getAllByRole('button');
+    // ITEM-9: exactly four presets — no legacy scenario can hide in the list.
+    expect(buttons).toHaveLength(4);
     expect(buttons.map((button) => button.getAttribute('data-preset'))).toEqual([
       'qa-normal-6-actions',
       'qa-medium-14-expand',
@@ -334,6 +336,8 @@ describe('LobbyPage', () => {
       'discard-and-endgame',
       'throw-in-multi-qa',
       'large-hand-stress',
+      'throw-in-visibility-3p',
+      'mega-hand-30',
       'transparent-mode',
       'light-theme-gradient',
     ]) {
