@@ -49,6 +49,7 @@ import {
   MIN_VISIBLE_STRIP_PX,
   BOUT_CARD_HEIGHT,
   BOUT_CARD_WIDTH,
+  BOUT_DEFENSE_OVERHANG_RATIO,
   BOUT_MIN_VISIBLE_LEFT,
   CARD_HEIGHT,
   CARD_WIDTH,
@@ -1985,7 +1986,9 @@ describe('feedback 7: tight glow, discard pile and reflection alignment', () => 
     const pairRule = cssRule('.table-pair');
     expect(pairRule).toContain('grid-template-rows: var(--pair-card-h, var(--card-h, 140px))');
     expect(pairRule).toContain('align-content: start');
-    expect(pairRule).toContain('padding: 0 var(--pair-defense-offset, 20px) var(--bout-card-offset, 18px) 0');
+    expect(pairRule).toContain(
+      'padding: 0 var(--pair-defense-offset, 36px) var(--bout-card-offset, 18px) 0',
+    );
     expect(pairRule).toContain('box-sizing: border-box');
 
     const outlineRule = cssRule('.redirect-outline');
@@ -2630,6 +2633,45 @@ describe('T-90-3 ITEM-NEW: compact single-row play area and roundness', () => {
     expect(MOBILE_CARD_WIDTH - mobile.overlap).toBeGreaterThanOrEqual(
       Math.ceil((CARD_INDEX_STRIP_WIDTH_PX * MOBILE_CARD_WIDTH) / CARD_WIDTH) - 1e-9,
     );
+  });
+
+  it('T-96: the defence overhang clears the whole shared index strip', () => {
+    // The covering card starts exactly where the attack card's rank/suit index
+    // strip ends, so the `0` of a covered `10` is never clipped.
+    expect(BOUT_DEFENSE_OVERHANG_RATIO).toBeCloseTo(
+      CARD_INDEX_STRIP_WIDTH_PX / CARD_WIDTH,
+      10,
+    );
+    expect(Math.round(BOUT_CARD_WIDTH * BOUT_DEFENSE_OVERHANG_RATIO)).toBe(
+      CARD_INDEX_STRIP_WIDTH_PX,
+    );
+    // The 48px mobile card scales the strip proportionally (17.28px, which the
+    // CSS rounds up to the documented 18px offset).
+    expect(MOBILE_CARD_WIDTH * BOUT_DEFENSE_OVERHANG_RATIO).toBeCloseTo(
+      (CARD_INDEX_STRIP_WIDTH_PX * MOBILE_CARD_WIDTH) / CARD_WIDTH,
+      10,
+    );
+
+    // `boutLayout` reserves that overhang when spacing neighbouring pairs.
+    const pairRule = cssRule('.table-pair');
+    expect(pairRule).toContain(
+      '--pair-defense-offset: var(--card-index-strip-width, 36px)',
+    );
+    expect(pairRule).toContain(
+      'padding: 0 var(--pair-defense-offset, 36px) var(--bout-card-offset, 18px) 0',
+    );
+    // `.table-pair-defense` is first declared in the grouped grid-column rule,
+    // so match its own margin rule directly.
+    expect(tableCss).toMatch(
+      /\.table-pair-defense\s*{\s*margin: 15px 0 0 var\(--pair-defense-offset, 36px\)/,
+    );
+    // The 48px mobile layout scales the same strip (18px) instead of the
+    // former narrower 14px offset.
+    expect(tableCss).toMatch(/--pair-defense-offset: 18px/);
+    expect(tableCss).toContain(
+      'padding: 0 var(--pair-defense-offset, 18px) var(--bout-card-offset, 10px) 0',
+    );
+    expect(tableCss).toContain('margin: 10px 0 0 var(--pair-defense-offset, 18px)');
   });
 
   it('ITEM-NEW-1a: binds --app-roundness to every table element', () => {

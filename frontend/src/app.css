@@ -330,7 +330,7 @@ html[data-theme='light'] .error-banner {
 /* Lichess 3-column desktop shell. */
 .game-shell {
   display: grid;
-  grid-template-columns: 240px minmax(640px, 1fr) 260px;
+  grid-template-columns: 272px minmax(640px, 1fr) 260px;
   gap: 16px;
   align-items: start;
   max-width: 1440px;
@@ -584,7 +584,8 @@ html[data-theme='light'] .error-banner {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
+  /* T-96: tight enough that `Alice (You)` and `6 cards` both fit the row. */
+  gap: 6px;
   min-width: 0;
   padding: 6px 8px;
   background: var(--app-input-bg);
@@ -626,10 +627,16 @@ html[data-theme='light'] .error-banner {
   align-items: center;
   gap: 6px;
   min-width: 0;
+  /* T-96: the name column is clipped to its own track, so a long name can
+     never spill over `.status-cards`. */
+  max-width: 100%;
+  overflow: hidden;
   justify-self: start;
 }
 
 .status-name {
+  min-width: 0;
+  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
