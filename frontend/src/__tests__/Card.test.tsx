@@ -4,7 +4,8 @@ import {
   ACE_PIP,
   CARD_CORNER_FONT_FAMILY,
   CARD_CORNER_PADDING_LEFT_PX,
-  CARD_CORNER_STRIP_PX,
+  CARD_INDEX_STRIP_CSS_VAR,
+  CARD_INDEX_STRIP_WIDTH_PX,
   CARD_DEFAULT_HEIGHT,
   CARD_DEFAULT_WIDTH,
   CARD_DRAG_IMAGE_OFFSET,
@@ -593,8 +594,9 @@ describe('card sprite serif typography and Roundness (T-90-2)', () => {
     expect(corner).toContain('Inter');
     expect(corner).toContain('system-ui');
     expect(corner).toContain('Segoe UI');
-    // The declaration ends on the generic `sans-serif` fallback.
-    expect(corner.trim()).toMatch(/sans-serif;$/);
+    // The declaration ends its font stack on the generic `sans-serif` fallback
+    // (T-90-feedback-20261122_171451-2 adds `white-space` after it).
+    expect(corner).toMatch(/font-family:[^;]*sans-serif;/);
     expect(corner).not.toContain('Cinzel');
     expect(corner).not.toContain('Georgia');
 
@@ -617,7 +619,7 @@ describe('card sprite serif typography and Roundness (T-90-2)', () => {
 
     const topRank = container.querySelector('[data-index="top-rank"]')!;
     const topSuit = container.querySelector('[data-index="top-suit"]')!;
-    expect(topRank.getAttribute('x')).toBe('7.5');
+    expect(topRank.getAttribute('x')).toBe(String(CARD_INDEX.topRank.x));
     expect(topRank.getAttribute('y')).toBe('21');
     expect(topSuit.getAttribute('y')).toBe('34');
     expect(container.querySelector('[data-pip="rank"]')!.getAttribute('y')).toBe(
@@ -790,9 +792,10 @@ describe('corner pip alignment and face pip sizing (T-90 ITEM-3a / ITEM-3b)', ()
         const suitNode = container.querySelector(`[data-testid="${suitId}"]`)!;
         const suitSize = Number(suitNode.getAttribute('font-size'));
 
-        // Lightly larger than the previous 10-unit corner suit (+1.5–2.5).
-        expect(suitSize, `${rank} ${suitId}`).toBeGreaterThanOrEqual(11.5);
-        expect(suitSize, `${rank} ${suitId}`).toBeLessThanOrEqual(12.5);
+        // Enlarged from the previous 12-unit corner suit so the pip fills the
+        // widened `'10'` index strip (T-90-feedback-20261122_171451-2 ITEM-2b).
+        expect(suitSize, `${rank} ${suitId}`).toBeGreaterThan(12);
+        expect(suitSize, `${rank} ${suitId}`).toBeLessThanOrEqual(14.5);
 
         // The rank and the larger suit glyph never overlap: the suit sits in
         // its own band (below the rank in the top-left corner, above it in the
@@ -1115,7 +1118,7 @@ describe('centred card faces with equal margins (T-90-1 ITEM-3a / ITEM-3b)', () 
     }
   });
 
-  it('ITEM-3a/ITEM-4: keeps the corner pip columns at 7.5 / 62.5 in size 12, clear of the face', () => {
+  it('ITEM-3a/ITEM-4: keeps the corner indices on the shared axis in size 14, clear of the face', () => {
     for (const rank of ALL_RANKS) {
       const { container, unmount } = render(<Card suit="spades" rank={rank} trump />);
 
@@ -1124,15 +1127,19 @@ describe('centred card faces with equal margins (T-90-1 ITEM-3a / ITEM-3b)', () 
       const topSuit = container.querySelector('[data-testid="card-suit-top"]')!;
       const bottomSuit = container.querySelector('[data-testid="card-suit-bottom"]')!;
 
-      expect(Number(topRank.getAttribute('x')), rank).toBe(7.5);
-      expect(Number(bottomRank.getAttribute('x')), rank).toBe(62.5);
-      expect(Number(topSuit.getAttribute('x')), rank).toBe(7.5);
-      expect(Number(bottomSuit.getAttribute('x')), rank).toBe(62.5);
+      expect(Number(topRank.getAttribute('x')), rank).toBe(CARD_INDEX.topRank.x);
+      expect(Number(bottomRank.getAttribute('x')), rank).toBe(CARD_INDEX.bottomRank.x);
+      expect(Number(topSuit.getAttribute('x')), rank).toBe(CARD_INDEX.topSuit.x);
+      expect(Number(bottomSuit.getAttribute('x')), rank).toBe(CARD_INDEX.bottomSuit.x);
       expect(Number(topSuit.getAttribute('x')) + Number(bottomSuit.getAttribute('x'))).toBe(
         CARD_WIDTH,
       );
-      expect(Number(topSuit.getAttribute('font-size')), rank).toBe(12);
-      expect(Number(bottomSuit.getAttribute('font-size')), rank).toBe(12);
+      expect(Number(topSuit.getAttribute('font-size')), rank).toBe(
+        CARD_INDEX.topSuit.fontSize,
+      );
+      expect(Number(bottomSuit.getAttribute('font-size')), rank).toBe(
+        CARD_INDEX.bottomSuit.fontSize,
+      );
       // The suit glyph shares the rank's centre axis in both corners.
       expect(topSuit.getAttribute('x'), rank).toBe(topRank.getAttribute('x'));
       expect(bottomSuit.getAttribute('x'), rank).toBe(bottomRank.getAttribute('x'));
@@ -1291,9 +1298,9 @@ describe('T-90-2 inverted corner indices and symmetrical trump badges', () => {
       // Top-left: upright, unchanged and explicitly not inverted.
       expect(topRank.getAttribute('data-inverted'), rank).toBe('false');
       expect(topSuit.getAttribute('data-inverted'), rank).toBe('false');
-      expect(Number(topRank.getAttribute('x')), rank).toBe(7.5);
+      expect(Number(topRank.getAttribute('x')), rank).toBe(CARD_INDEX.topRank.x);
       expect(Number(topRank.getAttribute('y')), rank).toBe(21);
-      expect(Number(topSuit.getAttribute('x')), rank).toBe(7.5);
+      expect(Number(topSuit.getAttribute('x')), rank).toBe(CARD_INDEX.topSuit.x);
       expect(Number(topSuit.getAttribute('y')), rank).toBe(34);
       expect(topRank.getAttribute('transform'), rank).toBeNull();
       expect(topSuit.getAttribute('transform'), rank).toBeNull();
@@ -1301,12 +1308,16 @@ describe('T-90-2 inverted corner indices and symmetrical trump badges', () => {
       // Bottom-right: the exact 180° rotation around the (35, 50) card centre.
       expect(bottomRank.getAttribute('data-inverted'), rank).toBe('true');
       expect(bottomSuit.getAttribute('data-inverted'), rank).toBe('true');
-      expect(Number(bottomRank.getAttribute('x')), rank).toBe(70 - 7.5);
+      expect(Number(bottomRank.getAttribute('x')), rank).toBe(70 - CARD_INDEX.topRank.x);
       expect(Number(bottomRank.getAttribute('y')), rank).toBe(100 - 21);
-      expect(Number(bottomSuit.getAttribute('x')), rank).toBe(70 - 7.5);
+      expect(Number(bottomSuit.getAttribute('x')), rank).toBe(70 - CARD_INDEX.topSuit.x);
       expect(Number(bottomSuit.getAttribute('y')), rank).toBe(100 - 34);
-      expect(bottomRank.getAttribute('transform'), rank).toBe('rotate(180 62.5 79)');
-      expect(bottomSuit.getAttribute('transform'), rank).toBe('rotate(180 62.5 66)');
+      expect(bottomRank.getAttribute('transform'), rank).toBe(
+        `rotate(180 ${CARD_INDEX.bottomRank.x} ${CARD_INDEX.bottomRank.y})`,
+      );
+      expect(bottomSuit.getAttribute('transform'), rank).toBe(
+        `rotate(180 ${CARD_INDEX.bottomSuit.x} ${CARD_INDEX.bottomSuit.y})`,
+      );
       // The upside-down rank sits nearest the corner, the suit above it.
       expect(Number(bottomRank.getAttribute('y')), rank).toBeGreaterThan(
         Number(bottomSuit.getAttribute('y')),
@@ -1437,7 +1448,7 @@ describe('T-90-feedback-20261105_221105-2: card footprint', () => {
     expect(compactSlot.style.height).toBe('114px');
   });
 
-  it('ITEM-4: keeps the top-left index inside the 20px strip left at 80% overlap', () => {
+  it('ITEM-4: keeps the top-left index inside the shared CARD_INDEX_STRIP_WIDTH_PX strip', () => {
     const ranks = ['two', 'six', 'nine', 'ten', 'jack', 'queen', 'king', 'ace'];
 
     ranks.forEach((rank) => {
@@ -1445,18 +1456,20 @@ describe('T-90-feedback-20261105_221105-2: card footprint', () => {
       const rankNode = container.querySelector('[data-testid="card-rank-top"]')!;
       const suitNode = container.querySelector('[data-testid="card-suit-top"]')!;
 
-      // T-90-feedback-2 ITEM-4: the rank and suit share the `x = 7.5` axis.
-      expect(Number(rankNode.getAttribute('x')), rank).toBe(7.5);
-      expect(Number(suitNode.getAttribute('x')), rank).toBe(7.5);
+      // T-90-feedback-2 ITEM-4: the rank and suit share one centre axis.
+      expect(Number(rankNode.getAttribute('x')), rank).toBe(CARD_INDEX.topRank.x);
+      expect(Number(suitNode.getAttribute('x')), rank).toBe(CARD_INDEX.topRank.x);
 
-      // At 100px card width the whole index ink stays inside the leftmost 20px
-      // (the strip an 80% overlap always leaves uncovered).
+      // At 100px card width the whole index ink (the full-size `10` included)
+      // stays inside the shared corner index strip.
       for (const node of [rankNode, suitNode]) {
         const box = textBox(node);
         const leftPx = (box.left * CARD_DEFAULT_WIDTH) / 70;
         const rightPx = (box.right * CARD_DEFAULT_WIDTH) / 70;
-        expect(leftPx, `${rank} left`).toBeGreaterThanOrEqual(0);
-        expect(rightPx, `${rank} right`).toBeLessThanOrEqual(20);
+        expect(leftPx, `${rank} left`).toBeGreaterThanOrEqual(
+          CARD_CORNER_PADDING_LEFT_PX,
+        );
+        expect(rightPx, `${rank} right`).toBeLessThanOrEqual(CARD_INDEX_STRIP_WIDTH_PX);
       }
       unmount();
     });
@@ -1547,7 +1560,7 @@ describe('T-90-feedback-20261122_011021-3: full-size cards and always-visible dr
     expect(container.querySelector('.table-pair')!.getAttribute('data-card-width')).toBe('100');
   });
 
-  it('ITEM-5: stacks the rank and suit in the leftmost 20px corner strip on every rank', () => {
+  it('ITEM-5: stacks the rank and suit in the shared corner index strip on every rank', () => {
     for (const rank of ['six', 'ten', 'ace', 'king']) {
       const { container, unmount } = render(<Card suit="spades" rank={rank} />);
       const corner = container.querySelector('[data-testid="card-corner-top-left"]')!;
@@ -1557,8 +1570,8 @@ describe('T-90-feedback-20261122_011021-3: full-size cards and always-visible dr
       expect(corner.getAttribute('data-corner'), rank).toBe('top-left');
       expect(corner.getAttribute('data-stack'), rank).toBe('vertical');
       expect(corner.getAttribute('data-strip'), rank).toBe('left');
-      expect(Number(corner.getAttribute('data-strip-width-px')), rank).toBe(
-        CARD_CORNER_STRIP_PX,
+      expect(Number(corner.getAttribute('data-index-strip-width-px')), rank).toBe(
+        CARD_INDEX_STRIP_WIDTH_PX,
       );
       expect(Number(corner.getAttribute('data-padding-left-px')), rank).toBe(
         CARD_CORNER_PADDING_LEFT_PX,
@@ -1568,17 +1581,21 @@ describe('T-90-feedback-20261122_011021-3: full-size cards and always-visible dr
         Number(rankNode.getAttribute('y')),
       );
 
-      // The painted ink starts at least 3px from the left edge and ends inside
-      // the 20px strip an 80% overlap always leaves uncovered.
+      // The painted ink starts at least 3px from the left edge, is centred on
+      // the strip's shared axis, and ends inside the widened strip.
       for (const node of [rankNode, suitNode]) {
         const box = textBox(node);
         const leftPx = (box.left * CARD_DEFAULT_WIDTH) / 70;
         const rightPx = (box.right * CARD_DEFAULT_WIDTH) / 70;
+        const centrePx = ((box.left + box.right) / 2 / 70) * CARD_DEFAULT_WIDTH;
         expect(leftPx, `${rank} padding-left`).toBeGreaterThanOrEqual(
           CARD_CORNER_PADDING_LEFT_PX,
         );
-        expect(leftPx, `${rank} padding-left max`).toBeLessThanOrEqual(4.5);
-        expect(rightPx, `${rank} strip`).toBeLessThanOrEqual(CARD_CORNER_STRIP_PX);
+        expect(rightPx, `${rank} strip`).toBeLessThanOrEqual(CARD_INDEX_STRIP_WIDTH_PX);
+        expect(centrePx, `${rank} axis`).toBeCloseTo(
+          (CARD_INDEX.topRank.x / 70) * CARD_DEFAULT_WIDTH,
+          5,
+        );
       }
 
       unmount();
@@ -1674,5 +1691,131 @@ describe('T-90-feedback-20261122_011021-3: full-size cards and always-visible dr
     expect(slot.getAttribute('data-dragging')).toBe('false');
     expect(slot.style.opacity).toBe('1');
     expect(slot.style.visibility).toBe('visible');
+  });
+});
+
+/**
+ * T-90-feedback-20261122_171451-2 ITEM-2a/2b: the two-character `10` is drawn
+ * at the exact same rank size as every other rank, and the corner suit pip is
+ * enlarged to make full use of the widened index strip.
+ */
+describe('T-90-feedback-20261122_171451-2: full-size 10 rank and enlarged corner suit', () => {
+  afterEach(() => {
+    resetSettings();
+  });
+
+  const RANK_LABELS: Array<[string, string]> = [
+    ['six', '6'],
+    ['seven', '7'],
+    ['eight', '8'],
+    ['nine', '9'],
+    ['ten', '10'],
+    ['jack', 'J'],
+    ['queen', 'Q'],
+    ['king', 'K'],
+    ['ace', 'A'],
+  ];
+
+  it('ITEM-2a: draws "10" at the exact same rank font size as every other rank', () => {
+    for (const [rank, label] of RANK_LABELS) {
+      const { container, unmount } = render(<Card suit="spades" rank={rank} />);
+
+      for (const testId of ['card-rank-top', 'card-rank-bottom']) {
+        const node = container.querySelector(`[data-testid="${testId}"]`)!;
+        expect(node.textContent, `${rank} ${testId}`).toBe(label);
+        expect(Number(node.getAttribute('font-size')), `${rank} ${testId}`).toBe(
+          CARD_INDEX.topRank.fontSize,
+        );
+        expect(Number(node.getAttribute('font-size')), `${rank} ${testId}`).toBe(15);
+      }
+
+      unmount();
+    }
+
+    // No smaller two-digit override survives on the component...
+    expect('twoDigitFontSize' in CARD_INDEX.topRank).toBe(false);
+    expect('twoDigitFontSize' in CARD_INDEX.bottomRank).toBe(false);
+    // ...and no transform / tracking squish makes `10` look smaller.
+    expect(tableCss).not.toMatch(/\.playing-card \.card-rank-index\s*{[^}]*scaleX/);
+    expect(tableCss).toMatch(
+      /\.playing-card \.card-rank-index\s*{[^}]*white-space: nowrap/,
+    );
+    expect(tableCss).toMatch(
+      /\.playing-card \.card-rank-index\s*{[^}]*letter-spacing: normal/,
+    );
+  });
+
+  it('ITEM-2a: keeps the two digits of "10" on one line and clear of the card edge and pips', () => {
+    const { container } = render(<Card suit="hearts" rank="ten" />);
+    const rank = container.querySelector('[data-testid="card-rank-top"]')!;
+    const box = textBox(rank);
+    const leftPx = (box.left * CARD_DEFAULT_WIDTH) / 70;
+    const rightPx = (box.right * CARD_DEFAULT_WIDTH) / 70;
+
+    expect(rank.textContent).toBe('10');
+    // One text run: the SVG paints `10` as a single line of two digits.
+    expect(rank.childNodes).toHaveLength(1);
+    expect(leftPx).toBeGreaterThanOrEqual(CARD_CORNER_PADDING_LEFT_PX);
+    expect(rightPx).toBeLessThanOrEqual(CARD_INDEX_STRIP_WIDTH_PX);
+
+    for (const pip of Array.from(container.querySelectorAll('[data-pip="rank"]'))) {
+      expect(
+        overlaps(textBox(pip), box),
+        `pip at ${pip.getAttribute('x')},${pip.getAttribute('y')}`,
+      ).toBe(false);
+    }
+  });
+
+  it('ITEM-2b: enlarges the corner suit indicator on every rank', () => {
+    expect(CARD_INDEX.topSuit.fontSize).toBeGreaterThan(12);
+    expect(CARD_INDEX.topSuit.fontSize).toBe(CARD_INDEX.bottomSuit.fontSize);
+
+    for (const [rank] of CORNER_RANKS) {
+      const { container, unmount } = render(<Card suit="clubs" rank={rank} />);
+      const topRank = container.querySelector('[data-testid="card-rank-top"]')!;
+      const topSuit = container.querySelector('[data-testid="card-suit-top"]')!;
+
+      expect(Number(topSuit.getAttribute('font-size')), rank).toBe(
+        CARD_INDEX.topSuit.fontSize,
+      );
+      // Centred beneath its rank on the same axis.
+      expect(Number(topSuit.getAttribute('x')), rank).toBe(
+        Number(topRank.getAttribute('x')),
+      );
+
+      const box = textBox(topSuit);
+      const leftPx = (box.left * CARD_DEFAULT_WIDTH) / 70;
+      const rightPx = (box.right * CARD_DEFAULT_WIDTH) / 70;
+      expect(leftPx, `${rank} suit left`).toBeGreaterThanOrEqual(
+        CARD_CORNER_PADDING_LEFT_PX,
+      );
+      expect(rightPx, `${rank} suit right`).toBeLessThanOrEqual(
+        CARD_INDEX_STRIP_WIDTH_PX,
+      );
+
+      unmount();
+    }
+  });
+
+  it('ITEM-2b: exports CARD_INDEX_STRIP_WIDTH_PX and mirrors it as a CSS variable', () => {
+    expect(CARD_INDEX_STRIP_WIDTH_PX).toBeGreaterThanOrEqual(34);
+    expect(CARD_INDEX_STRIP_WIDTH_PX).toBeLessThanOrEqual(38);
+    expect(CARD_INDEX_STRIP_CSS_VAR).toBe('--card-index-strip-width');
+    expect(tableCss).toMatch(
+      new RegExp(`${CARD_INDEX_STRIP_CSS_VAR}: ${CARD_INDEX_STRIP_WIDTH_PX}px`),
+    );
+
+    for (const rank of ['six', 'ten', 'ace', 'king']) {
+      const { container, unmount } = render(<Card suit="diamonds" rank={rank} />);
+      const corner = container.querySelector('[data-testid="card-corner-top-left"]')!;
+      expect(Number(corner.getAttribute('data-index-strip-width-px')), rank).toBe(
+        CARD_INDEX_STRIP_WIDTH_PX,
+      );
+      // The wider index strip leaves the card footprint untouched.
+      const slot = container.querySelector('.card-slot') as HTMLElement;
+      expect(slot.getAttribute('data-card-width'), rank).toBe('100');
+      expect(slot.getAttribute('data-card-height'), rank).toBe('140');
+      unmount();
+    }
   });
 });

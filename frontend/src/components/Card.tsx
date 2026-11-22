@@ -26,12 +26,19 @@ export const CARD_MOBILE_WIDTH = 48;
 export const CARD_MOBILE_HEIGHT = 68;
 
 /**
- * T-90-feedback-20261122 ITEM-5: hand cards may overlap by up to 80% of their
- * width, so the leftmost `20px` of a 100px desktop card is always uncovered.
- * The top-left corner index is structured as one vertical rank+suit stack that
- * lives entirely inside that strip.
+ * T-90-feedback-20261122_171451-2 ITEM-2a/2b: the left-edge corner index strip
+ * width, in px on the canonical 100px-wide desktop card.
+ *
+ * Widening the strip is what lets the two-character `"10"` keep the exact same
+ * `15` rank size as `6`–`9`, `J`, `Q`, `K` and `A`: its two digits are ≈`18.6`
+ * viewBox units (≈`26.6px`) of ink, which needs `36px` to clear the `3px` left
+ * padding and still leave a ~`6px` right gutter for the enlarged `14` suit pip
+ * beneath it. Mirrored into CSS as `--card-index-strip-width` (table.css) so
+ * `handLayout.ts` and `GameTable.tsx` stay on the exact same geometry.
  */
-export const CARD_CORNER_STRIP_PX = 20;
+export const CARD_INDEX_STRIP_WIDTH_PX = 36;
+/** CSS custom property that mirrors [[CARD_INDEX_STRIP_WIDTH_PX]]. */
+export const CARD_INDEX_STRIP_CSS_VAR = '--card-index-strip-width';
 /** Minimum ink-free padding between the card's left edge and the corner index. */
 export const CARD_CORNER_PADDING_LEFT_PX = 3;
 
@@ -121,34 +128,34 @@ export const CARD_BORDER_RADIUS = 'var(--app-roundness, 8px)';
 
 /**
  * Corner index geometry inside the `70x100` viewBox (T-90 ITEM-3a, reworked by
- * T-90-feedback-2 ITEM-4).
+ * T-90-feedback-2 ITEM-4 and T-90-feedback-20261122_171451-2 ITEM-2a/2b).
  *
  * The rank number/letter and its suit pip share **one horizontal centre axis**
- * at `x = 7.5` in the top-left corner, mirrored at `70 - 7.5 = 62.5` in the
- * bottom-right corner, and both are drawn with `text-anchor="middle"`. That
- * places the whole corner index inside `x ∈ [2.5, 12.5]` (≈`3.5px`–`18px` at
- * 100px card width), so an 80% overlap — which leaves the leftmost 20px of
- * every card uncovered — can never hide a card's rank or suit.
+ * at `x = 11.45` in the top-left corner, mirrored at `70 - 11.45 = 58.55` in
+ * the bottom-right corner, and both are drawn with `text-anchor="middle"`. The
+ * whole index lives inside the widened [[CARD_INDEX_STRIP_WIDTH_PX]] strip.
  *
- * The two-character `"10"` is drawn at `twoDigitFontSize = 8.5` so its ink
- * starts ≈`3.2px` from the left edge and stays inside that same 20px strip;
- * `2`–`9`, `J`, `Q`, `K`, `A` keep the larger `15` (ink from ≈`4px` to
- * ≈`17.4px`). The whole index is rendered as one `card-corner-index` group.
- * The 12pt suit pip fits naturally (`≈2.7`–`12.3`), the rank band still ends at
- * `y = 21`, and the face grid starts at the leftmost pip column `x = 22.5`.
+ * `10` is drawn at the exact same `15` as `6`–`9`, `J`, `Q`, `K` and `A`. Its
+ * two digits are ≈`18.6` viewBox units of ink, so the shared axis sits at the
+ * `3px` (2.1 unit) left padding plus half of that ink: `2.1 + 9.3 ≈ 11.45`.
+ * That keeps the ink at `x ∈ [2.15, 20.75]` (≈`3px`–`29.6px`), comfortably
+ * inside the `36px` index strip with a ~`6px` right gutter. Every
+ * single-character rank shares the same axis, so the enlarged `14` suit pip
+ * sits exactly centred beneath its rank (`x ∈ [5.85, 17.05]`).
+ *
+ * The rank band still ends at `y = 21` and the face grid still starts at the
+ * leftmost pip column `x = 22.5`, whose 13pt ink begins at `x = 17.3` — clear
+ * of the suit pip (`17.05`) and, vertically, of the rank band (`21.3`).
  */
 export const CARD_INDEX = {
-  // T-90-feedback-20261122 ITEM-5: the two-character `"10"` is drawn at 8.5 so
-  // its ink starts at least 3px from the left edge of a 100px card while still
-  // ending inside the 20px (14 viewBox unit) strip an 80% overlap leaves clear.
-  topRank: { x: 7.5, y: 21, fontSize: 15, twoDigitFontSize: 8.5 },
-  topSuit: { x: 7.5, y: 34, fontSize: 12 },
+  topRank: { x: 11.45, y: 21, fontSize: 15 },
+  topSuit: { x: 11.45, y: 34, fontSize: 14 },
   // T-90-2 ITEM-11: the bottom-right corner is the exact 180° rotation of the
   // top-left one around the `(35, 50)` card centre, so the upside-down rank
-  // sits nearest the corner (`70 - 7.5`, `100 - 21`) and the upside-down suit
-  // directly above it (`70 - 7.5`, `100 - 34`).
-  bottomRank: { x: 62.5, y: 79, fontSize: 15, twoDigitFontSize: 8.5 },
-  bottomSuit: { x: 62.5, y: 66, fontSize: 12 },
+  // sits nearest the corner (`70 - 11.45`, `100 - 21`) and the upside-down suit
+  // directly above it (`70 - 11.45`, `100 - 34`).
+  bottomRank: { x: 58.55, y: 79, fontSize: 15 },
+  bottomSuit: { x: 58.55, y: 66, fontSize: 14 },
 } as const;
 
 /**
@@ -617,16 +624,16 @@ export function Card({
           stroke-width={1.5}
         />
 
-        {/* T-90-feedback-20261122 ITEM-5: one vertical rank+suit stack anchored
-            inside the leftmost 20px strip, so an 80% overlap by the adjacent
-            hand card can never cover either glyph. */}
+        {/* T-90-feedback-20261122_171451-2 ITEM-2a/2b: one vertical rank+suit
+            stack anchored inside the widened CARD_INDEX_STRIP_WIDTH_PX strip, so
+            the full-size `10` rank and the enlarged suit pip are never clipped. */}
         <g
           class="card-corner-index"
           data-corner="top-left"
           data-testid="card-corner-top-left"
           data-stack="vertical"
           data-strip="left"
-          data-strip-width-px={CARD_CORNER_STRIP_PX}
+          data-index-strip-width-px={CARD_INDEX_STRIP_WIDTH_PX}
           data-padding-left-px={CARD_CORNER_PADDING_LEFT_PX}
         >
           <text
@@ -637,11 +644,7 @@ export function Card({
             data-inverted="false"
             x={CARD_INDEX.topRank.x}
             y={CARD_INDEX.topRank.y}
-            font-size={
-              label.length > 1
-                ? CARD_INDEX.topRank.twoDigitFontSize
-                : CARD_INDEX.topRank.fontSize
-            }
+            font-size={CARD_INDEX.topRank.fontSize}
             font-family={CARD_CORNER_FONT_FAMILY}
             font-weight="700"
             text-anchor="middle"
@@ -754,11 +757,7 @@ export function Card({
           data-inverted="true"
           x={CARD_INDEX.bottomRank.x}
           y={CARD_INDEX.bottomRank.y}
-          font-size={
-            label.length > 1
-              ? CARD_INDEX.bottomRank.twoDigitFontSize
-              : CARD_INDEX.bottomRank.fontSize
-          }
+          font-size={CARD_INDEX.bottomRank.fontSize}
           font-family={CARD_CORNER_FONT_FAMILY}
           font-weight="700"
           text-anchor="middle"
