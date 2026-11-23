@@ -5985,7 +5985,7 @@ describe('T-95-audit-gap-20261122_203506-1: center-locked card dragging', () => 
       />,
     );
 
-  const wrappers = (container: HTMLElement): HTMLElement[] =>
+  const wrappers = (container: Element): HTMLElement[] =>
     Array.from(container.querySelectorAll('.hand-card-wrapper')) as HTMLElement[];
 
   const translate = (value: string): { x: number; y: number } => {
@@ -6281,5 +6281,56 @@ describe('T-96: re-drag reliability, selection lock and 30-card parting stabilit
       clientY: 40,
     });
     expect(zone.getAttribute('data-hovered-card-index')).toBe('16');
+  });
+
+  it('coalesces hover tracking through one rAF pass and ignores unchanged indices', async () => {
+    const view = renderHand(14);
+    const box = mockHandBox(HAND_FALLBACK_WIDTH);
+    const zone = document.querySelector('[data-zone="player-hand"]') as HTMLElement;
+    const cards = wrappers(view.container);
+    fireEvent.mouseLeave(zone);
+
+    const frames: FrameRequestCallback[] = [];
+    const originalRaf = window.requestAnimationFrame;
+    const originalCancel = window.cancelAnimationFrame;
+    const rafWindow = window as unknown as {
+      requestAnimationFrame: typeof requestAnimationFrame;
+      cancelAnimationFrame: typeof cancelAnimationFrame;
+    };
+    rafWindow.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    }) as typeof requestAnimationFrame;
+    rafWindow.cancelAnimationFrame = (() => undefined) as typeof cancelAnimationFrame;
+
+    try {
+      const resting = cards.map((card) => Number(card.getAttribute('data-card-x')));
+      const at = (index: number) => resting[index] + 1;
+
+      // The first resolved index of a frame commits on the leading edge.
+      fireEvent.mouseMove(box, { clientX: at(3), clientY: 40 });
+      expect(zone.getAttribute('data-hovered-card-index')).toBe('3');
+      expect(frames).toHaveLength(1);
+
+      // Every further move in the same frame shares that single rAF pass.
+      fireEvent.mouseMove(box, { clientX: at(5), clientY: 40 });
+      fireEvent.mouseMove(box, { clientX: at(7), clientY: 40 });
+      expect(frames).toHaveLength(1);
+
+      // A move that still resolves to the same card does no work at all.
+      fireEvent.mouseMove(box, { clientX: at(7) + 0.5, clientY: 40 });
+      expect(frames).toHaveLength(1);
+      expect(zone.getAttribute('data-hovered-card-index')).toBe('7');
+
+      frames[0](0);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(zone.getAttribute('data-hovered-card-index')).toBe('7');
+      expect(frames).toHaveLength(1);
+    } finally {
+      rafWindow.requestAnimationFrame = originalRaf;
+      rafWindow.cancelAnimationFrame = originalCancel;
+    }
+
+    view.unmount();
   });
 });

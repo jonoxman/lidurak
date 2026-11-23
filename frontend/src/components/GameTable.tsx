@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { memo } from 'preact/compat';
 import type { ComponentChildren } from 'preact';
 import {
   CARD_INDEX_STRIP_WIDTH_PX,
@@ -20,8 +21,9 @@ import {
 } from '../types';
 import {
   buildHandContourPath,
+  cardTranslate3d,
   computeHandLayout as computeUtilsHandLayout,
-  computePartedCardPositions,
+  computePartedCardLayout,
   resolveHoveredCardIndex,
   getCardVerticalLiftPx,
   ELIGIBLE_LIFT_PX,
@@ -166,6 +168,141 @@ interface DragLike {
   clientY: number;
   currentTarget?: EventTarget | null;
 }
+
+/** Stable callbacks a memoized hand slot calls; `GameTable` refreshes them. */
+export interface HandCardSlotApi {
+  beginPointerDrag: (card: CardData) => (event: MouseEvent) => void;
+  beginNativeDrag: (card: CardData, event: DragEvent) => void;
+  onCardClick?: ((card: CardData) => void) | undefined;
+  onCardDoubleClick?: ((card: CardData) => void) | undefined;
+  suppressClick: (event: Event) => void;
+  endNativeDrag: () => void;
+}
+
+export interface HandCardSlotProps {
+  card: CardData;
+  index: number;
+  /** Exact rendered left edge inside `.hand-cards`. */
+  cardX: number;
+  /** Upward raise in px (`0` resting, `9` playable, `18` selected). */
+  liftPx: number;
+  /** GPU-composited horizontal parting delta in px. */
+  deltaX: number;
+  partDirection?: 'left' | 'right' | 'none';
+  collapsed: boolean;
+  dragging: boolean;
+  draggable: boolean;
+  selected: boolean;
+  playable: boolean;
+  trump: boolean;
+  doubleClickBlocked: boolean;
+  hasCardClick: boolean;
+  hasCardDoubleClick: boolean;
+  marginLeft: string;
+  transform?: string;
+  api: { current: HandCardSlotApi | null };
+}
+
+/**
+ * T-90-feedback-20261123_020207-2: one memoized hand card slot.
+ *
+ * All layout is expressed as pure `transform: translate3d(...)` on a wrapper
+ * anchored at `left: 0`, and `<memo>` compares the primitive props from the
+ * previous render. A pointer sweep across a 30-card hand therefore repaints only
+ * the handful of cards whose local parting transform actually changed, and never
+ * the table arena, the opponents or the sidebars. Read live table state through
+ * the stable `api` handle so a skipped render can never use a stale callback.
+ */
+export const HandCardSlot = memo(function HandCardSlot({
+  card,
+  index,
+  cardX,
+  liftPx,
+  deltaX,
+  partDirection,
+  collapsed,
+  dragging,
+  draggable,
+  selected,
+  playable,
+  trump,
+  doubleClickBlocked,
+  hasCardClick,
+  hasCardDoubleClick,
+  marginLeft,
+  transform,
+  api,
+}: HandCardSlotProps) {
+  const live = () => api.current;
+  return (
+    <div
+      class="hand-slot hand-card-wrapper"
+      data-hidden="false"
+      data-index={index}
+      data-card-x={cardX}
+      data-card-y={-Math.round(liftPx)}
+      data-lift-px={Math.round(liftPx)}
+      // T-90-feedback-6 ITEM-6a: the exact GPU-composited horizontal parting
+      // delta applied to this card (`0` for the hovered card).
+      data-part-delta-x={deltaX}
+      data-eligible={playable ? 'true' : 'false'}
+      data-part-direction={partDirection}
+      data-collapsed={collapsed ? 'true' : 'false'}
+      // ITEM-5: the click-selected throw-in / attack cards are marked on the
+      // wrapper as well as on the card itself.
+      data-selected={selected ? 'true' : 'false'}
+      // T-90-feedback-2 ITEM-3: the dragged wrapper keeps `data-dragging` and a
+      // live `translate3d`; it is never hidden or clipped.
+      data-dragging={dragging ? 'true' : 'false'}
+      data-draggable={draggable ? 'true' : 'false'}
+      // ITEM-7: the wrapper never starts a native HTML5 drag, so the browser can
+      // never swap the pointer finger for its arrow.
+      draggable={false}
+      style={
+        dragging
+          ? { marginLeft, transform, zIndex: 1000, transition: 'none' }
+          : { marginLeft, transform }
+      }
+      onMouseDown={(event) => live()?.beginPointerDrag(card)(event)}
+      onPointerDown={(event) => live()?.beginPointerDrag(card)(event)}
+      // T-90-feedback-6 ITEM-3: a `dragstart` dispatched on the wrapper (not only
+      // the inner card) still opens the center-locked preview.
+      onDragStart={(event) => live()?.beginNativeDrag(card, event)}
+      onClickCapture={(event) => live()?.suppressClick(event)}
+    >
+      <Card
+        suit={card.suit}
+        rank={card.rank}
+        trump={trump}
+        selected={selected}
+        playable={playable}
+        onClick={
+          hasCardClick
+            ? (event: MouseEvent) => {
+                // ITEM-5: the second click of a double-click must never toggle
+                // the card back off before `onDoubleClick` fires.
+                if (event.detail >= 2) return;
+                live()?.onCardClick?.(card);
+              }
+            : undefined
+        }
+        onDoubleClick={
+          hasCardDoubleClick
+            ? () => {
+                // ITEM-CHAOS-1: several legal targets make a double-click
+                // ambiguous, so the player drags onto the wanted outline.
+                if (doubleClickBlocked) return;
+                live()?.onCardDoubleClick?.(card);
+              }
+            : undefined
+        }
+        draggable={false}
+        onDragStart={(event) => live()?.beginNativeDrag(card, event)}
+        onDragEnd={() => live()?.endNativeDrag()}
+      />
+    </div>
+  );
+});
 
 const SUIT_ORDER: Record<string, number> = {
   spades: 0,
@@ -1471,6 +1608,21 @@ export function GameTable({
   // T-90-feedback-5 ITEM-6a/6b: the hand card currently under the pointer, or
   // `null` when the pointer is outside the hand / a drag is running.
   const [hoveredCardIndex, setHoveredCardIndex] = useState<number | null>(null);
+  /**
+   * T-90-feedback-20261123_020207-2: `hoveredCardIndex` plus the request-animation
+   * -frame coalescing state. Pointer sweeps commit at most one leading and one
+   * trailing index per frame, and an unchanged resolved index never calls
+   * `setHoveredCardIndex`, so sub-pixel mouse movement cannot re-render React.
+   */
+  const hoveredCardIndexRef = useRef<number | null>(null);
+  const hoverFrameRef = useRef<number | null>(null);
+  const lastHoverEventRef = useRef<Event | null>(null);
+  /** Commits a resolved hover index only when it actually changed. */
+  const commitHoveredCardIndex = (index: number | null) => {
+    if (hoveredCardIndexRef.current === index) return;
+    hoveredCardIndexRef.current = index;
+    setHoveredCardIndex(index);
+  };
   const [handWidth, setHandWidth] = useState(0);
   // Live width of `[data-zone="table-arena"]`, i.e. the Option B maximal box.
   const [arenaWidth, setArenaWidth] = useState(0);
@@ -1504,6 +1656,8 @@ export function GameTable({
   const settings = useSettings();
 
   const hand = sortHand(myHand, sortMode, trumpSuit);
+  // T-90-feedback-20261123_020207-2: stable identity for the memoized geometry.
+  const handSignature = hand.map((card) => cardKey(card)).join('|');
 
   /**
    * Index of the hand card under a pointer event, or `null`.
@@ -1547,7 +1701,8 @@ export function GameTable({
    */
   const handleHandPointerMove = (event: Event) => {
     if (dragCard !== null || hand.length <= 1) {
-      if (hoveredCardIndex !== null) setHoveredCardIndex(null);
+      lastHoverEventRef.current = null;
+      commitHoveredCardIndex(null);
       return;
     }
     const index = handPointerIndex(event);
@@ -1556,11 +1711,40 @@ export function GameTable({
     // flickering the row closed while the cursor is still inside the hand;
     // only the hand container's `pointerleave` / `mouseleave` resets it.
     if (index === null) return;
-    if (index !== hoveredCardIndex) setHoveredCardIndex(index);
+    lastHoverEventRef.current = event;
+    // T-90-feedback-20261123_020207-2: dedupe — sub-pixel mouse movement that
+    // still resolves to the same card does no state work at all.
+    if (index === hoveredCardIndexRef.current) return;
+    // Leading edge: the first resolved index of a frame applies immediately, so
+    // the local parting can never lag a frame behind the cursor.
+    commitHoveredCardIndex(index);
+    if (hoverFrameRef.current !== null) return;
+    if (typeof requestAnimationFrame !== 'function') return;
+    // Trailing edge: all remaining moves in this frame share one rAF pass, which
+    // re-resolves the resting row and commits only if it changed again.
+    hoverFrameRef.current = requestAnimationFrame(() => {
+      hoverFrameRef.current = null;
+      const last = lastHoverEventRef.current;
+      if (!last) return;
+      const resolved = handPointerIndex(last);
+      if (resolved !== null) commitHoveredCardIndex(resolved);
+    });
   };
   const clearHandHover = () => {
-    if (hoveredCardIndex !== null) setHoveredCardIndex(null);
+    lastHoverEventRef.current = null;
+    commitHoveredCardIndex(null);
   };
+  // T-90-feedback-20261123_020207-2: never let a pending hover frame outlive the
+  // table (a stale commit after unmount would touch a dead component tree).
+  useEffect(
+    () => () => {
+      if (hoverFrameRef.current !== null && typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(hoverFrameRef.current);
+      }
+      hoverFrameRef.current = null;
+    },
+    [],
+  );
   /**
    * T-90-feedback-6 ITEM-3: moves the floating preview so its exact centre is
    * `(clientX, clientY)`. The transform is written directly on the node (no
@@ -1727,7 +1911,22 @@ export function GameTable({
       minVisibleStripPx: CARD_INDEX_STRIP_WIDTH_PX,
       maximalBoxWidth,
     });
-  const handLayoutState = buildHandLayoutState(hand.length);
+  // T-90-feedback-20261123_020207-2: resting geometry is recomputed only when
+  // the hand, its measured lane or its playable/selected tiers change — never on
+  // a hover frame.
+  const handLayoutState = useMemo(
+    () => buildHandLayoutState(hand.length),
+    [
+      hand.length,
+      handSignature,
+      handAvailableWidth,
+      cardWidth,
+      cardHeight,
+      maximalBoxWidth,
+      activePlayableKeys.join('|'),
+      selectedKeys.join('|'),
+    ],
+  );
 
   // T-90-2 ITEM-6a: while a card is dragged out of the hand, the remaining
   // N - 1 cards compact into the sequence without it, so the original slot
@@ -1738,9 +1937,22 @@ export function GameTable({
       ? hand.findIndex((candidate) => cardKey(candidate) === cardKey(dragCard))
       : -1;
   const gapClosed = draggedCardIndex >= 0;
-  const compactHandLayoutState = gapClosed
-    ? buildHandLayoutState(Math.max(0, hand.length - 1))
-    : handLayoutState;
+  const compactHandLayoutState = useMemo(
+    () =>
+      gapClosed ? buildHandLayoutState(Math.max(0, hand.length - 1)) : handLayoutState,
+    [
+      gapClosed,
+      hand.length,
+      handSignature,
+      handAvailableWidth,
+      cardWidth,
+      cardHeight,
+      maximalBoxWidth,
+      activePlayableKeys.join('|'),
+      selectedKeys.join('|'),
+      handLayoutState,
+    ],
+  );
   const activeHandLayoutState = gapClosed ? compactHandLayoutState : handLayoutState;
   const compactCardPositions = compactHandLayoutState.cardPositions;
   // ITEM-3/ITEM-5b: the exact left edge of every card in the row currently
@@ -1777,14 +1989,23 @@ export function GameTable({
   // solver pins the hovered card's own left edge.
   const partingActive =
     dragCard === null && hand.length > 1 && hoveredCardIndex !== null;
-  const renderedCardPositions: readonly number[] = partingActive
-    ? computePartedCardPositions(
+  // T-90-feedback-20261123_020207-2: one localized parting solve per hovered
+  // index. `baseCardPositions` is rebuilt each render, so its exact values are
+  // the memo key; only the cards around the cursor can receive a non-zero delta.
+  const basePositionsKey = baseCardPositions.join(',');
+  const partedCardLayout = useMemo(
+    () =>
+      computePartedCardLayout(
         baseCardPositions,
         cardWidth,
         maximalBoxWidth,
-        hoveredCardIndex,
+        partingActive ? hoveredCardIndex : null,
         CARD_INDEX_STRIP_WIDTH_PX,
-      )
+      ),
+    [basePositionsKey, cardWidth, maximalBoxWidth, partingActive, hoveredCardIndex],
+  );
+  const renderedCardPositions: readonly number[] = partingActive
+    ? partedCardLayout.positions
     : baseCardPositions;
   // ITEM-8: two vertical tiers — eligible cards rise halfway, selected cards
   // rise fully, everything else stays at the baseline.
@@ -1804,7 +2025,13 @@ export function GameTable({
   const contourCards = gapClosed
     ? handCardPositions.filter((_, index) => index !== draggedCardIndex)
     : handCardPositions;
-  const handContour = computeHandContour(contourCards, cardWidth, cardHeight);
+  // T-90-feedback-20261123_020207-2: the contour trace is the most expensive
+  // per-frame geometry; it only reruns when a card actually moved.
+  const contourKey = contourCards.map((card) => `${card.x},${card.y}`).join(';');
+  const handContour = useMemo(
+    () => computeHandContour(contourCards, cardWidth, cardHeight),
+    [contourKey, cardWidth, cardHeight],
+  );
   const totalHandWidth = activeHandLayoutState.totalWidth;
   // ITEM-5a: the row is never scaled down any more — the Option B geometry
   // compresses the overlap instead, so the cards keep their exact footprint.
@@ -2106,7 +2333,7 @@ export function GameTable({
         }
         pointer.active = true;
         setDragCard(pointer.card);
-        setHoveredCardIndex(null);
+        commitHoveredCardIndex(null);
       }
       // T-90-feedback-5 ITEM-3: store the live viewport pointer position only.
       // The translate is derived from the captured grab offset at render time,
@@ -2457,7 +2684,7 @@ export function GameTable({
       : dragPreviewPosRef.current ?? { x: cardWidth / 2, y: cardHeight / 2 };
     dragPreviewPosRef.current = nextPos;
     moveDragPreview(nextPos.x, nextPos.y);
-    setHoveredCardIndex(null);
+    commitHoveredCardIndex(null);
     setDragCard(card);
     setDragPointer({ x: nextPos.x, y: nextPos.y });
   };
@@ -2497,13 +2724,47 @@ export function GameTable({
       x: Number.isFinite(event.clientX) ? event.clientX : cardWidth / 2,
       y: Number.isFinite(event.clientY) ? event.clientY : cardHeight / 2,
     };
-    setHoveredCardIndex(null);
+    commitHoveredCardIndex(null);
     pointerDragRef.current = {
       card,
       startX: event.clientX,
       startY: event.clientY,
       active: false,
     };
+  };
+
+  /** ITEM-5: the click that follows a completed drag never selects the card. */
+  const handleSlotClickCapture = (event: Event) => {
+    if (!suppressClickRef.current) return;
+    suppressClickRef.current = false;
+    event.stopPropagation();
+    event.preventDefault();
+  };
+
+  /** T-96: a finished native drag clears every transient drag surface. */
+  const endSlotNativeDrag = () => {
+    nativeDragEventRef.current = null;
+    nativeDragCancelledRef.current = false;
+    setDragCard(null);
+    setDragPointer(null);
+    setSnapZone(null);
+    setReorderIndex(null);
+  };
+
+  /**
+   * T-90-feedback-20261123_020207-2: stable handle for the memoized hand slots.
+   * Its identity never changes, while every callback still reads the latest
+   * table state, so a skipped slot render can never freeze the drag/hover
+   * behaviour it drives.
+   */
+  const handSlotApiRef = useRef<HandCardSlotApi | null>(null);
+  handSlotApiRef.current = {
+    beginPointerDrag,
+    beginNativeDrag,
+    onCardClick,
+    onCardDoubleClick,
+    suppressClick: handleSlotClickCapture,
+    endNativeDrag: endSlotNativeDrag,
   };
 
   // T-90-4 ITEM-1b/1c: every covered pair is pinned to the defender's edge and
@@ -3033,140 +3294,61 @@ export function GameTable({
         {/* ITEM-3: the contour and the card row share one CSS Grid cell, so the
             outline layers tightly over the exact hand pixels. */}
         <div class="hand-row" data-testid="hand-row">
-        {hand.map((card, index) => {
-          // Option B renders every card in the hand; nothing is ever hidden.
-          const hidden = false;
-          const draggedIndex = dragCard
-            ? hand.findIndex((candidate) => cardKey(candidate) === cardKey(dragCard))
-            : -1;
-          // ITEM-6a: compare every other card's index among the remaining
-          // cards with the insertion slot — cards left of it shift left,
-          // cards at or right of it shift right, even for a no-op slot.
-          const effectiveIndex =
-            draggedIndex >= 0 && index > draggedIndex ? index - 1 : index;
-          const partDirection =
-            dragCard === null || index === draggedIndex
-              ? undefined
-              : reorderIndex === null
-                ? 'none'
-                : effectiveIndex < reorderIndex
-                  ? 'left'
-                  : 'right';
-          const baseX = baseCardPositions[index] ?? 0;
-          const renderedX = handCardPositions[index]?.x ?? baseX;
-          const lift = -handCardPositions[index]?.y!;
-          const deltaX = Math.round((renderedX - baseX) * 100) / 100;
-          return (
-            <div
-              key={`${cardKey(card)}-${index}`}
-              class="hand-slot hand-card-wrapper"
-              data-hidden={hidden ? 'true' : 'false'}
-              data-index={index}
-              data-card-x={handCardPositions[index].x}
-              data-card-y={Math.round(handCardPositions[index].y)}
-              data-lift-px={Math.round(-handCardPositions[index].y)}
-              // T-90-feedback-6 ITEM-6a: the exact GPU-composited horizontal
-              // parting delta applied to this card (`0` for the hovered card).
-              data-part-delta-x={deltaX}
-              data-eligible={
-                !reviewMode && activePlayableKeys.includes(cardKey(card))
-                  ? 'true'
-                  : 'false'
-              }
-              data-part-direction={partDirection}
-              data-collapsed={index === draggedCardIndex ? 'true' : 'false'}
-              // ITEM-5: the click-selected throw-in / attack cards are marked
-              // on the wrapper as well as on the card itself.
-              data-selected={selectedKeys.includes(cardKey(card)) ? 'true' : 'false'}
-              // T-90-feedback-2 ITEM-3: the dragged wrapper keeps `data-dragging`
-              // and a live `translate3d`; it is never hidden or clipped.
-              data-dragging={index === draggedCardIndex ? 'true' : 'false'}
-              data-draggable={draggable ? 'true' : 'false'}
-              // ITEM-7: the wrapper never starts a native HTML5 drag, so the
-              // browser can never swap the pointer finger for its arrow.
-              draggable={false}
-              aria-hidden={hidden ? 'true' : undefined}
-              style={(() => {
-                if (index === draggedCardIndex) {
-                  return {
-                    marginLeft: handSlotMargin(index),
-                    transform: draggedTransform,
-                    zIndex: 1000,
-                    // Zero lag: the dragged card must not animate behind the
-                    // pointer.
-                    transition: 'none',
-                  };
-                }
-                return {
-                  marginLeft: handSlotMargin(index),
-                  // ITEM-6a/6b/8: hover-parting offsets and the two-tier raise
-                  // are pure GPU-friendly transforms, so CSS can animate them.
-                  transform:
-                    deltaX !== 0 || lift !== 0
-                      ? `translate3d(${deltaX}px, ${-lift}px, 0)`
-                      : undefined,
-                };
-              })()}
-              onMouseDown={beginPointerDrag(card)}
-              onPointerDown={beginPointerDrag(card)}
-              // T-90-feedback-6 ITEM-3: a `dragstart` dispatched on the wrapper
-              // (not only the inner card) still opens the center-locked preview.
-              onDragStart={(event) => beginNativeDrag(card, event)}
-              onClickCapture={(event) => {
-                if (!suppressClickRef.current) return;
-                suppressClickRef.current = false;
-                event.stopPropagation();
-                event.preventDefault();
-              }}
-            >
-              <Card
-                suit={card.suit}
-                rank={card.rank}
-                trump={isTrumpCard(card, trumpSuit)}
+          {hand.map((card, index) => {
+            // Option B renders every card in the hand; nothing is ever hidden.
+            const draggedIndex = dragCard
+              ? hand.findIndex((candidate) => cardKey(candidate) === cardKey(dragCard))
+              : -1;
+            // ITEM-6a: compare every other card's index among the remaining
+            // cards with the insertion slot — cards left of it shift left,
+            // cards at or right of it shift right, even for a no-op slot.
+            const effectiveIndex =
+              draggedIndex >= 0 && index > draggedIndex ? index - 1 : index;
+            const partDirection: 'left' | 'right' | 'none' | undefined =
+              dragCard === null || index === draggedIndex
+                ? undefined
+                : reorderIndex === null
+                  ? 'none'
+                  : effectiveIndex < reorderIndex
+                    ? 'left'
+                    : 'right';
+            const baseX = baseCardPositions[index] ?? 0;
+            const renderedX = handCardPositions[index]?.x ?? baseX;
+            const lift = -handCardPositions[index]?.y!;
+            const deltaX = Math.round((renderedX - baseX) * 100) / 100;
+            const dragging = index === draggedCardIndex;
+            return (
+              <HandCardSlot
+                key={`${cardKey(card)}-${index}`}
+                card={card}
+                index={index}
+                cardX={renderedX}
+                liftPx={lift}
+                deltaX={deltaX}
+                partDirection={partDirection}
+                collapsed={dragging}
+                dragging={dragging}
+                draggable={draggable}
                 selected={selectedKeys.includes(cardKey(card))}
                 playable={activePlayableKeys.includes(cardKey(card))}
-                onClick={
-                  onCardClick
-                    ? (event: MouseEvent) => {
-                        // ITEM-5: the second click of a double-click must never
-                        // toggle the card back off before `onDoubleClick` fires.
-                        if (event.detail >= 2) return;
-                        onCardClick(card);
-                      }
-                    : undefined
+                trump={isTrumpCard(card, trumpSuit)}
+                doubleClickBlocked={
+                  awaitingAttack && tablePairs.length === 0 && targetIds.length > 1
                 }
-                onDoubleClick={
-                  !reviewMode && onCardDoubleClick
-                    ? () => {
-                        // ITEM-CHAOS-1: several legal targets make a double-click
-                        // ambiguous, so the player drags onto the wanted outline.
-                        if (
-                          awaitingAttack &&
-                          tablePairs.length === 0 &&
-                          targetIds.length > 1
-                        ) {
-                          return;
-                        }
-                        onCardDoubleClick(card);
-                      }
-                    : undefined
+                hasCardClick={Boolean(onCardClick)}
+                hasCardDoubleClick={!reviewMode && Boolean(onCardDoubleClick)}
+                marginLeft={handSlotMargin(index)}
+                transform={
+                  dragging
+                    ? draggedTransform
+                    : deltaX !== 0 || lift !== 0
+                      ? cardTranslate3d(deltaX, -lift)
+                      : undefined
                 }
-                draggable={false}
-                onDragStart={(event) => beginNativeDrag(card, event)}
-                onDragEnd={() => {
-                  // T-96: a completed native drag also resets the once-per-event
-                  // guard, so the very next drag always opens its own preview.
-                  nativeDragEventRef.current = null;
-                  nativeDragCancelledRef.current = false;
-                  setDragCard(null);
-                  setDragPointer(null);
-                  setSnapZone(null);
-                  setReorderIndex(null);
-                }}
+                api={handSlotApiRef}
               />
-            </div>
-          );
-        })}
+            );
+          })}
         </div>
         </div>
       </section>
