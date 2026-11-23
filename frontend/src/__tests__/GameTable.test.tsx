@@ -4007,6 +4007,44 @@ describe('T-90-4: larger cards, aura containment, throw-in slot, hand reorder an
     expect(document.body.hasAttribute('data-dragging')).toBe(false);
   });
 
+  it('T-96: resting cards report direction none and pointerenter never parts the hand', () => {
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={[fourPlayerOpponents[0]]}
+        tablePairs={[]}
+        trumpSuit="diamonds"
+        defenderId="p1"
+      />,
+    );
+    const handBox = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+    const wrappers = Array.from(
+      handBox.querySelectorAll('.hand-card-wrapper'),
+    ) as HTMLElement[];
+
+    expect(wrappers.map((node) => node.getAttribute('data-part-delta-x'))).toEqual([
+      '0',
+      '0',
+      '0',
+    ]);
+    expect(wrappers.map((node) => node.getAttribute('data-part-direction'))).toEqual([
+      'none',
+      'none',
+      'none',
+    ]);
+
+    fireEvent.pointerEnter(handBox, { bubbles: true });
+    const zone = document.querySelector('[data-zone="player-hand"]') as HTMLElement;
+    expect(zone.getAttribute('data-parting-active')).toBe('false');
+    expect(zone.getAttribute('data-hovered-card-index')).toBeNull();
+    expect(wrappers.map((node) => node.getAttribute('data-part-direction'))).toEqual([
+      'none',
+      'none',
+      'none',
+    ]);
+  });
+
   it('ITEM-10b: renders low-detail opponent cards with symmetrical trump badges', () => {
     render(
       <GameTable

@@ -1724,6 +1724,25 @@ export function GameTable({
       commitHoveredCardIndex(null);
       return;
     }
+    // T-96: a pointer that arrives in the lane from the lobby (or parks in the
+    // reserved timer clearance above the cards) must never part the hand. Only
+    // moves inside the real card row's vertical bounds are hover moves; jsdom's
+    // zero-sized box keeps the unit-test fallback path untouched.
+    const pointer = event as MouseEvent;
+    const box = handRef.current;
+    const rect =
+      box && typeof box.getBoundingClientRect === 'function'
+        ? box.getBoundingClientRect()
+        : null;
+    if (
+      rect &&
+      rect.width > 0 &&
+      rect.height > 0 &&
+      Number.isFinite(pointer.clientY) &&
+      (pointer.clientY < rect.top - SELECTED_LIFT_PX || pointer.clientY > rect.bottom)
+    ) {
+      return;
+    }
     const index = handPointerIndex(event);
     // T-90-feedback-6 ITEM-6a: moves over the parted gaps, the contour SVG or
     // the timer band resolve to no card. Keep the last hovered card instead of
@@ -3271,7 +3290,8 @@ export function GameTable({
           '--hand-contour-padding': `${HAND_CONTOUR_PADDING}px`,
         }}
         ref={handZoneRef}
-        onPointerEnter={handleHandPointerMove}
+        // T-96: never bind `pointerenter` — a stationary pointer left over the
+        // lane by the lobby's QA preset button would part the hand on mount.
         onPointerMove={handleHandPointerMove}
         onPointerLeave={clearHandHover}
         // T-90-feedback-6 ITEM-6a: standard mouse sweeps are tracked on the
@@ -3409,18 +3429,29 @@ export function GameTable({
             // cards at or right of it shift right, even for a no-op slot.
             const effectiveIndex =
               draggedIndex >= 0 && index > draggedIndex ? index - 1 : index;
-            const partDirection: 'left' | 'right' | 'none' | undefined =
-              dragCard === null || index === draggedIndex
-                ? undefined
-                : reorderIndex === null
-                  ? 'none'
-                  : effectiveIndex < reorderIndex
-                    ? 'left'
-                    : 'right';
             const baseX = baseCardPositions[index] ?? 0;
             const renderedX = handCardPositions[index]?.x ?? baseX;
             const lift = -handCardPositions[index]?.y!;
             const deltaX = Math.round((renderedX - baseX) * 100) / 100;
+            // T-96: with no drag in flight, `data-part-direction` is a pure
+            // hint derived from the live parting delta — resting, single-card,
+            // hovered and distant cards report `none`, parted neighbours the
+            // direction they actually moved. During a drag the source slot
+            // stays attribute-less and the remaining cards report their slot.
+            const partDirection: 'left' | 'right' | 'none' | undefined =
+              dragCard === null
+                ? deltaX < 0
+                  ? 'left'
+                  : deltaX > 0
+                    ? 'right'
+                    : 'none'
+                : index === draggedIndex
+                  ? undefined
+                  : reorderIndex === null
+                    ? 'none'
+                    : effectiveIndex < reorderIndex
+                      ? 'left'
+                      : 'right';
             const dragging = index === draggedCardIndex;
             return (
               <HandCardSlot
