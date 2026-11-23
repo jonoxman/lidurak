@@ -456,18 +456,23 @@ class PresetSuite extends munit.FunSuite:
     // Dave defends from `top-right` of Alice's view: covered pairs snap right.
     assertEquals(alice.defenderIdx, 3)
     assertEquals(alice.trumpSuit, Suit.Hearts)
-    assertEquals(alice.tablePairs.size, 5)
-    assertEquals(alice.tablePairs.count(_.defense.isDefined), 3)
+    assertEquals(alice.tablePairs.size, 4)
+    assertEquals(alice.tablePairs.count(_.defense.isDefined), 2)
     assertEquals(alice.tablePairs.count(_.defense.isEmpty), 2)
     // A covered ten keeps its full rank and suit readable in the collapsed stack.
     assertEquals(
       alice.tablePairs.count(pair => pair.attack.rank == Rank.Ten && pair.defense.isDefined),
       1
     )
-    // The attacker holds a matching rank for the sixth-card throw-in.
+    // The attacker holds both matching ranks, and both fit under the bout cap.
     assert(alice.myHand.contains(Card(Suit.Clubs, Rank.Seven)), alice.myHand.toString)
-    // Two throw-in matches, but only one free slot under maxBoutAttacks = 6.
-    assertEquals(alice.throwInCapacity, 1)
+    assert(alice.myHand.contains(Card(Suit.Hearts, Rank.Eight)), alice.myHand.toString)
+    assertEquals(
+      alice.throwInCards,
+      List(Card(Suit.Clubs, Rank.Seven), Card(Suit.Hearts, Rank.Eight))
+    )
+    // `maxBoutAttacks = 6` with four cards on the table leaves two free slots.
+    assertEquals(alice.throwInCapacity, 2)
     assertEquals(alice.legalActions, List("throwIn"))
     assertEquals(alice.turnPlayerId, Some("p3"))
     assert(alice.turnDeadlineMs > 0L, alice.turnDeadlineMs.toString)
@@ -479,7 +484,7 @@ class PresetSuite extends munit.FunSuite:
     assertEquals(dave.myName, "Dave")
     assertEquals(dave.defenderIdx, 3)
     assertEquals(dave.attackerIdx, 0)
-    assert(dave.myHand.size >= 3, dave.myHand.toString)
+    assert(dave.myHand.size == 4, dave.myHand.toString)
     // Dave can cover both uncovered attacks, so a cover visibly snaps to an edge.
     val uncovered = alice.tablePairs.filter(_.defense.isEmpty).map(_.attack)
     assertEquals(uncovered.size, 2)
@@ -495,7 +500,7 @@ class PresetSuite extends munit.FunSuite:
     // The whole 52-card deck is conserved across hands, table and talon.
     val state = assertConserved(manager, gameId, 52)
     assertEquals(state.players.map(_.hand.size), Vector(6, 6, 6, 4))
-    assertEquals(state.tablePairs.size, 5)
+    assertEquals(state.tablePairs.size, 4)
 
     // Covering an uncovered card keeps the pair count and adds a defense.
     val (coverStatus, coverJson) = post(
@@ -528,8 +533,101 @@ class PresetSuite extends munit.FunSuite:
     val after = throwJson
       .as[PlayerGameView]
       .getOrElse(fail(s"invalid view body: ${throwJson.noSpaces}"))
-    assertEquals(after.tablePairs.size, 6)
+    assertEquals(after.tablePairs.size, 5)
     assertEquals(after.myHand.size, 5)
+  }
+
+  test("qa-table-collapse-right throws in both matching cards one after another") {
+    val manager = newManager
+    val (gameId, _) = startPreset(manager, "qa-table-collapse-right")
+
+    val sevenClubs = Card(Suit.Clubs, Rank.Seven)
+    val eightHearts = Card(Suit.Hearts, Rank.Eight)
+
+    val alice = view(manager, gameId, "p0")
+    // ITEM-NEW1: Dave holds four cards and only four bout slots are taken, so
+    // both matching cards are legal from the first frame.
+    assertEquals(alice.opponents.find(_.id == "p3").map(_.cardCount), Some(4))
+    assertEquals(alice.tablePairs.size, 4)
+    assertEquals(alice.tablePairs.count(_.defense.isEmpty), 2)
+    assertEquals(
+      alice.myHand,
+      List(
+        sevenClubs,
+        eightHearts,
+        Card(Suit.Spades, Rank.Two),
+        Card(Suit.Spades, Rank.Three),
+        Card(Suit.Spades, Rank.Four),
+        Card(Suit.Spades, Rank.Five)
+      )
+    )
+    assertEquals(alice.throwInCards, List(sevenClubs, eightHearts))
+    assertEquals(alice.throwInCapacity, 2)
+    assertEquals(alice.canThrowIn, true)
+
+    def throwIn(cards: List[Card]): PlayerGameView =
+      val (status, json) = post(
+        manager,
+        s"/api/games/$gameId/action",
+        Json.obj(
+          "type" -> "throwInCards".asJson,
+          "playerId" -> "p0".asJson,
+          "cards" -> cards.asJson
+        )
+      )
+      assertEquals(status, Status.Ok, json.noSpaces)
+      json.as[PlayerGameView].getOrElse(fail(s"invalid view body: ${json.noSpaces}"))
+
+    // The first card lands while the defender still answers two uncovered attacks.
+    val afterFirst = throwIn(List(sevenClubs))
+    assertEquals(afterFirst.tablePairs.size, 5)
+    assertEquals(afterFirst.tablePairs.count(_.defense.isEmpty), 3)
+    assertEquals(afterFirst.myHand.size, 5)
+    // The second valid card stays listed and playable right after the first move.
+    assertEquals(afterFirst.canThrowIn, true)
+    assertEquals(afterFirst.throwInCapacity, 1)
+    assertEquals(afterFirst.throwInCards, List(eightHearts))
+    assert(afterFirst.legalActions.contains("throwIn"), afterFirst.legalActions.toString)
+
+    // ... and submitting it succeeds, filling the six-card bout ceiling.
+    val afterSecond = throwIn(List(eightHearts))
+    assertEquals(afterSecond.tablePairs.size, 6)
+    assertEquals(
+      afterSecond.tablePairs.map(_.attack).takeRight(2),
+      Vector(sevenClubs, eightHearts)
+    )
+    assertEquals(afterSecond.myHand.size, 4)
+    assertEquals(afterSecond.tablePairs.size, afterSecond.maxBoutAttacks)
+    assertEquals(afterSecond.canThrowIn, false)
+    assertEquals(afterSecond.throwInCapacity, 0)
+    assertEquals(afterSecond.throwInCards, Nil)
+    assertEquals(
+      assertConserved(manager, gameId, 52).players.map(_.hand.size),
+      Vector(4, 6, 6, 4)
+    )
+
+    // A fresh copy of the same scenario also accepts both cards in one action.
+    val (batchId, _) = startPreset(manager, "qa-table-collapse-right")
+    val (batchStatus, batchJson) = post(
+      manager,
+      s"/api/games/$batchId/action",
+      Json.obj(
+        "type" -> "throwInCards".asJson,
+        "playerId" -> "p0".asJson,
+        "cards" -> List(sevenClubs, eightHearts).asJson
+      )
+    )
+    assertEquals(batchStatus, Status.Ok, batchJson.noSpaces)
+    val batched = batchJson
+      .as[PlayerGameView]
+      .getOrElse(fail(s"invalid view body: ${batchJson.noSpaces}"))
+    assertEquals(batched.tablePairs.size, 6)
+    assertEquals(
+      batched.tablePairs.map(_.attack).takeRight(2),
+      Vector(sevenClubs, eightHearts)
+    )
+    assertEquals(batched.myHand.size, 4)
+    assertEquals(batched.canThrowIn, false)
   }
 
   test("qa-surrender-timer arms the clock on the surrendering active defender") {
