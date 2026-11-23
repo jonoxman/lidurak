@@ -71,6 +71,13 @@ let socketHandlers: import('../api/lobbyClient').LobbySocketHandlers | null = nu
 
 const renderLobby = () => render(<LobbyPage initialServerReady />);
 
+/** The SPA opens M2 rooms with the History API, never a hash route. */
+const expectGamePath = (gameId: string) =>
+  waitFor(() => {
+    expect(window.location.pathname).toBe(`/g/${gameId}`);
+    expect(window.location.hash).toBe('');
+  });
+
 const openPoolTab = async () => {
   fireEvent.click(screen.getByRole('tab', { name: /Lobby Pool/ }));
   await waitFor(() => expect(socketHandlers).not.toBeNull());
@@ -79,6 +86,7 @@ const openPoolTab = async () => {
 describe('M2 LobbyPage', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    window.history.replaceState({}, '', '/');
     window.location.hash = '';
     socketHandlers = null;
 
@@ -160,7 +168,8 @@ describe('M2 LobbyPage', () => {
         allowRedirect: true,
       }),
     );
-    await waitFor(() => expect(window.location.hash).toBe('#/g/qp-1'));
+    await waitFor(() => expect(window.location.pathname).toBe('/g/qp-1'));
+    expect(window.location.hash).toBe('');
   });
 
   it('shows a searching state whose Cancel leaves the pairing queue', async () => {
@@ -197,7 +206,7 @@ describe('M2 LobbyPage', () => {
 
     fireEvent.click(within(row).getByRole('button', { name: 'Join' }));
     await waitFor(() => expect(joinRoom).toHaveBeenCalledWith('room-1'));
-    await waitFor(() => expect(window.location.hash).toBe('#/g/room-1'));
+    await expectGamePath('room-1');
   });
 
   it('updates the pool from live LobbyUpdated frames', async () => {
@@ -245,7 +254,7 @@ describe('M2 LobbyPage', () => {
         isPublic: true,
       }),
     );
-    await waitFor(() => expect(window.location.hash).toBe('#/g/inv-1'));
+    await expectGamePath('inv-1');
   });
 
   it('seeds the lobby pool and switches to the Lobby Pool tab', async () => {
@@ -274,16 +283,16 @@ describe('M2 LobbyPage', () => {
         isPublic: true,
       }),
     );
-    await waitFor(() => expect(window.location.hash).toBe('#/g/inv-1'));
-    window.location.hash = '';
+    await expectGamePath('inv-1');
+    window.history.replaceState({}, '', '/');
 
     await waitFor(() =>
       expect((screen.getByTestId('qa-active-match') as HTMLButtonElement).disabled).toBe(false),
     );
     fireEvent.click(screen.getByTestId('qa-active-match'));
     await waitFor(() => expect(createActiveMatchPreset).toHaveBeenCalledWith(2));
-    await waitFor(() => expect(window.location.hash).toBe('#/g/active-1'));
-    window.location.hash = '';
+    await expectGamePath('active-1');
+    window.history.replaceState({}, '', '/');
 
     await waitFor(() =>
       expect(
@@ -292,7 +301,7 @@ describe('M2 LobbyPage', () => {
     );
     fireEvent.click(screen.getByTestId('qa-spectator-match'));
     await waitFor(() => expect(createSpectatorMatchPreset).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(window.location.hash).toBe('#/g/spec-1'));
+    await expectGamePath('spec-1');
   });
 
   it('keeps the existing local game editor available below the M2 lobby', () => {

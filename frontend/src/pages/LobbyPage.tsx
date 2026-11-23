@@ -12,6 +12,7 @@ import { CreateInviteTab } from '../components/lobby/CreateInviteTab';
 import { LobbyPoolTab } from '../components/lobby/LobbyPoolTab';
 import { QaLobbyPresets } from '../components/lobby/QaLobbyPresets';
 import { QuickPairingTab } from '../components/lobby/QuickPairingTab';
+import { navigateToGame } from '../router/useRoute';
 import type { PlayerType } from '../types';
 import type { GuestSession, LobbyRoomSummary, SocketStatus } from '../types/multiplayer';
 import '../styles/table.css';
@@ -61,9 +62,12 @@ function isServerWarmupFailure(reason: unknown): boolean {
   return WARMUP_STATUS.test(reason.message);
 }
 
-/** Opens a game table on the app's hash route (`#/g/:gameId`). */
+/**
+ * Opens a live M2 room at `/g/:gameId` through the History-API router, so the
+ * URL matches the backend's `inviteUrl` and survives a direct reload.
+ */
 function openGame(gameId: string): void {
-  window.location.hash = `#/g/${encodeURIComponent(gameId)}`;
+  navigateToGame(gameId);
 }
 
 /**

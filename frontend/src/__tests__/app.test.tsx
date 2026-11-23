@@ -12,10 +12,56 @@ vi.mock('../api/client', async (importOriginal) => {
   };
 });
 
+vi.mock('../api/sessionClient', () => ({
+  getOrCreateSession: vi.fn(async () => ({
+    playerId: 'guest-abcd1234',
+    displayName: 'Guest-AB12',
+    isGuest: true,
+  })),
+  updateGuestName: vi.fn(),
+}));
+
+vi.mock('../api/lobbyClient', () => ({
+  fetchLobbyRooms: vi.fn(async () => []),
+  fetchGameView: vi.fn(),
+  joinRoom: vi.fn(),
+  leaveRoom: vi.fn(),
+  connectLobbySocket: vi.fn(),
+  joinQuickPair: vi.fn(),
+  cancelQuickPair: vi.fn(),
+  createRoom: vi.fn(),
+  seedLobbyPreset: vi.fn(),
+  createActiveMatchPreset: vi.fn(),
+  createSpectatorMatchPreset: vi.fn(),
+}));
+
+vi.mock('../api/gameSocket', () => ({
+  createGameSocket: vi.fn(() => ({
+    status: 'connected',
+    sendAction: vi.fn(),
+    dispose: vi.fn(),
+  })),
+}));
+
+vi.mock('../api/websocket', () => ({
+  GameWebSocket: class {
+    constructor() {}
+    connect(): void {}
+    disconnect(): void {}
+    isOpen(): boolean {
+      return false;
+    }
+    sendAction(): void {}
+    sendPresence(): void {}
+  },
+}));
+
 import * as client from '../api/client';
+import * as lobbyApi from '../api/lobbyClient';
 import { App, parseRoute } from '../app';
 import appCss from '../app.css?raw';
 import tableCss from '../styles/table.css?raw';
+import type { PlayerGameView } from '../types/multiplayer';
 
 /** Declarations of the first rule whose selector text contains `selector`. */
 function cssRule(css: string, selector: string): string {
@@ -27,10 +73,86 @@ function cssRule(css: string, selector: string): string {
 }
 
 const checkServerHealth = client.checkServerHealth as unknown as ReturnType<typeof vi.fn>;
+const getGameView = client.getGameView as unknown as ReturnType<typeof vi.fn>;
+const fetchGameView = lobbyApi.fetchGameView as unknown as ReturnType<typeof vi.fn>;
+
+/** A waiting-room projection, enough for the M2 page to render. */
+const WAITING_VIEW: PlayerGameView = {
+  gameId: 'room-42',
+  status: 'WaitingForPlayers',
+  config: {
+    playerCount: 2,
+    allowRedirect: true,
+    turnTimeoutSeconds: 15,
+    isPublic: true,
+  },
+  viewerId: 'guest-abcd1234',
+  viewerSeat: 0,
+  hand: [],
+  players: [],
+  seats: [
+    {
+      seatIndex: 0,
+      playerId: 'guest-abcd1234',
+      displayName: 'Guest-AB12',
+      isConnected: true,
+    },
+    { seatIndex: 1, playerId: null, displayName: null, isConnected: false },
+  ],
+  tablePairs: [],
+  talonCount: 0,
+  bottomTrumpCard: null,
+  trumpSuit: null,
+  discardCount: 0,
+  phase: null,
+  attackerIdx: null,
+  defenderIdx: null,
+  maxBoutAttacks: 6,
+  finishOrder: [],
+  isDraw: false,
+  durakId: null,
+  turnDeadlineEpochMs: null,
+};
 
 describe('App', () => {
   beforeEach(() => {
+    window.history.replaceState({}, '', '/');
+    window.location.hash = '';
+    getGameView.mockReset();
+    fetchGameView.mockReset();
+    fetchGameView.mockResolvedValue(WAITING_VIEW);
     checkServerHealth.mockResolvedValue(true);
+  });
+
+  it('routes /g/:gameId to the live multiplayer room', async () => {
+    window.history.replaceState({}, '', '/g/room-42');
+
+    render(<App />);
+
+    expect(await screen.findByTestId('multiplayer-game')).toBeTruthy();
+    expect(await screen.findByTestId('waiting-room')).toBeTruthy();
+    expect(screen.getByText('Room room-42')).toBeTruthy();
+    expect(fetchGameView).toHaveBeenCalledWith('room-42');
+  });
+
+  it('routes / to the lobby', async () => {
+    render(<App />);
+
+    expect(await screen.findByRole('button', { name: 'Create Game' })).toBeTruthy();
+    expect(screen.queryByTestId('multiplayer-game')).toBeNull();
+    expect(fetchGameView).not.toHaveBeenCalled();
+  });
+
+  it('keeps the M1 hash game route ahead of the History API', async () => {
+    window.history.replaceState({}, '', '/g/history-42');
+    window.location.hash = '#/g/local-1?player=p1';
+    getGameView.mockReturnValue(new Promise(() => {}));
+
+    render(<App />);
+
+    expect(await screen.findByText(/Loading game local-1/)).toBeTruthy();
+    expect(screen.queryByTestId('multiplayer-game')).toBeNull();
+    expect(fetchGameView).not.toHaveBeenCalled();
   });
 
   it('does not repeat the Lidurak title below the header bar', async () => {
