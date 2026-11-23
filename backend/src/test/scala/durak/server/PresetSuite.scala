@@ -14,11 +14,13 @@ import org.http4s.headers.`Content-Type`
 import scala.concurrent.duration.*
 
 /**
- * T-90-feedback-20261122_171451-1 ITEM-9: the QA Scenario Preset catalog of the
- * current QA round, i.e. exactly the four curated positions
- * (`qa-normal-6-actions`, `qa-medium-14-expand`, `qa-large-30-compress` and
- * `qa-single-card`). Every one of them must load a card-conserving, rule
- * compliant `GameState` with a live turn clock.
+ * T-90-feedback-20261122_171451-1 ITEM-9 plus the T-90 feedback round: the QA
+ * Scenario Preset catalog of the current QA round, i.e. the four curated
+ * positions (`qa-normal-6-actions`, `qa-medium-14-expand`,
+ * `qa-large-30-compress` and `qa-single-card`) and the two feedback positions
+ * (`qa-table-collapse-right` for covered-pair edge collapsing and
+ * `qa-surrender-timer` for the live surrender clock). Every one of them must
+ * load a card-conserving, rule compliant `GameState` with a live turn clock.
  */
 class PresetSuite extends munit.FunSuite:
 
@@ -93,14 +95,16 @@ class PresetSuite extends munit.FunSuite:
     assertEquals(allCards.distinct.size, deckSize, s"cards: $allCards")
     state
 
-  test("the preset catalog exposes only the four curated QA scenarios") {
+  test("the preset catalog exposes the four curated QA scenarios plus the two feedback positions") {
     assertEquals(
       GameManager.Presets,
       Vector(
         "qa-normal-6-actions",
         "qa-medium-14-expand",
         "qa-large-30-compress",
-        "qa-single-card"
+        "qa-single-card",
+        "qa-table-collapse-right",
+        "qa-surrender-timer"
       )
     )
 
@@ -424,6 +428,179 @@ class PresetSuite extends munit.FunSuite:
     assertEquals(after.myHand, List.empty)
     assertEquals(after.tablePairs.map(_.attack), Vector(Card(Suit.Spades, Rank.Ten)))
     assertEquals(after.boutPhase, BoutPhase.Defense)
+  }
+
+  test("qa-table-collapse-right starts the four-seat collapse table") {
+    val manager = newManager
+    val (gameId, json) = startPreset(manager, "qa-table-collapse-right")
+
+    assertEquals(json.hcursor.get[String]("defaultPlayerId").toOption, Some("p0"))
+    assertEquals(
+      json.hcursor.downField("players").as[List[Json]].map(_.size).toOption,
+      Some(4)
+    )
+    assertEquals(
+      json.hcursor.downField("playerTypes").as[List[String]].toOption,
+      Some(List("human", "human", "human", "human"))
+    )
+    assertEquals(json.hcursor.get[Boolean]("devMode").toOption, Some(true))
+
+    val alice = view(manager, gameId, "p0")
+
+    assertEquals(alice.myName, "Alice")
+    assertEquals(alice.myHand.size, 6)
+    assertEquals(alice.boutPhase, BoutPhase.Defense)
+    assertEquals(alice.attackerIdx, 0)
+    // Dave defends from `top-right` of Alice's view: covered pairs snap right.
+    assertEquals(alice.defenderIdx, 3)
+    assertEquals(alice.trumpSuit, Suit.Hearts)
+    assertEquals(alice.tablePairs.size, 5)
+    assertEquals(alice.tablePairs.count(_.defense.isDefined), 3)
+    assertEquals(alice.tablePairs.count(_.defense.isEmpty), 2)
+    // A covered ten keeps its full rank and suit readable in the collapsed stack.
+    assertEquals(
+      alice.tablePairs.count(pair => pair.attack.rank == Rank.Ten && pair.defense.isDefined),
+      1
+    )
+    // The attacker holds a matching rank for the sixth-card throw-in.
+    assert(alice.myHand.contains(Card(Suit.Clubs, Rank.Seven)), alice.myHand.toString)
+    // Two throw-in matches, but only one free slot under maxBoutAttacks = 6.
+    assertEquals(alice.throwInCapacity, 1)
+    assertEquals(alice.legalActions, List("throwIn"))
+    assertEquals(alice.turnPlayerId, Some("p3"))
+    assert(alice.turnDeadlineMs > 0L, alice.turnDeadlineMs.toString)
+    assert(alice.talonCount > 0, alice.talonCount.toString)
+    assertEquals(alice.bottomTrumpCard.map(_.suit), Some(Suit.Hearts))
+
+    // Every seat reads the same position, so a reviewer can switch the POV.
+    val dave = view(manager, gameId, "p3")
+    assertEquals(dave.myName, "Dave")
+    assertEquals(dave.defenderIdx, 3)
+    assertEquals(dave.attackerIdx, 0)
+    assert(dave.myHand.size >= 3, dave.myHand.toString)
+    // Dave can cover both uncovered attacks, so a cover visibly snaps to an edge.
+    val uncovered = alice.tablePairs.filter(_.defense.isEmpty).map(_.attack)
+    assertEquals(uncovered.size, 2)
+    uncovered.foreach { attack =>
+      assert(
+        dave.myHand.exists(_.covers(attack, dave.trumpSuit)),
+        s"Dave cannot cover $attack with ${dave.myHand}"
+      )
+    }
+    assertEquals(view(manager, gameId, "p1").myName, "Bob")
+    assertEquals(view(manager, gameId, "p2").myName, "Carol")
+
+    // The whole 52-card deck is conserved across hands, table and talon.
+    val state = assertConserved(manager, gameId, 52)
+    assertEquals(state.players.map(_.hand.size), Vector(6, 6, 6, 4))
+    assertEquals(state.tablePairs.size, 5)
+
+    // Covering an uncovered card keeps the pair count and adds a defense.
+    val (coverStatus, coverJson) = post(
+      manager,
+      s"/api/games/$gameId/action",
+      Json.obj(
+        "type" -> "coverCard".asJson,
+        "playerId" -> "p3".asJson,
+        "attackIndex" -> 3.asJson,
+        "defenseCard" -> Card(Suit.Hearts, Rank.Nine).asJson
+      )
+    )
+    assertEquals(coverStatus, Status.Ok, coverJson.noSpaces)
+    assertEquals(
+      coverJson.as[PlayerGameView].map(_.tablePairs(3).defense),
+      Right(Some(Card(Suit.Hearts, Rank.Nine)))
+    )
+
+    // Alice throws in a sixth matching card, crowding the single row.
+    val (throwStatus, throwJson) = post(
+      manager,
+      s"/api/games/$gameId/action",
+      Json.obj(
+        "type" -> "throwInCards".asJson,
+        "playerId" -> "p0".asJson,
+        "cards" -> Json.arr(Card(Suit.Clubs, Rank.Seven).asJson)
+      )
+    )
+    assertEquals(throwStatus, Status.Ok, throwJson.noSpaces)
+    val after = throwJson
+      .as[PlayerGameView]
+      .getOrElse(fail(s"invalid view body: ${throwJson.noSpaces}"))
+    assertEquals(after.tablePairs.size, 6)
+    assertEquals(after.myHand.size, 5)
+  }
+
+  test("qa-surrender-timer arms the clock on the surrendering active defender") {
+    val manager = newManager
+    val (gameId, json) = startPresetPath(manager, "qa-surrender-timer")
+
+    assertEquals(json.hcursor.get[String]("defaultPlayerId").toOption, Some("p0"))
+    assertEquals(
+      json.hcursor.downField("players").as[List[Json]].map(_.size).toOption,
+      Some(3)
+    )
+    assertEquals(
+      json.hcursor.downField("playerTypes").as[List[String]].toOption,
+      Some(List("human", "human", "human"))
+    )
+
+    val alice = view(manager, gameId, "p0")
+    assertEquals(alice.myName, "Alice")
+    assertEquals(alice.myHand.size, 6)
+    assertEquals(alice.boutPhase, BoutPhase.SurrenderThrowIn)
+    assertEquals(alice.attackerIdx, 2)
+    // The active bottom user is the surrendering defender (ITEM-4).
+    assertEquals(alice.defenderIdx, 0)
+    assertEquals(alice.tablePairs.size, 4)
+    assertEquals(alice.tablePairs.count(_.defense.isDefined), 1)
+    assertEquals(alice.tablePairs.count(_.defense.isEmpty), 3)
+    // Bob and Carol keep the throw-in window open and the clock armed.
+    assertEquals(alice.promptedPlayerIds.toSet, Set("p1", "p2"))
+    assertEquals(alice.turnPlayerId, Some("p1"))
+    assert(alice.turnDeadlineMs > 0L, alice.turnDeadlineMs.toString)
+    assert(alice.turnSecondsRemaining > 0, alice.turnSecondsRemaining.toString)
+    // A surrendering defender has nothing left to play.
+    assertEquals(alice.legalActions, List.empty)
+    assertEquals(alice.canThrowIn, false)
+
+    val bob = view(manager, gameId, "p1")
+    assertEquals(bob.myHand.size, 6)
+    assertEquals(bob.throwInCapacity, 2)
+    assertEquals(
+      bob.throwInCards,
+      List(Card(Suit.Spades, Rank.Jack), Card(Suit.Hearts, Rank.Jack))
+    )
+    assert(bob.legalActions.contains("throwIn"), bob.legalActions.toString)
+    assert(bob.legalActions.contains("pass"), bob.legalActions.toString)
+    assert(bob.turnDeadlineMs > 0L, bob.turnDeadlineMs.toString)
+
+    val carol = view(manager, gameId, "p2")
+    assertEquals(carol.throwInCapacity, 1)
+    assertEquals(carol.throwInCards, List(Card(Suit.Diamonds, Rank.Jack)))
+
+    val state = assertConserved(manager, gameId, 36)
+    assertEquals(state.players.map(_.hand.size), Vector(6, 6, 6))
+    assertEquals(state.tablePairs.size, 4)
+    assertEquals(state.talon.size, 13)
+
+    // Carol throws in her matching jack while Alice keeps surrendering.
+    val (status, afterJson) = post(
+      manager,
+      s"/api/games/$gameId/action",
+      Json.obj(
+        "type" -> "throwInCards".asJson,
+        "playerId" -> "p2".asJson,
+        "cards" -> Json.arr(Card(Suit.Diamonds, Rank.Jack).asJson)
+      )
+    )
+    assertEquals(status, Status.Ok, afterJson.noSpaces)
+    val after = afterJson
+      .as[PlayerGameView]
+      .getOrElse(fail(s"invalid view body: ${afterJson.noSpaces}"))
+    assertEquals(after.boutPhase, BoutPhase.SurrenderThrowIn)
+    assertEquals(after.tablePairs.size, 5)
+    assertEquals(after.myHand.size, 5)
+    assert(after.turnDeadlineMs > 0L, after.turnDeadlineMs.toString)
   }
 
   test("POST /api/games reads chaosMode and opens every seat as a target") {
