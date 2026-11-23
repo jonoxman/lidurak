@@ -10,6 +10,7 @@ import {
   HAND_BASE_CARD_WIDTH,
   HAND_CONTOUR_CORNER_RADIUS,
   HAND_CONTOUR_PADDING,
+  handContourCornerRadius,
   HAND_HOVER_PARTING_RADIUS,
   HAND_MIN_OVERLAP_RATIO,
   HAND_SMALL_HAND_MAX_CARDS,
@@ -913,6 +914,25 @@ describe('T-90-feedback-20261122_171451-3 ITEM-8: two-tier lift', () => {
     expect(layout.maxLift).toBe(12);
     expect(layout.cards[0].y).toBe(8);
     expect(layout.cards[1].y).toBe(0);
+  });
+});
+
+describe('T-90-feedback-20261123_130625-2 ITEM-2: Roundness-bound contour radius', () => {
+  it('maps 0 to a sharp contour and the default/max settings to 12/24px', () => {
+    expect(handContourCornerRadius(0)).toBe(0);
+    expect(handContourCornerRadius(8)).toBe(HAND_CONTOUR_CORNER_RADIUS);
+    expect(handContourCornerRadius(16)).toBe(24);
+    expect(handContourCornerRadius(Number.NaN)).toBe(HAND_CONTOUR_CORNER_RADIUS);
+  });
+
+  it('traces the requested radius into the path arcs', () => {
+    const card: CardRect = { x: 0, y: 0, width: CARD_WIDTH, height: CARD_HEIGHT };
+    const sharp = buildHandContourPath([card], { cornerRadius: handContourCornerRadius(0) });
+    expect(sharp.pathD).not.toMatch(/A [\d.]/);
+    const rounded = buildHandContourPath([card], {
+      cornerRadius: handContourCornerRadius(16),
+    });
+    expect(rounded.pathD).toMatch(/A 24 24 /);
   });
 });
 

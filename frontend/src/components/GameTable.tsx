@@ -28,6 +28,8 @@ import {
   resolveDragInsertIndex,
   resolveHoveredCardIndex,
   getCardVerticalLiftPx,
+  handContourCornerRadius,
+  HAND_CONTOUR_CORNER_RADIUS,
   ELIGIBLE_LIFT_PX,
   SELECTED_LIFT_PX,
 } from '../utils/handLayout';
@@ -799,6 +801,7 @@ export function computeHandContour(
   cardWidth = HAND_CARD_WIDTH,
   cardHeight = HAND_CARD_HEIGHT,
   pad = HAND_CONTOUR_PADDING,
+  cornerRadius = HAND_CONTOUR_CORNER_RADIUS,
 ): HandContour {
   if (cards.length === 0) {
     return { d: '', left: 0, top: 0, width: 0, height: 0, nonRectangular: false };
@@ -814,7 +817,7 @@ export function computeHandContour(
       width: cardWidth,
       height: cardHeight,
     })),
-    { padding: pad },
+    { padding: pad, cornerRadius },
   );
   return {
     d: official.pathD,
@@ -832,8 +835,9 @@ export function handContourPath(
   cardWidth = HAND_CARD_WIDTH,
   cardHeight = HAND_CARD_HEIGHT,
   pad = HAND_CONTOUR_PADDING,
+  cornerRadius = HAND_CONTOUR_CORNER_RADIUS,
 ): string {
-  return computeHandContour(cards, cardWidth, cardHeight, pad).d;
+  return computeHandContour(cards, cardWidth, cardHeight, pad, cornerRadius).d;
 }
 
 /** ITEM-13: documented alias of [[handLayout]] used by the hand geometry spec. */
@@ -2103,9 +2107,13 @@ export function GameTable({
   // T-90-feedback-20261123_020207-2: the contour trace is the most expensive
   // per-frame geometry; it only reruns when a card actually moved.
   const contourKey = contourCards.map((card) => `${card.x},${card.y}`).join(';');
+  // T-90-feedback-20261123_130625-2 ITEM-2: the hand outline highlight's corner
+  // radius is derived from the Theme menu's Roundness slider, so it goes sharp
+  // at 0 and rounds up to 24px at the maximum 16 — live, like every panel.
+  const contourCornerRadius = handContourCornerRadius(settings.roundness);
   const handContour = useMemo(
-    () => computeHandContour(contourCards, cardWidth, cardHeight),
-    [contourKey, cardWidth, cardHeight],
+    () => computeHandContour(contourCards, cardWidth, cardHeight, undefined, contourCornerRadius),
+    [contourKey, cardWidth, cardHeight, contourCornerRadius],
   );
   const totalHandWidth = activeHandLayoutState.totalWidth;
   // ITEM-5a: the row is never scaled down any more — the Option B geometry
@@ -3392,6 +3400,7 @@ export function GameTable({
           data-testid="hand-highlight-contour"
           data-non-rectangular={handContour.nonRectangular ? 'true' : 'false'}
           data-contour-shape={handContour.nonRectangular ? 'stepped' : 'uniform'}
+          data-contour-radius={contourCornerRadius}
           data-contour-width={Math.round(totalHandWidth)}
           data-contour-rendered-width={Math.round(totalHandWidth * handFitScale)}
           width={handContour.width}
@@ -3400,7 +3409,9 @@ export function GameTable({
           style={{
             // The SVG is a CSS Grid layer (`grid-area: 1 / 1`) stacked over the
             // hand row; negative margins place it around the real card boxes
-            // without any absolute positioning.
+            // without any absolute positioning. The box radius mirrors the path
+            // radius for any future non-SVG clipping and stays Roundness-bound.
+            borderRadius: 'var(--app-roundness, 8px)',
             marginLeft: `${handContour.left}px`,
             marginTop: `${handContour.top}px`,
             width: `${handContour.width}px`,

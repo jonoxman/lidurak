@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, within } from '@testing-library/preact';
+import { act, fireEvent, render, screen, within } from '@testing-library/preact';
 import {
   GameTable,
   attackTargetIds,
@@ -2728,6 +2728,42 @@ describe('T-90-3 ITEM-NEW: compact single-row play area and roundness', () => {
     // ITEM-NEW-3: the CSS rule overrides the SVG presentation attribute, so it
     // must carry the same ornate serif stack as `CARD_SERIF_FONT_FAMILY`.
     expect(tableCss).toContain("'Cinzel', 'Playfair Display', Georgia, 'Times New Roman'");
+  });
+
+  it('T-90-feedback-20261123_130625-2: rounds the hand outline highlight with the slider', () => {
+    setSettings({ roundness: 0 });
+    const view = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={uncoveredPair}
+        trumpSuit="diamonds"
+        defenderId="p1"
+        canRedirect
+      />,
+    );
+
+    const contour = () => screen.getByTestId('hand-highlight-contour');
+    const path = () => screen.getByTestId('hand-highlight-path').getAttribute('d') ?? '';
+
+    // Roundness 0 → a sharp, arc-free contour.
+    expect(contour().getAttribute('data-contour-radius')).toBe('0');
+    expect(path()).not.toMatch(/A [\d.]/);
+
+    // Every later change repaints the outline live from the settings store.
+    act(() => setSettings({ roundness: DEFAULT_SETTINGS.roundness }));
+    expect(document.documentElement.style.getPropertyValue('--app-roundness')).toBe('8px');
+    expect(contour().getAttribute('data-contour-radius')).toBe('12');
+    expect(path()).toMatch(/A 12 12 /);
+
+    act(() => setSettings({ roundness: 16 }));
+    expect(document.documentElement.style.getPropertyValue('--app-roundness')).toBe('16px');
+    expect(contour().getAttribute('data-contour-radius')).toBe('24');
+    expect(path()).toMatch(/A 24 24 /);
+
+    view.unmount();
+    setSettings({ roundness: DEFAULT_SETTINGS.roundness });
   });
 
   it('ITEM-NEW-1b: rounds the reflection SVG plate with the slider', () => {
