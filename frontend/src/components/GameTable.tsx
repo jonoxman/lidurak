@@ -26,6 +26,7 @@ import {
   ELIGIBLE_LIFT_PX,
   SELECTED_LIFT_PX,
 } from '../utils/handLayout';
+import { computeTableBoutLayout, partitionTablePairs } from '../utils/tableLayout';
 import '../styles/table.css';
 
 export interface OpponentSummary {
@@ -2187,13 +2188,6 @@ export function GameTable({
     showThrowInOutline && !gameOverPhase && tablePairs.length > 0 && tablePairs.length < 6
       ? 1
       : 0;
-  const boutGeometry = boutLayout(
-    tablePairs.length + throwInSlot + redirectSlot,
-    boutWidth > 0 ? boutWidth : BOUT_FALLBACK_WIDTH,
-    boutCardWidth,
-  );
-  const boutSlotMargin = (index: number): string | undefined =>
-    index === 0 ? undefined : `${boutGeometry.step - boutCardWidth}px`;
 
   // T-90 (surrender throw-in outline): the outline never rides the half-off
   // `translateY(calc(±50% ± 12px))` transform of the taken cards. During a
@@ -2208,6 +2202,33 @@ export function GameTable({
       : 'below';
   // Detaching the outline from the pair row is what keeps it fully on the table.
   const throwInDetached = surrendered;
+
+  // T-90-4 ITEM-1: covered pairs leave the interactive row immediately and are
+  // pinned to the felt edge nearest the defender, while every still-uncovered
+  // card keeps its ORIGINAL `attackIndex` so a cover action can never submit a
+  // stale backend index. The single-row solver shrinks the gaps first and only
+  // then allows a slight overlap, so the whole bout always stays on one row.
+  const { covered: coveredPairs, uncovered: uncoveredPairs } =
+    partitionTablePairs(tablePairs);
+  // A detached (surrender) throw-in outline lives outside this row, so it must
+  // not reserve a slot in the single-row layout.
+  const inlineThrowInSlot = throwInDetached ? 0 : throwInSlot;
+  const boutRowLayout = computeTableBoutLayout({
+    coveredCount: coveredPairs.length,
+    uncoveredCount: uncoveredPairs.length,
+    extraSlotCount: inlineThrowInSlot + redirectSlot,
+    availableWidth: boutWidth > 0 ? boutWidth : BOUT_FALLBACK_WIDTH,
+    cardWidth: boutCardWidth,
+    cardHeight: boutCardHeight,
+    defenderSeat: boutAnchor,
+  });
+  // Only the first slot of the uncovered row sits at the row origin; every
+  // later pair (and the inline outlines) takes the solved step, which is a small
+  // positive gap while the row fits and a slight overlap when it does not.
+  const uncoveredSlotMargin = (index: number): string | undefined =>
+    index === 0 ? undefined : `${boutRowLayout.uncoveredMarginPx}px`;
+  const coveredSlotMargin = (index: number): string =>
+    index === 0 ? '0px' : `${boutRowLayout.coveredPairMarginPx}px`;
   const throwInOutline = (
     <div
       class={`target-outline throw-in-outline${
@@ -2261,6 +2282,36 @@ export function GameTable({
       active: false,
     };
   };
+
+  // T-90-4 ITEM-1b/1c: every covered pair is pinned to the defender's edge and
+  // rendered maximally overlapped (`defenseOverhang + indexStripWidth` step, so
+  // both cards' rank and suit stay visible) with ascending z-index. Covered
+  // pairs are no longer interactive: no drop target, no click handler.
+  const coveredPairsStack =
+    coveredPairs.length > 0 ? (
+      <div
+        class="covered-pairs-stack"
+        data-testid="covered-pairs-stack"
+        data-edge={boutRowLayout.coveredEdge}
+        data-count={coveredPairs.length}
+        data-step={boutRowLayout.coveredPairStep}
+      >
+        {coveredPairs.map((entry, index) => (
+          <TablePair
+            key={`covered-${entry.pairIndex}`}
+            attack={entry.pair.attack}
+            defense={entry.pair.defense}
+            trumpSuit={trumpSuit}
+            marginLeft={coveredSlotMargin(index)}
+            cardWidth={boutCardWidth}
+            cardHeight={boutCardHeight}
+            isCollapsedCovered
+            coveredEdge={boutRowLayout.coveredEdge}
+            style={{ zIndex: index + 1 }}
+          />
+        ))}
+      </div>
+    ) : null;
 
   const boutClasses = ['bout-area'];
 
@@ -2470,83 +2521,114 @@ export function GameTable({
           data-anchor-seat={boutAnchor}
           data-single-row="true"
           data-min-visible-left={BOUT_MIN_VISIBLE_LEFT}
-          data-step={boutGeometry.step}
-          data-overlap={boutGeometry.overlap}
+          data-step={boutRowLayout.uncoveredStep}
+          data-overlap={
+            Math.round((boutCardWidth - boutRowLayout.uncoveredStep) * 100) / 100
+          }
+          data-covered-edge={boutRowLayout.coveredEdge}
           data-surrendered={surrendered ? 'true' : 'false'}
           data-surrender-target={surrendered ? surrenderTarget : undefined}
         >
-          {tablePairs.map((pair, index) => {
-            const zone = `cover:${index}`;
-            const coverable = !reviewMode && !pair.defense && Boolean(onCoverDrop);
-            return (
-              <TablePair
-                key={`${pair.attack.suit.toLowerCase()}:${pair.attack.rank.toLowerCase()}`}
-                attack={pair.attack}
-                defense={pair.defense}
-                trumpSuit={trumpSuit}
-                marginLeft={boutSlotMargin(index)}
-                cardWidth={boutCardWidth}
-                cardHeight={boutCardHeight}
-                highlightUncovered={uncoveredHighlight && !pair.defense}
-                snap={snapZone === zone}
-                dropZone={coverable ? zone : undefined}
-                onAttackClick={
-                  onTableCardClick && !pair.defense ? () => onTableCardClick(index) : undefined
-                }
-                onDragOverCard={coverable ? hoverZone(zone) : undefined}
-                onDragLeaveCard={coverable ? clearSnap : undefined}
-                onDropCard={
-                  coverable
-                    ? (event) => dropOn(zone, event, (card) => onCoverDrop?.(card, index))
-                    : undefined
-                }
-              />
-            );
-          })}
+          {/* T-90-4 ITEM-1a/1d: the whole bout lives in ONE horizontal row
+              (`nowrap`): the covered stack on the defender's edge, then the
+              still-interactive uncovered cards and their outlines. */}
+          <div
+            class="table-bout-row"
+            data-testid="table-bout-row"
+            data-covered-edge={boutRowLayout.coveredEdge}
+            data-group-gap={boutRowLayout.groupGapPx}
+            style={{ columnGap: `${boutRowLayout.groupGapPx}px` }}
+          >
+            {boutRowLayout.coveredEdge === 'left' ? coveredPairsStack : null}
 
-          {/* ITEM-8: the dedicated throw-in slot sits immediately right of the
-              cards in play. It is the ONLY throw-in drop zone, so a card
-              dropped elsewhere on the felt is not played. Its wrapper carries
-              the row spacing, so the outline itself stays exactly 100x140. */}
-          {throwInSlot > 0 && !throwInDetached ? (
-            <div
-              class="throw-in-slot"
-              data-testid="throw-in-slot"
-              data-surrender-outline-position="inline"
-              data-on-table="true"
-              style={{ marginLeft: boutSlotMargin(tablePairs.length) }}
-            >
-              {throwInOutline}
-            </div>
-          ) : null}
+            <div class="table-uncovered-row" data-testid="uncovered-pairs-row">
+              {uncoveredPairs.map((entry, index) => {
+                const zone = `cover:${entry.attackIndex}`;
+                const coverable = !reviewMode && Boolean(onCoverDrop);
+                return (
+                  <TablePair
+                    key={`uncovered-${entry.pairIndex}`}
+                    attack={entry.pair.attack}
+                    defense={null}
+                    trumpSuit={trumpSuit}
+                    marginLeft={uncoveredSlotMargin(index)}
+                    cardWidth={boutCardWidth}
+                    cardHeight={boutCardHeight}
+                    coveredEdge={boutRowLayout.coveredEdge}
+                    highlightUncovered={uncoveredHighlight}
+                    snap={snapZone === zone}
+                    dropZone={coverable ? zone : undefined}
+                    onAttackClick={
+                      onTableCardClick
+                        ? () => onTableCardClick(entry.attackIndex)
+                        : undefined
+                    }
+                    onDragOverCard={coverable ? hoverZone(zone) : undefined}
+                    onDragLeaveCard={coverable ? clearSnap : undefined}
+                    onDropCard={
+                      coverable
+                        ? (event) =>
+                            dropOn(zone, event, (card) =>
+                              onCoverDrop?.(card, entry.attackIndex),
+                            )
+                        : undefined
+                    }
+                  />
+                );
+              })}
 
-          {/* Item 8: the dashed reflection outline is a sibling of the attack
-              cards in the same single row, so its top, centre and bottom edges
-              always line up with every card in play at any table width. */}
-          {!reviewMode && canRedirect && tablePairs.length > 0 ? (
-            <div
-              class={`redirect-outline${snapZone === 'redirect' ? ' snap-active' : ''}`}
-              data-testid="redirect-outline"
-              style={{ marginLeft: boutSlotMargin(tablePairs.length + throwInSlot) }}
-              data-drop-zone="redirect"
-              data-card-width={boutCardWidth}
-              data-card-height={boutCardHeight}
-              data-direction={redirectDirection}
-              data-target-seat={redirectDirection}
-              data-target-player={
-                redirectHasSeat ? (redirectTargetPlayerId ?? undefined) : undefined
-              }
-              data-align="card"
-              aria-label="Reflect the attack"
-              onDragOver={hoverZone('redirect')}
-              onDragLeave={clearSnap}
-              onDrop={(event) =>
-                dropOn('redirect', event, (card) => onRedirectDrop?.(card))
-              }
-            >
-              <RedirectIcon chaosMode={chaosMode} direction={redirectDirection} />
+              {/* ITEM-8: the dedicated throw-in slot sits immediately right of
+                  the cards in play. It is the ONLY throw-in drop zone, so a
+                  card dropped elsewhere on the felt is not played. Its wrapper
+                  carries the row spacing, so the outline itself stays exactly
+                  100x140. */}
+              {throwInSlot > 0 && !throwInDetached ? (
+                <div
+                  class="throw-in-slot"
+                  data-testid="throw-in-slot"
+                  data-surrender-outline-position="inline"
+                  data-on-table="true"
+                  style={{ marginLeft: uncoveredSlotMargin(uncoveredPairs.length) }}
+                >
+                  {throwInOutline}
+                </div>
+              ) : null}
+
+              {/* Item 8: the dashed reflection outline is a sibling of the
+                  attack cards in the same single row, so its top, centre and
+                  bottom edges always line up with every card in play. */}
+              {!reviewMode && canRedirect && tablePairs.length > 0 ? (
+                <div
+                  class={`redirect-outline${snapZone === 'redirect' ? ' snap-active' : ''}`}
+                  data-testid="redirect-outline"
+                  style={{
+                    marginLeft: uncoveredSlotMargin(
+                      uncoveredPairs.length + inlineThrowInSlot,
+                    ),
+                  }}
+                  data-drop-zone="redirect"
+                  data-card-width={boutCardWidth}
+                  data-card-height={boutCardHeight}
+                  data-direction={redirectDirection}
+                  data-target-seat={redirectDirection}
+                  data-target-player={
+                    redirectHasSeat ? (redirectTargetPlayerId ?? undefined) : undefined
+                  }
+                  data-align="card"
+                  aria-label="Reflect the attack"
+                  onDragOver={hoverZone('redirect')}
+                  onDragLeave={clearSnap}
+                  onDrop={(event) =>
+                    dropOn('redirect', event, (card) => onRedirectDrop?.(card))
+                  }
+                >
+                  <RedirectIcon chaosMode={chaosMode} direction={redirectDirection} />
+                </div>
+              ) : null}
             </div>
-          ) : null}
+
+            {boutRowLayout.coveredEdge === 'right' ? coveredPairsStack : null}
+          </div>
         </div>
 
         {/* T-90 ITEM-1a/1b: under a surrender the throw-in outline is a direct
@@ -2592,6 +2674,11 @@ export function GameTable({
         data-defenseless={defenderDefenseless ? 'true' : 'false'}
         data-hovered-card-index={hoveredCardIndex === null ? undefined : hoveredCardIndex}
         data-parting-active={partingActive ? 'true' : 'false'}
+        // T-90-4 ITEM-4: Row 3 opens with a dedicated, non-overlapping turn
+        // timer band. Its reserved top clearance absorbs incoming surrender
+        // cards that hang below the Row 2 bout box; its grid row-gap keeps
+        // every raised / selected hand card strictly below the clock.
+        data-timer-band="true"
         // ITEM-4: the stylesheet's timer clearance is derived from the SAME
         // Wave-1 tier constants the cards are raised by, so the clock track can
         // never be tuned to a different lift than the cards actually use.
@@ -2606,9 +2693,11 @@ export function GameTable({
         onDragOver={draggable && onReorderHand ? hoverHandZone : undefined}
         onDrop={draggable && onReorderHand ? dropOnHand : undefined}
       >
-        {/* ITEM-4: the timer sits in its own grid track above the card stage
-            (see `[data-zone="player-hand"]` in table.css), so neither a
-            half-raised nor a fully raised selected card can ever clip it. */}
+        {/* T-90-4 ITEM-4: the timer sits in its own band above the card stage
+            (see `[data-zone="player-hand"]` in table.css). The band reserves
+            vertical clearance above (incoming surrender cards) and below (the
+            fully raised selected cards), so no gameplay element can ever
+            overlap it. */}
         <span
           class={`hand-clock${viewerOnClock ? ' active' : ''}`}
           data-testid="hand-clock"

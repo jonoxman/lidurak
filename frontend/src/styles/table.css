@@ -118,9 +118,17 @@
      that runs out of cards or a hand that empties never resizes the table. */
   --seat-row-height: 150px;
   --battlefield-height: clamp(240px, 30vh, 320px);
-  /* ITEM-4: the hand row reserves the timer track AND the vertical clearance a
-     fully raised selected card needs, so the clock is never clipped. */
-  --hand-row-height: calc(var(--hand-card-height, 140px) + 66px);
+  /* T-90-4 ITEM-4: the hand row opens with a dedicated turn-timer band. Its
+     top clearance absorbs the part of a surrendered bottom-seat bout that
+     hangs below the tinted box, so incoming cards can never reach the clock:
+     half a pair box (`140 + 18`) + 12px translation - the 18px pair reserve =
+     73px below the box, minus the 18px arena gap = 55px into this row. 64px
+     leaves 9px of slack. The `+ 66px` after the card is the existing clearance
+     below the clock for a fully raised selected card + contour stroke. */
+  --hand-timer-clearance: 64px;
+  --hand-row-height: calc(
+    var(--hand-card-height, 140px) + 66px + var(--hand-timer-clearance, 64px)
+  );
   /* ITEM-7: the dedicated lower-table control band (Row 4). */
   --actions-row-height: 64px;
   grid-template-rows: var(--seat-row-height) var(--battlefield-height) var(--hand-row-height) var(--actions-row-height);
@@ -436,13 +444,57 @@
   --bout-card-height: var(--card-h, 140px);
   --bout-card-offset: 18px;
   display: flex;
-  /* T-90: never shrink a card to fit; up to six pairs wrap with a gap. */
-  flex-wrap: wrap;
-  align-items: flex-start;
+  /* T-90-4 ITEM-1a: the bout NEVER wraps. `boutLayout` / `computeTableBoutLayout`
+     shrink the gaps and then allow a slight overlap instead. */
+  flex-wrap: nowrap;
+  align-items: center;
   justify-content: center;
-  gap: var(--bout-gap, 4px);
+  width: 100%;
+  max-width: 100%;
+  gap: 0;
   min-width: 0;
+  box-sizing: border-box;
   transition: transform 320ms ease;
+}
+
+/* T-90-4 ITEM-1a/1d: the single bout row. It owns the covered-stack group gap
+   (written inline from the solver) and never wraps, so every card in play stays
+   collected in one row at any table width. */
+.table-bout-row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  gap: 0;
+  box-sizing: border-box;
+}
+
+/* T-90-4 ITEM-1b/1c: covered pairs are already resolved, so they leave the
+   interactive row immediately and overlap maximally (the inline negative
+   `margin-left` is `coveredPairStep - coveredPairWidth`). */
+.covered-pairs-stack,
+.table-uncovered-row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  flex: 0 0 auto;
+  min-width: 0;
+  gap: 0;
+  box-sizing: border-box;
+}
+
+/* The covered stack snaps flush to the felt edge nearest the defender: the
+   natural start for the left edge, an auto margin for the right edge. */
+.covered-pairs-stack[data-edge='right'] {
+  margin-left: auto;
+}
+
+/* A covered pair can no longer be interacted with directly (no drop, no click). */
+.table-pair-covered-collapsed {
+  pointer-events: none;
 }
 
 .table-pairs-group[data-surrendered='true'] {
@@ -1111,7 +1163,10 @@
   /* ITEM-ADD-6: a full card height (plus the clock) is always reserved, even
      when the viewer has run out of cards, so the felt never resizes. */
   min-height: var(--hand-row-height, calc(var(--hand-card-height, 114px) + 38px));
-  padding: 2px 0 8px;
+  /* T-90-4 ITEM-4: the dedicated turn-timer band. This top clearance keeps the
+     clock below any surrendered bout card that hangs past the Row 2 box, and
+     the row-gap below keeps raised hand cards below the clock. */
+  padding: var(--hand-timer-clearance, 64px) 0 8px;
   /* T-90-feedback-2 ITEM-3: the hand column never clips a dragged card. */
   overflow: visible;
 }
@@ -1614,6 +1669,9 @@
 
 @media (max-width: 899px) {
   [data-zone='table-arena'] {
+    /* T-90-4 ITEM-4: the mobile pair box overhangs less, so the hand row's
+       timer band clears it with 40px instead of the desktop 64px. */
+    --hand-timer-clearance: 40px;
     grid-template-columns: minmax(0, 1fr);
     /* Five tracks (seats, bout, spare, hand, controls). Each keeps its height
        whether or not a player still holds cards (ITEM-ADD-6). */
@@ -1676,8 +1734,10 @@
   [data-zone='player-hand'] {
     grid-column: 1;
     grid-row: 4;
-    /* ITEM-4: the base rule's timer clearance is the row gap; the mobile
-       layout only resets the (unused) column gap. */
+    /* T-90-4 ITEM-4: the 48x68 mobile pair box hangs 29px past the tinted box
+       after its surrender translation, minus the 12px mobile row gap, so the
+       band keeps its own reduced but sufficient clearance. */
+    --hand-timer-clearance: 40px;
     column-gap: 0;
   }
 
