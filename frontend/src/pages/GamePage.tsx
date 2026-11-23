@@ -502,7 +502,10 @@ export function GamePage({
     const requesterId = initialSeatIdRef.current ?? playerId;
     getGameView(gameId, playerId, requesterId)
       .then((initial) => {
-        if (active) setView((current) => current ?? initial);
+        // T-96 item 1: a POV switch keeps the same game id, so `current` still
+        // holds the previous seat's projection. Only the view already fetched
+        // for THIS seat may be kept; otherwise the fresh projection must land.
+        if (active) setView((current) => (current?.myId === playerId ? current : initial));
       })
       .catch((reason: unknown) => {
         console.warn('Could not load the game view', reason);
@@ -1519,6 +1522,23 @@ export function GamePage({
               data-player-id={player.id}
               data-role={role}
               data-pov-clickable={canSwitchPov ? 'true' : 'false'}
+              // T-96 item 1: a POV-clickable row is a real tab. It advertises
+              // its role, the currently inspected seat and keyboard
+              // activation, while keeping every existing attribute and class.
+              role={canSwitchPov ? 'tab' : undefined}
+              aria-selected={
+                canSwitchPov ? (player.id === playerId ? 'true' : 'false') : undefined
+              }
+              tabIndex={canSwitchPov ? 0 : undefined}
+              onKeyDown={
+                canSwitchPov
+                  ? (event) => {
+                      if (event.key !== 'Enter' && event.key !== ' ') return;
+                      event.preventDefault();
+                      if (player.id !== playerId) onSwitchPlayer(player.id);
+                    }
+                  : undefined
+              }
               aria-disabled={canSwitchPov ? undefined : 'true'}
               title={
                 canSwitchPov
@@ -1877,7 +1897,14 @@ export function GamePage({
             !reviewMode && hasLegalAction(view.legalActions, 'cover') ? coverAttack : undefined
           }
           onAttackDrop={reviewMode ? undefined : playAttackDrop}
-          onCoverDrop={reviewMode ? undefined : playCoverDrop}
+          /* T-96 item 1: like `onTableCardClick`, the cover drop zone is only
+             advertised when covering is actually legal for this seat, so an
+             attacker POV never shows a `cover:<index>` drop target. */
+          onCoverDrop={
+            !reviewMode && hasLegalAction(displayedView.legalActions, 'cover')
+              ? playCoverDrop
+              : undefined
+          }
           onThrowInDrop={reviewMode ? undefined : playThrowInDrop}
           onRedirectDrop={reviewMode ? undefined : playRedirectDrop}
           onReorderHand={reviewMode ? undefined : reorderHand}

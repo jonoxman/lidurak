@@ -423,6 +423,130 @@ describe('GamePage', () => {
     expect(onSwitchPlayer).toHaveBeenCalledWith('p1');
   });
 
+  it('T-96 item 1: POV rows expose tab semantics and Enter/Space activation', async () => {
+    getGameView.mockResolvedValue(view);
+    const onSwitchPlayer = vi.fn();
+
+    render(
+      <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={onSwitchPlayer} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('players-panel')).toBeTruthy());
+
+    const bob = screen.getByTestId('player-row-p1');
+    expect(bob.getAttribute('role')).toBe('tab');
+    expect(bob.getAttribute('aria-selected')).toBe('false');
+    expect(bob.getAttribute('tabindex')).toBe('0');
+    expect(screen.getByTestId('player-row-p0').getAttribute('aria-selected')).toBe('true');
+
+    fireEvent.keyDown(bob, { key: 'Enter' });
+    expect(onSwitchPlayer).toHaveBeenCalledWith('p1');
+    fireEvent.keyDown(bob, { key: ' ' });
+    expect(onSwitchPlayer).toHaveBeenCalledTimes(2);
+  });
+
+  it('T-96 item 1: a POV switch replaces the previous seat’s projection', async () => {
+    const aliceView: PlayerGameView = {
+      ...view,
+      myId: 'p0',
+      myName: 'Alice',
+      myHand: [{ suit: 'spades', rank: 'six' }],
+    };
+    const bobView: PlayerGameView = {
+      ...view,
+      myId: 'p1',
+      myName: 'Bob',
+      myHand: [{ suit: 'hearts', rank: 'ace' }],
+      opponents: [
+        { id: 'p0', name: 'Alice', cardCount: 6, hasPassed: false, finishRank: null },
+      ],
+      attackerIdx: 0,
+      defenderIdx: 1,
+    };
+    const bySeat: Record<string, PlayerGameView> = { p0: aliceView, p1: bobView };
+    getGameView.mockImplementation(async (_gameId: string, seat: string) => bySeat[seat]);
+
+    const { rerender } = render(
+      <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId('player-row-p0').className).toContain('mine'),
+    );
+
+    // Same game id, new seat: the fetched projection must replace the old one
+    // instead of being discarded by `current ?? initial`.
+    rerender(<GamePage gameId="game-1" playerId="p1" onSwitchPlayer={() => {}} />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('player-row-p1').className).toContain('mine'),
+    );
+    expect(screen.getByTestId('player-row-p0').className).not.toContain('mine');
+  });
+
+  it('T-96 item 1: qa-table-collapse-right pins covered pairs left for every defender POV', async () => {
+    const names: Record<string, string> = {
+      p0: 'Alice',
+      p1: 'Bob',
+      p2: 'Carol',
+      p3: 'Dave',
+    };
+    const seatIds = ['p0', 'p1', 'p2', 'p3'];
+    const povView = (myId: string): PlayerGameView => ({
+      ...view,
+      myId,
+      myName: names[myId],
+      myHand: [
+        myId === 'p0'
+          ? { suit: 'spades', rank: 'six' }
+          : { suit: 'hearts', rank: 'ace' },
+      ],
+      opponents: seatIds
+        .filter((id) => id !== myId)
+        .map((id) => ({
+          id,
+          name: names[id],
+          cardCount: 6,
+          hasPassed: false,
+          finishRank: null,
+        })),
+      tablePairs: [
+        {
+          attack: { suit: 'spades', rank: 'six' },
+          defense: { suit: 'spades', rank: 'seven' },
+        },
+        { attack: { suit: 'clubs', rank: 'king' }, defense: null },
+      ],
+      attackerIdx: 0,
+      defenderIdx: 3,
+      boutPhase: 'defense',
+      legalActions: [],
+      devMode: true,
+    });
+    const bySeat: Record<string, PlayerGameView> = Object.fromEntries(
+      seatIds.map((id) => [id, povView(id)]),
+    );
+    getGameView.mockImplementation(async (_gameId: string, seat: string) => bySeat[seat]);
+
+    const edge = (container: Element): string | null | undefined =>
+      container
+        .querySelector('[data-testid="table-bout-row"]')
+        ?.getAttribute('data-covered-edge');
+
+    // The original Alice (p0) POV: Dave (p3) defends from top-right.
+    const { container, rerender } = render(
+      <GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />,
+    );
+    await waitFor(() => expect(edge(container)).toBe('right'));
+
+    // Switching POV must actually re-project the table: whatever the new seat
+    // sees as top-left / top-center / bottom pins the covered stack left.
+    for (const seat of ['p1', 'p2', 'p3']) {
+      rerender(<GamePage gameId="game-1" playerId={seat} onSwitchPlayer={() => {}} />);
+      await waitFor(() => expect(edge(container), `POV ${seat}`).toBe('left'));
+    }
+  });
+
   it('selects a hand card, then covers an uncovered table attack with it', async () => {
     const defenseView: PlayerGameView = {
       ...view,
