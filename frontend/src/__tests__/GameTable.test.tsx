@@ -6334,3 +6334,137 @@ describe('T-96: re-drag reliability, selection lock and 30-card parting stabilit
     view.unmount();
   });
 });
+
+describe('T-90-feedback-20261123_020207-4: drag reorder slot and consecutive throw-ins', () => {
+  const dragRect = (width = 300): DOMRect =>
+    ({
+      left: 0,
+      top: 0,
+      right: width,
+      bottom: 140,
+      width,
+      height: 140,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    }) as DOMRect;
+
+  it('ITEM-NEW2: exposes and commits the exact parted insertion slot', () => {
+    const onReorderHand = vi.fn();
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={opponents}
+        tablePairs={[]}
+        trumpSuit="diamonds"
+        defenderId="p1"
+        onReorderHand={onReorderHand}
+      />,
+    );
+    const handBox = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+    vi.spyOn(handBox, 'getBoundingClientRect').mockReturnValue(dragRect());
+
+    fireEvent.mouseDown(screen.getByLabelText('king of clubs'), {
+      button: 0,
+      clientX: 150,
+      clientY: 20,
+    });
+    fireEvent.mouseMove(document, { clientX: 5, clientY: 22 });
+
+    expect(handBox.getAttribute('data-drag-insert-index')).toBe('0');
+    const wrappers = Array.from(
+      handBox.querySelectorAll('.hand-card-wrapper'),
+    ) as HTMLElement[];
+    expect(wrappers[1].getAttribute('data-drag-source')).toBe('true');
+    // The remaining cards open a slot at the left edge: the first one is pushed
+    // right until a whole card fits, the second decays, and nothing else moves.
+    expect(
+      Number(wrappers[0].getAttribute('data-part-delta-x')),
+    ).toBeGreaterThan(60);
+    expect(Number(wrappers[0].getAttribute('data-card-x'))).toBeGreaterThanOrEqual(
+      CARD_WIDTH - 1,
+    );
+    // The dragged card itself never carries a parting delta.
+    expect(Number(wrappers[1].getAttribute('data-part-delta-x'))).toBe(0);
+
+    fireEvent.mouseUp(document, { clientX: 5, clientY: 22 });
+    expect(onReorderHand).toHaveBeenCalledWith([
+      { suit: 'clubs', rank: 'king' },
+      { suit: 'spades', rank: 'six' },
+      { suit: 'hearts', rank: 'ace' },
+    ]);
+    expect(handBox.getAttribute('data-drag-insert-index')).toBeNull();
+  });
+
+  const sevenClubs: CardData = { suit: 'clubs', rank: 'seven' };
+  const eightHearts: CardData = { suit: 'hearts', rank: 'eight' };
+  const collapseHand: CardData[] = [
+    sevenClubs,
+    eightHearts,
+    { suit: 'spades', rank: 'two' },
+    { suit: 'spades', rank: 'three' },
+  ];
+  // `qa-table-collapse-right`: two covered pairs plus two uncovered attacks.
+  const collapsePairs: TablePairData[] = [
+    { attack: { suit: 'clubs', rank: 'ten' }, defense: { suit: 'clubs', rank: 'jack' } },
+    { attack: { suit: 'spades', rank: 'eight' }, defense: { suit: 'spades', rank: 'queen' } },
+    { attack: { suit: 'hearts', rank: 'seven' }, defense: null },
+    { attack: { suit: 'diamonds', rank: 'eight' }, defense: null },
+  ];
+  const collapseOpponents: OpponentSummary[] = [
+    { id: 'p3', name: 'Dave', cardCount: 4, hasPassed: false, finishRank: null },
+  ];
+
+  it('ITEM-NEW1: plays both projected throw-ins in a row during Defense with uncovered pairs', () => {
+    const onThrowInDrop = vi.fn();
+    const view = render(
+      <GameTable
+        myId="p0"
+        myHand={collapseHand}
+        opponents={collapseOpponents}
+        tablePairs={collapsePairs}
+        trumpSuit="hearts"
+        attackerId="p0"
+        defenderId="p3"
+        boutPhase="Defense"
+        canThrowIn
+        throwInCards={[sevenClubs, eightHearts]}
+        throwInCapacity={2}
+        onThrowInDrop={onThrowInDrop}
+      />,
+    );
+
+    const first = screen.getByTestId('throw-in-outline');
+    expect(first.getAttribute('data-throw-in-enabled')).toBe('true');
+    fireEvent.drop(first, { dataTransfer: { getData: () => cardKey(sevenClubs) } });
+    expect(onThrowInDrop).toHaveBeenNthCalledWith(1, sevenClubs);
+
+    // The server's view after the first card lands: five pairs, three uncovered
+    // attacks, the one remaining projected card and one slot of capacity.
+    view.rerender(
+      <GameTable
+        myId="p0"
+        myHand={collapseHand.slice(1)}
+        opponents={collapseOpponents}
+        tablePairs={[...collapsePairs, { attack: sevenClubs, defense: null }]}
+        trumpSuit="hearts"
+        attackerId="p0"
+        defenderId="p3"
+        boutPhase="Defense"
+        canThrowIn
+        throwInCards={[eightHearts]}
+        throwInCapacity={1}
+        onThrowInDrop={onThrowInDrop}
+      />,
+    );
+
+    const second = screen.getByTestId('throw-in-outline');
+    expect(second.getAttribute('data-throw-in-enabled')).toBe('true');
+    expect(second.getAttribute('data-drop-zone')).toBe('throw-in');
+    fireEvent.drop(second, { dataTransfer: { getData: () => cardKey(eightHearts) } });
+    expect(onThrowInDrop).toHaveBeenNthCalledWith(2, eightHearts);
+    expect(onThrowInDrop).toHaveBeenCalledTimes(2);
+    view.unmount();
+  });
+});

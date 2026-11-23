@@ -909,13 +909,22 @@ describe('T-95 #3: the collapsed drag slot closes the gap exactly', () => {
       expect(expectedMargin).toBeLessThan(0);
       expect(Number.parseFloat(collapsed.style.marginLeft)).toBeCloseTo(expectedMargin, 2);
 
-      // Every real left edge matches the x the drag math and contour use.
+      // Every real left edge matches the x the drag math and contour use. The
+      // rendered edge is the resting flex margin plus the GPU-composited
+      // `translate3d` parting delta (`data-part-delta-x`), which never moves a
+      // card by layout margin.
       const actual = flexRowLefts(handWrappers());
       const reported = handWrappers().map((node) =>
         Number(node.getAttribute('data-card-x')),
       );
+      const deltas = handWrappers().map((node) =>
+        Number(node.getAttribute('data-part-delta-x')),
+      );
       actual.forEach((left, cardIndex) => {
-        expect(left, `card ${cardIndex}`).toBeCloseTo(reported[cardIndex], 2);
+        expect(left + deltas[cardIndex], `card ${cardIndex}`).toBeCloseTo(
+          reported[cardIndex],
+          2,
+        );
       });
       // The compacted row stays strictly inside the maximal hand box.
       expect(actual[actual.length - 1] + CARD_WIDTH).toBeLessThanOrEqual(
@@ -979,5 +988,106 @@ describe('T-96 item 6: contour expansion never shifts the hand row', () => {
     // no `justify-content` re-centring can move the row (the old -17px jump).
     expect(Number.parseFloat(contour.style.width)).toBeGreaterThan(contourWidthAtRest);
     expect(box.style.width).toBe(stageWidthAtRest);
+  });
+});
+
+describe('T-90-feedback-20261123_020207-4 ITEM-NEW2: drag reorder parting', () => {
+  const mockHandBox = (width = 300): HTMLElement => {
+    const box = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+    vi.spyOn(box, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      right: width,
+      bottom: 140,
+      width,
+      height: 140,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+    return box;
+  };
+
+  it('parts the remaining cards around the live slot and commits that exact slot on release', () => {
+    const onReorderHand = vi.fn();
+    const view = mountTable(DECK.slice(0, 6), { onReorderHand });
+    const box = mockHandBox();
+    const wrappers = handWrappers();
+
+    fireEvent.mouseDown(wrappers[2], { button: 0, clientX: 130, clientY: 70 });
+    fireEvent.mouseMove(document, { clientX: 0, clientY: 70 });
+
+    expect(box.getAttribute('data-drag-insert-index')).toBe('0');
+    // The dragged source slot is vacated in-hand; the preview is the visible card.
+    expect(wrappers[2].getAttribute('data-drag-source')).toBe('true');
+    expect(box.getAttribute('data-drag-preview')).toBe('true');
+
+    const deltas = handWrappers().map((node) =>
+      Number(node.getAttribute('data-part-delta-x')),
+    );
+    // Slot 0 pushes the remaining row right until a whole card fits into the
+    // parted slot, decaying over the local window; distant cards stay exactly
+    // anchored.
+    expect(deltas[2]).toBe(0);
+    expect(deltas[0]).toBeGreaterThan(60);
+    expect(deltas[1]).toBeGreaterThan(0);
+    expect(deltas[5]).toBe(0);
+    expect(Number(handWrappers()[0].getAttribute('data-card-x'))).toBeGreaterThanOrEqual(
+      CARD_WIDTH - 1,
+    );
+    expect(handWrappers()[0].style.transform).toContain('translate3d(');
+
+    // Sweeping right moves the parted gap with the cursor.
+    fireEvent.mouseMove(document, { clientX: 500, clientY: 70 });
+    expect(box.getAttribute('data-drag-insert-index')).toBe('5');
+
+    fireEvent.mouseUp(document, { clientX: 500, clientY: 70 });
+    expect(onReorderHand).toHaveBeenCalledTimes(1);
+    expect(
+      (onReorderHand.mock.calls[0][0] as CardData[]).map(cardKey),
+    ).toEqual([
+      cardKey(DECK[0]),
+      cardKey(DECK[1]),
+      cardKey(DECK[3]),
+      cardKey(DECK[4]),
+      cardKey(DECK[5]),
+      cardKey(DECK[2]),
+    ]);
+    expect(box.getAttribute('data-drag-insert-index')).toBeNull();
+    view.unmount();
+  });
+
+  it('leaves all but the three neighbouring cards of a 30-card hand anchored', () => {
+    const view = mountTable(DECK.slice(0, 30), { onReorderHand: vi.fn() });
+    mockHandBox();
+    const wrappers = handWrappers();
+
+    const draggedIndex = Number(wrappers[15].getAttribute('data-index'));
+    fireEvent.mouseDown(wrappers[15], { button: 0, clientX: 290, clientY: 70 });
+    fireEvent.mouseMove(document, { clientX: 300, clientY: 70 });
+
+    const box = screen.getByTestId('hand-turn-highlight');
+    expect(box.getAttribute('data-drag-insert-index')).not.toBeNull();
+    const deltas = handWrappers().map((node) =>
+      Number(node.getAttribute('data-part-delta-x')),
+    );
+    const moved = deltas
+      .map((delta, index) => (delta !== 0 ? index : -1))
+      .filter((index) => index >= 0);
+    expect(moved.length).toBeGreaterThan(0);
+    for (const index of moved) {
+      // The remaining row shifts by one around the dragged card, plus the three
+      // card local parting window on each side.
+      expect(Math.abs(index - draggedIndex)).toBeLessThanOrEqual(5);
+    }
+    for (const index of [0, 5, 24, 29]) {
+      expect(deltas[index]).toBe(0);
+      expect(handWrappers()[index].style.transform).toBe('');
+    }
+    expect(handWrappers()).toHaveLength(30);
+    expect(screen.getByTestId('drag-card-preview')).toBeTruthy();
+
+    fireEvent.mouseUp(document, { clientX: 300, clientY: 70 });
+    view.unmount();
   });
 });

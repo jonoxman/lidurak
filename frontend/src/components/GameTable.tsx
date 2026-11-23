@@ -22,8 +22,10 @@ import {
 import {
   buildHandContourPath,
   cardTranslate3d,
+  computeDragPartedCardPositions,
   computeHandLayout as computeUtilsHandLayout,
   computePartedCardLayout,
+  resolveDragInsertIndex,
   resolveHoveredCardIndex,
   getCardVerticalLiftPx,
   ELIGIBLE_LIFT_PX,
@@ -190,6 +192,8 @@ export interface HandCardSlotProps {
   deltaX: number;
   partDirection?: 'left' | 'right' | 'none';
   collapsed: boolean;
+  /** True for the card being dragged: its in-hand slot is vacated. */
+  dragSource: boolean;
   dragging: boolean;
   draggable: boolean;
   selected: boolean;
@@ -221,6 +225,7 @@ export const HandCardSlot = memo(function HandCardSlot({
   deltaX,
   partDirection,
   collapsed,
+  dragSource,
   dragging,
   draggable,
   selected,
@@ -248,6 +253,10 @@ export const HandCardSlot = memo(function HandCardSlot({
       data-eligible={playable ? 'true' : 'false'}
       data-part-direction={partDirection}
       data-collapsed={collapsed ? 'true' : 'false'}
+      // T-90-feedback-20261123_020207-4 ITEM-NEW2: the dragged source slot is
+      // vacated in-hand (`opacity: 0`, `pointer-events: none`) while the
+      // center-locked preview is the card the player sees.
+      data-drag-source={dragSource ? 'true' : 'false'}
       // ITEM-5: the click-selected throw-in / attack cards are marked on the
       // wrapper as well as on the card itself.
       data-selected={selected ? 'true' : 'false'}
@@ -1568,6 +1577,16 @@ export function GameTable({
   const [reorderIndex, setReorderIndex] = useState<number | null>(null);
   const reorderIndexRef = useRef<number | null>(null);
   reorderIndexRef.current = reorderIndex;
+  /**
+   * T-90-feedback-20261123_020207-4 ITEM-NEW2: commits the live insertion slot
+   * only when it actually changed, so a 60fps pointer sweep across one slot
+   * never re-renders the table.
+   */
+  const commitReorderIndex = (next: number | null) => {
+    if (reorderIndexRef.current === next) return;
+    reorderIndexRef.current = next;
+    setReorderIndex(next);
+  };
   // A press only becomes a pointer drag after 4px of movement, so a plain click
   // and a double-click still play/select the card normally.
   const pointerDragRef = useRef<{
@@ -2004,9 +2023,46 @@ export function GameTable({
       ),
     [basePositionsKey, cardWidth, maximalBoxWidth, partingActive, hoveredCardIndex],
   );
-  const renderedCardPositions: readonly number[] = partingActive
-    ? partedCardLayout.positions
-    : baseCardPositions;
+  // T-90-feedback-20261123_020207-4 ITEM-NEW2: while a hand card is dragged, the
+  // N - 1 remaining cards rest exactly where they would without it and part
+  // around the live insertion slot. The solve only reruns when the slot (or the
+  // measured row) changes, never on sub-slot pointer movement.
+  const dragParting = useMemo(
+    () =>
+      computeDragPartedCardPositions({
+        cardCount: hand.length,
+        containerWidth: handAvailableWidth,
+        dragSourceIndex: draggedCardIndex,
+        dragInsertIndex: dragCard !== null ? reorderIndex : null,
+        baseCardWidth: cardWidth,
+        baseCardHeight: cardHeight,
+        maximalBoxWidth,
+        minVisibleStripPx: CARD_INDEX_STRIP_WIDTH_PX,
+      }),
+    [
+      hand.length,
+      handSignature,
+      draggedCardIndex,
+      dragCard,
+      reorderIndex,
+      handAvailableWidth,
+      cardWidth,
+      cardHeight,
+      maximalBoxWidth,
+    ],
+  );
+  // The dragged card's own slot stays collapsed (and hidden); every other card
+  // renders at its parted coordinate. Distant cards keep an exact `0` delta.
+  const renderedCardPositions: readonly number[] =
+    dragCard !== null && draggedCardIndex >= 0
+      ? hand.map((_card, index) => {
+          if (index === draggedCardIndex) return baseCardPositions[index] ?? 0;
+          const remainingIndex = index > draggedCardIndex ? index - 1 : index;
+          return dragParting.positions[remainingIndex] ?? baseCardPositions[index] ?? 0;
+        })
+      : partingActive
+        ? partedCardLayout.positions
+        : baseCardPositions;
   // ITEM-8: two vertical tiers — eligible cards rise halfway, selected cards
   // rise fully, everything else stays at the baseline.
   const liftForCard = (card: CardData): number =>
@@ -2264,20 +2320,51 @@ export function GameTable({
     };
   }, [dragCard]);
 
-  /** ITEM-6a: insertion index `0..hand.length - 1` from the pointer's clientX. */
-  const reorderIndexFromClientX = (clientX: number, element: HTMLElement): number => {
+  /**
+   * T-90-feedback-20261123_020207-4 ITEM-NEW2: the insertion slot
+   * `0..remainingCount` under a live pointer, or `null` outside the hand lane.
+   *
+   * The slot is resolved from the RESTING row of the remaining cards (never from
+   * the parted transforms), so a left-to-right sweep is strictly monotonic and
+   * the gap can never oscillate. `checkVertical` is off for native `dragover`
+   * events on the hand container (which also spans the timer band) and on for
+   * pointer tracking, where leaving the card row must close the gap.
+   */
+  const dragInsertIndexFromPointer = (
+    clientX: number,
+    clientY: number,
+    checkVertical: boolean,
+    // The first pointer frame commits the drag state and the slot together, so
+    // the caller passes the card's index instead of a not-yet-rendered state.
+    sourceIndex: number = draggedCardIndex,
+  ): number | null => {
+    if (sourceIndex < 0) return null;
+    const box = handRef.current;
     const rect =
-      typeof element.getBoundingClientRect === 'function'
-        ? element.getBoundingClientRect()
+      box && typeof box.getBoundingClientRect === 'function'
+        ? box.getBoundingClientRect()
         : null;
-    const width = rect?.width ?? 0;
-    if (width <= 0) return 0;
-    const left = rect?.left ?? 0;
-    const fraction = Math.min(1, Math.max(0, (clientX - left) / width));
-    return Math.max(
-      0,
-      Math.min(Math.max(0, hand.length - 1), Math.round(fraction * hand.length)),
-    );
+    // A laid-out hand reports a real box; jsdom's zero-sized box falls back to
+    // the event's viewport coordinates.
+    const measured = rect != null && (rect.width > 0 || rect.left !== 0 || rect.top !== 0);
+    if (checkVertical && rect) {
+      // Leaving the card row vertically (up onto the felt, or down past the
+      // controls) closes the insertion gap. This also holds for jsdom's
+      // zero-sized box, where only the real horizontal lane is unknown.
+      if (clientY < rect.top - 40) return null;
+      if (clientY > rect.bottom + 60) return null;
+    }
+    return resolveDragInsertIndex({
+      cardCount: hand.length,
+      containerWidth: handAvailableWidth,
+      dragSourceIndex: sourceIndex,
+      pointerX: clientX - (measured && rect ? rect.left : 0),
+      tolerancePx: 40,
+      baseCardWidth: cardWidth,
+      baseCardHeight: cardHeight,
+      maximalBoxWidth,
+      minVisibleStripPx: CARD_INDEX_STRIP_WIDTH_PX,
+    });
   };
 
   /**
@@ -2343,21 +2430,34 @@ export function GameTable({
       // T-90-feedback-6 ITEM-3: the floating preview is centred on the cursor.
       moveDragPreview(event.clientX, event.clientY);
       event.preventDefault();
-      const box = handRef.current;
-      if (!box) return;
-      const rect = box.getBoundingClientRect();
-      const nearHand =
-        event.clientX >= rect.left - 40 &&
-        event.clientX <= rect.right + 40 &&
-        event.clientY >= rect.top - 40 &&
-        event.clientY <= rect.bottom + 60;
-      setReorderIndex(nearHand ? reorderIndexFromClientX(event.clientX, box) : null);
+      const sourceIndex = hand.findIndex(
+        (candidate) => cardKey(candidate) === cardKey(pointer.card),
+      );
+      commitReorderIndex(
+        dragInsertIndexFromPointer(event.clientX, event.clientY, true, sourceIndex),
+      );
     };
     const up = (event: MouseEvent) => {
       const pointer = pointerDragRef.current;
       pointerDragRef.current = null;
       if (!pointer?.active) return;
-      const targetIndex = reorderIndexRef.current;
+      // T-90-feedback-20261123_020207-4 ITEM-NEW2: the release point is
+      // authoritative. Releasing inside the hand commits the exact parted
+      // slot under the pointer; releasing off the row (for example over the
+      // felt) closes the gap and plays the card on the drop target below.
+      // A coordinate-less `mouseup` (`0, 0`) keeps the last tracked slot.
+      const sourceIndex = hand.findIndex(
+        (candidate) => cardKey(candidate) === cardKey(pointer.card),
+      );
+      const targetIndex =
+        event.clientX === 0 && event.clientY === 0
+          ? reorderIndexRef.current
+          : dragInsertIndexFromPointer(
+              event.clientX,
+              event.clientY,
+              true,
+              sourceIndex,
+            );
       if (targetIndex !== null) {
         if (onReorderHand) {
           const from = hand.findIndex(
@@ -2381,7 +2481,7 @@ export function GameTable({
       setDragCard(null);
       setDragPointer(null);
       setSnapZone(null);
-      setReorderIndex(null);
+      commitReorderIndex(null);
     };
     document.addEventListener('mousemove', move);
     document.addEventListener('mouseup', up);
@@ -2406,7 +2506,7 @@ export function GameTable({
       setDragCard(null);
       setDragPointer(null);
       setSnapZone(null);
-      setReorderIndex(null);
+      commitReorderIndex(null);
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') cancel();
@@ -2455,10 +2555,10 @@ export function GameTable({
     setSnapZone(null);
     // The hit box is always the card row, even when the event fires on the
     // outer hand zone; lifted/oversized areas still map to the same slots.
-    const element =
-      handRef.current ?? (event.currentTarget as unknown as HTMLElement | null);
-    if (!element) return;
-    setReorderIndex(reorderIndexFromClientX(event.clientX, element));
+    if (!handRef.current) return;
+    commitReorderIndex(
+      dragInsertIndexFromPointer(event.clientX, event.clientY, false),
+    );
   };
 
   // `dragleave` bubbles from the cards/SVG children; ignore moves that stay
@@ -2467,7 +2567,7 @@ export function GameTable({
     const current = event.currentTarget as Node | null;
     const related = event.relatedTarget as Node | null;
     if (current && related && current.contains(related)) return;
-    setReorderIndex(null);
+    commitReorderIndex(null);
   };
 
   const dropOnHand = (event: DragLike) => {
@@ -2475,14 +2575,14 @@ export function GameTable({
     event.preventDefault();
     event.stopPropagation();
     const card = readDraggedCard(event);
-    const element =
-      handRef.current ?? (event.currentTarget as unknown as HTMLElement | null);
     const targetIndex =
-      reorderIndex ?? (element ? reorderIndexFromClientX(event.clientX, element) : 0);
+      reorderIndex ??
+      dragInsertIndexFromPointer(event.clientX, event.clientY, false) ??
+      0;
     setDragCard(null);
     setDragPointer(null);
     setSnapZone(null);
-    setReorderIndex(null);
+    commitReorderIndex(null);
     if (!card) return;
     const from = hand.findIndex((candidate) => cardKey(candidate) === cardKey(card));
     if (from < 0) return;
@@ -2748,7 +2848,7 @@ export function GameTable({
     setDragCard(null);
     setDragPointer(null);
     setSnapZone(null);
-    setReorderIndex(null);
+    commitReorderIndex(null);
   };
 
   /**
@@ -3239,6 +3339,11 @@ export function GameTable({
           data-hidden-left={0}
           data-hidden-right={0}
           data-reorder-target-index={reorderIndex === null ? undefined : reorderIndex}
+          // T-90-feedback-20261123_020207-4 ITEM-NEW2: the live insertion slot
+          // the remaining cards are parting around (`0..remainingCount`).
+          data-drag-insert-index={
+            dragCard !== null && reorderIndex !== null ? reorderIndex : undefined
+          }
           // T-90-feedback-2 ITEM-2: `.hand-cards` is exactly the overlapped card
           // footprint; the contour SVG is anchored to this box.
           style={{
@@ -3327,6 +3432,7 @@ export function GameTable({
                 deltaX={deltaX}
                 partDirection={partDirection}
                 collapsed={dragging}
+                dragSource={dragging}
                 dragging={dragging}
                 draggable={draggable}
                 selected={selectedKeys.includes(cardKey(card))}
