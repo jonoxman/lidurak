@@ -153,6 +153,11 @@
   content: '';
   grid-column: 1 / -1;
   grid-row: 1 / -1;
+  /* T-96: a grid item spans the CONTENT box, so the felt stopped 28px short of
+     every edge and let the hand overhang onto the page background. Negative
+     grid margins pull the painted felt out through the padding to fill the
+     whole padding box — still no absolute positioning, so nothing overlaps. */
+  margin: -24px -28px -28px -28px;
   z-index: 0;
   border-radius: calc(var(--app-roundness, 8px) * 1.5);
   background-color: var(--table-felt, #1e2923);
@@ -1055,8 +1060,11 @@
 /* ITEM-12a: trump cards carry no glowing aura any more — the symmetrical
    top-right / bottom-left badges (Ticket 2) are the only distinction. */
 .card-slot.trump {
-  border: 1px solid var(--trump-accent);
-  border-color: var(--trump-accent);
+  /* T-96: the slot no longer paints an inset border. A 1px slot border shrank
+     the inner 100x140 trump face to 98x138 and stacked its ring on top of the
+     face's own 2px gold border, so cards visibly jumped at trump boundaries.
+     The zero-width border keeps the trump accent token for theme overrides. */
+  border: 0 solid var(--trump-accent);
   box-shadow: none;
 }
 
@@ -1614,6 +1622,11 @@
     gap: 12px;
     min-height: 0;
     padding: 12px;
+  }
+
+  /* T-96: the felt still fills the full (12px) padding box on small screens. */
+  [data-zone='table-arena']::before {
+    margin: -12px;
   }
 
   .seat-top-left,

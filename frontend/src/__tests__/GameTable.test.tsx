@@ -3102,8 +3102,13 @@ describe('T-90-2 ITEM-PREV-4: defender hand glow before the surrender decision',
       const trump = cssRule(tableCss, ":root[data-theme='light'] .card-slot.trump");
       expect(trump).toContain('border-color: var(--trump-accent)');
       expect(trump).toContain('box-shadow: none');
+      // T-96: the slot carries no inset border any more; the inner trump face
+      // paints the single 2px gold ring at the full 100x140 footprint.
       expect(tableCss).toMatch(
-        /\n\.card-slot\.trump\s*{[^}]*border: 1px solid var\(--trump-accent\);[^}]*box-shadow: none/,
+        /\n\.card-slot\.trump\s*{[^}]*border: 0 solid var\(--trump-accent\);[^}]*box-shadow: none/,
+      );
+      expect(tableCss).toMatch(
+        /\n\.playing-card\.trump-card\s*{[^}]*border: 2px solid var\(--trump-border, #f59e0b\)/,
       );
 
       const uncovered = cssRule(
@@ -3582,7 +3587,10 @@ describe('T-90 ITEM-1c: distinct gameplay feature colours', () => {
     expect(cssRule(tableCss, '.playing-card.trump-card')).toContain(
       'var(--trump-border, #f59e0b)',
     );
-    expect(cssRule(tableCss, '.card-slot.trump')).toContain('border: 1px solid var(--trump-accent)');
+    // T-96: no slot border, so the trump face keeps its exact 100x140 size.
+    const trumpSlot = cssRule(tableCss, '.card-slot.trump');
+    expect(trumpSlot).toContain('border: 0 solid var(--trump-accent)');
+    expect(trumpSlot).toContain('box-shadow: none');
     expect(cssRule(tableCss, '.trump-badge')).toContain('var(--trump-accent)');
   });
 
@@ -3759,6 +3767,15 @@ describe('T-90-4: larger cards, aura containment, throw-in slot, hand reorder an
 
     const arenaRule = cssRule(tableCss, "[data-zone='table-arena']");
     expect(arenaRule).toContain('padding: 24px 28px 28px 28px');
+    // T-96: the felt layer pulls out through the padding, so the painted surface
+    // fills the whole padding box instead of stopping 28px short on each side.
+    expect(tableCss).toMatch(
+      /\[data-zone='table-arena'\]::before\s*{[^}]*margin: -24px -28px -28px -28px;/,
+    );
+    // ... and the small-screen 12px inset is pulled out by the same amount.
+    expect(tableCss).toMatch(
+      /\[data-zone='table-arena'\]::before\s*{[^}]*margin: -12px;/,
+    );
     expect(cssRule(tableCss, '.battlefield-tinted-box')).toContain('clamp(240px, 30vh, 320px)');
     expect(
       cssRule(tableCss, "[data-zone='table-arena'][data-aura-contained='true'] .opponent-seat"),
