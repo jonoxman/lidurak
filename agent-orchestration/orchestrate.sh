@@ -335,20 +335,34 @@ dump_changed_files_context() {
 }
 
 dump_frontend_qa_context() {
-  # Frontend-focused context (~65KB max) for Technical QA Playbook so UI selectors/CSS/presets are never truncated
+  # Full-stack QA context (~65KB max): 45KB non-test frontend + 20KB modified backend/launcher so server milestones (auth/DB/WS) are covered too
   local BASE_C
   BASE_C=$(cat .reviews/feedback_base_commit 2>/dev/null || git rev-parse HEAD~1 2>/dev/null || echo "HEAD")
-  local FE_CHANGED FE_CORE ALL_FE
+  local FE_CHANGED FE_CORE ALL_FE BE_CHANGED
   FE_CHANGED=$(git diff --name-only "${BASE_C}...HEAD" -- frontend/src/ \
     ':(exclude)*.test.*' ':(exclude)*.spec.*' ':(exclude)*__tests__*' 2>/dev/null || true)
   FE_CORE=$(find frontend/src -type f \( -name '*.tsx' -o -name '*.ts' -o -name '*.css' \) \
     ! -name '*.test.*' ! -name '*.spec.*' ! -path '*/__tests__/*' 2>/dev/null | sort || true)
   ALL_FE=$(printf '%s\n%s\n' "$FE_CHANGED" "$FE_CORE" | awk 'NF && !seen[$0]++')
-  while IFS= read -r f; do
-    [ -f "$f" ] || continue
-    echo "===FRONTEND_FILE:${f}==="
-    (grep -vE '^[[:space:]]*$' "$f" || true) | head -n 300
-  done <<< "$ALL_FE" | head -c 65000
+  (
+    while IFS= read -r f; do
+      [ -f "$f" ] || continue
+      echo "===FRONTEND_FILE:${f}==="
+      (grep -vE '^[[:space:]]*$' "$f" || true) | head -n 260
+    done <<< "$ALL_FE"
+  ) | head -c 45000
+
+  BE_CHANGED=$(git diff --name-only "${BASE_C}...HEAD" -- backend/src/main/ play-local.sh \
+    ':(exclude)*Test.scala' ':(exclude)*Spec.scala' 2>/dev/null || true)
+  if [ -n "$BE_CHANGED" ]; then
+    (
+      while IFS= read -r f; do
+        [ -f "$f" ] || continue
+        echo "===BACKEND_FILE:${f}==="
+        (grep -vE '^[[:space:]]*$' "$f" || true) | head -n 200
+      done <<< "$BE_CHANGED"
+    ) | head -c 20000
+  fi
 }
 
 # Serialized FreeBuff admission & prompt submission (handles "This session was released" / "Enter: retry" automatically)
@@ -931,6 +945,56 @@ extract_tickets_with_waves() {
 }
 
 # === PHASE 1: DECOMPOSE CURRENT ACTIVE MILESTONE IN SPEC.md ===
+build_milestone_verification_spec() {
+  local ACTIVE_M="${1:-M2}"
+  python3 - "$ACTIVE_M" << 'PY_SPEC'
+from pathlib import Path
+import re
+import sys
+
+active_m = sys.argv[1]
+spec_path = Path("SPEC.md")
+spec_excerpt = ""
+if spec_path.exists():
+    spec_text = spec_path.read_text(encoding="utf-8", errors="replace")
+    m = re.search(
+        rf'(?ms)^##+[^\n]*\b(?:Milestone\s+)?{re.escape(active_m)}\b.*?(?=^##+[^\n]*\b(?:Milestone\s+)?M\d+\b|\Z)',
+        spec_text,
+    )
+    if m:
+        spec_excerpt = m.group(0).strip()[:5000]
+
+lines = [
+    f"# Milestone {active_m} Verification Checklist",
+    f"These numbered items represent the complete deliverables for Milestone {active_m} (do NOT reference earlier milestones).",
+    "",
+]
+if spec_excerpt:
+    lines += [f"## SPEC.md Reference ({active_m})", spec_excerpt, "", "## Implemented Milestone Deliverables"]
+
+ticket_files = sorted(Path(".tickets").glob("T-*.md"))
+for idx, tf in enumerate(ticket_files, 1):
+    raw = tf.read_text(encoding="utf-8", errors="replace")
+    title = tf.stem
+    for raw_line in raw.splitlines():
+        s = raw_line.strip()
+        if s.startswith("#"):
+            title = s.lstrip("#").strip()
+            break
+    criteria = [
+        l.strip()
+        for l in raw.splitlines()
+        if re.match(r'^([-*]|\d+\.)\s+', l.strip())
+    ]
+    lines.append(f"{idx}. **{title}** (`{tf.name}`)")
+    for c in criteria[:10]:
+        lines.append(f"   {c}")
+
+out = "\n".join(lines).strip() + "\n"
+Path(".reviews/active_feedback_resolved.md").write_text(out, encoding="utf-8")
+PY_SPEC
+}
+
 ensure_milestone_tickets_exist() {
   if [ -n "$(ls -A .tickets/T-*.md 2>/dev/null)" ]; then
     return 0
@@ -977,6 +1041,18 @@ PROMPT_EOF
   git add .tickets/ 2>/dev/null || true
   agent_git commit -m "chore(tickets): generate wave tickets for ${ACTIVE_M}" >/dev/null 2>&1 || true
   [ "$USE_GITHUB_PRS" -eq 1 ] && (retry_git_push origin main >/dev/null 2>&1 || true)
+
+  # Arm Stages 3, 3.5, 3.6, and 3.7 so the completed milestone gets audited, documented, and turned into a fresh QA Playbook
+  git rev-parse HEAD > .reviews/feedback_base_commit
+  echo "0" > .reviews/feedback_audit_passes
+  echo "0" > .reviews/visual_qa_passes
+  rm -f .reviews/stage_holistic.done .reviews/stage_visual_qa.done .reviews/stage_docs.done .reviews/stage_tech_qa.done \
+        .reviews/QA_PLAYBOOK_TECH.md .reviews/QA_PLAYBOOK_TECH.raw.md \
+        .reviews/QA_PLAYBOOK_HUMAN.txt .reviews/QA_PLAYBOOK_HUMAN.raw.txt \
+        .reviews/QA_PLAYBOOK.md .reviews/QA_PLAYBOOK.raw.md
+  echo "None (fresh milestone ${ACTIVE_M})." > .reviews/previous_round_feedback.md
+  echo "None (fresh milestone ${ACTIVE_M})." > .reviews/previous_round_qa_playbook.md
+  build_milestone_verification_spec "$ACTIVE_M"
 }
 
 # === PHASE 1.5: HUMAN FEEDBACK AMBIGUITY TRIAGE + TRACEABLE WAVE GENERATION ===
@@ -1658,7 +1734,7 @@ advance_to_next_milestone() {
   mkdir -p "$ARCHIVE_DIR"
   mv .tickets/T-*.md "$ARCHIVE_DIR"/ 2>/dev/null || true
   mv .tickets/.completed_* "$ARCHIVE_DIR"/ 2>/dev/null || true
-  rm -f .reviews/raw_tickets.txt .tickets/STATUS .reviews/feedback_base_commit .reviews/feedback_audit_passes .reviews/visual_qa_passes .reviews/stage_holistic.done .reviews/stage_visual_qa.done .reviews/stage_docs.done .reviews/stage_tech_qa.done
+  rm -f .reviews/raw_tickets.txt .tickets/STATUS .reviews/feedback_base_commit .reviews/feedback_audit_passes .reviews/visual_qa_passes .reviews/stage_holistic.done .reviews/stage_visual_qa.done .reviews/stage_docs.done .reviews/stage_tech_qa.done .reviews/active_feedback_resolved.md .reviews/previous_round_feedback.md .reviews/previous_round_qa_playbook.md .reviews/QA_PLAYBOOK_TECH.md .reviews/QA_PLAYBOOK_TECH.raw.md .reviews/QA_PLAYBOOK_HUMAN.txt .reviews/QA_PLAYBOOK_HUMAN.raw.txt .reviews/QA_PLAYBOOK.md .reviews/QA_PLAYBOOK.raw.md
 
   if grep -q "CURRENT ACTIVE MILESTONE:" SPEC.md 2>/dev/null; then
     sed -i "s/CURRENT ACTIVE MILESTONE: M[0-9]\+/CURRENT ACTIVE MILESTONE: ${NEXT_M}/g" SPEC.md
