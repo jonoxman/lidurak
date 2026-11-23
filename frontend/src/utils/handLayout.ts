@@ -861,9 +861,19 @@ export interface DragInsertOptions extends DragHandGeometryOptions {
  * The slot is resolved from the RESTING row of the remaining cards, never from
  * the parted transforms: a left-to-right sweep is therefore strictly
  * non-decreasing (`0 -> 1 -> ... -> remainingCount`), so the slot animation can
- * never oscillate while the row moves under a stationary cursor. A pointer left
- * of the first remaining card's centre resolves to `0`, and one past the last
- * card's centre resolves to the rightmost slot.
+ * never oscillate while the row moves under a stationary cursor. A pointer at
+ * or left of the first remaining card's centre resolves to `0`, one past a
+ * card's centre resolves to the slot after it, and one past the last card's
+ * centre resolves to the rightmost slot.
+ *
+ * T-96: the boundary is STRICT. A small hand (`<= HAND_SMALL_HAND_MAX_CARDS`)
+ * is re-centred by `startX` (0 -> 32px on desktop) as soon as it drops to
+ * `N - 1` cards, so the remaining row's centres move left by that shift. An
+ * inclusive `<=` therefore treated the exact midpoint between two ORIGINAL
+ * slots as sitting on the re-centred next card's centre and jumped one slot
+ * too far (`146 <= 146` -> `2` instead of `1`, `274 <= 274` -> `4` instead of
+ * `3`). Comparing strictly keeps an exact midpoint on the lower slot, which is
+ * the slot the pointer is aiming at, and still sweeps monotonically.
  */
 export function resolveDragInsertIndex(options: DragInsertOptions): number | null {
   const row = resolveDragHandRow(options);
@@ -878,7 +888,9 @@ export function resolveDragInsertIndex(options: DragInsertOptions): number | nul
 
   let insertIndex = 0;
   for (let index = 0; index < row.restingPositions.length; index += 1) {
-    if (row.restingPositions[index] + row.cardWidth / 2 <= pointerX) {
+    // T-96: strict — an exact midpoint between two cards belongs to the lower
+    // slot, never to the card whose re-centred centre it happens to equal.
+    if (row.restingPositions[index] + row.cardWidth / 2 < pointerX) {
       insertIndex = index + 1;
     }
   }

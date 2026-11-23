@@ -1007,6 +1007,35 @@ describe('T-90-feedback-20261123_020207-4 ITEM-NEW2: in-hand drag reorder partin
     ).toBeNull();
   });
 
+  it('T-96: resolves small-hand midpoints to the lower slot and parts there', () => {
+    const options = {
+      cardCount: 6,
+      containerWidth: 640,
+      dragSourceIndex: 0,
+      maximalBoxWidth: BOX,
+    };
+    // Removing the dragged card drops the hand to five cards, which the
+    // small-hand runway re-centres by 32px: [0, 64, ...] -> [32, 96, ...].
+    expect(dragRow(6, null).restingPositions).toEqual([32, 96, 160, 224, 288]);
+
+    // `146` is the midpoint between the ORIGINAL card 1 (centre 114) and card 2
+    // (centre 178) — and exactly the re-centred 10♣ centre. `274` is the same
+    // for cards 3 (242) and 4 (306). Both must resolve to the LOWER slot.
+    expect(resolveDragInsertIndex({ ...options, pointerX: 146 })).toBe(1);
+    expect(resolveDragInsertIndex({ ...options, pointerX: 274 })).toBe(3);
+    // Past those centres the slot advances by exactly one (no jump of two).
+    expect(resolveDragInsertIndex({ ...options, pointerX: 146.01 })).toBe(2);
+    expect(resolveDragInsertIndex({ ...options, pointerX: 274.01 })).toBe(4);
+
+    // The parted row opens a whole-card gap at the resolved slot, ordered and
+    // inside the lane, so the dragged card lands without overlapping a card.
+    const parted = computeDragPartedCardPositions({ ...options, dragInsertIndex: 1 });
+    expect(parted.insertIndex).toBe(1);
+    expect(parted.gapPx).toBeGreaterThanOrEqual(CARD_WIDTH - EPS);
+    expect(gapAt(parted.positions, 1)).toBeGreaterThanOrEqual(CARD_WIDTH - EPS);
+    expectOrderedPositions(parted.positions);
+  });
+
   it('closes the gap when no slot is active and never breaks tiny hands', () => {
     const closed = dragRow(6, null);
     expect(closed.deltas.every((delta) => delta === 0)).toBe(true);
