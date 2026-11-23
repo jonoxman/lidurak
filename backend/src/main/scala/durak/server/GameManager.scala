@@ -118,10 +118,12 @@ object GameManager:
   // --- QA Scenario presets ---
 
   /**
-   * Every scripted position `POST /api/games/preset` can start: exactly the four
-   * curated scenarios of the current QA round (ITEM-9). Every preset of the
-   * previous rounds has been pruned, and the engine positions those old tests
-   * reasoned about now live as test-only fixtures under
+   * Every scripted position `POST /api/games/preset` can start: the four curated
+   * scenarios of the current QA round (ITEM-9) plus the two feedback positions
+   * for covered-pair edge collapsing (`qa-table-collapse-right`) and the live
+   * surrender timer (`qa-surrender-timer`). Every preset of the previous rounds
+   * has been pruned, and the engine positions those old tests reasoned about now
+   * live as test-only fixtures under
    * `backend/src/test/scala/durak/engine/ThrowInFixtures.scala`.
    */
   /** `"6-Card 10s & Actions"`: a 3p table with a throw-in and both action seats. */
@@ -136,20 +138,36 @@ object GameManager:
   /** `"1-Card Hand (No Part)"`: Alice opens a 2p bout with a single `10♠`. */
   val QaSingleCard: String = "qa-single-card"
 
+  /**
+   * `"Table Collapse Right"`: a 4p table whose tapped defender sits `top-right`
+   * from Alice's POV, with three covered and two uncovered pairs on the felt.
+   */
+  val QaTableCollapseRight: String = "qa-table-collapse-right"
+
+  /**
+   * `"Surrender Timer"`: the active Alice surrenders a four-card incoming bout
+   * while Bob and Carol hold live throw-ins and the turn clock keeps ticking.
+   */
+  val QaSurrenderTimer: String = "qa-surrender-timer"
+
   val Presets: Vector[String] = Vector(
     QaNormal6Actions,
     QaMedium14Expand,
     QaLarge30Compress,
-    QaSingleCard
+    QaSingleCard,
+    QaTableCollapseRight,
+    QaSurrenderTimer
   )
 
   /** The scripted position called `presetId`, or an error naming the unknown one. */
   def preset(presetId: String): Either[String, PresetGame] =
     Option(presetId).map(_.trim.toLowerCase).getOrElse("") match
-      case QaNormal6Actions  => Right(qaNormal6ActionsPreset)
-      case QaMedium14Expand  => Right(qaMedium14ExpandPreset)
-      case QaLarge30Compress => Right(qaLarge30CompressPreset)
-      case QaSingleCard      => Right(qaSingleCardPreset)
+      case QaNormal6Actions      => Right(qaNormal6ActionsPreset)
+      case QaMedium14Expand      => Right(qaMedium14ExpandPreset)
+      case QaLarge30Compress     => Right(qaLarge30CompressPreset)
+      case QaSingleCard          => Right(qaSingleCardPreset)
+      case QaTableCollapseRight  => Right(qaTableCollapseRightPreset)
+      case QaSurrenderTimer      => Right(qaSurrenderTimerPreset)
       case other =>
         Left(
           s"Unknown preset: $other (expected one of ${Presets.mkString(", ")})"
@@ -418,6 +436,146 @@ object GameManager:
         boutPhase = BoutPhase.InitialAttack,
         defenderInitialHandSize = bobHand.size,
         discardPile = discardPile
+      ),
+      defaultPlayerId = "p0"
+    )
+
+  /**
+   * `qa-table-collapse-right` — "Table Collapse Right".
+   *
+   * A four-seat hotseat table over the 52-card deck (`trumpSuit = Hearts`) with
+   * three covered pairs and two uncovered attacks on the felt, opened on Alice
+   * (`p0`, the default POV, the attacker). The defender Dave (`p3`) sits
+   * `top-right` from Alice's view, so the covered pairs must collapse toward the
+   * **right** edge; switching the POV to Bob (`p1`), Carol (`p2`) or Dave (`p3`)
+   * moves Dave to `top-center`, `top-left` and the active bottom seat, and the
+   * same covered pairs must then collapse to the **left** edge.
+   *
+   * The covered ten (`10♣` under `J♣`) keeps its full rank and suit readable in
+   * the collapsed stack. Dave holds trump covering cards for both uncovered
+   * attacks (`7♥` and `8♦`), so covering one makes it snap to the edge, and
+   * Alice holds `7♣` (a rank already on the table) so she can throw in a sixth
+   * card and crowd the single row. The bout opened while Dave held six cards, so
+   * `maxBoutAttacks = 6` and exactly one throw-in slot is free.
+   */
+  private def qaTableCollapseRightPreset: PresetGame =
+    val aliceHand = Vector(
+      card(Rank.Seven, Suit.Clubs),
+      card(Rank.Eight, Suit.Hearts),
+      card(Rank.Two, Suit.Spades),
+      card(Rank.Three, Suit.Spades),
+      card(Rank.Four, Suit.Spades),
+      card(Rank.Five, Suit.Spades)
+    )
+    val bobHand = Vector(
+      card(Rank.Six, Suit.Spades),
+      card(Rank.Six, Suit.Clubs),
+      card(Rank.Two, Suit.Diamonds),
+      card(Rank.Three, Suit.Diamonds),
+      card(Rank.Four, Suit.Diamonds),
+      card(Rank.Five, Suit.Diamonds)
+    )
+    val carolHand = Vector(
+      card(Rank.Queen, Suit.Hearts),
+      card(Rank.Three, Suit.Clubs),
+      card(Rank.Four, Suit.Clubs),
+      card(Rank.Five, Suit.Clubs),
+      card(Rank.Six, Suit.Hearts),
+      card(Rank.Seven, Suit.Spades)
+    )
+    val daveHand = Vector(
+      card(Rank.Nine, Suit.Hearts),
+      card(Rank.Ten, Suit.Hearts),
+      card(Rank.Jack, Suit.Hearts),
+      card(Rank.Two, Suit.Clubs)
+    )
+    val tablePairs = Vector(
+      TablePair(card(Rank.Ten, Suit.Clubs), Some(card(Rank.Jack, Suit.Clubs))),
+      TablePair(card(Rank.Eight, Suit.Spades), Some(card(Rank.Queen, Suit.Spades))),
+      TablePair(card(Rank.Nine, Suit.Diamonds), Some(card(Rank.King, Suit.Diamonds))),
+      TablePair(card(Rank.Seven, Suit.Hearts)),
+      TablePair(card(Rank.Eight, Suit.Diamonds))
+    )
+    val used = aliceHand ++ bobHand ++ carolHand ++ daveHand ++
+      tablePairs.flatMap(pair => pair.attack :: pair.defense.toList)
+    val talon = suitBottomTalon(4, used, Suit.Hearts)
+    PresetGame(
+      state = presetState(
+        names = Vector("Alice", "Bob", "Carol", "Dave"),
+        hands = Vector(aliceHand, bobHand, carolHand, daveHand),
+        talon = talon,
+        trumpSuit = Suit.Hearts,
+        bottomTrumpCard = talon.lastOption,
+        tablePairs = tablePairs,
+        attackerIdx = 0,
+        defenderIdx = 3,
+        boutPhase = BoutPhase.Defense,
+        defenderInitialHandSize = 6
+      ),
+      defaultPlayerId = "p0"
+    )
+
+  /**
+   * `qa-surrender-timer` — "Surrender Timer".
+   *
+   * A three-seat hotseat table (`trumpSuit = Hearts`) where Carol (`p2`) has
+   * attacked with four tens, Alice (`p0`, the default POV and the active bottom
+   * user) covered one of them with `J♣` and then surrendered. The bout sits in
+   * `SurrenderThrowIn` with four incoming pairs (one covered, three uncovered),
+   * so Alice's hand and the turn clock above it are both populated while she is
+   * surrendering.
+   *
+   * Bob (`p1`) holds `J♠`/`J♥` and Carol holds `J♦`, all matching the `J♣` on
+   * the table, so their throw-in window stays open (`promptedPlayerIds` is
+   * non-empty) and the room's turn clock is armed from the first frame instead
+   * of settling the surrendered bout immediately.
+   */
+  private def qaSurrenderTimerPreset: PresetGame =
+    val aliceHand = Vector(
+      card(Rank.Nine, Suit.Hearts),
+      card(Rank.Eight, Suit.Hearts),
+      card(Rank.Seven, Suit.Hearts),
+      card(Rank.Six, Suit.Diamonds),
+      card(Rank.Ace, Suit.Spades),
+      card(Rank.King, Suit.Spades)
+    )
+    val bobHand = Vector(
+      card(Rank.Jack, Suit.Spades),
+      card(Rank.Jack, Suit.Hearts),
+      card(Rank.Six, Suit.Spades),
+      card(Rank.Seven, Suit.Spades),
+      card(Rank.Eight, Suit.Spades),
+      card(Rank.Nine, Suit.Spades)
+    )
+    val carolHand = Vector(
+      card(Rank.Jack, Suit.Diamonds),
+      card(Rank.Six, Suit.Hearts),
+      card(Rank.Queen, Suit.Hearts),
+      card(Rank.King, Suit.Hearts),
+      card(Rank.Nine, Suit.Diamonds),
+      card(Rank.Ace, Suit.Diamonds)
+    )
+    val tablePairs = Vector(
+      TablePair(card(Rank.Ten, Suit.Clubs), Some(card(Rank.Jack, Suit.Clubs))),
+      TablePair(card(Rank.Ten, Suit.Spades)),
+      TablePair(card(Rank.Ten, Suit.Diamonds)),
+      TablePair(card(Rank.Ten, Suit.Hearts))
+    )
+    val used = aliceHand ++ bobHand ++ carolHand ++
+      tablePairs.flatMap(pair => pair.attack :: pair.defense.toList)
+    val talon = suitBottomTalon(3, used, Suit.Hearts)
+    PresetGame(
+      state = presetState(
+        names = Vector("Alice", "Bob", "Carol"),
+        hands = Vector(aliceHand, bobHand, carolHand),
+        talon = talon,
+        trumpSuit = Suit.Hearts,
+        bottomTrumpCard = talon.lastOption,
+        tablePairs = tablePairs,
+        attackerIdx = 2,
+        defenderIdx = 0,
+        boutPhase = BoutPhase.SurrenderThrowIn,
+        defenderInitialHandSize = 6
       ),
       defaultPlayerId = "p0"
     )
