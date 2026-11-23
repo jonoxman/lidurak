@@ -108,7 +108,7 @@ export interface CreatedPresetGame {
 
 /**
  * Every scripted position offered in the lobby and the game's left sidebar:
- * exactly the six curated scenarios of the current QA round.
+ * exactly the seven curated scenarios of the current QA round.
  */
 export const QA_SCENARIOS: { id: string; label: string }[] = [
   { id: 'qa-table-collapse-right', label: 'Table Collapse (Edge & Row)' },
@@ -117,13 +117,14 @@ export const QA_SCENARIOS: { id: string; label: string }[] = [
   { id: 'qa-medium-14-expand', label: '14-Card Expand Box' },
   { id: 'qa-large-30-compress', label: '30-Card Compress & Part' },
   { id: 'qa-single-card', label: '1-Card Hand (No Part)' },
+  { id: 'qa-fast-bots', label: 'Fast Bots (75% Faster)' },
 ];
 
 /**
- * Starts one of the six scripted QA positions (`qa-table-collapse-right`,
+ * Starts one of the seven scripted QA positions (`qa-table-collapse-right`,
  * `qa-surrender-timer`, `qa-normal-6-actions`, `qa-medium-14-expand`,
- * `qa-large-30-compress`, `qa-single-card`) so a reviewer can jump straight to
- * that exact table state in one click.
+ * `qa-large-30-compress`, `qa-single-card`, `qa-fast-bots`) so a reviewer can
+ * jump straight to that exact table state in one click.
  */
 export async function createPresetGame(preset: string): Promise<CreatedPresetGame> {
   const response = await fetch('/api/games/preset', {

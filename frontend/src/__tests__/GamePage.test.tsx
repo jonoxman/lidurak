@@ -2558,7 +2558,7 @@ describe('GamePage', () => {
     expect(screen.getByTestId('player-status-tag-p2').textContent).toBe('WINNER');
   });
 
-  it('T-90: lists only the six current-round QA presets and opens them in a click', async () => {
+  it('T-90: lists only the seven current-round QA presets and opens them in a click', async () => {
     getGameView.mockResolvedValue(view);
     getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
     createPresetGameMock.mockResolvedValue({
@@ -2580,8 +2580,8 @@ describe('GamePage', () => {
 
     const panel = await screen.findByTestId('qa-scenarios');
     expect(panel.closest('[data-zone="sidebar-left"]')).not.toBeNull();
-    // Exactly six presets — no legacy scenario can hide in the list.
-    expect(within(panel).getAllByRole('button')).toHaveLength(6);
+    // Exactly seven presets — no legacy scenario can hide in the list.
+    expect(within(panel).getAllByRole('button')).toHaveLength(7);
     expect(
       within(panel).getAllByRole('button').map((button) => button.getAttribute('data-preset')),
     ).toEqual([
@@ -2591,6 +2591,7 @@ describe('GamePage', () => {
       'qa-medium-14-expand',
       'qa-large-30-compress',
       'qa-single-card',
+      'qa-fast-bots',
     ]);
     expect(
       within(panel).getAllByRole('button').map((button) => button.textContent),
@@ -2601,6 +2602,7 @@ describe('GamePage', () => {
       '14-Card Expand Box',
       '30-Card Compress & Part',
       '1-Card Hand (No Part)',
+      'Fast Bots (75% Faster)',
     ]);
 
     // Every preset of the previous rounds is pruned from the live UI.
@@ -2651,6 +2653,44 @@ describe('GamePage', () => {
 
     await waitFor(() => expect(createPresetGameMock).toHaveBeenCalledWith('qa-normal-6-actions'));
     await waitFor(() => expect(onNavigateGame).toHaveBeenCalledTimes(3));
+
+    // ITEM-NEW3: the fast-bot room sends its exact preset id too.
+    fireEvent.click(within(panel).getByRole('button', { name: 'Fast Bots (75% Faster)' }));
+
+    await waitFor(() => expect(createPresetGameMock).toHaveBeenCalledWith('qa-fast-bots'));
+    await waitFor(() => expect(onNavigateGame).toHaveBeenCalledTimes(4));
+  });
+
+  it('T-90-feedback-5: opens the Fast Bots preset from the left sidebar', async () => {
+    getGameView.mockResolvedValue(view);
+    getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
+    createPresetGameMock.mockResolvedValue({
+      gameId: 'fast-bots',
+      players: ['p0', 'p1', 'p2', 'p3'],
+      playerTypes: ['human', 'basicBot', 'basicBot', 'basicBot'],
+      defaultPlayerId: 'p0',
+    });
+    const onNavigateGame = vi.fn();
+
+    render(
+      <GamePage
+        gameId="game-1"
+        playerId="p0"
+        onSwitchPlayer={() => {}}
+        onNavigateGame={onNavigateGame}
+      />,
+    );
+
+    const panel = await screen.findByTestId('qa-scenarios');
+    expect(panel.closest('[data-zone="sidebar-left"]')).not.toBeNull();
+    const button = within(panel).getByTestId('preset-btn-qa-fast-bots');
+    expect(button.textContent).toBe('Fast Bots (75% Faster)');
+
+    fireEvent.click(button);
+
+    await waitFor(() => expect(createPresetGameMock).toHaveBeenCalledWith('qa-fast-bots'));
+    await waitFor(() => expect(onNavigateGame).toHaveBeenCalledWith('fast-bots', 'p0'));
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
   });
 
   it('T-90-feedback-3: light mode paints the paler highlights live', async () => {
@@ -3944,5 +3984,139 @@ describe('T-90-feedback-20261106_111512-3: backend canThrowIn gate', () => {
           document.querySelectorAll('.hand-card-wrapper[data-selected="true"]'),
         ).toHaveLength(0),
     );
+  });
+});
+
+/**
+ * T-90-feedback-20261123_020207-5 ITEM-NEW1: in the Table Collapse (Edge & Row)
+ * position the attacker holds two matching throw-in cards; sending the first one
+ * must never suppress the second. The updated server projection that keeps the
+ * second card legal has to be dispatchable immediately, with no client latch.
+ */
+describe('T-90-feedback-20261123_020207-5: Table Collapse consecutive throw-ins', () => {
+  beforeEach(() => {
+    getGameView.mockReset();
+    getGameReplay.mockReset();
+    sendAction.mockReset();
+    createPresetGameMock.mockReset();
+    wsState.onUpdate = null;
+    getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
+  });
+
+  const collapseView: PlayerGameView = {
+    ...view,
+    myId: 'p0',
+    myName: 'Alice',
+    myHand: [
+      { suit: 'hearts', rank: 'seven' },
+      { suit: 'clubs', rank: 'seven' },
+      { suit: 'diamonds', rank: 'nine' },
+    ],
+    opponents: [
+      { id: 'p1', name: 'Bob', cardCount: 5, hasPassed: true, finishRank: null },
+      { id: 'p2', name: 'Carol', cardCount: 5, hasPassed: true, finishRank: null },
+      { id: 'p3', name: 'Dave', cardCount: 4, hasPassed: false, finishRank: null },
+    ],
+    tablePairs: [
+      { attack: { suit: 'spades', rank: 'seven' }, defense: { suit: 'clubs', rank: 'eight' } },
+      { attack: { suit: 'diamonds', rank: 'seven' }, defense: { suit: 'hearts', rank: 'eight' } },
+      { attack: { suit: 'hearts', rank: 'nine' }, defense: null },
+      { attack: { suit: 'clubs', rank: 'nine' }, defense: null },
+    ],
+    trumpSuit: 'spades',
+    attackerIdx: 0,
+    defenderIdx: 3,
+    boutPhase: 'Defense',
+    legalActions: ['throwIn', 'pass'],
+    maxBoutAttacks: 6,
+    canThrowIn: true,
+    throwInCards: [
+      { suit: 'hearts', rank: 'seven' },
+      { suit: 'clubs', rank: 'seven' },
+    ],
+    throwInCapacity: 2,
+  };
+
+  // The projection lands right after the first card: Dave still holds four
+  // cards, and the second seven is still the one legal throw-in.
+  const afterFirstThrowIn: PlayerGameView = {
+    ...collapseView,
+    myHand: [
+      { suit: 'clubs', rank: 'seven' },
+      { suit: 'diamonds', rank: 'nine' },
+    ],
+    tablePairs: [
+      ...collapseView.tablePairs,
+      { attack: { suit: 'hearts', rank: 'seven' }, defense: null },
+    ],
+    throwInCards: [{ suit: 'clubs', rank: 'seven' }],
+    throwInCapacity: 1,
+  };
+
+  const afterSecondThrowIn: PlayerGameView = {
+    ...afterFirstThrowIn,
+    myHand: [{ suit: 'diamonds', rank: 'nine' }],
+    tablePairs: [
+      ...afterFirstThrowIn.tablePairs,
+      { attack: { suit: 'clubs', rank: 'seven' }, defense: null },
+    ],
+    canThrowIn: false,
+    throwInCards: [],
+    throwInCapacity: 0,
+    legalActions: ['pass'],
+  };
+
+  const handCard = (label: string): HTMLElement =>
+    screen.getByLabelText(label).closest('.card-slot') as HTMLElement;
+
+  it('ITEM-NEW1: dispatches both valid attack cards one after the other', async () => {
+    getGameView.mockResolvedValue(collapseView);
+    sendAction
+      .mockResolvedValueOnce(afterFirstThrowIn)
+      .mockResolvedValueOnce(afterSecondThrowIn);
+
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    await screen.findByTestId('throw-in-outline');
+
+    // First valid card.
+    fireEvent.click(handCard('seven of hearts'));
+    await waitFor(() =>
+      expect(
+        document.querySelectorAll('.hand-card-wrapper[data-selected="true"]'),
+      ).toHaveLength(1),
+    );
+    fireEvent.dblClick(handCard('seven of hearts'));
+
+    await waitFor(() => expect(sendAction).toHaveBeenCalledTimes(1));
+    expect(sendAction.mock.calls[0][1]).toEqual({
+      type: 'throwInCards',
+      playerId: 'p0',
+      cards: [{ suit: 'hearts', rank: 'seven' }],
+    });
+
+    // The refreshed projection keeps the second seven playable.
+    await waitFor(() =>
+      expect(document.querySelectorAll('[data-zone="player-hand"] .hand-card-wrapper')).toHaveLength(2),
+    );
+    expect(screen.getByTestId('throw-in-outline').getAttribute('data-throw-in-enabled')).toBe(
+      'true',
+    );
+
+    // Second valid card, dispatched straight away with no latch or delay.
+    fireEvent.click(handCard('seven of clubs'));
+    await waitFor(() =>
+      expect(
+        document.querySelectorAll('.hand-card-wrapper[data-selected="true"]'),
+      ).toHaveLength(1),
+    );
+    fireEvent.dblClick(handCard('seven of clubs'));
+
+    await waitFor(() => expect(sendAction).toHaveBeenCalledTimes(2));
+    expect(sendAction.mock.calls[1][1]).toEqual({
+      type: 'throwInCards',
+      playerId: 'p0',
+      cards: [{ suit: 'clubs', rank: 'seven' }],
+    });
   });
 });
