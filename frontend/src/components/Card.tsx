@@ -79,6 +79,12 @@ export interface CardProps {
   draggable?: boolean;
   onDragStart?: (event: DragEvent) => void;
   onDragEnd?: () => void;
+  /**
+   * T-90-feedback-6 ITEM-3: render a purely visual duplicate (the floating
+   * center-locked drag preview) with no accessible name, so the previewed card
+   * never duplicates the source card's label for screen readers or tests.
+   */
+  decorative?: boolean;
 }
 
 const SUIT_SYMBOLS: Record<string, string> = {
@@ -456,6 +462,7 @@ export function Card({
   draggable = false,
   onDragStart,
   onDragEnd,
+  decorative = false,
 }: CardProps) {
   // T-90-feedback-2 ITEM-1b (review round 2): every card carries its footprint
   // inline, as the ticket requires. Explicit props win (the hand / play area
@@ -603,8 +610,9 @@ export function Card({
         // pointer finger set by the hand wrapper is never replaced by the
         // browser's drag / "no drop" cursor.
         onDragStart={(event: DragEvent) => event.preventDefault()}
-        role="img"
-        aria-label={`${rank} of ${suit}`}
+        role={decorative ? 'presentation' : 'img'}
+        aria-label={decorative ? undefined : `${rank} of ${suit}`}
+        aria-hidden={decorative ? 'true' : undefined}
         data-card-theme={theme}
         data-card-face={palette.face}
         data-roundness={roundness}

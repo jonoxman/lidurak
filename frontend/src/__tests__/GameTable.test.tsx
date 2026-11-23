@@ -5257,18 +5257,52 @@ describe('T-90-feedback-20261106_111512-3: throw-in gate, card tokens, drag visi
     expect(block('.card-slot')).not.toMatch(/transform:\s*scale\(/);
   });
 
-  it('keeps the dragged card painted and images it from the live element', () => {
+  it('suppresses the native drag ghost and paints the center-locked preview', () => {
     render(<GameTable {...base} tablePairs={[]} defenderId="p1" onReorderHand={vi.fn()} />);
     const card = screen.getByLabelText('king of clubs').closest('.card-slot') as HTMLElement;
     const wrapper = card.closest('.hand-card-wrapper') as HTMLElement;
     const setDragImage = vi.fn();
-    fireEvent.dragStart(card, { dataTransfer: { setData: vi.fn(), setDragImage, effectAllowed: 'move' } });
+    // A real grab pre-captures the point on mousedown. jsdom's `dragstart` has
+    // no coordinates, so it must not discard the pre-captured point.
+    fireEvent.mouseDown(card, { button: 0, clientX: 60, clientY: 90 });
+    fireEvent.dragStart(card, {
+      dataTransfer: { setData: vi.fn(), setDragImage, effectAllowed: 'move' },
+    });
     expect(setDragImage).toHaveBeenCalledTimes(1);
     const [image, offsetX, offsetY] = setDragImage.mock.calls[0];
-    expect(image).toBe(card);
-    expect((image as HTMLElement).isConnected).toBe(true);
-    expect(Number(offsetX)).toBeGreaterThanOrEqual(0);
-    expect(Number(offsetY)).toBeGreaterThanOrEqual(0);
+    // ITEM-3: a cached 1x1 transparent image replaces the offset-prone ghost.
+    expect(image).not.toBe(card);
+    expect((image as HTMLCanvasElement).width).toBe(1);
+    expect((image as HTMLCanvasElement).height).toBe(1);
+    expect(offsetX).toBe(0);
+    expect(offsetY).toBe(0);
+
+    // The center-locked preview is the visible dragged card.
+    const preview = screen.getByTestId('drag-card-preview');
+    const width = Number(preview.getAttribute('data-card-width'));
+    const height = Number(preview.getAttribute('data-card-height'));
+    expect(width).toBe(100);
+    expect(height).toBe(140);
+
+    const readCenter = (): { x: number; y: number } => {
+      const [translateX, translateY] = (
+        preview.style.transform.match(
+          /translate3d\((-?[\d.]+)px, (-?[\d.]+)px, 0\)/,
+        ) ?? []
+      )
+        .slice(1)
+        .map(Number);
+      return { x: translateX + width / 2, y: translateY + height / 2 };
+    };
+
+    // Before any `dragover`, the preview is already centred on the grab point.
+    expect(readCenter()).toEqual({ x: 60, y: 90 });
+
+    // The window-level dragover listener then keeps its centre on the pointer.
+    window.dispatchEvent(new window.MouseEvent('dragover', { clientX: 200, clientY: 220 }));
+    expect(readCenter()).toEqual({ x: 200, y: 220 });
+
+    // The source card stays connected and fully painted behind the preview.
     expect(document.body.contains(card)).toBe(true);
     expect(wrapper.isConnected).toBe(true);
     expect(card.style.opacity).not.toBe('0');
@@ -5276,6 +5310,10 @@ describe('T-90-feedback-20261106_111512-3: throw-in gate, card tokens, drag visi
     expect(card.style.display).not.toBe('none');
     expect(wrapper.className).not.toContain('dragging-hidden');
     expect(wrapper.getAttribute('data-drag-hidden')).toBeNull();
+
+    // `dragend` dismisses the floating preview cleanly.
+    fireEvent.dragEnd(card);
+    expect(screen.queryByTestId('drag-card-preview')).toBeNull();
   });
 });
 

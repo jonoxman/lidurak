@@ -220,6 +220,24 @@ export function cardSizeForViewport(viewportWidth: number): {
     ? { width: MOBILE_CARD_WIDTH, height: MOBILE_CARD_HEIGHT }
     : { width: CARD_WIDTH, height: CARD_HEIGHT };
 }
+/**
+ * T-90-feedback-6 ITEM-3: cached 1x1 transparent drag image. Installing it as
+ * the native drag image removes the browser's offset-prone ghost completely, so
+ * the only card the player sees during a drag is the center-locked
+ * `[data-testid="drag-card-preview"]` element.
+ */
+let transparentDragImage: HTMLCanvasElement | null = null;
+export function getTransparentDragImage(): HTMLCanvasElement | null {
+  if (typeof document === 'undefined') return null;
+  if (!transparentDragImage) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1;
+    canvas.height = 1;
+    transparentDragImage = canvas;
+  }
+  return transparentDragImage;
+}
+
 /** ITEM-13: width of one hand card at desktop scale (+25% from 80). */
 export const HAND_CARD_WIDTH = CARD_WIDTH;
 /** ITEM-13: height of one hand card at desktop scale (+25% from 114). */
@@ -1433,6 +1451,19 @@ export function GameTable({
     stageTop: number;
   } | null>(null);
   const suppressClickRef = useRef(false);
+  /**
+   * T-90-feedback-6 ITEM-3: the transient floating drag preview. Its exact
+   * geometric centre is locked to `(clientX, clientY)` in viewport space, no
+   * matter where on the card the gesture started, which hand index it is, or
+   * how far the hand is currently parted. Position updates go straight to the
+   * DOM, so a 60fps pointer sweep never re-renders React.
+   */
+  const dragPreviewRef = useRef<HTMLDivElement>(null);
+  const dragPreviewSizeRef = useRef({ width: CARD_WIDTH, height: CARD_HEIGHT });
+  const dragPreviewPosRef = useRef<{ x: number; y: number } | null>(null);
+  // The inner card and its wrapper both receive the bubbled `dragstart`; this
+  // marker makes sure only the first invocation opens the drag/preview.
+  const nativeDragEventRef = useRef<Event | null>(null);
   // T-90-feedback-5 ITEM-6a/6b: the hand card currently under the pointer, or
   // `null` when the pointer is outside the hand / a drag is running.
   const [hoveredCardIndex, setHoveredCardIndex] = useState<number | null>(null);
@@ -1445,6 +1476,12 @@ export function GameTable({
   const [cardHeight, setCardHeight] = useState(
     () => cardSizeForViewport(typeof window === 'undefined' ? 0 : window.innerWidth).height,
   );
+  // T-90-feedback-6 ITEM-3: the floating preview stores its exact footprint in
+  // the same ref `moveDragPreview` uses, so render and pointer tracking can
+  // never disagree after a responsive viewport change.
+  useEffect(() => {
+    dragPreviewSizeRef.current = { width: cardWidth, height: cardHeight };
+  }, [cardWidth, cardHeight]);
   // T-90-feedback-5 ITEM-3: the live viewport pointer position during a drag.
   // The translate is derived from it at render time, so a row re-layout can
   // never leave the card behind the pointer.
@@ -1484,10 +1521,34 @@ export function GameTable({
       return;
     }
     const index = handPointerIndex(event);
+    // T-90-feedback-6 ITEM-6a: moves over the parted gaps, the contour SVG or
+    // the timer band resolve to no card. Keep the last hovered card instead of
+    // flickering the row closed while the cursor is still inside the hand;
+    // only the hand container's `pointerleave` / `mouseleave` resets it.
+    if (index === null) return;
     if (index !== hoveredCardIndex) setHoveredCardIndex(index);
   };
   const clearHandHover = () => {
     if (hoveredCardIndex !== null) setHoveredCardIndex(null);
+  };
+  /**
+   * T-90-feedback-6 ITEM-3: moves the floating preview so its exact centre is
+   * `(clientX, clientY)`. The transform is written directly on the node (no
+   * React state), which keeps cursor tracking at 0ms lag. A browser
+   * end-of-gesture sentinel of `(0, 0)` is ignored so the preview never jumps
+   * to the top-left corner.
+   */
+  const moveDragPreview = (clientX: number, clientY: number) => {
+    // A fallback `Event` (no DragEvent support) has no pointer coordinates.
+    if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return;
+    if (clientX === 0 && clientY === 0) return;
+    dragPreviewPosRef.current = { x: clientX, y: clientY };
+    const node = dragPreviewRef.current;
+    if (!node) return;
+    const { width, height } = dragPreviewSizeRef.current;
+    node.style.transform = `translate3d(${clientX - width / 2}px, ${
+      clientY - height / 2
+    }px, 0)`;
   };
   // ITEM-ADD-1: seats are resolved from the viewer's own canonical index, so
   // the opponent row stays realistic from any player's point of view.
@@ -2009,13 +2070,14 @@ export function GameTable({
         pointer.active = true;
         setDragCard(pointer.card);
         setHoveredCardIndex(null);
-        setDragPointer({ x: event.clientX, y: event.clientY });
       }
       // T-90-feedback-5 ITEM-3: store the live viewport pointer position only.
       // The translate is derived from the captured grab offset at render time,
       // so the dragged card tracks the mouse 1:1 at its full 100x140 size and
       // is never invisible during the gesture.
       setDragPointer({ x: event.clientX, y: event.clientY });
+      // T-90-feedback-6 ITEM-3: the floating preview is centred on the cursor.
+      moveDragPreview(event.clientX, event.clientY);
       event.preventDefault();
       const box = handRef.current;
       if (!box) return;
@@ -2064,6 +2126,50 @@ export function GameTable({
       document.removeEventListener('mouseup', up);
     };
   }, [hand, onReorderHand]);
+
+  // T-90-feedback-6 ITEM-3: while a card is in flight, follow the pointer from
+  // the window so the preview tracks across the whole page — including a native
+  // HTML5 drag, whose `dragover` / `drag` events are the only pointer source.
+  // `dragend`, `drop` and Escape all dismiss the preview cleanly.
+  useEffect(() => {
+    if (typeof window === 'undefined' || dragCard === null) return undefined;
+    const follow = (event: Event) => {
+      const pointer = event as MouseEvent;
+      moveDragPreview(pointer.clientX, pointer.clientY);
+    };
+    const cancel = () => {
+      pointerDragRef.current = null;
+      setDragCard(null);
+      setDragPointer(null);
+      setSnapZone(null);
+      setReorderIndex(null);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') cancel();
+    };
+    // Capture phase: a nested drop zone calling `stopPropagation()` in its own
+    // `dragover` / `drag` handler must not be able to freeze the preview.
+    window.addEventListener('dragover', follow, true);
+    window.addEventListener('drag', follow, true);
+    window.addEventListener('keydown', onKeyDown);
+    document.addEventListener('dragend', cancel, true);
+    // Drops are cleaned up in capture phase too, but the actual state clear is
+    // deferred to a microtask so the target's React `onDrop` handler runs first
+    // and can still read the dragged card. This guarantees dismissal even when
+    // a drop target stops propagation.
+    const cancelAfterDrop = () => {
+      if (typeof queueMicrotask === 'function') queueMicrotask(cancel);
+      else setTimeout(cancel, 0);
+    };
+    document.addEventListener('drop', cancelAfterDrop, true);
+    return () => {
+      window.removeEventListener('dragover', follow, true);
+      window.removeEventListener('drag', follow, true);
+      window.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('dragend', cancel, true);
+      document.removeEventListener('drop', cancelAfterDrop, true);
+    };
+  }, [dragCard]);
 
   const hoverHandZone = (event: DragLike) => {
     if (!onReorderHand || !dragCard) return;
@@ -2252,6 +2358,53 @@ export function GameTable({
     </div>
   );
 
+  /**
+   * T-90-feedback-6 ITEM-3: the single native-dragstart entry point (the card
+   * and its wrapper both route here). It installs the transparent drag image,
+   * preserves the coordinates pre-captured on `mousedown` / `pointerdown` when
+   * a synthetic `dragstart` carries none, and opens the floating preview at
+   * that exact point.
+   */
+  const beginNativeDrag = (card: CardData, event: DragEvent) => {
+    // The inner card and its wrapper both listen for `dragstart`; the bubbled
+    // copy is a no-op so the transparent drag image is installed exactly once.
+    // (`defaultPrevented` cannot be used: the card's SVG prevents the native
+    // drag before the gesture reaches the card wrapper.)
+    if (nativeDragEventRef.current === event) return;
+    nativeDragEventRef.current = event;
+    const transfer = event.dataTransfer;
+    if (transfer) {
+      transfer.effectAllowed = 'move';
+      transfer.setData('text/plain', cardKey(card));
+      if (typeof transfer.setDragImage === 'function') {
+        const ghost = getTransparentDragImage();
+        if (ghost) {
+          try {
+            transfer.setDragImage(ghost, 0, 0);
+          } catch {
+            // No native drag image support (jsdom / older engines).
+          }
+        }
+      }
+    }
+    // Pointer-driven gesture stays; native drag is suppressed after.
+    event.preventDefault();
+    pointerDragRef.current = null;
+    dragPreviewSizeRef.current = { width: cardWidth, height: cardHeight };
+    const hasCoords =
+      Number.isFinite(event.clientX) &&
+      Number.isFinite(event.clientY) &&
+      !(event.clientX === 0 && event.clientY === 0);
+    const nextPos = hasCoords
+      ? { x: event.clientX, y: event.clientY }
+      : dragPreviewPosRef.current ?? { x: cardWidth / 2, y: cardHeight / 2 };
+    dragPreviewPosRef.current = nextPos;
+    moveDragPreview(nextPos.x, nextPos.y);
+    setHoveredCardIndex(null);
+    setDragCard(card);
+    setDragPointer({ x: nextPos.x, y: nextPos.y });
+  };
+
   // Starts the pointer fallback for any card, at any time; review/bot seats and
   // non-primary buttons are ignored so they keep their read-only behaviour.
   const beginPointerDrag = (card: CardData) => (event: MouseEvent) => {
@@ -2273,6 +2426,14 @@ export function GameTable({
       grabOffsetY: cardRect ? event.clientY - cardRect.top : 0,
       stageLeft: stageRect?.left ?? 0,
       stageTop: stageRect?.top ?? 0,
+    };
+    // T-90-feedback-6 ITEM-3: record the exact rendered footprint and the
+    // initial pointer position, so the preview is already correctly centred
+    // before the first `dragover` / `mousemove` fires.
+    dragPreviewSizeRef.current = { width: cardWidth, height: cardHeight };
+    dragPreviewPosRef.current = {
+      x: Number.isFinite(event.clientX) ? event.clientX : cardWidth / 2,
+      y: Number.isFinite(event.clientY) ? event.clientY : cardHeight / 2,
     };
     setHoveredCardIndex(null);
     pointerDragRef.current = {
@@ -2690,6 +2851,12 @@ export function GameTable({
         onPointerEnter={handleHandPointerMove}
         onPointerMove={handleHandPointerMove}
         onPointerLeave={clearHandHover}
+        // T-90-feedback-6 ITEM-6a: standard mouse sweeps are tracked on the
+        // whole hand container too, so parting works without pointer events and
+        // never flickers while crossing the parted gaps. Leaving the container
+        // is the only thing that closes the row.
+        onMouseMove={handleHandPointerMove}
+        onMouseLeave={clearHandHover}
         onDragOver={draggable && onReorderHand ? hoverHandZone : undefined}
         onDrop={draggable && onReorderHand ? dropOnHand : undefined}
       >
@@ -2723,6 +2890,10 @@ export function GameTable({
           // the hand closes over it before the insertion gap parts again.
           data-gap-closed={gapClosed ? 'true' : 'false'}
           data-dragged-index={gapClosed ? draggedCardIndex : undefined}
+          // T-90-feedback-6 ITEM-3: the floating preview is the visible dragged
+          // card; the source slot keeps its internal drag math but never paints
+          // a duplicate copy of the card.
+          data-drag-preview={dragCard !== null ? 'true' : 'false'}
           // ITEM-6a: `none` once the dragged card leaves the hand, so every
           // remaining card sits closed with no insertion gap on the felt.
           data-part-direction={
@@ -2819,6 +2990,10 @@ export function GameTable({
                 : effectiveIndex < reorderIndex
                   ? 'left'
                   : 'right';
+          const baseX = baseCardPositions[index] ?? 0;
+          const renderedX = handCardPositions[index]?.x ?? baseX;
+          const lift = -handCardPositions[index]?.y!;
+          const deltaX = Math.round((renderedX - baseX) * 100) / 100;
           return (
             <div
               key={`${cardKey(card)}-${index}`}
@@ -2828,6 +3003,9 @@ export function GameTable({
               data-card-x={handCardPositions[index].x}
               data-card-y={Math.round(handCardPositions[index].y)}
               data-lift-px={Math.round(-handCardPositions[index].y)}
+              // T-90-feedback-6 ITEM-6a: the exact GPU-composited horizontal
+              // parting delta applied to this card (`0` for the hovered card).
+              data-part-delta-x={deltaX}
               data-eligible={
                 !reviewMode && activePlayableKeys.includes(cardKey(card))
                   ? 'true'
@@ -2847,10 +3025,6 @@ export function GameTable({
               draggable={false}
               aria-hidden={hidden ? 'true' : undefined}
               style={(() => {
-                const baseX = baseCardPositions[index] ?? 0;
-                const renderedX = handCardPositions[index]?.x ?? baseX;
-                const lift = -handCardPositions[index]?.y!;
-                const deltaX = Math.round((renderedX - baseX) * 100) / 100;
                 if (index === draggedCardIndex) {
                   return {
                     marginLeft: handSlotMargin(index),
@@ -2872,7 +3046,10 @@ export function GameTable({
                 };
               })()}
               onMouseDown={beginPointerDrag(card)}
-              onDragStart={(event) => event.preventDefault()}
+              onPointerDown={beginPointerDrag(card)}
+              // T-90-feedback-6 ITEM-3: a `dragstart` dispatched on the wrapper
+              // (not only the inner card) still opens the center-locked preview.
+              onDragStart={(event) => beginNativeDrag(card, event)}
               onClickCapture={(event) => {
                 if (!suppressClickRef.current) return;
                 suppressClickRef.current = false;
@@ -2913,31 +3090,7 @@ export function GameTable({
                     : undefined
                 }
                 draggable={false}
-                onDragStart={(event) => {
-                  // T-90: drag image from the mounted card, before any re-render.
-                  const element = event.currentTarget as HTMLElement | null;
-                  const transfer = event.dataTransfer;
-                  if (transfer) {
-                    transfer.effectAllowed = 'move';
-                    transfer.setData('text/plain', cardKey(card));
-                    if (element && typeof transfer.setDragImage === 'function') {
-                      const rect =
-                        typeof element.getBoundingClientRect === 'function'
-                          ? element.getBoundingClientRect()
-                          : null;
-                      const offsetX =
-                        rect && rect.width > 0 ? rect.width / 2 : cardWidth / 2;
-                      const offsetY =
-                        rect && rect.height > 0 ? rect.height / 2 : cardHeight / 2;
-                      transfer.setDragImage(element, offsetX, offsetY);
-                    }
-                  }
-                  // Pointer-driven gesture stays; native drag is suppressed after.
-                  event.preventDefault();
-                  pointerDragRef.current = null;
-                  setDragCard(card);
-                  setDragPointer({ x: event.clientX, y: event.clientY });
-                }}
+                onDragStart={(event) => beginNativeDrag(card, event)}
                 onDragEnd={() => {
                   setDragCard(null);
                   setDragPointer(null);
@@ -2969,6 +3122,54 @@ export function GameTable({
           {children}
         </div>
       )}
+
+      {/* T-90-feedback-6 ITEM-3: the transient, center-locked drag preview. Its
+          exact geometric centre — `width / 2`, `height / 2` — is locked to the
+          live `(clientX, clientY)`, regardless of the click point, the hand
+          index, the hand size or the current parting transform. This is the
+          only viewport-positioned element on the table (a drag ghost); every
+          layout zone (seats, bout, hand, sidebars) stays CSS Grid/Flexbox. */}
+      {dragCard !== null ? (
+        (() => {
+          const width = cardWidth;
+          const height = cardHeight;
+          const stored = dragPreviewPosRef.current;
+          const position =
+            stored && Number.isFinite(stored.x) && Number.isFinite(stored.y)
+              ? stored
+              : { x: width / 2, y: height / 2 };
+          const previewTranslate = `translate3d(${
+            Math.round((position.x - width / 2) * 100) / 100
+          }px, ${Math.round((position.y - height / 2) * 100) / 100}px, 0)`;
+          return (
+            <div
+              // This project renders with Preact, where the standard `class`
+              // attribute is correct (and used by every other component).
+              class="drag-card-preview"
+              data-testid="drag-card-preview"
+              data-card-width={width}
+              data-card-height={height}
+              data-dragging-card={cardKey(dragCard)}
+              aria-hidden="true"
+              ref={dragPreviewRef}
+              style={{
+                width: `${width}px`,
+                height: `${height}px`,
+                transform: previewTranslate,
+              }}
+            >
+              <Card
+                suit={dragCard.suit}
+                rank={dragCard.rank}
+                trump={isTrumpCard(dragCard, trumpSuit)}
+                width={width}
+                height={height}
+                decorative
+              />
+            </div>
+          );
+        })()
+      ) : null}
     </div>
   );
 }
