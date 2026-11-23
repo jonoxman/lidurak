@@ -2768,8 +2768,8 @@ export function GameTable({
       onDragLeave={clearSnap}
       onDrop={(event) => dropOn('throw-in', event, (card) => onThrowInDrop?.(card))}
     >
-      <svg class="throw-in-icon" viewBox="0 0 40 40" aria-hidden="true">
-        <path d="M20 8 L20 32 M8 20 L32 20" />
+      <svg class="throw-in-icon" viewBox="0 0 100 140" aria-hidden="true">
+        <path d="M50 53 L50 87 M33 70 L67 70" />
       </svg>
     </div>
   );
@@ -3434,8 +3434,8 @@ export function GameTable({
             class="hand-highlight-path"
             data-testid="hand-highlight-path"
             d={handContour.d}
-            stroke-linejoin="round"
-            stroke-linecap="round"
+            stroke-linejoin={contourCornerRadius > 0 ? 'round' : 'miter'}
+            stroke-linecap={contourCornerRadius > 0 ? 'round' : 'square'}
           />
         </svg>
         {/* ITEM-3: the contour and the card row share one CSS Grid cell, so the

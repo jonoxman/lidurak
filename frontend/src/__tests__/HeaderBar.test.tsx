@@ -99,7 +99,15 @@ describe('HeaderBar', () => {
 
     openProfile();
 
+    // T-96: the trigger and dropdown carry stable test ids so browser QA can
+    // target the profile menu without matching the nav menus by aria-haspopup.
+    const trigger = screen.getByTestId('profile-button');
+    expect(trigger.classList.contains('profile-button')).toBe(true);
+    expect(trigger.getAttribute('aria-label')).toBe('Account menu');
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+
     const menu = screen.getByRole('menu', { name: 'Profile menu' });
+    expect(screen.getByTestId('profile-dropdown')).toBe(menu);
     const labels = [
       'Profile',
       'Inbox',
@@ -1152,6 +1160,29 @@ describe('T-90-feedback-3 profile menu outside-click dismissal', () => {
 
     fireEvent.click(trigger);
     expect(profileMenu()).not.toBeNull();
+  });
+
+  it('T-96: keeps the menu open when an inside slider drag is released outside', () => {
+    render(<HeaderBar />);
+    openSubmenu('Theme');
+    expect(profileMenu()).not.toBeNull();
+
+    const slider = within(screen.getByTestId('submenu-theme')).getByLabelText(
+      'Roundness',
+    );
+
+    // A drag starts inside the dropdown...
+    fireEvent.mouseDown(slider);
+    // ...and the release outside dispatches a click on an outside ancestor.
+    fireEvent.click(document.body);
+
+    expect(profileMenu()).not.toBeNull();
+    expect(screen.getByTestId('submenu-theme')).toBeTruthy();
+
+    // A standalone outside press with no inside press still dismisses it.
+    fireEvent.mouseDown(document.body);
+    expect(profileMenu()).toBeNull();
+    expect(screen.queryByTestId('submenu-theme')).toBeNull();
   });
 
   it('closes the profile menu when a submenu was open', () => {

@@ -1336,6 +1336,13 @@
   transition: stroke 160ms ease, filter 160ms ease;
 }
 
+/* T-96: Roundness = 0 is a truly sharp contour — the 2.5px stroke must not
+   soften the mitered vertices that `buildHandContourPath` just drew. */
+.hand-highlight-contour[data-contour-radius='0'] .hand-highlight-path {
+  stroke-linejoin: miter;
+  stroke-linecap: square;
+}
+
 @keyframes handContourAttacker {
   0%,
   100% {
@@ -2800,8 +2807,9 @@ body[data-dragging='true'] * {
 }
 
 .throw-in-icon {
-  width: 42%;
-  height: 42%;
+  display: block;
+  width: 100%;
+  height: 100%;
   stroke: var(--role-attacker-accent, #22c55e);
   stroke-width: 4;
   stroke-linecap: round;

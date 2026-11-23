@@ -570,6 +570,9 @@ export function HeaderBar({ pingMs = 24, serverDelayMs = 12 }: HeaderBarProps) {
   // T-90-feedback-3: wraps the profile trigger *and* its dropdown panel, so a
   // press on either counts as inside and everything else closes the menu.
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
+  // T-96: distinguishes a standalone outside click from a drag that started
+  // inside the dropdown (e.g. a Roundness slider) and was released outside.
+  const pressedInsideRef = useRef(false);
   // T-90-feedback-4: expose the page gradient direction for deterministic CSS
   // and tests — Light is the inverse ("lightening") of Dark ("darkening").
   const settings = useSettings();
@@ -593,24 +596,43 @@ export function HeaderBar({ pingMs = 24, serverDelayMs = 12 }: HeaderBarProps) {
       setSubmenu(null);
     };
 
-    const handleOutsidePress = (event: Event) => {
+    const isInsideMenu = (event: Event): boolean => {
       const container = profileMenuRef.current;
       const target = event.target;
-      if (container && target instanceof Node && container.contains(target)) return;
+      return Boolean(container && target instanceof Node && container.contains(target));
+    };
+
+    const handlePress = (event: Event) => {
+      if (isInsideMenu(event)) {
+        pressedInsideRef.current = true;
+        return;
+      }
+      pressedInsideRef.current = false;
       closeProfileMenu();
     };
 
-    const eventTypes = ['pointerdown', 'mousedown', 'click'] as const;
-    for (const type of eventTypes) {
-      document.addEventListener(type, handleOutsidePress as EventListener, { capture: true });
-    }
+    const handleClick = (event: Event) => {
+      if (isInsideMenu(event)) {
+        pressedInsideRef.current = false;
+        return;
+      }
+      // T-96: a drag that began inside the menu (a slider) and was released
+      // outside still produces a click on an outside ancestor — ignore it.
+      if (pressedInsideRef.current) {
+        pressedInsideRef.current = false;
+        return;
+      }
+      closeProfileMenu();
+    };
+
+    document.addEventListener('pointerdown', handlePress, { capture: true });
+    document.addEventListener('mousedown', handlePress, { capture: true });
+    document.addEventListener('click', handleClick, { capture: true });
 
     return () => {
-      for (const type of eventTypes) {
-        document.removeEventListener(type, handleOutsidePress as EventListener, {
-          capture: true,
-        });
-      }
+      document.removeEventListener('pointerdown', handlePress, { capture: true });
+      document.removeEventListener('mousedown', handlePress, { capture: true });
+      document.removeEventListener('click', handleClick, { capture: true });
     };
   }, [profileOpen]);
 
@@ -708,6 +730,7 @@ export function HeaderBar({ pingMs = 24, serverDelayMs = 12 }: HeaderBarProps) {
         <button
           type="button"
           class="profile-button"
+          data-testid="profile-button"
           aria-label="Account menu"
           aria-haspopup="true"
           aria-expanded={profileOpen}
@@ -731,7 +754,12 @@ export function HeaderBar({ pingMs = 24, serverDelayMs = 12 }: HeaderBarProps) {
         </button>
 
         {profileOpen ? (
-          <div class="profile-dropdown" role="menu" aria-label="Profile menu">
+          <div
+            class="profile-dropdown"
+            data-testid="profile-dropdown"
+            role="menu"
+            aria-label="Profile menu"
+          >
             {submenu ? (
               // The submenu replaces the main list in place: its header carries a
               // back chevron and the title, and returns to the main menu.
