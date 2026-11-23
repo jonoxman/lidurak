@@ -151,7 +151,7 @@ object GameManager:
 
   /**
    * `"Table Collapse Right"`: a 4p table whose tapped defender sits `top-right`
-   * from Alice's POV, with three covered and two uncovered pairs on the felt.
+   * from Alice's POV, with two covered and two uncovered pairs on the felt.
    */
   val QaTableCollapseRight: String = "qa-table-collapse-right"
 
@@ -463,7 +463,7 @@ object GameManager:
    * `qa-table-collapse-right` — "Table Collapse Right".
    *
    * A four-seat hotseat table over the 52-card deck (`trumpSuit = Hearts`) with
-   * three covered pairs and two uncovered attacks on the felt, opened on Alice
+   * two covered pairs and two uncovered attacks on the felt, opened on Alice
    * (`p0`, the default POV, the attacker). The defender Dave (`p3`) sits
    * `top-right` from Alice's view, so the covered pairs must collapse toward the
    * **right** edge; switching the POV to Bob (`p1`), Carol (`p2`) or Dave (`p3`)
@@ -473,9 +473,12 @@ object GameManager:
    * The covered ten (`10♣` under `J♣`) keeps its full rank and suit readable in
    * the collapsed stack. Dave holds trump covering cards for both uncovered
    * attacks (`7♥` and `8♦`), so covering one makes it snap to the edge, and
-   * Alice holds `7♣` (a rank already on the table) so she can throw in a sixth
-   * card and crowd the single row. The bout opened while Dave held six cards, so
-   * `maxBoutAttacks = 6` and exactly one throw-in slot is free.
+   * Alice holds `7♣` and `8♥`, both matching a rank already on the table, so she
+   * may throw in one and then the other (ITEM-NEW1). Dave opened the bout with
+   * six cards and has covered two of them, leaving the four cards the reviewer
+   * expects on his seat. With four cards on the felt, `maxBoutAttacks = 6`
+   * leaves two free throw-in slots, and `4 remaining - 2 uncovered = 2`, so both
+   * matching cards are genuinely legal under the Durak capacity rules.
    */
   private def qaTableCollapseRightPreset: PresetGame =
     val aliceHand = Vector(
@@ -511,7 +514,6 @@ object GameManager:
     val tablePairs = Vector(
       TablePair(card(Rank.Ten, Suit.Clubs), Some(card(Rank.Jack, Suit.Clubs))),
       TablePair(card(Rank.Eight, Suit.Spades), Some(card(Rank.Queen, Suit.Spades))),
-      TablePair(card(Rank.Nine, Suit.Diamonds), Some(card(Rank.King, Suit.Diamonds))),
       TablePair(card(Rank.Seven, Suit.Hearts)),
       TablePair(card(Rank.Eight, Suit.Diamonds))
     )

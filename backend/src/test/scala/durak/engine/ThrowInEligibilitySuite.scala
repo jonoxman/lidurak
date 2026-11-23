@@ -352,6 +352,76 @@ class ThrowInEligibilitySuite extends munit.FunSuite:
     assertEquals(passedView.canThrowIn, false)
   }
 
+  // --- T-90-feedback-20261123_020207-1 ITEM-NEW1: two throw-ins in a row ---
+
+  test("a non-defender throws in two matching cards in a row while uncovered attacks remain") {
+    // Four cards on the felt (two covered, two uncovered) with
+    // `maxBoutAttacks = min(6, 6) = 6` leave two free slots, and the defender's
+    // four cards minus the two uncovered attacks leave room for two as well.
+    val state = visibility.copy(
+      tablePairs = Vector(
+        TablePair(card(Rank.Seven, Suit.Spades), Some(card(Rank.Nine, Suit.Spades))),
+        TablePair(card(Rank.Eight, Suit.Diamonds), Some(card(Rank.Queen, Suit.Diamonds))),
+        TablePair(card(Rank.Seven, Suit.Diamonds)),
+        TablePair(card(Rank.Eight, Suit.Hearts))
+      ),
+      players = visibility.players.updated(
+        1,
+        visibility.players(1).copy(
+          hand = Vector(
+            card(Rank.Ten, Suit.Hearts),
+            card(Rank.Jack, Suit.Hearts),
+            card(Rank.Queen, Suit.Hearts),
+            card(Rank.King, Suit.Hearts)
+          )
+        )
+      ),
+      defenderInitialHandSize = 6
+    )
+
+    assertEquals(state.maxBoutAttacks, 6)
+    assertEquals(state.uncoveredCount, 2)
+    assertEquals(GameEngine.throwInCapacity(state, "p0"), 2)
+    // `Q♥` also matches the covered `Q♦`, so four cards qualify but only two fit.
+    assertEquals(
+      PlayerGameView.forViewer(state, "p0").throwInCards,
+      List(sevenHearts, sevenDiamonds, nineDiamonds, card(Rank.Queen, Suit.Hearts))
+    )
+    assertEquals(PlayerGameView.forViewer(state, "p0").canThrowIn, true)
+
+    val afterFirst = GameEngine
+      .applyAction(state, GameAction.ThrowInCards("p0", List(sevenHearts)))
+      .getOrElse(fail("expected the first throw-in to be legal"))
+    assertEquals(afterFirst.tablePairs.size, 5)
+    assertEquals(afterFirst.uncoveredCount, 3)
+
+    // The second matching card is still offered and accepted immediately.
+    val afterFirstView = PlayerGameView.forViewer(afterFirst, "p0")
+    assertEquals(afterFirstView.canThrowIn, true)
+    assertEquals(afterFirstView.throwInCapacity, 1)
+    assertEquals(
+      afterFirstView.throwInCards,
+      List(sevenDiamonds, nineDiamonds, card(Rank.Queen, Suit.Hearts))
+    )
+
+    val afterSecond = GameEngine
+      .applyAction(afterFirst, GameAction.ThrowInCards("p0", List(sevenDiamonds)))
+      .getOrElse(fail("expected the second throw-in to be legal"))
+    assertEquals(afterSecond.tablePairs.size, 6)
+    assertEquals(
+      afterSecond.tablePairs.map(_.attack).takeRight(2),
+      Vector(sevenHearts, sevenDiamonds)
+    )
+    assertEquals(afterSecond.players(0).hand.size, 4)
+    assertEquals(PlayerGameView.forViewer(afterSecond, "p0").canThrowIn, false)
+    assertEquals(
+      GameEngine
+        .applyAction(afterSecond, GameAction.ThrowInCards("p0", List(nineDiamonds)))
+        .isLeft,
+      true
+    )
+  }
+
   test("a 30-card defender against a lone 7♠ never sees the throw-in outline") {
     val megaHand = ThrowInFixtures.megaHand30
     val alice = PlayerGameView.forViewer(megaHand, "p0")
