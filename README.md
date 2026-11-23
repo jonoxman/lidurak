@@ -9,47 +9,59 @@ Lidurak is a fast, minimalist, browser-based implementation of the classic Russi
 ## 1. Quick Start & Installation
 
 ### Prerequisites
-- **Backend:** Scala / `sbt` (for `backend/`)
-- **Frontend:** Node.js and `npm` (for `frontend/`)
+- **Java (JDK) & sbt** — required to build, run, and test the Scala 3 backend.
+- **Node.js & npm** — required to build, run, and test the Preact/TypeScript frontend.
+- **Bash** — required to run the local launcher script.
 
-### Launch Locally
-Start both the backend server and the frontend application from the repository root using the local launcher script:
+### Launch the Application
+From the repository root, start both the backend server and the frontend dev server with a single command:
 
 ```bash
 ./play-local.sh
 ```
 
-### Running Tests
-Run the backend and frontend test suites from their respective directories:
+Once both services are running, open the local frontend URL printed in the terminal in your browser.
+
+### Run the Test Suites
+Run the backend and frontend test suites independently from their respective directories:
 
 ```bash
-# Backend tests (from backend/)
-sbt -batch test
+# Backend (Scala 3)
+cd backend && sbt -batch test
 
-# Frontend tests (from frontend/)
-npm test -- --run
+# Frontend (Preact / TypeScript)
+cd frontend && npm test -- --run
 ```
 
-## 2. Gameplay & UI Overview
+---
 
-### Lobby & Game Modes
-From the lobby you can start a match by choosing the player count, player names, and seat types (human or bot). Optional match settings include:
-- **Allow Redirect:** Lets a defender pass an uncovered initial attack to the next player by playing a matching-rank card.
-- **Chaos Mode:** Allows attackers to target any active opponent rather than only the standard seat.
-- **Transparent Mode:** Reveals opponents' hands on the table for inspection.
-- **Dev Mode / Scenario Presets:** Launches curated preset table states in one click (6-card actions, 14-card hand expansion, 30-card hand compression, and 1-card hand edge cases).
+## 2. UI & Gameplay Overview
 
-### Rules of Durak
-- **Attack & Defend:** Defend every attacking card with a higher card of the same suit, or any trump card against a non-trump.
-- **End a Bout:** Once all attacks are covered, attackers pass to send defended cards to the discard pile.
-- **Throw In:** Attackers may add extra attacking cards matching any rank already on the table.
-- **Surrender:** A defender may surrender to pick up all cards currently on the table and skip their next attack.
-- **Redirect:** Before covering any card, a defender may redirect the attack to the next player (when enabled).
-- **Winning:** The last player still holding cards is the Durak.
+### Lobby & Game Setup
+From the lobby, you can configure a new match or jump directly into a preset table state:
+- **Players & Seats:** Choose the player count, customize player names, and assign seats as human or bot players.
+- **Rule Variants & Modes:**
+  - **Redirect:** Allow a defender to transfer an uncovered attack to the next player by playing a matching rank.
+  - **Chaos Mode:** Allow attackers to target any active opponent at the table.
+  - **Transparent Mode:** Reveal opponent hands for open-table inspection or debugging.
+- **Scenario Presets:** Launch curated table positions in one click from either the lobby or the in-game left sidebar to test specific hand sizes, surrender timers, and table layouts without playing through a full deck.
 
-### Table Interface
-The game table uses a three-column layout:
-- **Left Sidebar:** In-game *How to Play* summary, quick scenario presets, and hotseat player-switcher tabs.
-- **Center Table Arena:** Opponent seats across the top, the central bout area with attack/defense pairs and drop targets, the talon deck and trump card, your sortable hand, and contextual **Pass** / **Surrender** controls. You can play cards by dragging them onto valid targets or double-clicking.
-- **Right Sidebar:** Digital turn countdown timer (`00:15` default), overall match clock, and end-of-game / Durak results with step-by-step replay review.
-- **Themes & Settings:** Supports Dark and Light themes, hand sorting modes, and adjustable visual roundness and highlight intensity.
+### Table Layout
+The game screen uses a three-column layout designed to keep the table readable at both desktop and mobile sizes:
+- **Left Sidebar:** Displays the **How to Play** quick reference, **Scenario Presets**, hand-sorting controls, and **hotseat player-switcher tabs** when inspecting or playing multiple human seats.
+- **Center Felt Arena:**
+  - **Top Row:** Opponent seats showing each player's name, card count, pass status, and finish rank.
+  - **Middle Row:** Active attacking and defending card pairs, legal drop/target outlines, and a redirect outline when a transfer is available.
+  - **Bottom Row:** The remaining talon deck with the face-up trump card, your interactive hand (supporting click, double-click, and drag-and-drop), hand-sorting controls, and the contextual **Pass** / **Surrender** button.
+- **Right Sidebar:** Shows the active turn countdown clock (`00:15` default), overall match elapsed clock, and end-of-game winner / Durak standings.
+
+### Core Durak Rules
+1. **Attack & Defend:** The attacker plays one or more cards; the defender must cover every attacking card with a higher-ranked card of the same suit or any card of the trump suit.
+2. **Throw-Ins:** Attackers may add extra cards matching any rank already present on the table.
+3. **Redirect:** If enabled and no card has been covered yet, the defender may play a card of the same rank to pass the defense onward.
+4. **Pass or Surrender:** Once all attacks are covered, players pass to discard the bout and deal back up from the talon. If the defender cannot or chooses not to cover, they surrender and pick up all cards on the table, skipping their next turn to attack.
+5. **Winning & Losing:** Play continues until the deck is exhausted and players empty their hands. The last player left holding cards is the **Durak**.
+
+### Themes & Match Replay
+- **Appearance:** Supports Dark and Light themes (automatically respecting system preferences or user settings).
+- **Replay Mode:** Completed matches can be reviewed frame by frame via the recorded match replay view.
