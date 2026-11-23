@@ -1,4 +1,6 @@
+import type { JSX } from 'preact';
 import { Card, type CardData } from './Card';
+import type { CoveredPairsEdge } from '../utils/tableLayout';
 
 export interface TablePairProps {
   attack: CardData;
@@ -24,6 +26,15 @@ export interface TablePairProps {
   /** T-90 ITEM-2: exact card footprint this pair reserves (`100` x `140`). */
   cardWidth?: number;
   cardHeight?: number;
+  /**
+   * ITEM-1b: this pair is already covered, so it lives in the edge-pinned
+   * covered stack (Wave 2 renders the stack itself) instead of the active row.
+   */
+  isCollapsedCovered?: boolean;
+  /** Which vertical felt edge the covered stack is pinned to. */
+  coveredEdge?: CoveredPairsEdge;
+  /** Extra inline presentation style, merged last (e.g. the covered margin). */
+  style?: JSX.CSSProperties;
   onAttackClick?: () => void;
   onDragOverCard?: (event: DragEvent) => void;
   onDragLeaveCard?: () => void;
@@ -42,6 +53,9 @@ export function TablePair({
   marginLeft,
   cardWidth = 100,
   cardHeight = 140,
+  isCollapsedCovered = false,
+  coveredEdge,
+  style,
   onAttackClick,
   onDragOverCard,
   onDragLeaveCard,
@@ -53,9 +67,11 @@ export function TablePair({
   // T-90 ITEM-PREV-4a/4b: the crimson prompt may only appear on an uncovered
   // card when the caller explicitly allows it. `pulse` stays a legacy alias.
   const uncoveredHighlighted = defense == null && (highlightUncovered ?? pulse);
+  const isCovered = defense != null;
   const classes = ['table-pair'];
   if (uncoveredHighlighted) classes.push('turn-pulse', 'table-card-uncovered');
   if (snap) classes.push('snap-active');
+  if (isCollapsedCovered) classes.push('table-pair-covered-collapsed');
 
   // Item 8: an attack card sits flush with the top of an exact card-sized box,
   // so the reflection outline can share the same top and bottom edges.
@@ -68,11 +84,17 @@ export function TablePair({
       data-card-width={cardWidth}
       data-card-height={cardHeight}
       data-uncovered-highlighted={uncoveredHighlighted ? 'true' : 'false'}
+      // ITEM-1b: QA and Wave 2 can tell covered pairs and their edge apart
+      // deterministically, without inspecting class names.
+      data-covered={isCovered ? 'true' : 'false'}
+      data-covered-edge={coveredEdge}
+      data-collapsed-covered={isCollapsedCovered ? 'true' : 'false'}
       // T-90: size the pair from the shared card tokens (no measured px).
       style={{
         '--pair-card-w': 'var(--card-w, 100px)',
         '--pair-card-h': 'var(--card-h, 140px)',
         ...(marginLeft ? { marginLeft } : {}),
+        ...style,
       }}
     >
       <div
