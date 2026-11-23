@@ -5,8 +5,18 @@ import durak.engine.*
 
 import scala.concurrent.duration.*
 
-/** A scripted QA position that can be started in one click. */
-case class PresetGame(state: GameState, defaultPlayerId: String)
+/**
+ * A scripted QA position that can be started in one click.
+ *
+ * `turnSecondsOverride` arms the room with a shorter turn clock than the
+ * ordinary fifteen seconds, so a preset whose clock must expire during a review
+ * (`qa-surrender-timer`) resolves with no manual move.
+ */
+case class PresetGame(
+    state: GameState,
+    defaultPlayerId: String,
+    turnSecondsOverride: Option[Int] = None
+)
 
 /**
  * Bot pacing every room the manager creates. Production uses the GameActor
@@ -50,6 +60,7 @@ class GameManager(
       case Right(preset) =>
         val build = GameActor.createFrom(
           preset.state,
+          turnSeconds = preset.turnSecondsOverride.getOrElse(GameActor.DefaultTurnSeconds),
           defaultPlayerId = Some(preset.defaultPlayerId),
           randomBotDelay = botTiming.randomBotDelay,
           initialBotStartDelay = botTiming.initialBotStartDelay
@@ -149,6 +160,14 @@ object GameManager:
    * while Bob and Carol hold live throw-ins and the turn clock keeps ticking.
    */
   val QaSurrenderTimer: String = "qa-surrender-timer"
+
+  /**
+   * Turn-clock length of the `qa-surrender-timer` room. Three seconds is short
+   * enough that the surrendered bout resolves while a reviewer watches it: the
+   * clock auto-passes Bob and Carol, Alice picks up the five table cards and
+   * the bout clears. Every other room keeps the fifteen-second default.
+   */
+  val QaSurrenderTimerTurnSeconds: Int = 3
 
   val Presets: Vector[String] = Vector(
     QaNormal6Actions,
@@ -529,6 +548,11 @@ object GameManager:
    * the table, so their throw-in window stays open (`promptedPlayerIds` is
    * non-empty) and the room's turn clock is armed from the first frame instead
    * of settling the surrendered bout immediately.
+   *
+   * The room runs on a three-second clock ([[QaSurrenderTimerTurnSeconds]]) so
+   * the throw-in window really expires during a QA step: Bob and Carol are
+   * auto-passed, the bout resolves and the five table cards move into Alice's
+   * hand (`6 -> 11`).
    */
   private def qaSurrenderTimerPreset: PresetGame =
     val aliceHand = Vector(
@@ -577,5 +601,6 @@ object GameManager:
         boutPhase = BoutPhase.SurrenderThrowIn,
         defenderInitialHandSize = 6
       ),
-      defaultPlayerId = "p0"
+      defaultPlayerId = "p0",
+      turnSecondsOverride = Some(QaSurrenderTimerTurnSeconds)
     )

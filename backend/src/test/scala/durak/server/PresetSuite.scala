@@ -20,7 +20,9 @@ import scala.concurrent.duration.*
  * `qa-large-30-compress` and `qa-single-card`) and the two feedback positions
  * (`qa-table-collapse-right` for covered-pair edge collapsing and
  * `qa-surrender-timer` for the live surrender clock). Every one of them must
- * load a card-conserving, rule compliant `GameState` with a live turn clock.
+ * load a card-conserving, rule compliant `GameState` with a live turn clock —
+ * and `qa-surrender-timer`'s three-second clock must settle its surrendered
+ * bout without a manual move.
  */
 class PresetSuite extends munit.FunSuite:
 
@@ -558,7 +560,12 @@ class PresetSuite extends munit.FunSuite:
     assertEquals(alice.promptedPlayerIds.toSet, Set("p1", "p2"))
     assertEquals(alice.turnPlayerId, Some("p1"))
     assert(alice.turnDeadlineMs > 0L, alice.turnDeadlineMs.toString)
-    assert(alice.turnSecondsRemaining > 0, alice.turnSecondsRemaining.toString)
+    // The room runs on a short clock, so the throw-in window actually expires
+    // during a QA step instead of showing a fifteen-second countdown.
+    assert(
+      alice.turnSecondsRemaining >= 1 && alice.turnSecondsRemaining <= 3,
+      alice.turnSecondsRemaining.toString
+    )
     // A surrendering defender has nothing left to play.
     assertEquals(alice.legalActions, List.empty)
     assertEquals(alice.canThrowIn, false)
@@ -601,6 +608,34 @@ class PresetSuite extends munit.FunSuite:
     assertEquals(after.tablePairs.size, 5)
     assertEquals(after.myHand.size, 5)
     assert(after.turnDeadlineMs > 0L, after.turnDeadlineMs.toString)
+  }
+
+  test("qa-surrender-timer's short clock resolves the surrendered bout on its own") {
+    val manager = newManager
+    val (gameId, _) = startPresetPath(manager, "qa-surrender-timer")
+    val room = manager.getRoom(gameId).unsafeRunSync().getOrElse(fail("room is missing"))
+    assertEquals(room.turnSeconds, GameManager.QaSurrenderTimerTurnSeconds)
+    assertEquals(room.turnSeconds, 3)
+
+    // The expired clock auto-passes Bob and Carol, which settles the surrendered
+    // bout: the table clears and Alice picks up all five table cards (`6 -> 11`).
+    // Poll the authoritative state so the assertion does not depend on the exact
+    // wake-up of the room's clock fiber.
+    val waitUntilMs = System.currentTimeMillis() + 10_000L
+    var settled = room.stateRef.get.unsafeRunSync()
+    while settled.tablePairs.nonEmpty && System.currentTimeMillis() < waitUntilMs do
+      Thread.sleep(100L)
+      settled = room.stateRef.get.unsafeRunSync()
+
+    assertNotEquals(settled.boutPhase, BoutPhase.SurrenderThrowIn)
+    assertEquals(settled.tablePairs.size, 0, s"table: ${settled.tablePairs}")
+    assertEquals(settled.players.head.hand.size, 11, s"hand: ${settled.players.head.hand}")
+    assertEquals(settled.players.map(_.hand.size), Vector(11, 6, 6))
+    assertEquals(settled.talon.size, 13)
+
+    // Nothing was created or lost while the clock settled the bout.
+    val conserved = assertConserved(manager, gameId, 36)
+    assertEquals(conserved.players.map(_.hand.size), Vector(11, 6, 6))
   }
 
   test("POST /api/games reads chaosMode and opens every seat as a target") {
