@@ -550,9 +550,10 @@ describe('T-90-feedback-5 ITEM-6a/6b/6c: smooth hover parting', () => {
     const wrapperRule = cssRule(tableCss, '.hand-card-wrapper {');
     expect(wrapperRule).toContain('will-change: transform');
     expect(wrapperRule).toContain(
-      'transform 220ms cubic-bezier(0.22, 1, 0.36, 1)',
+      'transform 120ms cubic-bezier(0.22, 1, 0.36, 1)',
     );
-    expect(wrapperRule).not.toMatch(/transition:[^;]*(width|left|right):/);
+    expect(wrapperRule).not.toMatch(/transition:[^;]*(width|left|right|margin):/);
+    expect(wrapperRule).not.toMatch(/transition:\s*all/);
 
     // The floating preview itself opts out of every transition (0ms lag).
     const previewRule = cssRule(tableCss, '.drag-card-preview {');
@@ -973,7 +974,7 @@ describe('T-96 item 6: contour expansion never shifts the hand row', () => {
     expect(deltas[2]).toBe(0);
     // ... its neighbours part outward ...
     expect(deltas[1]).toBeLessThan(0);
-    expect(deltas[3]).toBeCloseTo(14.67, 2);
+    expect(deltas[3]).toBeCloseTo(28, 1);
     // ... and the contour widens WITHOUT changing the stage's track width, so
     // no `justify-content` re-centring can move the row (the old -17px jump).
     expect(Number.parseFloat(contour.style.width)).toBeGreaterThan(contourWidthAtRest);

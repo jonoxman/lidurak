@@ -1041,7 +1041,9 @@
   /* The trump border paints inside the card box, so a bordered card is never
      one or two pixels larger than the plain cards it overlaps. */
   box-sizing: border-box;
-  transition: transform 120ms ease, box-shadow 120ms ease;
+  /* T-90-feedback-20261123_020207-2: `box-shadow` (a paint property) is no
+     longer transitioned; cards are animated exclusively on the compositor. */
+  transition: transform 120ms ease;
 }
 
 .playing-card {
@@ -2616,13 +2618,13 @@ body[data-dragging='true'] * {
      dragged card opts out inline (`transition: none`) so pointer tracking has
      zero lag; only the transient drag preview follows the cursor untweened. */
   will-change: transform;
-  /* T-96 item 6: the hover-parting / gap animation is a GPU-composited
-     transform transition only — no width, inset or grid-track change can
-     reflow the row mid-gesture. */
-  transition:
-    transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
-    margin-left 200ms cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 120ms ease;
+  /* T-90-feedback-20261123_020207-2: compositor-only animation. Only
+     `transform` may transition on a hand card — never `left`, `top`,
+     `margin-left`, `width`, `box-shadow`, `filter`, nor an all-property
+     transition — so a pointer sweep never triggers layout or paint work. The
+     resting slot is a static inline `margin-left`, and every live move is a
+     pure `translate3d` delta. */
+  transition: transform 120ms cubic-bezier(0.22, 1, 0.36, 1);
   /* T-96: the hand is a gesture surface, never a text surface. Suppressing the
      selection (and the browser's native drag of a selection) here is what keeps
      a re-drag from falling back to a blue text selection instead of the

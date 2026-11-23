@@ -8,15 +8,19 @@ import {
   HAND_BASE_CARD_WIDTH,
   HAND_CONTOUR_CORNER_RADIUS,
   HAND_CONTOUR_PADDING,
+  HAND_HOVER_PARTING_RADIUS,
   HAND_MIN_OVERLAP_RATIO,
   HAND_SMALL_HAND_MAX_CARDS,
   HAND_SMALL_HAND_OVERLAP_RATIO,
   HAND_SMALL_HAND_PARTING_PAD_RATIO,
   SELECTED_LIFT_PX,
   buildHandContourPath,
+  cardTranslate3d,
   computeHandLayout,
+  computeLocalizedPartingDeltas,
   computePartedCardLayout,
   computePartedCardPositions,
+  computeRestingCardPositions,
   getCardVerticalLiftPx,
   resolveHoveredCardIndex,
   type CardRect,
@@ -537,22 +541,25 @@ describe('T-90-feedback-20261122_171451-3 ITEM-6a/6b: hover parting solver', () 
     }
   });
 
-  it('opens the neighbour gap and compresses the distant cards', () => {
+  it('opens the neighbour gap and leaves every distant card at rest', () => {
     const hovered = 7;
     const parted = computePartedCardPositions(base, CARD_WIDTH, BOX, hovered);
+    const layout = computePartedCardLayout(base, CARD_WIDTH, BOX, hovered);
 
     const nearLeftGap = parted[hovered] - parted[hovered - 1];
     const nearRightGap = parted[hovered + 1] - parted[hovered];
-    const farLeftGap = parted[1] - parted[0];
-    const farRightGap = parted[13] - parted[12];
 
     expect(nearLeftGap).toBeGreaterThan(baseStep);
     expect(nearRightGap).toBeGreaterThan(baseStep);
-    expect(farLeftGap).toBeLessThan(nearLeftGap);
-    expect(farRightGap).toBeLessThan(nearRightGap);
-    // Far cards end up more tightly packed than at rest.
-    expect(farLeftGap).toBeLessThan(baseStep);
-    expect(farRightGap).toBeLessThan(baseStep);
+    // T-90-feedback-20261123_020207-2 ITEM-QA6: the row no longer re-spreads —
+    // only the tight window around the cursor moves.
+    for (let index = 0; index < base.length; index += 1) {
+      if (Math.abs(index - hovered) <= HAND_HOVER_PARTING_RADIUS) continue;
+      expect(layout.deltas[index], `card ${index}`).toBe(0);
+      expect(parted[index]).toBe(base[index]);
+    }
+    expect(parted[1] - parted[0]).toBeCloseTo(baseStep, 2);
+    expect(parted[13] - parted[12]).toBeCloseTo(baseStep, 2);
   });
 
   it('keeps strict left-to-right order and stays inside the box', () => {
@@ -562,12 +569,15 @@ describe('T-90-feedback-20261122_171451-3 ITEM-6a/6b: hover parting solver', () 
     }
   });
 
-  it('widenes the closest neighbour to a readable strip on a tight hand', () => {
+  it('widenes the closest neighbour substantially on a tight hand', () => {
     const tight = layoutFor(46).cardPositions;
+    const restingGap = tight[24] - tight[23];
     const parted = computePartedCardPositions(tight, CARD_WIDTH, BOX, 23);
     const nearGap = parted[24] - parted[23];
-    expect(nearGap).toBeGreaterThan(tight[24] - tight[23]);
-    expect(nearGap).toBeGreaterThan(STRIP);
+    expect(nearGap).toBeGreaterThan(restingGap);
+    // Only 4 base gaps of a 46-card hand fit the local window, so the flare is
+    // bounded by that span instead of re-spreading the whole row.
+    expect(nearGap).toBeGreaterThan(restingGap * 2);
     expectOrderedPositions(parted);
   });
 
@@ -604,6 +614,102 @@ describe('T-90-feedback-20261122_171451-3 ITEM-6a/6b: hover parting solver', () 
     const narrow = computePartedCardPositions(narrowBase, CARD_WIDTH, 300, 7, STRIP);
     expect(narrow[7]).toBe(narrowBase[7]);
     expectOrderedPositions(narrow, 300);
+  });
+});
+
+describe('T-90-feedback-20261123_020207-2 ITEM-QA6: strictly localized parting', () => {
+  it('never moves a card outside the tight local window on a 30-card hand', () => {
+    const base = layoutFor(30).cardPositions;
+    expect(HAND_HOVER_PARTING_RADIUS).toBe(3);
+
+    for (const hovered of [0, 1, 5, 15, 24, 29]) {
+      const layout = computePartedCardLayout(base, CARD_WIDTH, BOX, hovered);
+      expect(layout.deltas[hovered]).toBe(0);
+      expect(layout.positions[hovered]).toBe(base[hovered]);
+      for (let index = 0; index < base.length; index += 1) {
+        if (Math.abs(index - hovered) <= HAND_HOVER_PARTING_RADIUS) continue;
+        expect(layout.deltas[index], `card ${index} hover ${hovered}`).toBe(0);
+        expect(layout.positions[index], `card ${index} hover ${hovered}`).toBe(
+          base[index],
+        );
+      }
+      // Every card with local room on its side parts; the row stays ordered
+      // inside the lane. (At index 0/1/28/29 one side has no lane runway left,
+      // so only the side with room can flare.)
+      const parted = [hovered - 1, hovered + 1]
+        .filter((neighbour) => neighbour >= 1 && neighbour <= base.length - 2)
+        .map((neighbour) => Math.abs(layout.deltas[neighbour]));
+      if (parted.length > 0) {
+        expect(Math.max(...parted)).toBeGreaterThan(0);
+      }
+      if (hovered > 1 && hovered < base.length - 2) {
+        expect(Math.abs(layout.deltas[hovered - 1])).toBeGreaterThan(0);
+        expect(Math.abs(layout.deltas[hovered + 1])).toBeGreaterThan(0);
+      }
+      expectOrderedPositions(layout.positions);
+    }
+  });
+
+  it('leaves indices 0..10 and 20..29 untouched while hovering index 15', () => {
+    const base = layoutFor(30).cardPositions;
+    const layout = computePartedCardLayout(base, CARD_WIDTH, BOX, 15);
+
+    for (let index = 0; index <= 10; index += 1) {
+      expect(layout.deltas[index], `card ${index}`).toBe(0);
+    }
+    for (let index = 20; index < 30; index += 1) {
+      expect(layout.deltas[index], `card ${index}`).toBe(0);
+    }
+    // The hovered card's own strip opens on both sides despite the 30-card squeeze.
+    expect(layout.positions[16] - layout.positions[15]).toBeGreaterThanOrEqual(STRIP - EPS);
+    expect(layout.positions[15] - layout.positions[14]).toBeGreaterThanOrEqual(STRIP - EPS);
+    expectOrderedPositions(layout.positions);
+  });
+
+  it('locally parts a 6-card hand and never shifts a 1-card hand', () => {
+    const six = layoutFor(6).cardPositions;
+    const restingStep = six[1] - six[0];
+
+    for (const hovered of [0, 2, 5]) {
+      const layout = computePartedCardLayout(six, CARD_WIDTH, BOX, hovered);
+      expect(layout.isParted).toBe(true);
+      expect(layout.positions[hovered]).toBe(six[hovered]);
+      for (const neighbour of [hovered - 1, hovered + 1]) {
+        if (neighbour < 0 || neighbour >= six.length) continue;
+        expect(Math.abs(layout.deltas[neighbour])).toBeGreaterThan(0);
+      }
+      const gap =
+        hovered === 5
+          ? layout.positions[5] - layout.positions[4]
+          : layout.positions[hovered + 1] - layout.positions[hovered];
+      expect(gap).toBeGreaterThan(restingStep);
+      expectOrderedPositions(layout.positions);
+    }
+
+    const one = layoutFor(1).cardPositions;
+    const single = computePartedCardLayout(one, CARD_WIDTH, BOX, 0);
+    expect(single.deltas).toEqual([0]);
+    expect(single.maxAbsDelta).toBe(0);
+    expect(single.isParted).toBe(false);
+    expect(single.positions[0]).toBe(one[0]);
+    expect(computePartedCardPositions(one, CARD_WIDTH, BOX, 0)).toBe(one);
+  });
+
+  it('exposes the shared resting + translate3d primitives for Wave 2 drag parting', () => {
+    const resting = computeRestingCardPositions({
+      cardCount: 30,
+      containerWidth: 640,
+      maximalBoxWidth: BOX,
+    });
+    expect(resting).toEqual(layoutFor(30).cardPositions);
+
+    const deltas = computeLocalizedPartingDeltas(resting, CARD_WIDTH, BOX, 15);
+    expect(deltas[15]).toBe(0);
+    expect(deltas[0]).toBe(0);
+    expect(deltas[29]).toBe(0);
+
+    expect(cardTranslate3d(12.345, -9)).toBe('translate3d(12.35px, -9px, 0)');
+    expect(cardTranslate3d(0, 0)).toBe('translate3d(0px, 0px, 0)');
   });
 });
 

@@ -17,11 +17,13 @@
  *    enlarged suit pip), and finally super-compresses inside the same box for
  *    extreme hands (30-46+ cards). Cards are never scaled down and never
  *    overflow the box.
- * 2. [[computePartedCardLayout]] / [[computePartedCardPositions]] — the smooth
- *    hover-parting solver: the hovered card never moves, a Gaussian falloff
- *    widens the gaps closest to it, distant gaps compress to keep the row
- *    bounded, and the exported per-card `deltas` feed GPU-composited
- *    `translate3d(...)` transforms without a layout reflow.
+ * 2. [[computePartedCardLayout]] / [[computePartedCardPositions]] — the
+ *    localized hover-parting solver: the hovered card never moves, only the
+ *    three immediate neighbours on each side may flare, every distant card
+ *    keeps an exact `0` delta, and the exported per-card `deltas` feed
+ *    GPU-composited `translate3d(...)` transforms without a layout reflow.
+ *    [[computeRestingCardPositions]] / [[cardTranslate3d]] expose those same
+ *    primitives so in-hand drag parting can reuse them verbatim.
  * 3. [[buildHandContourPath]] — the tight, non-rectangular SVG outline that hugs
  *    every laid-out card, including the two raised tiers and hover-parted `x`
  *    positions.
@@ -111,12 +113,25 @@ export const HAND_CONTOUR_PADDING = 6;
 export const HAND_CONTOUR_CORNER_RADIUS = 12;
 
 /**
- * ITEM-6a: width of the smooth (Gaussian) hover-parting falloff, in card
- * distances. The nearest gap gets ~`0.92` of the available extra spacing, the
- * next ~`0.71`, then `0.46`, `0.25`, `0.11`, ... so pointer motion across the
- * hand produces a continuous bulge instead of an abrupt single-card step.
+ * T-90-feedback-20261123_020207-2 ITEM-QA6: how many neighbours on each side of
+ * the hovered card may move at all. Everything outside
+ * `|i - hoveredIndex| <= 3` is pinned to its resting slot with an exact `0`
+ * delta, so a 30-card hand keeps 24 cards perfectly still instead of spreading
+ * or compressing the whole row.
  */
-const HOVER_PARTING_SIGMA = 2.4;
+export const HAND_HOVER_PARTING_RADIUS = 3;
+/**
+ * T-90-feedback-20261123_020207-2: sharp local decay inside that window. The
+ * immediate neighbour takes the full opening, the second gap a fifth and the
+ * third a twentieth, so the flare is concentrated around the cursor.
+ */
+const HAND_HOVER_PARTING_WEIGHTS = [1, 0.2, 0.05] as const;
+/**
+ * T-90-feedback-20261123_020207-2: how far past the minimum-overlap stride a
+ * locally parted gap opens (`0.12` of a card). A hand already resting at the
+ * minimum stride therefore still gets a visible `12px` local flare.
+ */
+const HAND_HOVER_SPREAD_MARGIN_RATIO = 0.12;
 /** Distance factor used when a side has no room at all (degenerate input). */
 const HOVER_PARTING_DEGENERATE_FIT = 1e-3;
 
@@ -500,11 +515,22 @@ export function computeHandLayout(options: HandLayoutOptions): HandLayoutResult 
   };
 }
 
+/** One gap's weight inside the local parting window. */
+function hoverPartingWeight(distance: number): number {
+  const weight = HAND_HOVER_PARTING_WEIGHTS[distance - 1];
+  return weight === undefined ? 0 : weight;
+}
+
 /**
- * Share of the desired gaps that fits into `span`. Only ever shrinks (the row
- * never grows past its own spread targets), and stays positive.
+ * T-90-feedback-20261123_020207-2: per-side fit scale for the local window.
+ *
+ * `span` is the fixed resting distance from the hovered card to the outermost
+ * card the window is allowed to move. The handful of gaps inside that span share
+ * it exactly, so those edge cards keep their resting `x` and every card outside
+ * the window keeps an exact `0` delta. Only ever shrinks (the window never grows
+ * past its own span) and stays positive.
  */
-function gapFitScale(gaps: readonly number[], span: number): number {
+function localPartingFitScale(gaps: readonly number[], span: number): number {
   if (gaps.length === 0) return 1;
   const total = gaps.reduce((sum, gap) => sum + gap, 0);
   if (!(total > 0)) return 1;
@@ -535,27 +561,122 @@ function zeroDeltas(count: number): number[] {
 }
 
 /**
- * ITEM-6a/6b/6c: smooth hover-parting geometry for one hand row.
+ * T-90-feedback-20261123_020207-2 ITEM-QA6: localized hover-parting
+ * displacements, in px.
  *
- * - `basePositions` are the resting left edges (from [[computeHandLayout]]).
+ * `basePositions` are the resting left edges (from [[computeHandLayout]]).
+ *
+ * - Only the cards at `1..radius` distance from `hoveredIndex` may move. Every
+ *   other card gets an exact `0` delta, so a 30-card hovered hand keeps 24 cards
+ *   overlapping exactly as the hand size demands.
+ * - Within each side's window the resting span from the hovered card to the
+ *   first untouched card (or to the lane edge at the end of the hand) is fixed,
+ *   and the gaps inside it are re-weighted by [[hoverPartingWeight]]: full
+ *   opening on the immediate neighbour, a fifth on the next, a twentieth on the
+ *   third. The fit scale shrinks every gap in that window by the same factor
+ *   when the span cannot hold the flare, which keeps the coordinates strictly
+ *   ordered, keeps every card inside the hand lane, and pins every card beyond
+ *   the window to its resting slot.
+ * - The hovered card itself never moves and a single-card hand never parts.
+ *
+ * The returned array is the pure input for `translate3d` positioning: Wave 2
+ * reuses it verbatim for in-hand drag parting, so both gestures share one
+ * geometry.
+ */
+export function computeLocalizedPartingDeltas(
+  basePositions: readonly number[],
+  cardWidth: number,
+  maximalBoxWidth: number,
+  hoveredIndex: number | null,
+  minVisibleStripPx: number = DEFAULT_MIN_VISIBLE_INDEX_STRIP_PX,
+  radius: number = HAND_HOVER_PARTING_RADIUS,
+): number[] {
+  const count = basePositions.length;
+  const deltas = zeroDeltas(count);
+  // ITEM-6c: nothing to part with a single card (or none at all).
+  if (count <= 1) return deltas;
+  if (hoveredIndex === null || hoveredIndex === undefined) return deltas;
+  if (!Number.isFinite(hoveredIndex)) return deltas;
+  const hovered = Math.floor(hoveredIndex);
+  if (hovered !== hoveredIndex || hovered < 0 || hovered >= count) return deltas;
+
+  const width = Math.max(1, cardWidth);
+  const boxWidth = Math.max(width, maximalBoxWidth);
+  const strip = clamp(minVisibleStripPx, 0, width);
+  // Local opening target: just past the minimum-overlap stride (so an already
+  // expanded hand still flares) and never below the index strip.
+  const spreadStep =
+    Math.max(width * (1 - HAND_MIN_OVERLAP_RATIO), strip) +
+    width * HAND_HOVER_SPREAD_MARGIN_RATIO;
+  const reach = Math.max(
+    0,
+    Math.floor(finiteOr(radius, HAND_HOVER_PARTING_RADIUS)),
+  );
+  const pivot = basePositions[hovered];
+  const rightBound = Math.max(pivot, boxWidth - width);
+
+  const solveSide = (direction: 1 | -1): void => {
+    const available = direction === 1 ? count - 1 - hovered : hovered;
+    const window = Math.min(reach, available);
+    if (window <= 0) return;
+    // The first card OUTSIDE the local window is the wall every moved card has
+    // to stay behind; it never gets a delta itself. When the window reaches the
+    // end of the hand, the lane edge is the wall instead, so a 2-card hand can
+    // still use the parting runway around it.
+    const wallIndex = hovered + direction * (window + 1);
+    const hasWall = wallIndex >= 0 && wallIndex < count;
+    // The gaps that share the fixed span: the moved gaps plus, when a wall
+    // exists, the gap that ends on it (weight `0`, so it keeps its resting
+    // share and only scales with the rest).
+    const gapCount = hasWall ? window + 1 : window;
+    const gaps: number[] = [];
+    for (let distance = 1; distance <= gapCount; distance += 1) {
+      const left = direction === 1 ? hovered + distance - 1 : hovered - distance;
+      const baseGap = Math.max(0, basePositions[left + 1] - basePositions[left]);
+      const extra = Math.max(0, spreadStep - baseGap) * hoverPartingWeight(distance);
+      gaps.push(baseGap + extra);
+    }
+    const span = hasWall
+      ? Math.abs(basePositions[wallIndex] - pivot)
+      : direction === 1
+        ? Math.max(0, rightBound - pivot)
+        : Math.max(0, pivot);
+    const scale = localPartingFitScale(gaps, span);
+    let offset = 0;
+    for (let distance = 1; distance <= window; distance += 1) {
+      offset += gaps[distance - 1] * scale;
+      const index = hovered + direction * distance;
+      const position = direction === 1 ? pivot + offset : pivot - offset;
+      // Delta against the card's OWN resting slot — never against the pivot.
+      deltas[index] = position - basePositions[index];
+    }
+  };
+
+  solveSide(-1);
+  solveSide(1);
+
+  // The hovered card is pinned and every card outside the window stays at 0.
+  deltas[hovered] = 0;
+  for (let index = 0; index < count; index += 1) {
+    deltas[index] = round2(deltas[index]);
+  }
+  return deltas;
+}
+
+/**
+ * ITEM-6a/6b/6c: localized hover-parting geometry for one hand row.
+ *
  * - The hovered card never moves: `positions[hoveredIndex] === basePositions[hoveredIndex]`
  *   and `deltas[hoveredIndex] === 0`.
- * - Gaps next to the hovered card open toward the widest comfortable stride
- *   (`max(cardWidth * 0.8, minVisibleStripPx)`) with a Gaussian falloff by
- *   distance, so motion across the hand never snaps: ~`92%` of the expansion
- *   lands on the immediate neighbour, ~`71%` on the next gap, and so on.
- * - Removing the extra spacing from the far gaps keeps the row bounded:
- *   left cards stay in `[0, hoveredX]`, right cards in
- *   `[hoveredX, maximalBoxWidth - cardWidth]`, so the row stays strictly
- *   ordered and never overflows the maximal hand lane. Even a fully compressed
- *   30/46-card hand reveals at least `minVisibleStripPx` next to the hovered
- *   card.
+ * - Only the tight local window from [[computeLocalizedPartingDeltas]] moves;
+ *   every distant card keeps its resting left edge (`deltas[i] === 0`), so the
+ *   row stays strictly ordered and never leaves the maximal hand lane.
  * - Parting is disabled for `cardCount <= 1`, an empty hand, or an inactive /
  *   out-of-range hover: `positions` is the very same `basePositions` array and
  *   every delta is strictly `0`.
  *
- * The returned `deltas` are what Wave 3 animates with
- * `transform: translate3d(deltaX, liftY, 0)` — no layout reflow per frame.
+ * The returned `deltas` are what the table animates with
+ * `cardTranslate3d(deltaX, liftY)` — no layout reflow per frame.
  */
 export function computePartedCardLayout(
   basePositions: readonly number[],
@@ -572,73 +693,28 @@ export function computePartedCardLayout(
     isParted: false,
     maxAbsDelta: 0,
   };
-  // ITEM-6c: nothing to part with a single card (or none at all).
   if (count <= 1) return resting;
   if (hoveredIndex === null || hoveredIndex === undefined) return resting;
   if (!Number.isFinite(hoveredIndex)) return resting;
   const hovered = Math.floor(hoveredIndex);
   if (hovered !== hoveredIndex || hovered < 0 || hovered >= count) return resting;
 
-  const width = Math.max(1, cardWidth);
-  const boxWidth = Math.max(width, maximalBoxWidth);
-  const strip = clamp(minVisibleStripPx, 0, width);
-  // The widest comfortable stride still keeps the card's left index visible.
-  const spreadStep = Math.max(width * (1 - HAND_MIN_OVERLAP_RATIO), strip);
-  const pivot = basePositions[hovered];
-  const leftBound = 0;
-  const rightBound = boxWidth - width;
-
-  // ITEM-6a: smooth Gaussian kernel — no abrupt one-neighbour-only jump.
-  const hoverWeight = (distance: number): number =>
-    Math.exp(-(distance * distance) / (2 * HOVER_PARTING_SIGMA * HOVER_PARTING_SIGMA));
-  const desiredGap = (distance: number, baseGap: number): number => {
-    const extra = Math.max(0, spreadStep - baseGap);
-    return baseGap + extra * hoverWeight(distance);
-  };
-
-  const leftGaps: number[] = [];
-  for (let distance = 1; distance <= hovered; distance += 1) {
-    const left = hovered - distance;
-    const baseGap = Math.max(0, basePositions[left + 1] - basePositions[left]);
-    leftGaps.push(desiredGap(distance, baseGap));
-  }
-  const rightGaps: number[] = [];
-  for (let distance = 1; distance <= count - 1 - hovered; distance += 1) {
-    const left = hovered + distance - 1;
-    const baseGap = Math.max(0, basePositions[left + 1] - basePositions[left]);
-    rightGaps.push(desiredGap(distance, baseGap));
-  }
-
-  // Uniform fit scaling preserves the smooth falloff while guaranteeing that
-  // the nearest gap still gains spacing (small hands now have edge runway and
-  // medium/large hands have enough far gaps to give the extra spacing back).
-  const leftScale = gapFitScale(leftGaps, Math.max(0, pivot - leftBound));
-  const rightScale = gapFitScale(rightGaps, Math.max(0, rightBound - pivot));
-
-  const positions = basePositions.slice() as number[];
-
-  let offset = 0;
-  for (let distance = 1; distance <= hovered; distance += 1) {
-    offset += leftGaps[distance - 1] * leftScale;
-    // Never leave the lane on the left; positive gaps keep the order intact.
-    positions[hovered - distance] = Math.max(leftBound, pivot - offset);
-  }
-
-  offset = 0;
-  for (let distance = 1; distance <= count - 1 - hovered; distance += 1) {
-    offset += rightGaps[distance - 1] * rightScale;
-    const x = pivot + offset;
-    positions[hovered + distance] = rightBound >= pivot ? Math.min(rightBound, x) : x;
-  }
-
-  // ITEM-6b: the hovered card is pinned — never moves, not even by rounding.
-  positions[hovered] = pivot;
-
-  const deltas = positions.map((x, index) =>
-    index === hovered ? 0 : round2(x - basePositions[index]),
+  const deltas = computeLocalizedPartingDeltas(
+    basePositions,
+    cardWidth,
+    maximalBoxWidth,
+    hovered,
+    minVisibleStripPx,
   );
+
   let maxAbsDelta = 0;
-  for (const delta of deltas) maxAbsDelta = Math.max(maxAbsDelta, Math.abs(delta));
+  const positions = basePositions.map((x, index) => {
+    const delta = index === hovered ? 0 : deltas[index];
+    maxAbsDelta = Math.max(maxAbsDelta, Math.abs(delta));
+    return round2(x + delta);
+  });
+  // The hovered card is pinned — never moves, not even by rounding.
+  positions[hovered] = basePositions[hovered];
 
   return {
     positions,
@@ -668,6 +744,26 @@ export function computePartedCardPositions(
     hoveredIndex,
     minVisibleStripPx,
   ).positions;
+}
+
+/**
+ * T-90-feedback-20261123_020207-2: pure resting-position helper. Returns the
+ * exact left edges every hand transform is expressed from, so a caller (Wave 2's
+ * in-hand drag parting, for example) can reuse the same primitives end to end.
+ */
+export function computeRestingCardPositions(
+  options: HandLayoutOptions,
+): readonly number[] {
+  return computeHandLayout(options).cardPositions;
+}
+
+/**
+ * T-90-feedback-20261123_020207-2: the single `translate3d` primitive every hand
+ * card is positioned with — hover parting and drag parting alike. Compositor
+ * only: no `left`, `top`, `margin-left` or width is ever animated.
+ */
+export function cardTranslate3d(x: number, y: number): string {
+  return `translate3d(${round2(x)}px, ${round2(y)}px, 0)`;
 }
 
 /**
