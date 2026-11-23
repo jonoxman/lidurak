@@ -5262,9 +5262,10 @@ describe('T-90-feedback-20261106_111512-3: throw-in gate, card tokens, drag visi
     const card = screen.getByLabelText('king of clubs').closest('.card-slot') as HTMLElement;
     const wrapper = card.closest('.hand-card-wrapper') as HTMLElement;
     const setDragImage = vi.fn();
+    // A real grab pre-captures the point on mousedown. jsdom's `dragstart` has
+    // no coordinates, so it must not discard the pre-captured point.
+    fireEvent.mouseDown(card, { button: 0, clientX: 60, clientY: 90 });
     fireEvent.dragStart(card, {
-      clientX: 60,
-      clientY: 90,
       dataTransfer: { setData: vi.fn(), setDragImage, effectAllowed: 'move' },
     });
     expect(setDragImage).toHaveBeenCalledTimes(1);
@@ -5283,18 +5284,23 @@ describe('T-90-feedback-20261106_111512-3: throw-in gate, card tokens, drag visi
     expect(width).toBe(100);
     expect(height).toBe(140);
 
-    // jsdom has no `DragEvent`, so the real coordinate path is the window-level
-    // dragover listener; the preview centre must lock to the live pointer.
-    window.dispatchEvent(new window.MouseEvent('dragover', { clientX: 60, clientY: 90 }));
-    const [translateX, translateY] = (
-      preview.style.transform.match(
-        /translate3d\((-?[\d.]+)px, (-?[\d.]+)px, 0\)/,
-      ) ?? []
-    )
-      .slice(1)
-      .map(Number);
-    expect(translateX + width / 2).toBeCloseTo(60, 5);
-    expect(translateY + height / 2).toBeCloseTo(90, 5);
+    const readCenter = (): { x: number; y: number } => {
+      const [translateX, translateY] = (
+        preview.style.transform.match(
+          /translate3d\((-?[\d.]+)px, (-?[\d.]+)px, 0\)/,
+        ) ?? []
+      )
+        .slice(1)
+        .map(Number);
+      return { x: translateX + width / 2, y: translateY + height / 2 };
+    };
+
+    // Before any `dragover`, the preview is already centred on the grab point.
+    expect(readCenter()).toEqual({ x: 60, y: 90 });
+
+    // The window-level dragover listener then keeps its centre on the pointer.
+    window.dispatchEvent(new window.MouseEvent('dragover', { clientX: 200, clientY: 220 }));
+    expect(readCenter()).toEqual({ x: 200, y: 220 });
 
     // The source card stays connected and fully painted behind the preview.
     expect(document.body.contains(card)).toBe(true);

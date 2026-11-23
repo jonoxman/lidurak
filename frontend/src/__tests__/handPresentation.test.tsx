@@ -478,10 +478,41 @@ describe('T-90-feedback-5 ITEM-6a/6b/6c: smooth hover parting', () => {
     expect(handWrappers()[0].style.transform).toBe('');
   });
 
-  it('ITEM-6b: visibly parts small 6-card and 3-card hands around the hovered card', () => {
-    const cases: Array<{ count: number; index: number; left: number; right: number }> = [
-      { count: 6, index: 2, left: 1, right: 3 },
+  it('ITEM-6a: keeps the hover over the parted gaps and clears only on leave', () => {
+    mountTable(DECK.slice(0, 6), { awaitingAttack: true });
+    const zone = document.querySelector('[data-zone="player-hand"]') as HTMLElement;
+    const box = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+
+    // A plain mouse sweep (not only pointer events) drives the parting.
+    fireEvent.mouseMove(handWrappers()[2], { bubbles: true });
+    expect(zone.getAttribute('data-hovered-card-index')).toBe('2');
+    expect(zone.getAttribute('data-parting-active')).toBe('true');
+
+    // Moving over the parted gap / contour (target = `.hand-cards`, with no
+    // card wrapper) must not flicker the row closed.
+    fireEvent.mouseMove(box, { bubbles: true });
+    expect(zone.getAttribute('data-hovered-card-index')).toBe('2');
+    expect(zone.getAttribute('data-parting-active')).toBe('true');
+
+    // Crossing straight to a neighbour keeps a single continuous hover.
+    fireEvent.mouseMove(handWrappers()[3], { bubbles: true });
+    expect(zone.getAttribute('data-hovered-card-index')).toBe('3');
+
+    // Leaving the hand container is the only reset.
+    fireEvent.mouseLeave(zone);
+    expect(zone.getAttribute('data-hovered-card-index')).toBeNull();
+    expect(zone.getAttribute('data-parting-active')).toBe('false');
+  });
+
+  it('ITEM-6b: visibly parts every multi-card hand size around the hovered card', () => {
+    const cases: Array<{ count: number; index: number; left?: number; right?: number }> = [
+      { count: 2, index: 0, right: 1 },
       { count: 3, index: 1, left: 0, right: 2 },
+      { count: 4, index: 2, left: 1, right: 3 },
+      { count: 5, index: 3, left: 2, right: 4 },
+      { count: 6, index: 2, left: 1, right: 3 },
+      { count: 14, index: 7, left: 6, right: 8 },
+      { count: 30, index: 15, left: 14, right: 16 },
     ];
     for (const { count, index, left, right } of cases) {
       const view = mountTable(DECK.slice(0, count), { awaitingAttack: true });
@@ -495,10 +526,16 @@ describe('T-90-feedback-5 ITEM-6a/6b/6c: smooth hover parting', () => {
         Number(wrapper.getAttribute('data-card-x')),
       );
       // The hovered card never moves; its neighbours visibly part outward.
-      expect(after[index]).toBe(before[index]);
+      expect(after[index], `${count}-card hovered card`).toBe(before[index]);
       expect(Number(handWrappers()[index].getAttribute('data-part-delta-x'))).toBe(0);
-      expect(after[left], `${count}-card left neighbour`).toBeLessThan(before[left]);
-      expect(after[right], `${count}-card right neighbour`).toBeGreaterThan(before[right]);
+      if (left !== undefined) {
+        expect(after[left], `${count}-card left neighbour`).toBeLessThan(before[left]);
+      }
+      if (right !== undefined) {
+        expect(after[right], `${count}-card right neighbour`).toBeGreaterThan(
+          before[right],
+        );
+      }
 
       // ITEM-6a: every parted card moves through a GPU-composited translate3d.
       for (const wrapper of handWrappers()) {
@@ -652,6 +689,110 @@ describe('T-90-feedback-6 ITEM-3: center-locked card dragging', () => {
     fireEvent.dragEnd(handWrappers()[0]);
     expect(screen.queryByTestId('drag-card-preview')).toBeNull();
     expect(handWrappers()).toHaveLength(6);
+  });
+
+  it('locks the preview centre on a 375x812 mobile viewport (48x68 cards)', () => {
+    setViewport(375);
+    mountTable(DECK.slice(0, 6), { onReorderHand: vi.fn() });
+
+    fireEvent.mouseDown(handWrappers()[5], { button: 0, clientX: 180, clientY: 300 });
+    fireEvent.mouseMove(document, { clientX: 240, clientY: 360 });
+
+    const center = dragPreviewCenter();
+    expect(center.width).toBe(MOBILE_CARD_WIDTH);
+    expect(center.height).toBe(MOBILE_CARD_HEIGHT);
+    expect(Math.abs(center.x - 240)).toBeLessThanOrEqual(1);
+    expect(Math.abs(center.y - 360)).toBeLessThanOrEqual(1);
+
+    fireEvent.mouseUp(document, { clientX: 240, clientY: 360 });
+    expect(screen.queryByTestId('drag-card-preview')).toBeNull();
+  });
+
+  it('executes the expected move on every drop target and dismisses the preview', () => {
+    const card = DECK[0]; // two of spades
+    const uncovered = [{ attack: { suit: 'spades', rank: 'six' }, defense: null }];
+    // The covered/uncovered mix keeps every uncovered card's ORIGINAL
+    // attackIndex on its `<TablePair>` drop zone.
+    const mixed = [
+      { attack: { suit: 'spades', rank: 'six' }, defense: { suit: 'spades', rank: 'seven' } },
+      { attack: { suit: 'clubs', rank: 'king' }, defense: null },
+      { attack: { suit: 'hearts', rank: 'ten' }, defense: { suit: 'hearts', rank: 'jack' } },
+      { attack: { suit: 'diamonds', rank: 'nine' }, defense: null },
+    ];
+    const baseProps: GameTableProps = {
+      myId: 'p0',
+      myHand: DECK.slice(0, 3),
+      opponents: [bob],
+      tablePairs: [],
+      trumpSuit: 'diamonds',
+      defenderId: 'p1',
+    };
+    const cases: Array<{
+      name: string;
+      props: GameTableProps;
+      findZone: () => Element | null;
+      spy: 'onCoverDrop' | 'onAttackDrop' | 'onRedirectDrop' | 'onThrowInDrop';
+      expected: unknown[];
+    }> = [
+      {
+        name: 'uncovered pair (original attackIndex)',
+        props: { ...baseProps, tablePairs: mixed },
+        findZone: () => document.querySelector('[data-drop-zone="cover:3"]'),
+        spy: 'onCoverDrop',
+        expected: [card, 3],
+      },
+      {
+        name: 'attack target outline',
+        props: { ...baseProps, tablePairs: [], awaitingAttack: true },
+        findZone: () => screen.getByTestId('target-outline-p1'),
+        spy: 'onAttackDrop',
+        expected: [card, 'p1'],
+      },
+      {
+        name: 'redirect outline',
+        props: { ...baseProps, tablePairs: uncovered, canRedirect: true },
+        findZone: () => screen.getByTestId('redirect-outline'),
+        spy: 'onRedirectDrop',
+        expected: [card],
+      },
+      {
+        name: 'throw-in outline',
+        props: { ...baseProps, tablePairs: uncovered, canThrowIn: true },
+        findZone: () => screen.getByTestId('throw-in-outline'),
+        spy: 'onThrowInDrop',
+        expected: [card],
+      },
+    ];
+
+    const original = (document as unknown as { elementFromPoint?: unknown })
+      .elementFromPoint;
+    try {
+      for (const testCase of cases) {
+        const spies = {
+          onCoverDrop: vi.fn(),
+          onAttackDrop: vi.fn(),
+          onRedirectDrop: vi.fn(),
+          onThrowInDrop: vi.fn(),
+        };
+        const view = render(<GameTable {...testCase.props} {...spies} />);
+        const zone = testCase.findZone();
+        expect(zone, testCase.name).not.toBeNull();
+        (document as unknown as { elementFromPoint: unknown }).elementFromPoint = vi.fn(
+          () => zone,
+        );
+
+        fireEvent.mouseDown(handWrappers()[0], { button: 0, clientX: 30, clientY: 60 });
+        fireEvent.mouseMove(document, { clientX: 120, clientY: 140 });
+        expect(screen.getByTestId('drag-card-preview'), testCase.name).toBeTruthy();
+        fireEvent.mouseUp(document, { clientX: 500, clientY: 300 });
+
+        expect(spies[testCase.spy]).toHaveBeenCalledWith(...testCase.expected);
+        expect(screen.queryByTestId('drag-card-preview'), testCase.name).toBeNull();
+        view.unmount();
+      }
+    } finally {
+      (document as unknown as { elementFromPoint: unknown }).elementFromPoint = original;
+    }
   });
 });
 
