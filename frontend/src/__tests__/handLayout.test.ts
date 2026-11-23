@@ -346,14 +346,18 @@ describe('T-90-feedback-20261122_171451-3 ITEM-6c: hover-parting guards', () => 
     expect(computePartedCardPositions(base, CARD_WIDTH, BOX, 2.5)).toBe(base);
   });
 
-  it('gives a two-card hand real parting room on both sides', () => {
+  it('parts a two-card hand only to the right of the hovered card', () => {
     const base = layoutFor(2).cardPositions;
     const restingStep = base[1] - base[0];
-    for (const hovered of [0, 1]) {
-      const parted = computePartedCardPositions(base, CARD_WIDTH, BOX, hovered);
-      expect(parted[hovered]).toBe(base[hovered]);
-      expect(parted[1] - parted[0]).toBeGreaterThan(restingStep);
-    }
+    const parted = computePartedCardPositions(base, CARD_WIDTH, BOX, 0);
+    expect(parted[0]).toBe(base[0]);
+    expect(parted[1] - parted[0]).toBeGreaterThan(restingStep);
+
+    // The rightmost card already paints fully on top: nothing may open behind
+    // it, or the card beneath would compete for the widest reveal.
+    const top = computePartedCardLayout(base, CARD_WIDTH, BOX, 1);
+    expect(top.deltas).toEqual([0, 0]);
+    expect(top.isParted).toBe(false);
   });
 });
 
@@ -487,34 +491,59 @@ describe('T-90-feedback-20261122_193457-2 ITEM-6a/6b: parting math for every han
     }
   });
 
-  it('parts every hover in a 2..6-card hand (the ITEM-6b complaint)', () => {
+  it('parts every hover left of the rightmost card in a 2..6-card hand', () => {
     for (const cardCount of [2, 3, 4, 5, 6]) {
       const base = layoutFor(cardCount).cardPositions;
       const restingStep = base[1] - base[0];
       for (let hovered = 0; hovered < cardCount; hovered += 1) {
-        const parted = computePartedCardPositions(base, CARD_WIDTH, BOX, hovered);
-        expect(parted[hovered]).toBe(base[hovered]);
-        const leftGap = hovered > 0 ? parted[hovered] - parted[hovered - 1] : 0;
-        const rightGap =
-          hovered < cardCount - 1 ? parted[hovered + 1] - parted[hovered] : 0;
-        expect(Math.max(leftGap, rightGap)).toBeGreaterThan(restingStep);
-        expectOrderedPositions(parted);
+        const layout = computePartedCardLayout(base, CARD_WIDTH, BOX, hovered);
+        expect(layout.positions[hovered]).toBe(base[hovered]);
+        if (hovered < cardCount - 1) {
+          const rightGap = layout.positions[hovered + 1] - layout.positions[hovered];
+          expect(rightGap, `${cardCount}-card hover ${hovered}`).toBeGreaterThan(
+            restingStep,
+          );
+        } else {
+          // Rightmost hover: already fully uncovered, so nothing moves.
+          expect(layout.deltas.every((delta) => delta === 0)).toBe(true);
+        }
+        // The left neighbour never opens a competing margin.
+        if (hovered > 0) {
+          expect(layout.deltas[hovered - 1]).toBe(0);
+          expect(layout.positions[hovered] - layout.positions[hovered - 1]).toBeCloseTo(
+            restingStep,
+            2,
+          );
+        }
+        expectOrderedPositions(layout.positions);
       }
     }
   });
 
-  it('reveals >= the index strip beside the hovered card on a 30-card hand', () => {
+  it('reveals the widest margin only beside the hovered card on a 30-card hand', () => {
     const base = layoutFor(30).cardPositions;
     const restingStep = base[1] - base[0];
-    for (const hovered of [0, 15, 29]) {
+    for (const hovered of [0, 15]) {
       const parted = computePartedCardPositions(base, CARD_WIDTH, BOX, hovered);
-      const gaps: number[] = [];
-      if (hovered > 0) gaps.push(parted[hovered] - parted[hovered - 1]);
-      if (hovered < 29) gaps.push(parted[hovered + 1] - parted[hovered]);
-      expect(Math.max(...gaps)).toBeGreaterThan(restingStep);
-      expect(Math.max(...gaps)).toBeGreaterThanOrEqual(STRIP - EPS);
+      const rightGap = parted[hovered + 1] - parted[hovered];
+      expect(rightGap).toBeGreaterThan(restingStep);
+      // The compressed hand still opens the full index strip in front of it.
+      expect(rightGap).toBeGreaterThanOrEqual(STRIP - EPS);
+      if (hovered > 0) {
+        expect(parted[hovered] - parted[hovered - 1]).toBeCloseTo(restingStep, 2);
+      }
       expectOrderedPositions(parted);
     }
+    // Near the right end the lane runway bounds the reveal, but it still beats
+    // (and is never matched by) the resting margin on the left.
+    const nearEnd = computePartedCardLayout(base, CARD_WIDTH, BOX, 28);
+    expect(nearEnd.positions[29] - nearEnd.positions[28]).toBeGreaterThan(restingStep);
+    expect(nearEnd.deltas[27]).toBe(0);
+    expectOrderedPositions(nearEnd.positions);
+    // The rightmost card moves nothing at all.
+    const rightmost = computePartedCardLayout(base, CARD_WIDTH, BOX, 29);
+    expect(rightmost.deltas.every((delta) => delta === 0)).toBe(true);
+    expect(rightmost.isParted).toBe(false);
   });
 
   it('keeps GPU deltas consistent and bounded on 14 and 30-card hands', () => {
@@ -522,8 +551,13 @@ describe('T-90-feedback-20261122_193457-2 ITEM-6a/6b: parting math for every han
       const base = layoutFor(cardCount).cardPositions;
       for (let hovered = 0; hovered < cardCount; hovered += 2) {
         const layout = computePartedCardLayout(base, CARD_WIDTH, BOX, hovered);
-        expect(layout.isParted).toBe(true);
-        expect(layout.maxAbsDelta).toBeGreaterThan(0);
+        // A hover with a full local right window always parts; the last few
+        // hovers are bounded by the lane edge (and the rightmost one cannot
+        // move at all, which is exactly the single-card reveal rule).
+        if (hovered + HAND_HOVER_PARTING_RADIUS <= cardCount - 2) {
+          expect(layout.isParted).toBe(true);
+          expect(layout.maxAbsDelta).toBeGreaterThan(0);
+        }
         for (let index = 0; index < cardCount; index += 1) {
           expect(layout.positions[index]).toBeGreaterThanOrEqual(-EPS);
           expect(layout.positions[index] + CARD_WIDTH).toBeLessThanOrEqual(BOX + EPS);
@@ -545,7 +579,7 @@ describe('T-90-feedback-20261122_171451-3 ITEM-6a/6b: hover parting solver', () 
     }
   });
 
-  it('opens the neighbour gap and leaves every distant card at rest', () => {
+  it('opens only the right neighbour gap and leaves every other card at rest', () => {
     const hovered = 7;
     const parted = computePartedCardPositions(base, CARD_WIDTH, BOX, hovered);
     const layout = computePartedCardLayout(base, CARD_WIDTH, BOX, hovered);
@@ -553,7 +587,10 @@ describe('T-90-feedback-20261122_171451-3 ITEM-6a/6b: hover parting solver', () 
     const nearLeftGap = parted[hovered] - parted[hovered - 1];
     const nearRightGap = parted[hovered + 1] - parted[hovered];
 
-    expect(nearLeftGap).toBeGreaterThan(baseStep);
+    // T-90 Hover Parting: only the right side opens, so the card under the
+    // cursor is the single card with the widest exposed margin.
+    expect(nearLeftGap).toBeCloseTo(baseStep, 2);
+    expect(layout.deltas[hovered - 1]).toBe(0);
     expect(nearRightGap).toBeGreaterThan(baseStep);
     // T-90-feedback-20261123_020207-2 ITEM-QA6: the row no longer re-spreads —
     // only the tight window around the cursor moves.
@@ -637,18 +674,19 @@ describe('T-90-feedback-20261123_020207-2 ITEM-QA6: strictly localized parting',
           base[index],
         );
       }
-      // Every card with local room on its side parts; the row stays ordered
-      // inside the lane. (At index 0/1/28/29 one side has no lane runway left,
-      // so only the side with room can flare.)
-      const parted = [hovered - 1, hovered + 1]
-        .filter((neighbour) => neighbour >= 1 && neighbour <= base.length - 2)
-        .map((neighbour) => Math.abs(layout.deltas[neighbour]));
+      // Every card with local room on the right side parts rightward; the
+      // left neighbour and every distant card stay exactly at rest. (At index
+      // 0/1/28/29 one side has no lane runway left, so only the side with room
+      // can flare; at 29 nothing moves at all.)
+      const parted = [hovered + 1]
+        .filter((neighbour) => neighbour <= base.length - 2)
+        .map((neighbour) => layout.deltas[neighbour]);
       if (parted.length > 0) {
         expect(Math.max(...parted)).toBeGreaterThan(0);
       }
       if (hovered > 1 && hovered < base.length - 2) {
-        expect(Math.abs(layout.deltas[hovered - 1])).toBeGreaterThan(0);
-        expect(Math.abs(layout.deltas[hovered + 1])).toBeGreaterThan(0);
+        expect(layout.deltas[hovered - 1]).toBe(0);
+        expect(layout.deltas[hovered + 1]).toBeGreaterThan(0);
       }
       expectOrderedPositions(layout.positions);
     }
@@ -664,9 +702,14 @@ describe('T-90-feedback-20261123_020207-2 ITEM-QA6: strictly localized parting',
     for (let index = 20; index < 30; index += 1) {
       expect(layout.deltas[index], `card ${index}`).toBe(0);
     }
-    // The hovered card's own strip opens on both sides despite the 30-card squeeze.
+    // The hovered card's own right strip opens despite the 30-card squeeze
+    // while its left neighbour keeps the resting overlap.
     expect(layout.positions[16] - layout.positions[15]).toBeGreaterThanOrEqual(STRIP - EPS);
-    expect(layout.positions[15] - layout.positions[14]).toBeGreaterThanOrEqual(STRIP - EPS);
+    expect(layout.positions[15] - layout.positions[14]).toBeCloseTo(
+      base[15] - base[14],
+      2,
+    );
+    expect(layout.deltas[14]).toBe(0);
     expectOrderedPositions(layout.positions);
   });
 
@@ -674,21 +717,28 @@ describe('T-90-feedback-20261123_020207-2 ITEM-QA6: strictly localized parting',
     const six = layoutFor(6).cardPositions;
     const restingStep = six[1] - six[0];
 
-    for (const hovered of [0, 2, 5]) {
+    for (const hovered of [0, 2, 4]) {
       const layout = computePartedCardLayout(six, CARD_WIDTH, BOX, hovered);
       expect(layout.isParted).toBe(true);
       expect(layout.positions[hovered]).toBe(six[hovered]);
-      for (const neighbour of [hovered - 1, hovered + 1]) {
-        if (neighbour < 0 || neighbour >= six.length) continue;
-        expect(Math.abs(layout.deltas[neighbour])).toBeGreaterThan(0);
-      }
-      const gap =
-        hovered === 5
-          ? layout.positions[5] - layout.positions[4]
-          : layout.positions[hovered + 1] - layout.positions[hovered];
+      // Only the right neighbour parts; the left one keeps its resting overlap.
+      expect(layout.deltas[hovered + 1]).toBeGreaterThan(0);
+      const gap = layout.positions[hovered + 1] - layout.positions[hovered];
       expect(gap).toBeGreaterThan(restingStep);
+      if (hovered > 0) {
+        expect(layout.deltas[hovered - 1]).toBe(0);
+        expect(layout.positions[hovered] - layout.positions[hovered - 1]).toBeCloseTo(
+          restingStep,
+          2,
+        );
+      }
       expectOrderedPositions(layout.positions);
     }
+
+    // The rightmost card is already fully uncovered: hovering it moves nothing.
+    const last = computePartedCardLayout(six, CARD_WIDTH, BOX, 5);
+    expect(last.deltas.every((delta) => delta === 0)).toBe(true);
+    expect(last.isParted).toBe(false);
 
     const one = layoutFor(1).cardPositions;
     const single = computePartedCardLayout(one, CARD_WIDTH, BOX, 0);
@@ -714,6 +764,100 @@ describe('T-90-feedback-20261123_020207-2 ITEM-QA6: strictly localized parting',
 
     expect(cardTranslate3d(12.345, -9)).toBe('translate3d(12.35px, -9px, 0)');
     expect(cardTranslate3d(0, 0)).toBe('translate3d(0px, 0px, 0)');
+  });
+});
+
+describe('T-90 Hover Parting: unambiguous single-card reveal', () => {
+  /** `x(j + 1) - x(j)`: the margin card `j` leaves uncovered. */
+  const exposedMargin = (positions: readonly number[], index: number): number =>
+    positions[index + 1] - positions[index];
+
+  it('opens exactly the hovered card with the widest margin on a 30-card hand', () => {
+    const base = layoutFor(30).cardPositions;
+    for (let hovered = 0; hovered < base.length; hovered += 1) {
+      const layout = computePartedCardLayout(base, CARD_WIDTH, BOX, hovered);
+      // A wall card exists only when the local right window does not run off
+      // the end of the hand; the last few hovers are lane-bounded.
+      const hasWall = hovered + HAND_HOVER_PARTING_RADIUS <= base.length - 2;
+      expect(layout.deltas[hovered], `hovered ${hovered}`).toBe(0);
+      // Nothing to the left of the cursor ever moves.
+      for (let index = 0; index <= hovered; index += 1) {
+        expect(layout.deltas[index], `left card ${index} hover ${hovered}`).toBe(0);
+        expect(layout.positions[index]).toBe(base[index]);
+      }
+      // Only the local right neighbourhood moves, and always rightward.
+      for (let index = hovered + 1; index < base.length; index += 1) {
+        if (index <= hovered + HAND_HOVER_PARTING_RADIUS) {
+          if (hasWall) {
+            expect(layout.deltas[index], `right card ${index} hover ${hovered}`).toBeGreaterThan(0);
+          } else {
+            expect(layout.deltas[index]).toBeGreaterThanOrEqual(0);
+          }
+        } else {
+          expect(layout.deltas[index], `distant card ${index} hover ${hovered}`).toBe(0);
+          expect(layout.positions[index]).toBe(base[index]);
+        }
+      }
+      // No inversion and never out of the lane.
+      expectOrderedPositions(layout.positions);
+
+      if (!hasWall) {
+        // Near the right end the lane runway bounds the reveal; the rightmost
+        // card (already fully uncovered) moves nothing at all.
+        if (hovered === base.length - 1) expect(layout.isParted).toBe(false);
+        continue;
+      }
+      const ownMargin = exposedMargin(layout.positions, hovered);
+      for (let index = 0; index < base.length - 1; index += 1) {
+        if (index === hovered) continue;
+        expect(ownMargin, `margin ${hovered} vs ${index} (hover ${hovered})`).toBeGreaterThan(
+          exposedMargin(layout.positions, index),
+        );
+      }
+    }
+  });
+
+  it('keeps the single-card reveal rule for every hand size and every hover', () => {
+    for (const cardCount of [2, 3, 6, 7, 14, 30, 46, 52]) {
+      for (const containerWidth of [640, 375]) {
+        const base = layoutFor(cardCount, containerWidth).cardPositions;
+        const box = layoutFor(cardCount, containerWidth).maximalBoxWidth;
+        for (let hovered = 0; hovered < cardCount; hovered += 1) {
+          const layout = computePartedCardLayout(base, CARD_WIDTH, box, hovered);
+          const hasWall = hovered + HAND_HOVER_PARTING_RADIUS <= cardCount - 2;
+          expect(layout.deltas[hovered]).toBe(0);
+          for (let index = 0; index <= hovered; index += 1) {
+            expect(layout.deltas[index], `n=${cardCount} w=${containerWidth} h=${hovered}`).toBe(0);
+          }
+          for (let index = 0; index < cardCount; index += 1) {
+            if (index > hovered && index <= hovered + HAND_HOVER_PARTING_RADIUS) {
+              expect(layout.deltas[index]).toBeGreaterThanOrEqual(0);
+            } else if (index > hovered) {
+              expect(layout.deltas[index]).toBe(0);
+            }
+          }
+          for (let index = 1; index < cardCount; index += 1) {
+            expect(layout.positions[index]).toBeGreaterThan(layout.positions[index - 1]);
+          }
+          if (!hasWall) continue;
+          const ownMargin = exposedMargin(layout.positions, hovered);
+          for (let index = 0; index < cardCount - 1; index += 1) {
+            if (index === hovered) continue;
+            expect(
+              ownMargin,
+              `n=${cardCount} w=${containerWidth} hover ${hovered} vs ${index}`,
+            ).toBeGreaterThan(exposedMargin(layout.positions, index));
+          }
+        }
+      }
+    }
+  });
+
+  it('leaves a 1-card hand and an inactive hover completely stationary', () => {
+    const one = layoutFor(1).cardPositions;
+    expect(computePartedCardPositions(one, CARD_WIDTH, BOX, 0)).toBe(one);
+    const thirty = layoutFor(30).cardPositions;
+    expect(computePartedCardPositions(thirty, CARD_WIDTH, BOX, null)).toBe(thirty);
   });
 });
 

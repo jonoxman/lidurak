@@ -3435,9 +3435,9 @@ export function GameTable({
             const deltaX = Math.round((renderedX - baseX) * 100) / 100;
             // T-96: with no drag in flight, `data-part-direction` is a pure
             // hint derived from the live parting delta — resting, single-card,
-            // hovered and distant cards report `none`, parted neighbours the
-            // direction they actually moved. During a drag the source slot
-            // stays attribute-less and the remaining cards report their slot.
+            // hovered, left-hand and distant cards report `none`, and only the
+            // local right-hand neighbours the single-card flare actually moved
+            // report `right`.
             const partDirection: 'left' | 'right' | 'none' | undefined =
               dragCard === null
                 ? deltaX < 0
