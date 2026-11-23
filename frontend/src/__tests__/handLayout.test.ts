@@ -332,6 +332,65 @@ describe('T-96: resting-geometry hover lookup', () => {
   });
 });
 
+/**
+ * T-96: hover hit-testing runs against the LIVE parted row, so the strip the
+ * player sees under the pointer is the card that opens — with no oscillation on
+ * repeated moves.
+ */
+describe('T-96: live rendered-row hover lookup', () => {
+  const BOX_652 = 652;
+  const base = computeHandLayout({
+    cardCount: 30,
+    containerWidth: BOX_652,
+    maximalBoxWidth: BOX_652,
+  }).cardPositions;
+  const parted = (hovered: number) =>
+    computePartedCardLayout(base, CARD_WIDTH, BOX_652, hovered).positions;
+
+  it('resolves the exposed strip of the pushed card 16 to card 16, not 17', () => {
+    const after15 = parted(15);
+    // The regression: card 16 is pushed right past card 17's RESTING slot.
+    expect(after15[16]).toBeGreaterThan(base[17]);
+    const pointer = after15[16] + 5;
+    expect(resolveHoveredCardIndex(pointer, after15, CARD_WIDTH, 0)).toBe(16);
+    // The resting lookup this replaced mis-attributed that point to card 17.
+    expect(resolveHoveredCardIndex(pointer, base, CARD_WIDTH, 0)).toBe(17);
+  });
+
+  it('keeps card 17 selected in the middle of its widened strip without oscillation', () => {
+    const after16 = parted(16);
+    // Enter card 17 through its live left edge while 16 is hovered...
+    expect(resolveHoveredCardIndex(after16[17] + 1, after16, CARD_WIDTH, 0)).toBe(17);
+
+    // ...then its own widened strip is centred past card 18's resting slot.
+    const after17 = parted(17);
+    const widenedStrip = after17[18] - after17[17];
+    const middle = after17[17] + widenedStrip / 2;
+    expect(middle).toBeGreaterThan(base[18]);
+    expect(resolveHoveredCardIndex(middle, after17, CARD_WIDTH, 0)).toBe(17);
+    // The old resting lookup sent the very same point to card 18.
+    expect(resolveHoveredCardIndex(middle, base, CARD_WIDTH, 0)).toBe(18);
+
+    // Repeats at the same and neighbouring coordinates never oscillate.
+    for (const x of [middle - 0.5, middle, middle + 0.5]) {
+      expect(resolveHoveredCardIndex(x, after17, CARD_WIDTH, 0)).toBe(17);
+    }
+  });
+
+  it('selects the same card before and after each hover transition', () => {
+    for (let hovered = 10; hovered <= 20; hovered += 1) {
+      const previous = parted(hovered - 1);
+      const current = parted(hovered);
+      // The point that revealed card `hovered` in the previous layout is still
+      // inside that card's pinned strip once the card itself is hovered, so the
+      // row cannot flip back and forth at a stationary cursor.
+      const entry = previous[hovered] + 1;
+      expect(resolveHoveredCardIndex(entry, previous, CARD_WIDTH, 0)).toBe(hovered);
+      expect(resolveHoveredCardIndex(entry, current, CARD_WIDTH, 0)).toBe(hovered);
+    }
+  });
+});
+
 describe('T-90-feedback-20261122_171451-3 ITEM-6c: hover-parting guards', () => {
   it('returns the very same array for a one-card hand', () => {
     const base = [0];

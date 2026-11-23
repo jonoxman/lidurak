@@ -1062,17 +1062,28 @@ export function computeDragPartedCardPositions(
 }
 
 /**
- * T-96: resolves the hand card under a live pointer from the RESTING row.
+ * T-96: resolves the hand card under a live pointer from a row's card left
+ * edges, in the SAME coordinate space the row is rendered in.
  *
  * Hit-testing the animated DOM (`closest('.hand-card-wrapper')`) is unstable
  * while hover-parting runs: transforming cards out from under the cursor
  * changes the very next hit test, so a neighboring card takes over, parts the
  * row back, and the highlight oscillates (the `7 reversals` seen at neighbor
- * index 16 on a 30-card compressed hand). This resolver ignores every animated
- * transform and maps the pointer's viewport x onto the resting slot that paints
- * on top at that x: in an overlapping row that is the right-most card whose
- * resting left edge the pointer has reached. A left-to-right sweep therefore
- * yields a strictly non-decreasing index.
+ * index 16 on a 30-card compressed hand). This resolver ignores the DOM and
+ * maps the pointer's viewport x onto the right-most card whose left edge the
+ * pointer has reached.
+ *
+ * `positions` must therefore be the LIVE rendered left edges — the parted
+ * `computePartedCardLayout(...).positions` while parting is active, the resting
+ * row otherwise. Resting edges only match what the player sees while nothing
+ * moves: with single-sided right parting they attribute the exposed strip of a
+ * pushed neighbour to the card after it. The parted row is safe to hit-test
+ * against because deltas only ever move cards RIGHT of the hovered card, whose
+ * own left edge is pinned: once card `j` is selected,
+ * `positions[j] <= x < positions[j + 1]` holds for that same `j` whether the
+ * pointer arrives from the left or the right, so repeated moves at one
+ * coordinate can never oscillate. A left-to-right sweep likewise yields a
+ * non-decreasing index.
  *
  * Returns `null` for a pointer left of the first card or past the last card's
  * right edge, so the caller can keep the previous hover while the cursor is in
