@@ -324,7 +324,9 @@ html[data-theme='light'] .error-banner {
   gap: 10px;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 16px;
+  /* T-96: a tight header band leaves the 1280x800 desktop plenty of vertical
+     room for the felt arena and the hand. */
+  padding: 6px 16px;
 }
 
 /* Lichess 3-column desktop shell. */
@@ -335,7 +337,9 @@ html[data-theme='light'] .error-banner {
   align-items: start;
   max-width: 1440px;
   margin: 0 auto;
-  padding: 16px;
+  /* T-96: the shell's vertical gutter is trimmed (the columns keep 16px) so the
+     arena can end well above the 800px fold. */
+  padding: 10px 16px 12px;
   box-sizing: border-box;
 }
 
