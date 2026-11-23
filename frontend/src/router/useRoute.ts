@@ -47,6 +47,21 @@ export function navigate(path: string): void {
   window.dispatchEvent(new Event(ROUTE_CHANGE_EVENT));
 }
 
+/** Canonical SPA path of a live multiplayer room (`/g/:gameId`). */
+export function gamePath(gameId: string): string {
+  return `/g/${encodeURIComponent(gameId)}`;
+}
+
+/** Opens the live room `/g/:gameId` through the History API. */
+export function navigateToGame(gameId: string): void {
+  navigate(gamePath(gameId));
+}
+
+/** Returns to the lobby (`/`) through the History API. */
+export function navigateToLobby(): void {
+  navigate('/');
+}
+
 /** Current SPA route plus the navigation helper. */
 export function useRoute(): { route: Route; navigate: typeof navigate } {
   const [route, setRoute] = useState<Route>(readRoute);

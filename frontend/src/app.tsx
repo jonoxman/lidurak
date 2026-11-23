@@ -3,6 +3,8 @@ import { HeaderBar } from './components/HeaderBar';
 import { initSettings } from './state/settings';
 import { GamePage } from './pages/GamePage';
 import { LobbyPage } from './pages/LobbyPage';
+import { MultiplayerGamePage } from './pages/MultiplayerGamePage';
+import { navigateToLobby, useRoute } from './router/useRoute';
 
 interface LobbyRoute {
   name: 'lobby';
@@ -16,6 +18,12 @@ interface GameRoute {
 
 type Route = LobbyRoute | GameRoute;
 
+/**
+ * Resolves the legacy M1 hash route (`#/g/:gameId?player=:seat`).
+ *
+ * The local/bot hotseat tables keep using this hash route; the M2 live rooms
+ * use the History-API path `/g/:gameId` handled by `useRoute`.
+ */
 export function parseRoute(hash: string): Route {
   const raw = hash.startsWith('#') ? hash.slice(1) : hash;
   const [path, query = ''] = raw.split('?');
@@ -42,15 +50,22 @@ export function parseRoute(hash: string): Route {
   return { name: 'lobby' };
 }
 
+/** True for the explicit `#/` lobby link used by the site header. */
+export function isLobbyHash(hash: string): boolean {
+  const raw = hash.startsWith('#') ? hash.slice(1) : hash;
+  return raw === '/';
+}
+
 export function navigate(path: string): void {
   window.location.hash = path;
 }
 
 export function App() {
-  const [route, setRoute] = useState<Route>(() => parseRoute(window.location.hash));
+  const { route } = useRoute();
+  const [hashRoute, setHashRoute] = useState<Route>(() => parseRoute(window.location.hash));
 
   useEffect(() => {
-    const handleHashChange = () => setRoute(parseRoute(window.location.hash));
+    const handleHashChange = () => setHashRoute(parseRoute(window.location.hash));
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
@@ -59,19 +74,28 @@ export function App() {
   // "Device theme" in sync with the OS colour scheme.
   useEffect(() => initSettings(), []);
 
+  // M1 local/bot tables keep their hash route; an explicit `#/` header link
+  // always returns to the lobby; everything else follows the History API.
+  const showLocalGame = hashRoute.name === 'game';
+  const showLobby = !showLocalGame && isLobbyHash(window.location.hash);
+
   return (
     <div class="app">
       {/* The LIDURAK brand link in HeaderBar already titles every page. */}
       <HeaderBar />
-      {route.name === 'game' ? (
+      {showLocalGame ? (
         <GamePage
-          gameId={route.gameId}
-          playerId={route.playerId}
-          onSwitchPlayer={(playerId) => navigate(`/g/${route.gameId}?player=${playerId}`)}
+          gameId={hashRoute.gameId}
+          playerId={hashRoute.playerId}
+          onSwitchPlayer={(playerId) =>
+            navigate(`/g/${hashRoute.gameId}?player=${playerId}`)
+          }
           onLeaveGame={() => navigate('/')}
         />
-      ) : (
+      ) : showLobby || route.kind === 'lobby' ? (
         <LobbyPage />
+      ) : (
+        <MultiplayerGamePage gameId={route.gameId} onNavigateLobby={navigateToLobby} />
       )}
     </div>
   );
