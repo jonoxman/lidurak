@@ -1,83 +1,82 @@
 # Lidurak Architecture
 
+Lidurak is a client-server implementation of the Durak card game combining a Scala 3 authoritative backend with a Preact + TypeScript + CSS Grid frontend.
+
 ## 1. Repository Structure
 
 ```text
 .
-├── play-local.sh                  # Local launcher for backend and frontend
-├── backend/                       # Scala 3 game engine and HTTP/WebSocket server
-│   └── src/main/scala/durak/
-│       ├── engine/                # Pure game rules, state machine, and replay types
-│       └── server/                # Cats Effect rooms, turn clocks, bot drivers, HTTP/WS API
-└── frontend/                      # Preact + TypeScript + CSS Grid client
+├── play-local.sh                  # Unified local launcher for backend and frontend
+├── backend/                       # Scala 3 backend (sbt)
+│   └── src/...
+│       ├── durak/engine/          # Pure game rules and state machine (`durak.engine`)
+│       └── durak/server/          # Actors, WebSocket/REST transport (`durak.server`)
+└── frontend/                      # Preact + TypeScript frontend (npm)
     └── src/
-        ├── api/                   # Typed REST client (client.ts)
-        ├── components/            # Table, Card, CardBack, TablePair, SortBar, sidebars/pages
-        ├── state/                 # Client settings and highlight/theme state
-        ├── styles/                # Felt arena CSS Grid and semantic theme tokens (table.css, etc.)
-        ├── utils/                 # Pure hand geometry (handLayout.ts) and table bout layout
-        └── types.ts               # Shared frontend request, action, view, and replay types
+        ├── audio/                 # SoundEngine & sound pack playback
+        ├── components/            # UI components (GameTable, HeaderBar, Card, CardBack, SortBar, TablePair, etc.)
+        ├── state/                 # Persistent user preferences & theme/highlight settings
+        ├── styles/                # CSS Grid table styles (`table.css`) & felt textures (`tableTextures`)
+        ├── utils/                 # Pure layout solvers (`handLayout.ts`, `tableLayout`)
+        └── types                  # Shared action builders and client-side protocol types
 ```
 
-## 2. Scala 3 Engine (`durak.engine`)
+## 2. Scala 3 Engine State Machine (`durak.engine`)
 
-The `durak.engine` package models Durak gameplay as a deterministic state machine over immutable `GameState` values:
+`durak.engine` encapsulates the pure, deterministic Durak state machine:
 
-- **Configuration (`GameConfig`):** Configures player count, seat types (human seats, `GameConfig.RandomBotSeat`, and `GameConfig.BasicBotSeat`), Redirect (Perevod) support, Chaos Mode (targeting any active opponent), Transparent Mode, and Dev Mode.
-- **Game Creation & Transitions (`GameEngine`):** `GameEngine.createGame(config, playerNames)` initializes a dealt match state. Incoming `GameAction` commands (such as `InitialAttack`, cover actions, redirect actions, throw-ins, passes, and surrenders) are validated against the current bout phase and player hand before producing the next `GameState`.
-- **Bout & Endgame State:** Tracks the active attacker, defender, eligible targets, uncovered/covered table pairs, bout phase (attack, defense, surrender throw-in), pass state per seat, finish ranks, and turn deadline (`turnDeadlineMs`).
-- **Replay Serialization (`SerializedGame`, `GameReplay`):** Captures the pristine initial deal (`GameReplay.initial(gameId, initialState)`) and subsequent state transitions so completed matches can be fetched and stepped through in review mode.
+- **Turn & Bout Lifecycle:** Tracks the talon deck, trump suit, per-player hands, bout phases (attack, defense, surrender throw-in, completion), and attacker/defender seat rotation.
+- **Move Validation & Legal Projections:** Evaluates legal initial attacks, defense covers (higher same-suit or trump), rank-matching throw-ins (bounded by defender capacity), and *Perevod* redirects.
+- **Game Mode Rules:** Supports standard clockwise targeting as well as Chaos Mode (`chaosMode`) where the attacker may target any active opponent seat, alongside end-of-game winner/Durak finish-rank resolution once the talon is depleted.
 
-## 3. Server Actors & Protocol (`durak.server`)
+## 3. Server Actors & WebSocket/REST Protocol (`durak.server`)
 
-The backend concurrency layer is built on Cats Effect and `fs2`:
+`durak.server` hosts live match sessions and bridges the engine to connected clients:
 
-### Room & Concurrency Model (`GameActor`, `GameRoom`)
-`GameActor.create` and `GameActor.createFrom` instantiate a `GameRoom` with an 8-character ID from `GameManager.generateGameId()` and manage concurrent access cleanly:
-- **`stateRef: Ref[IO, GameState]`**: Holds the authoritative current match state.
-- **`lock: Semaphore[IO]`**: Serializes submitted moves so multi-card actions and clock/bot transitions apply atomically.
-- **`topic: Topic[IO, GameState]`**: Broadcasts state updates to connected subscribers.
-- **`replay: Ref[IO, SerializedGame]`**: Records the match history from the opening deal.
-- **`povSeat: Ref[IO, Option[String]]`**: In non-Dev-Mode games, locks onto the first inspected human seat so clients cannot tamper with seat queries to view another player's hidden hand.
-- **`clockStop: Deferred[IO, Unit]`**: Coordinates shutdown of the room's background fibers.
+- **Session Actors:** Coordinate game rooms, bot turn execution, turn clocks, and serialized command processing over the engine state machine.
+- **REST & WebSocket Protocol:** Accepts match setup/management requests over REST and streams real-time game projections while receiving `GameAction` commands (initial attacks, covers, redirects, throw-ins, passes, and surrenders) over WebSocket.
+- **Seat-Scoped Projections:** Projects per-viewer state onto the client, withholding hidden opponent cards unless Transparent Mode or Review Mode is enabled, and explicitly supplying action gates and hints (`eligibleTargetIds`, `redirectTargetId`, `canRedirect`, `canThrowIn`, `throwInCards`, `throwInCapacity`, `playableKeys`, and turn clock counters).
 
-### Turn Clock & Bot Drivers
-- **Turn Clock (`DefaultTurnSeconds = 15`, `ClockPollMillis = 250`):** Tracks `turnDeadlineMs` and automatically plays a legal fallback move when an active player's timer expires. When a defender holds no legal defense or redirect, a `DefenselessGraceSeconds = 3` window applies before auto-surrender.
-- **Surrender Throw-In Pacing (`DefaultNoThrowInAutoPassDelay = 1s`):** Holds surrendered bouts briefly before auto-passing seats that have no legal throw-in cards, keeping surrendered cards and throw-ins visible on the table.
-- **Bot Driver (`BotPollMillis = 50`):** Drives computer-controlled seats:
-  - `BasicBotSeat`: Uses human-paced delays (`DefaultBotDelayMin = 125ms`, `DefaultBotDelayMax = 500ms`).
-  - `RandomBotSeat`: Plays after a brief initial start delay (`DefaultInitialBotStartDelay = 500ms`) and short inter-move delay (`DefaultRandomBotDelay = 50ms`).
-- **Audit Logging:** Rejected client actions are logged via `GameActor.logRejected` to SLF4J and stdout.
+## 4. Frontend Architecture (`frontend/src`)
 
-### HTTP / REST Endpoints
-Consumed by `frontend/src/api/client.ts`:
-- `GET /api/health` — Backend readiness/health check.
-- `POST /api/games` — Creates a match from `CreateGameRequest` (`playerCount`, `playerNames`, `allowRedirect`, `chaosMode`, `playerTypes`, optional `transparentMode`, optional `devMode`), returning `{ gameId, players }`.
-- `POST /api/games/preset` — Creates one of the 7 scripted QA/demo scenarios (`qa-table-collapse-right`, `qa-surrender-timer`, `qa-normal-6-actions`, `qa-medium-14-expand`, `qa-large-30-compress`, `qa-single-card`, `qa-fast-bots`), returning `{ gameId, players, playerTypes, defaultPlayerId }`.
-- `GET /api/game/:gameId/view/:playerId` — Returns a `PlayerGameView` projection for the requested seat (accepts optional `?requester=<id>` for Transparent/Dev projection filtering).
-- `POST /api/game/:gameId/action` — Submits a `GameAction` and returns the updated `PlayerGameView` or `{ error }`.
-- `GET /api/games/:gameId/replay` — Returns the recorded `GameReplay` for post-match review.
+### 4.1 Three-Column Shell & CSS Grid Arena (`styles/table.css`, `components/GameTable.tsx`)
 
-## 4. Preact & CSS Grid Frontend (`frontend/src`)
+The desktop gameplay screen uses a three-column shell (`[data-zone='sidebar-left']`, `[data-zone='table-arena']`, `[data-zone='sidebar-right']`) built strictly with CSS Grid and Flexbox to prevent overlapping elements:
 
-### API & Type Parsing (`frontend/src/api/client.ts`, `frontend/src/types.ts`)
-- `client.ts` wraps all REST calls (`checkServerHealth`, `createGame`, `createPresetGame`, `getGameView`, `getGameReplay`, `sendAction`) and validates payloads via `parsePlayerGameView` and `parseGameReplay`.
-- Action builders (`buildInitialAttack`, `buildCoverCard`, `buildRedirectAttack`) construct typed `GameAction` payloads for submission.
+- **Arena Grid:** `[data-zone='table-arena']` is a `1fr 2fr 1fr` 3-column, 4-row CSS Grid containing:
+  1. **Row 1 (Opponent Seats):** Fixed-size `.seat` / `.seat-box` containers (`top-left`, `top-center`, `top-right`) with per-seat clocks (`.seat-clock`) and role indicators (`data-role='attacker' | 'defender'`).
+  2. **Row 2 (Battlefield):** Active bout pairs rendered via `TablePair` (partitioned and positioned by `utils/tableLayout`), defender-anchored target outlines, and the *Perevod* redirect outline.
+  3. **Row 3 (Deck, Hand & Timer Clearance):** Talon/trump display (`[data-zone='table-deck']`) and the viewer's hand (`[data-zone='player-hand']`) with dedicated vertical clearance (`--hand-timer-clearance`) above the hand so surrendered bouts sliding toward the viewer never collide with the `.hand-clock`.
+  4. **Row 4 (Actions Band):** `SortBar` and contextual `Pass` / `Surrender` controls.
+- **Isolated Felt Layer:** The felt color, texture overlay, and visual filter (`--table-felt`, `--table-felt-overlay`, `--table-filter`) are rendered on `[data-zone='table-arena']::before` so visual adjustments tint only the table surface and never alter card legibility.
 
-### CSS Grid Felt Arena (`frontend/src/styles/table.css`)
-- **`[data-zone='table-arena']`:** A 3-column (`1fr 2fr 1fr`), 4-row CSS Grid with viewport-clamped track heights (`--seat-row-height`, `--battlefield-height`, `--hand-row-height` with `--hand-timer-clearance`, and `--actions-row-height`) so seats, bout pairs, hand, and lower action controls remain cleanly separated without absolute-positioned overlaps.
-- **Felt Layering:** Uses a dedicated `::before` grid-spanning surface layer (`--table-felt`, `--table-felt-overlay`, `--table-filter`) so brightness/contrast/hue filters tint the felt without affecting card graphics.
-- **Semantic Color Tokens:** Dark (`:root`) and light (`:root[data-theme='light']`) themes define distinct color families scaled by `--highlight-intensity`:
-  - `--role-attacker-*` (emerald/green: attack, throw-in, pass)
-  - `--role-defender-*` (crimson/red: defense, uncovered attacks, surrender)
-  - `--trump-*` (gold/bronze: trump card indicators)
-  - `--redirect-*` (violet/purple: redirect outline and arrow)
-  - `--clock-active-*` & `--clock-urgent-*` (cyan/teal active clock, orange-amber low-time state)
+### 4.2 Semantic Theme & Highlight Tokens (`styles/table.css`, `state/settings`)
 
-### Table Rendering & Hand Geometry (`GameTable.tsx`, `handLayout.ts`)
-- **`GameTable.tsx`:** Renders seat assignments (`top-left`, `top-center`, `top-right`), opponent boxes with role auras and optional revealed mini-cards in Transparent/review modes, active bout pairs (`TablePair`), drag-and-drop/click/double-click targets for attacks, covers, throw-ins, and redirects, and a memoized `HandCardSlot` component that applies GPU-composited `translate3d(...)` transforms via a stable `HandCardSlotApi` ref so pointer sweeps only repaint local neighboring cards.
-- **`utils/handLayout.ts`:** Pure, DOM-free layout engine providing:
-  - `computeHandLayout`: Maintains constant full card dimensions (`100x140` desktop, `48x68` mobile), uses a `0.36` resting overlap for 2–6 card hands inside a 6-card default box, expands up to `maximalBoxWidth` for medium hands, and compresses up to the exposed `36px` index strip (`DEFAULT_MIN_VISIBLE_INDEX_STRIP_PX`) before super-compressing large hands.
-  - `computePartedCardLayout` / `computeDragPartedCardPositions`: Opens localized gaps around a hovered or dragged card (`HAND_HOVER_PARTING_RADIUS = 3`) while keeping distant cards pinned.
-  - `getCardVerticalLiftPx`: Computes three elevation tiers (`0px` resting, `9px` playable/eligible, `18px` selected).
-  - `buildHandContourPath`: Generates a non-rectangular SVG contour path hugging the laid-out, lifted, and parted cards.
+Gameplay roles map to distinct CSS custom property families with calibrated palettes for both dark mode and `:root[data-theme='light']`:
+
+- `--role-attacker-*` (emerald/green): active attacker seat, throw-in prompts, and `Pass` cues.
+- `--role-defender-*` (crimson/red): active defender seat, uncovered attack prompts, and `Surrender` cues.
+- `--trump-*` (gold/bronze): trump card borders and suit indicators.
+- `--redirect-*` (violet/purple): *Perevod* reflection outline and directional indicator.
+- `--clock-active-*` and `--clock-urgent-*` (cyan and orange-amber): active and low-time clock states.
+
+User settings in `state/settings` dynamically update `--highlight-intensity` / `--highlight-intensity-scale` and `--app-roundness` on the document root so highlight glows and nested border radii (`calc(var(--app-roundness, 8px) * 1.5)` on the arena and contour) scale live.
+
+### 4.3 Pure Hand Geometry & Memoized Rendering (`utils/handLayout.ts`, `components/GameTable.tsx`)
+
+`utils/handLayout.ts` provides pure, DOM-free layout geometry consumed by `GameTable.tsx`:
+
+- **`computeHandLayout`:** Keeps cards at a constant canonical footprint (`100x140` desktop, `48x68` mobile) in a single row. Small hands (`2..6` cards) sit at `HAND_SMALL_HAND_OVERLAP_RATIO` (`0.36`) centered within a six-card box; larger hands expand toward the maximal container width at `HAND_MIN_OVERLAP_RATIO` (`0.20`), then compress while preserving the `36px` rank/suit index strip (`DEFAULT_MIN_VISIBLE_INDEX_STRIP_PX` / `CARD_INDEX_STRIP_WIDTH_PX`) before falling back to tighter steps for extreme hand sizes.
+- **Vertical Lift Tiers (`getCardVerticalLiftPx`):** Separates resting (`0px`), legally playable (`ELIGIBLE_LIFT_PX = 9px`), and selected (`SELECTED_LIFT_PX = 18px`) cards.
+- **Localized Hover & Drag Parting (`computePartedCardLayout`, `computeDragPartedCardPositions`):** Opens a localized gap strictly to the right of the hovered card across a `HAND_HOVER_PARTING_RADIUS` of `3` neighbors, leaving left-hand and distant cards stationary at zero delta.
+- **SVG Hand Contour (`buildHandContourPath`):** Generates a tight non-rectangular SVG path wrapping the laid-out cards, including lifted tiers and parted positions, with corner radii derived from `handContourCornerRadius`.
+- **Memoized Card Slots (`HandCardSlot`):** Each card wrapper in `GameTable.tsx` is wrapped in `memo` and positioned exclusively with `translate3d(...)` transforms while reading live interaction handlers from a stable `api` ref, preventing pointer sweeps or hand reordering from re-rendering unaffected cards or the surrounding table.
+
+### 4.4 Header Bar & Customization (`components/HeaderBar.tsx`)
+
+`HeaderBar` renders the top navigation (`NAV_MENUS`), the 4-bar latency tracker (`connectionLevel`), and a profile dropdown with in-place submenus (`SUBMENU_LABELS`):
+
+- **Sound:** Adjusts volume and switches packs exposed by `SoundEngine.soundPacks()`.
+- **Theme:** Toggles dark/light `ThemeMode`, highlight presets, highlight intensity, and corner roundness.
+- **Table:** Selects felt textures and palettes from `TABLE_TEXTURES` and `styles/tableTextures`.
+- **Card Back:** Selects card back designs from `ALL_CARD_BACK_PATTERNS` rendered via `CardBack`.

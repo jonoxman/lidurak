@@ -9,47 +9,47 @@ Lidurak is a fast, minimalist, browser-based implementation of the classic Russi
 ## 1. Quick Start & Installation
 
 ### Prerequisites
-- **Java (JDK 17+)** and **sbt** (for the Scala 3 backend)
-- **Node.js (18+)** and **npm** (for the Preact + TypeScript frontend)
+
+- **Java & sbt** (to build and run the Scala 3 backend)
+- **Node.js & npm** (to build and run the Preact frontend)
 
 ### Launch Locally
-Start both the backend server and frontend development server with the repository launcher script:
+
+From the repository root, start both the backend server and the frontend development server using the local launcher script:
 
 ```bash
 ./play-local.sh
 ```
 
-Once started, open the local frontend URL printed in your terminal to access the Lobby.
-
 ### Running Tests
-Run the backend and frontend test suites independently from their respective directories:
+
+Run the backend and frontend test suites from their respective directories:
 
 ```bash
-# Backend (Scala 3 / sbt)
+# Backend (Scala 3)
 cd backend && sbt -batch test
 
-# Frontend (Vitest / Preact)
+# Frontend (Preact / TypeScript)
 cd frontend && npm test -- --run
 ```
 
-## 2. UI & Gameplay Overview
+## 2. Gameplay & UI Overview
 
-### Lobby & Game Modes
-From the Lobby, you can configure a match with human seats and computer-controlled bots (`BasicBot` or `RandomBot`), customize player names, and toggle gameplay options:
-- **Redirect (Perevod):** Allows a defender to pass an attack forward to the next player by matching the attacking card's rank.
-- **Chaos Mode:** Allows attackers to target any active opponent at the table rather than only the player immediately to their left.
-- **Transparent Mode & Dev Mode:** Optional inspection modes for revealing opponent hands or switching perspectives during local testing and review.
-- **Scripted Presets:** One-click scenario presets available in the Lobby and left sidebar to jump directly into specific mid-game or edge-case table states.
+### Gameplay
 
-### Table Layout
-The game screen uses a clean three-column layout inspired by online tabletop interfaces:
-- **Left Sidebar:** Houses game rules/controls, hand-sorting options, and quick-launch scenario presets.
-- **Center Felt Arena:** Displays opponent seats across the top, the active bout pairs and target outlines in the middle, the talon deck and trump card alongside your hand, and contextual action controls (`Pass` / `Surrender`) below.
-- **Right Sidebar:** Displays match status, turn clock information, and end-of-match results.
+Lidurak implements classic **Durak** (including passing/redirecting variants) with a server-authoritative rule engine:
 
-### Playing a Turn
-- **Attacking & Throwing In:** Click, double-click, or drag a legal card onto an eligible opponent target or throw-in slot. Multiple cards of matching rank can be selected and played together, or you can `Pass` once satisfied.
-- **Defending & Redirecting:** Cover uncovered attacking cards with a higher card of the same suit or a trump card. When Redirect is enabled and legal, drag or play a matching-rank card onto the reflection target to pass the bout onward.
-- **Surrendering & Turn Clock:** Each active turn is governed by a countdown clock. If you cannot or choose not to defend, click `Surrender` to pick up the cards on the table after opponents finish any legal throw-ins.
-- **Hand Organization & Reordering:** Sort your hand by rank or suit, or drag cards directly within your hand to arrange them manually.
-- **Match Replay:** Completed matches can be inspected step by step in review mode.
+- **Attack & Throw-In:** The active attacker opens a bout by playing a card, and attackers may throw in additional cards whose ranks match cards already on the table.
+- **Defense:** The defender covers each uncovered attack card with a higher-ranking card of the same suit or any card of the **trump suit** (which beats non-trump suits and is beaten only by higher trumps).
+- **Redirect (*Perevod*):** When eligible, the defender can reflect an attack to the next player by matching the rank on the table.
+- **Pass & Surrender:** Attackers can pass once they have no further cards to throw in; a defender who cannot or chooses not to defend can surrender to pick up the bout cards.
+- **Modes & Variants:** Supports bot opponents and hotseat play, **Chaos Mode** (allowing attacks against any eligible opponent seat), **Transparent Mode** (revealing opponent hands), and a **Review Mode** for inspecting game states.
+
+### User Interface
+
+The game view follows a three-column table layout designed to keep the board clear and uncluttered:
+
+- **Top Header Bar:** Provides navigation menus, a connection latency indicator, and quick customization controls for **Sound** (volume and sound packs), **Theme** (dark/light mode, highlight intensity, and corner roundness), **Table** (felt textures and color filters), and **Card Back** patterns.
+- **Left Sidebar:** Houses the *How to Play* reference, scenario presets, and hotseat seat-switching tabs.
+- **Center Felt Arena:** Displays opponent seats across the top, the active bout area in the middle with clear attacker/defender/redirect target indicators, and the talon deck, trump card, your sortable hand, and contextual **Pass** / **Surrender** controls along the bottom.
+- **Right Sidebar:** Displays the turn clock and end-of-match winner/Durak results.
