@@ -126,5 +126,5 @@ Implement the full **Glicko-2** algorithm ($\mu, \phi, \sigma$, system constant 
 - **Milestone M5:** High-Concurrency Bot Arena & Server Stress-Test Suite (`/arena` UI + CLI benchmark runner).
 
 ## 9. ACTIVE MILESTONE DIRECTIVE (FOR ORCHESTRATOR)
-**CURRENT ACTIVE MILESTONE: M1**
-When decomposing this specification into `.tickets/T-XX.md`, generate atomic tickets ONLY for **Milestone M1** (Scaffolding `backend/` & `frontend/`, Pure Durak Rules Engine & Unit Tests, Local/WebSocket Game Controller, and Interactive SVG Table UI). Ensure every ticket includes exact `sbt test` or `npm test -- --run` verification commands, and ensure `play-local.sh` is updated if startup commands change (`README.md` and `ARCHITECTURE.md` are updated exclusively by the Orchestrator after milestone/feedback verification).
+**CURRENT ACTIVE MILESTONE: M2**
+When decomposing this specification into `.tickets/T-XX.md`, generate atomic tickets ONLY for **Milestone M2** (Scaffolding `backend/` & `frontend/`, Pure Durak Rules Engine & Unit Tests, Local/WebSocket Game Controller, and Interactive SVG Table UI). Ensure every ticket includes exact `sbt test` or `npm test -- --run` verification commands, and ensure `play-local.sh` is updated if startup commands change (`README.md` and `ARCHITECTURE.md` are updated exclusively by the Orchestrator after milestone/feedback verification).
