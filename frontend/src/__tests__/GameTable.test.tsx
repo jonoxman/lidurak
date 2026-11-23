@@ -1626,7 +1626,11 @@ describe('feedback 7: tight glow, discard pile and reflection alignment', () => 
     expect(rule).toContain('width: fit-content');
     expect(rule).toContain('max-width: none');
     expect(rule).toContain('align-items: center');
-    expect(rule).toContain('justify-content: center');
+    // T-96 item 6: the single track is pinned to the stage's inline width and
+    // the row starts at its left edge, so a widened contour overlay can never
+    // re-centre (and shift) the whole hand row.
+    expect(rule).toContain('grid-template-columns: minmax(0, 1fr)');
+    expect(rule).toContain('justify-content: start');
     expect(rule).toContain('padding: 0;');
     expect(rule).toContain('border-radius: calc(var(--app-roundness, 8px) + 4px)');
     expect(rule).toContain('box-sizing: border-box');

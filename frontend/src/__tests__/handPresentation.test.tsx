@@ -550,7 +550,7 @@ describe('T-90-feedback-5 ITEM-6a/6b/6c: smooth hover parting', () => {
     const wrapperRule = cssRule(tableCss, '.hand-card-wrapper {');
     expect(wrapperRule).toContain('will-change: transform');
     expect(wrapperRule).toContain(
-      'transform 200ms cubic-bezier(0.22, 1, 0.36, 1)',
+      'transform 220ms cubic-bezier(0.22, 1, 0.36, 1)',
     );
     expect(wrapperRule).not.toMatch(/transition:[^;]*(width|left|right):/);
 
@@ -930,5 +930,53 @@ describe('T-95 #3: the collapsed drag slot closes the gap exactly', () => {
     const collapsed = cssRule(tableCss, ".hand-card-wrapper[data-collapsed='true'] {");
     expect(collapsed).toContain('overflow: visible');
     expect(collapsed).not.toMatch(/margin-left:\s*0\s*!important/);
+  });
+});
+
+describe('T-96 item 6: contour expansion never shifts the hand row', () => {
+  it('pins the stage to one minmax(0, 1fr) track and starts the row', () => {
+    const stage = cssRule(tableCss, '.hand-cards {');
+    expect(stage).toContain('grid-template-columns: minmax(0, 1fr)');
+    expect(stage).toContain('justify-content: start');
+    // The old `auto` track sized itself from the contour's margin box, so a
+    // widened contour re-centred (and therefore shifted) the whole row.
+    expect(stage).not.toContain('grid-template-columns: auto');
+
+    // The contour stays a stacked overlay layer; it never adds track width.
+    const contour = cssRule(tableCss, '.hand-highlight-contour {');
+    expect(contour).toContain('grid-area: 1 / 1');
+    expect(contour).toContain('overflow: visible');
+  });
+
+  it('keeps the stage width fixed while card 2 stays pinned and card 3 parts right', () => {
+    mountTable(DECK.slice(0, 6), { awaitingAttack: true });
+
+    const box = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+    const contour = screen.getByTestId('hand-highlight-contour') as HTMLElement;
+    const stageWidthAtRest = box.style.width;
+    const contourWidthAtRest = Number.parseFloat(contour.style.width);
+    const before = handWrappers().map((wrapper) =>
+      Number(wrapper.getAttribute('data-card-x')),
+    );
+
+    fireEvent.mouseMove(handWrappers()[2], { bubbles: true });
+
+    const after = handWrappers().map((wrapper) =>
+      Number(wrapper.getAttribute('data-card-x')),
+    );
+    const deltas = handWrappers().map((wrapper) =>
+      Number(wrapper.getAttribute('data-part-delta-x')),
+    );
+
+    // The hovered card is pinned in the resting coordinate space ...
+    expect(after[2]).toBe(before[2]);
+    expect(deltas[2]).toBe(0);
+    // ... its neighbours part outward ...
+    expect(deltas[1]).toBeLessThan(0);
+    expect(deltas[3]).toBeCloseTo(14.67, 2);
+    // ... and the contour widens WITHOUT changing the stage's track width, so
+    // no `justify-content` re-centring can move the row (the old -17px jump).
+    expect(Number.parseFloat(contour.style.width)).toBeGreaterThan(contourWidthAtRest);
+    expect(box.style.width).toBe(stageWidthAtRest);
   });
 });
