@@ -1,15 +1,9 @@
 <!-- Write your plain-English UI/UX feedback, bugs, or usability requests below this line. -->
 <!-- Note: Your previous feedback is always backed up in FEEDBACK.backup.md and .reviews/feedback_archive/ -->
+#QA Playbook Responses
+6. When I said "smooth" I meant that the frame rate of the animation feels a little choppy. In fact, for the way the animation looks, I want the opposite of this change: only the cards very close to the cursor should part at all, with most cards remaining overlapping as the size of the hand demands. Try to implement this and improve the performance/framerate of the animation, if possible.
 
-# Deferred Items from Previous Round (Amend or Answer Below When Ready)
-
-1. Collapse table cards together as they are covered if there is not sufficient space. As cards are played into the game table area, they should always stay collected in one row. If necessary, this will require reducing the gaps between the cards already on the table when a new card is added, or even allow overlap. Implement it as follows: Pairs of cards that are already covering/covered should be moved to the nearest vertical edge of the game table (left or right, depending on the target player), since they cannot be further interacted with directly. Multiple instances of these covering card pairs on the table should be overlapping maximally in such a way that the suit and rank of all cards is still visible, in a similar way to how the hand maximally overlaps. Remaining active as-yet uncovered cards should maintain a small gap between each other and the covered cards by default, but they can be allowed to overlap slightly if necessary to keep all cards on one single row in the game table area.
-   - **[ORCHESTRATOR QUESTION TO RESOLVE]:** It is unclear whether covered pairs should always snap to a vertical edge immediately upon being covered or only collapse to the edge once the single row runs out of horizontal space, and which edge (left or right) should be chosen when the target defender sits at a centered seat (`top-center` or the bottom player).
-   - **[SUGGESTED OPTIONS]:** Option A: Always move covered pairs to the edge vs. Option B: Keep normal row spacing until horizontal space runs out, then collapse covered pairs to the edge; and for centered defenders (`top-center` / bottom), default to Left edge vs. Right edge vs. Split symmetrically.
-   - **[YOUR DECISION]:** Default to left edge for the top-left and center player, and right edge for the top-right player. Always move covered pairs to the edge.
-
-# QA playbook responses
-3. Compared to the previous version it seems somewhat better, but still there are cases where the mouse cursor and card are not aligned correctly. The center of the card should be perfectly locked to the mouse cursor when clicked, regardless of which part of the card was actually clicked on.
-4. The turn timer clears the active hand correctly, but now overlaps incoming cards in the case of an active user's surrender.
-6. The animation looks correct, but seems a little choppy. Try to make it smoother if possible. Additionally, currently the animation does not play with a small hand (of 6 cards or less). If the reason is because the parting effect cannot separate cards past their minimum degree of overlap, make the default overlap for the hand a little larger than the minimum so that there is some margin to expand to for the sake of this animation specifically.
-
+# New
+1. Potential bug: In the Table Collapse QA scenario, the active user can send only one card to attack, even though there are two valid cards to play. I don't see a reason for this, since the target player has 4 cards remaining in hand. 
+2. Implement the card parting animation for when the user drags cards around in their hand as well - the cards should part in a way that makes it obvious which slot the dragged card will end up in if let go.
+3. Reduce the time spent for the bots to make their moves by 75%.
