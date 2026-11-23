@@ -9,59 +9,47 @@ Lidurak is a fast, minimalist, browser-based implementation of the classic Russi
 ## 1. Quick Start & Installation
 
 ### Prerequisites
-- **Java (JDK) & sbt** — required to build, run, and test the Scala 3 backend.
-- **Node.js & npm** — required to build, run, and test the Preact/TypeScript frontend.
-- **Bash** — required to run the local launcher script.
+- **Java (JDK 17+)** and **sbt** (for the Scala 3 backend)
+- **Node.js (18+)** and **npm** (for the Preact + TypeScript frontend)
 
-### Launch the Application
-From the repository root, start both the backend server and the frontend dev server with a single command:
+### Launch Locally
+Start both the backend server and frontend development server with the repository launcher script:
 
 ```bash
 ./play-local.sh
 ```
 
-Once both services are running, open the local frontend URL printed in the terminal in your browser.
+Once started, open the local frontend URL printed in your terminal to access the Lobby.
 
-### Run the Test Suites
+### Running Tests
 Run the backend and frontend test suites independently from their respective directories:
 
 ```bash
-# Backend (Scala 3)
+# Backend (Scala 3 / sbt)
 cd backend && sbt -batch test
 
-# Frontend (Preact / TypeScript)
+# Frontend (Vitest / Preact)
 cd frontend && npm test -- --run
 ```
 
----
-
 ## 2. UI & Gameplay Overview
 
-### Lobby & Game Setup
-From the lobby, you can configure a new match or jump directly into a preset table state:
-- **Players & Seats:** Choose the player count, customize player names, and assign seats as human or bot players.
-- **Rule Variants & Modes:**
-  - **Redirect:** Allow a defender to transfer an uncovered attack to the next player by playing a matching rank.
-  - **Chaos Mode:** Allow attackers to target any active opponent at the table.
-  - **Transparent Mode:** Reveal opponent hands for open-table inspection or debugging.
-- **Scenario Presets:** Launch curated table positions in one click from either the lobby or the in-game left sidebar to test specific hand sizes, surrender timers, and table layouts without playing through a full deck.
+### Lobby & Game Modes
+From the Lobby, you can configure a match with human seats and computer-controlled bots (`BasicBot` or `RandomBot`), customize player names, and toggle gameplay options:
+- **Redirect (Perevod):** Allows a defender to pass an attack forward to the next player by matching the attacking card's rank.
+- **Chaos Mode:** Allows attackers to target any active opponent at the table rather than only the player immediately to their left.
+- **Transparent Mode & Dev Mode:** Optional inspection modes for revealing opponent hands or switching perspectives during local testing and review.
+- **Scripted Presets:** One-click scenario presets available in the Lobby and left sidebar to jump directly into specific mid-game or edge-case table states.
 
 ### Table Layout
-The game screen uses a three-column layout designed to keep the table readable at both desktop and mobile sizes:
-- **Left Sidebar:** Displays the **How to Play** quick reference, **Scenario Presets**, hand-sorting controls, and **hotseat player-switcher tabs** when inspecting or playing multiple human seats.
-- **Center Felt Arena:**
-  - **Top Row:** Opponent seats showing each player's name, card count, pass status, and finish rank.
-  - **Middle Row:** Active attacking and defending card pairs, legal drop/target outlines, and a redirect outline when a transfer is available.
-  - **Bottom Row:** The remaining talon deck with the face-up trump card, your interactive hand (supporting click, double-click, and drag-and-drop), hand-sorting controls, and the contextual **Pass** / **Surrender** button.
-- **Right Sidebar:** Shows the active turn countdown clock (`00:15` default), overall match elapsed clock, and end-of-game winner / Durak standings.
+The game screen uses a clean three-column layout inspired by online tabletop interfaces:
+- **Left Sidebar:** Houses game rules/controls, hand-sorting options, and quick-launch scenario presets.
+- **Center Felt Arena:** Displays opponent seats across the top, the active bout pairs and target outlines in the middle, the talon deck and trump card alongside your hand, and contextual action controls (`Pass` / `Surrender`) below.
+- **Right Sidebar:** Displays match status, turn clock information, and end-of-match results.
 
-### Core Durak Rules
-1. **Attack & Defend:** The attacker plays one or more cards; the defender must cover every attacking card with a higher-ranked card of the same suit or any card of the trump suit.
-2. **Throw-Ins:** Attackers may add extra cards matching any rank already present on the table.
-3. **Redirect:** If enabled and no card has been covered yet, the defender may play a card of the same rank to pass the defense onward.
-4. **Pass or Surrender:** Once all attacks are covered, players pass to discard the bout and deal back up from the talon. If the defender cannot or chooses not to cover, they surrender and pick up all cards on the table, skipping their next turn to attack.
-5. **Winning & Losing:** Play continues until the deck is exhausted and players empty their hands. The last player left holding cards is the **Durak**.
-
-### Themes & Match Replay
-- **Appearance:** Supports Dark and Light themes (automatically respecting system preferences or user settings).
-- **Replay Mode:** Completed matches can be reviewed frame by frame via the recorded match replay view.
+### Playing a Turn
+- **Attacking & Throwing In:** Click, double-click, or drag a legal card onto an eligible opponent target or throw-in slot. Multiple cards of matching rank can be selected and played together, or you can `Pass` once satisfied.
+- **Defending & Redirecting:** Cover uncovered attacking cards with a higher card of the same suit or a trump card. When Redirect is enabled and legal, drag or play a matching-rank card onto the reflection target to pass the bout onward.
+- **Surrendering & Turn Clock:** Each active turn is governed by a countdown clock. If you cannot or choose not to defend, click `Surrender` to pick up the cards on the table after opponents finish any legal throw-ins.
+- **Hand Organization & Reordering:** Sort your hand by rank or suit, or drag cards directly within your hand to arrange them manually.
+- **Match Replay:** Completed matches can be inspected step by step in review mode.
