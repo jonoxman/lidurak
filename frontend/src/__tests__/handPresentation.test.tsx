@@ -477,6 +477,182 @@ describe('T-90-feedback-5 ITEM-6a/6b/6c: smooth hover parting', () => {
     expect(handWrappers()[0].getAttribute('data-card-x')).toBe(beforeX);
     expect(handWrappers()[0].style.transform).toBe('');
   });
+
+  it('ITEM-6b: visibly parts small 6-card and 3-card hands around the hovered card', () => {
+    const cases: Array<{ count: number; index: number; left: number; right: number }> = [
+      { count: 6, index: 2, left: 1, right: 3 },
+      { count: 3, index: 1, left: 0, right: 2 },
+    ];
+    for (const { count, index, left, right } of cases) {
+      const view = mountTable(DECK.slice(0, count), { awaitingAttack: true });
+      const before = handWrappers().map((wrapper) =>
+        Number(wrapper.getAttribute('data-card-x')),
+      );
+
+      fireEvent.pointerMove(handWrappers()[index], { bubbles: true });
+
+      const after = handWrappers().map((wrapper) =>
+        Number(wrapper.getAttribute('data-card-x')),
+      );
+      // The hovered card never moves; its neighbours visibly part outward.
+      expect(after[index]).toBe(before[index]);
+      expect(Number(handWrappers()[index].getAttribute('data-part-delta-x'))).toBe(0);
+      expect(after[left], `${count}-card left neighbour`).toBeLessThan(before[left]);
+      expect(after[right], `${count}-card right neighbour`).toBeGreaterThan(before[right]);
+
+      // ITEM-6a: every parted card moves through a GPU-composited translate3d.
+      for (const wrapper of handWrappers()) {
+        if (Number(wrapper.getAttribute('data-part-delta-x')) === 0) continue;
+        expect(wrapper.style.transform).toContain('translate3d(');
+      }
+      view.unmount();
+    }
+  });
+
+  it('ITEM-6a: animates only transform / margin-left, never layout widths', () => {
+    const wrapperRule = cssRule(tableCss, '.hand-card-wrapper {');
+    expect(wrapperRule).toContain('will-change: transform');
+    expect(wrapperRule).toContain(
+      'transform 200ms cubic-bezier(0.22, 1, 0.36, 1)',
+    );
+    expect(wrapperRule).not.toMatch(/transition:[^;]*(width|left|right):/);
+
+    // The floating preview itself opts out of every transition (0ms lag).
+    const previewRule = cssRule(tableCss, '.drag-card-preview {');
+    expect(previewRule).toContain('position: fixed');
+    expect(previewRule).toContain('pointer-events: none');
+    expect(previewRule).toContain('z-index: 9999');
+    expect(previewRule).toContain('transition: none');
+  });
+});
+
+describe('T-90-feedback-6 ITEM-3: center-locked card dragging', () => {
+  /** Centre of `[data-testid="drag-card-preview"]` from its inline transform. */
+  function dragPreviewCenter(): { x: number; y: number; width: number; height: number } {
+    const preview = screen.getByTestId('drag-card-preview') as HTMLElement;
+    const width = Number(preview.getAttribute('data-card-width'));
+    const height = Number(preview.getAttribute('data-card-height'));
+    const match = preview.style.transform.match(
+      /translate3d\((-?[\d.]+)px, (-?[\d.]+)px, 0\)/,
+    );
+    return {
+      x: match ? Number(match[1]) + width / 2 : Number.NaN,
+      y: match ? Number(match[2]) + height / 2 : Number.NaN,
+      width,
+      height,
+    };
+  }
+
+  it('locks the exact preview centre to (clientX, clientY) from any click point and index', () => {
+    const cases: Array<{
+      count: number;
+      index: number;
+      grab: [number, number];
+    }> = [
+      // Far-left 5px edge, top-left and bottom-right corners, and dead centre.
+      { count: 1, index: 0, grab: [5, 6] },
+      { count: 6, index: 0, grab: [5, 130] },
+      { count: 6, index: 5, grab: [95, 18] },
+      { count: 14, index: 0, grab: [5, 5] },
+      { count: 14, index: 7, grab: [50, 70] },
+      { count: 14, index: 13, grab: [95, 135] },
+      { count: 30, index: 0, grab: [5, 135] },
+      { count: 30, index: 15, grab: [50, 2] },
+      { count: 30, index: 29, grab: [99, 139] },
+    ];
+
+    for (const { count, index, grab } of cases) {
+      const view = mountTable(DECK.slice(0, count), { onReorderHand: vi.fn() });
+      const wrapper = handWrappers()[index];
+      const [grabX, grabY] = grab;
+
+      // The preview does not exist until the gesture becomes a drag.
+      expect(screen.queryByTestId('drag-card-preview')).toBeNull();
+      fireEvent.mouseDown(wrapper, { button: 0, clientX: grabX, clientY: grabY });
+
+      for (const [clientX, clientY] of [
+        [grabX + 4, grabY],
+        [grabX + 120, grabY + 60],
+        [grabX + 260, grabY + 180],
+      ]) {
+        fireEvent.mouseMove(document, { clientX, clientY });
+        const center = dragPreviewCenter();
+        expect(center.width).toBe(CARD_WIDTH);
+        expect(center.height).toBe(CARD_HEIGHT);
+        expect(Math.abs(center.x - clientX)).toBeLessThanOrEqual(1);
+        expect(Math.abs(center.y - clientY)).toBeLessThanOrEqual(1);
+      }
+
+      // The preview is a transient, non-interactive, untweened floating card.
+      const preview = screen.getByTestId('drag-card-preview') as HTMLElement;
+      expect(preview.style.pointerEvents).toBe('');
+      const previewRule = cssRule(tableCss, '.drag-card-preview {');
+      expect(previewRule).toContain('pointer-events: none');
+      expect(previewRule).toContain('transition: none');
+      // The source hand card never paints a duplicate copy while dragging.
+      expect(
+        document
+          .querySelector('[data-testid="hand-turn-highlight"]')
+          ?.getAttribute('data-drag-preview'),
+      ).toBe('true');
+
+      fireEvent.mouseUp(document, { clientX: grabX + 260, clientY: grabY + 180 });
+      expect(screen.queryByTestId('drag-card-preview')).toBeNull();
+      view.unmount();
+    }
+  });
+
+  it('stays centered while the hand is actively parted by a hover', () => {
+    mountTable(DECK.slice(0, 14), { onReorderHand: vi.fn() });
+    const zone = document.querySelector('[data-zone="player-hand"]') as HTMLElement;
+
+    fireEvent.pointerMove(handWrappers()[3], { bubbles: true });
+    expect(zone.getAttribute('data-parting-active')).toBe('true');
+
+    fireEvent.mouseDown(handWrappers()[9], { button: 0, clientX: 500, clientY: 300 });
+    fireEvent.mouseMove(document, { clientX: 620, clientY: 360 });
+
+    const center = dragPreviewCenter();
+    expect(Math.abs(center.x - 620)).toBeLessThanOrEqual(1);
+    expect(Math.abs(center.y - 360)).toBeLessThanOrEqual(1);
+    // Parting is suppressed while the drag is live, so the hand never jitters.
+    expect(zone.getAttribute('data-parting-active')).toBe('false');
+
+    fireEvent.mouseUp(document, { clientX: 620, clientY: 360 });
+  });
+
+  it('follows window-level drag events, ignores the (0, 0) sentinel and clears on Escape', () => {
+    mountTable(DECK.slice(0, 6), { onReorderHand: vi.fn() });
+    fireEvent.mouseDown(handWrappers()[2], { button: 0, clientX: 40, clientY: 80 });
+    fireEvent.mouseMove(document, { clientX: 100, clientY: 120 });
+
+    // A native drag repositioning event moves the preview too (jsdom has no
+    // `DragEvent`, so the window listener is exercised with a real MouseEvent).
+    window.dispatchEvent(new window.MouseEvent('dragover', { clientX: 240, clientY: 200 }));
+    let center = dragPreviewCenter();
+    expect(Math.abs(center.x - 240)).toBeLessThanOrEqual(1);
+    expect(Math.abs(center.y - 200)).toBeLessThanOrEqual(1);
+
+    // The browser's end-of-drag (0, 0) sentinel never teleports the preview.
+    window.dispatchEvent(new window.MouseEvent('drag', { clientX: 0, clientY: 0 }));
+    center = dragPreviewCenter();
+    expect(Math.abs(center.x - 240)).toBeLessThanOrEqual(1);
+    expect(Math.abs(center.y - 200)).toBeLessThanOrEqual(1);
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByTestId('drag-card-preview')).toBeNull();
+  });
+
+  it('dismisses the preview on a cancelled dragend and keeps the hand intact', () => {
+    mountTable(DECK.slice(0, 6), { onReorderHand: vi.fn() });
+    fireEvent.mouseDown(handWrappers()[0], { button: 0, clientX: 20, clientY: 60 });
+    fireEvent.mouseMove(document, { clientX: 180, clientY: 140 });
+    expect(screen.getByTestId('drag-card-preview')).toBeTruthy();
+
+    fireEvent.dragEnd(handWrappers()[0]);
+    expect(screen.queryByTestId('drag-card-preview')).toBeNull();
+    expect(handWrappers()).toHaveLength(6);
+  });
 });
 
 describe('T-90-feedback-5 ITEM-3: zero horizontal drag drift', () => {

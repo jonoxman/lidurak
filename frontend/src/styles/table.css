@@ -2558,15 +2558,42 @@ body[data-dragging='true'] *,
      is `100 + (visibleCount - 1) * step`. */
   flex: 0 0 var(--hand-card-width, 100px);
   box-sizing: border-box;
-  /* T-90-2 ITEM-6a / T-90-feedback-5 ITEM-6a: opening / closing the insertion
-     gap, the hover-parting offsets and the two-tier raise are all smooth,
-     GPU-friendly transform / margin transitions. The actively dragged card
-     opts out inline (`transition: none`) so pointer tracking has zero lag. */
+  /* T-90-2 ITEM-6a / T-90-feedback-5 ITEM-6a / T-90-feedback-6 ITEM-6a: opening
+     / closing the insertion gap, the hover-parting offsets and the two-tier
+     raise are all smooth, GPU-composited transform transitions. The actively
+     dragged card opts out inline (`transition: none`) so pointer tracking has
+     zero lag; only the transient drag preview follows the cursor untweened. */
   will-change: transform;
   transition:
-    transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
-    margin-left 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    margin-left 200ms cubic-bezier(0.22, 1, 0.36, 1),
     opacity 120ms ease;
+}
+
+/* T-90-feedback-6 ITEM-3: the transient, center-locked drag preview — a
+   viewport-space floating card whose exact geometric centre sits on the
+   pointer. It is the ONLY position-fixed element on the table; every layout
+   zone (seats, bout, hand, sidebars) still uses CSS Grid/Flexbox. */
+.drag-card-preview {
+  position: fixed;
+  left: 0;
+  top: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  box-sizing: border-box;
+  pointer-events: none;
+  z-index: 9999;
+  transition: none;
+  will-change: transform;
+}
+
+/* T-90-feedback-6 ITEM-3: while the preview floats under the cursor the source
+   slot keeps its internal drag math but must never paint a second copy of the
+   card. Higher specificity than the `opacity: 1` dragged-slot rule above. */
+.hand-cards[data-drag-preview='true'] .hand-slot[data-dragging='true'] {
+  opacity: 0;
+  transition: none;
 }
 
 /* T-90-feedback-2 ITEM-3: the dragged card's original slot collapses its

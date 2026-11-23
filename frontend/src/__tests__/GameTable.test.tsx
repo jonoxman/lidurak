@@ -5257,18 +5257,46 @@ describe('T-90-feedback-20261106_111512-3: throw-in gate, card tokens, drag visi
     expect(block('.card-slot')).not.toMatch(/transform:\s*scale\(/);
   });
 
-  it('keeps the dragged card painted and images it from the live element', () => {
+  it('suppresses the native drag ghost and paints the center-locked preview', () => {
     render(<GameTable {...base} tablePairs={[]} defenderId="p1" onReorderHand={vi.fn()} />);
     const card = screen.getByLabelText('king of clubs').closest('.card-slot') as HTMLElement;
     const wrapper = card.closest('.hand-card-wrapper') as HTMLElement;
     const setDragImage = vi.fn();
-    fireEvent.dragStart(card, { dataTransfer: { setData: vi.fn(), setDragImage, effectAllowed: 'move' } });
+    fireEvent.dragStart(card, {
+      clientX: 60,
+      clientY: 90,
+      dataTransfer: { setData: vi.fn(), setDragImage, effectAllowed: 'move' },
+    });
     expect(setDragImage).toHaveBeenCalledTimes(1);
     const [image, offsetX, offsetY] = setDragImage.mock.calls[0];
-    expect(image).toBe(card);
-    expect((image as HTMLElement).isConnected).toBe(true);
-    expect(Number(offsetX)).toBeGreaterThanOrEqual(0);
-    expect(Number(offsetY)).toBeGreaterThanOrEqual(0);
+    // ITEM-3: a cached 1x1 transparent image replaces the offset-prone ghost.
+    expect(image).not.toBe(card);
+    expect((image as HTMLCanvasElement).width).toBe(1);
+    expect((image as HTMLCanvasElement).height).toBe(1);
+    expect(offsetX).toBe(0);
+    expect(offsetY).toBe(0);
+
+    // The center-locked preview is the visible dragged card.
+    const preview = screen.getByTestId('drag-card-preview');
+    const width = Number(preview.getAttribute('data-card-width'));
+    const height = Number(preview.getAttribute('data-card-height'));
+    expect(width).toBe(100);
+    expect(height).toBe(140);
+
+    // jsdom has no `DragEvent`, so the real coordinate path is the window-level
+    // dragover listener; the preview centre must lock to the live pointer.
+    window.dispatchEvent(new window.MouseEvent('dragover', { clientX: 60, clientY: 90 }));
+    const [translateX, translateY] = (
+      preview.style.transform.match(
+        /translate3d\((-?[\d.]+)px, (-?[\d.]+)px, 0\)/,
+      ) ?? []
+    )
+      .slice(1)
+      .map(Number);
+    expect(translateX + width / 2).toBeCloseTo(60, 5);
+    expect(translateY + height / 2).toBeCloseTo(90, 5);
+
+    // The source card stays connected and fully painted behind the preview.
     expect(document.body.contains(card)).toBe(true);
     expect(wrapper.isConnected).toBe(true);
     expect(card.style.opacity).not.toBe('0');
@@ -5276,6 +5304,10 @@ describe('T-90-feedback-20261106_111512-3: throw-in gate, card tokens, drag visi
     expect(card.style.display).not.toBe('none');
     expect(wrapper.className).not.toContain('dragging-hidden');
     expect(wrapper.getAttribute('data-drag-hidden')).toBeNull();
+
+    // `dragend` dismisses the floating preview cleanly.
+    fireEvent.dragEnd(card);
+    expect(screen.queryByTestId('drag-card-preview')).toBeNull();
   });
 });
 
