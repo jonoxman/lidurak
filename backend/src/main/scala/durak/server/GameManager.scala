@@ -20,8 +20,9 @@ case class PresetGame(
 
 /**
  * Bot pacing every room the manager creates. Production uses the GameActor
- * defaults (`200 ms` between RandomBot moves, `2 s` before the first one); a
- * test suite can build a manager with tiny values so bot matches stay fast.
+ * defaults (`50 ms` between RandomBot moves, `500 ms` before the first one,
+ * ITEM-NEW3); a test suite can build a manager with tiny values so bot matches
+ * stay fast.
  */
 case class BotTiming(
     randomBotDelay: FiniteDuration = GameActor.DefaultRandomBotDelay,
@@ -29,7 +30,7 @@ case class BotTiming(
 )
 
 object BotTiming:
-  /** The production pacing: fast RandomBot play after a 2-second start pause. */
+  /** The production pacing: fast RandomBot play after a half-second start pause. */
   val Default: BotTiming = BotTiming()
 
 /** An in-memory registry of live game rooms, keyed by their generated game id. */
@@ -162,6 +163,14 @@ object GameManager:
   val QaSurrenderTimer: String = "qa-surrender-timer"
 
   /**
+   * `"Fast Bots (75% Faster)"`: a four-seat table where Alice is the only human
+   * and Bob, Carol and Dave are `basicBot` seats, with Bob already on turn to
+   * open against Carol. The bots play at the ITEM-NEW3 cadence, so a reviewer
+   * watches attacks, defenses, throw-ins and passes chain together in seconds.
+   */
+  val QaFastBots: String = "qa-fast-bots"
+
+  /**
    * Turn-clock length of the `qa-surrender-timer` room. Three seconds is short
    * enough that the surrendered bout resolves while a reviewer watches it: the
    * clock auto-passes Bob and Carol, Alice picks up the five table cards and
@@ -175,7 +184,8 @@ object GameManager:
     QaLarge30Compress,
     QaSingleCard,
     QaTableCollapseRight,
-    QaSurrenderTimer
+    QaSurrenderTimer,
+    QaFastBots
   )
 
   /** The scripted position called `presetId`, or an error naming the unknown one. */
@@ -187,6 +197,7 @@ object GameManager:
       case QaSingleCard          => Right(qaSingleCardPreset)
       case QaTableCollapseRight  => Right(qaTableCollapseRightPreset)
       case QaSurrenderTimer      => Right(qaSurrenderTimerPreset)
+      case QaFastBots            => Right(qaFastBotsPreset)
       case other =>
         Left(
           s"Unknown preset: $other (expected one of ${Presets.mkString(", ")})"
@@ -219,14 +230,16 @@ object GameManager:
       finishOrder: Vector[String] = Vector.empty,
       finishRanks: Vector[Option[Int]] = Vector.empty,
       // Seats that already declared a pass, by seat index.
-      passedSeats: Set[Int] = Set.empty
+      passedSeats: Set[Int] = Set.empty,
+      // Seat types, e.g. one human plus three `basicBot` seats; empty is all-human.
+      playerTypes: Vector[String] = Vector.empty
   ): GameState =
     GameState(
       config = GameConfig(
         playerCount = names.size,
         allowRedirect = allowRedirect,
         seed = 20261102L,
-        playerTypes = Vector.fill(names.size)(GameConfig.HumanSeat),
+        playerTypes = playerTypes,
         chaosMode = chaosMode,
         transparentMode = transparentMode,
         devMode = devMode
@@ -605,4 +618,78 @@ object GameManager:
       ),
       defaultPlayerId = "p0",
       turnSecondsOverride = Some(QaSurrenderTimerTurnSeconds)
+    )
+
+  /**
+   * `qa-fast-bots` — "Fast Bots (75% Faster)".
+   *
+   * A four-seat table over the 52-card deck (`trumpSuit = Hearts`) where Alice
+   * (`p0`, the only human seat and the default POV) sits out of the opening
+   * bout: Bob (`p1`), Carol (`p2`) and Dave (`p3`) are `basicBot` seats, Bob is
+   * the attacker and Carol the defender, and the bout is still in
+   * `InitialAttack`, so the bot driver is on Bob's seat from the very first
+   * frame.
+   *
+   * The hands are chosen so the bots show the whole loop at the ITEM-NEW3
+   * cadence within seconds: Bob opens with a club, Carol covers with a trump,
+   * Dave matches the `6` on the table with his `6♦` throw-in, and Alice holds
+   * only `2`–`5` cards, so her throw-in window closes without a manual move.
+   * A 28-card talon keeps the deck healthy mid-game and the bottom-trump badge
+   * visible.
+   */
+  private def qaFastBotsPreset: PresetGame =
+    val aliceHand = Vector(
+      card(Rank.Two, Suit.Spades),
+      card(Rank.Three, Suit.Spades),
+      card(Rank.Four, Suit.Spades),
+      card(Rank.Five, Suit.Spades),
+      card(Rank.Two, Suit.Diamonds),
+      card(Rank.Three, Suit.Diamonds)
+    )
+    val bobHand = Vector(
+      card(Rank.Six, Suit.Clubs),
+      card(Rank.Seven, Suit.Clubs),
+      card(Rank.Eight, Suit.Clubs),
+      card(Rank.Nine, Suit.Clubs),
+      card(Rank.Ten, Suit.Clubs),
+      card(Rank.Jack, Suit.Clubs)
+    )
+    val carolHand = Vector(
+      card(Rank.Nine, Suit.Hearts),
+      card(Rank.Ten, Suit.Hearts),
+      card(Rank.Jack, Suit.Hearts),
+      card(Rank.Queen, Suit.Hearts),
+      card(Rank.King, Suit.Hearts),
+      card(Rank.Ace, Suit.Hearts)
+    )
+    val daveHand = Vector(
+      card(Rank.Four, Suit.Clubs),
+      card(Rank.Five, Suit.Clubs),
+      card(Rank.Six, Suit.Diamonds),
+      card(Rank.Seven, Suit.Diamonds),
+      card(Rank.Eight, Suit.Diamonds),
+      card(Rank.Queen, Suit.Spades)
+    )
+    val used = aliceHand ++ bobHand ++ carolHand ++ daveHand
+    val talon = suitBottomTalon(4, used, Suit.Hearts)
+    PresetGame(
+      state = presetState(
+        names = Vector("Alice", "Bob", "Carol", "Dave"),
+        hands = Vector(aliceHand, bobHand, carolHand, daveHand),
+        talon = talon,
+        trumpSuit = Suit.Hearts,
+        bottomTrumpCard = talon.lastOption,
+        tablePairs = Vector.empty,
+        attackerIdx = 1,
+        defenderIdx = 2,
+        boutPhase = BoutPhase.InitialAttack,
+        defenderInitialHandSize = carolHand.size,
+        playerTypes = Vector(
+          GameConfig.HumanSeat,
+          GameConfig.BasicBotSeat,
+          GameConfig.BasicBotSeat,
+          GameConfig.BasicBotSeat
+        )
+      ),
+      defaultPlayerId = "p0"
     )

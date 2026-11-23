@@ -106,7 +106,8 @@ class PresetSuite extends munit.FunSuite:
         "qa-large-30-compress",
         "qa-single-card",
         "qa-table-collapse-right",
-        "qa-surrender-timer"
+        "qa-surrender-timer",
+        "qa-fast-bots"
       )
     )
 
@@ -734,6 +735,89 @@ class PresetSuite extends munit.FunSuite:
     // Nothing was created or lost while the clock settled the bout.
     val conserved = assertConserved(manager, gameId, 36)
     assertEquals(conserved.players.map(_.hand.size), Vector(11, 6, 6))
+  }
+
+  test("qa-fast-bots opens a four-seat table with Bob immediately on turn to attack") {
+    // The preset itself is inspected without a bot fiber, so the opening
+    // position is exactly the authoring state rather than a raced later frame.
+    val preset = GameManager.preset("qa-fast-bots").getOrElse(fail("preset is missing"))
+    val state = preset.state
+
+    assertEquals(preset.defaultPlayerId, "p0")
+    assertEquals(state.players.map(_.id), Vector("p0", "p1", "p2", "p3"))
+    assertEquals(state.players.map(_.name), Vector("Alice", "Bob", "Carol", "Dave"))
+    assertEquals(
+      state.config.seatType(0),
+      GameConfig.HumanSeat
+    )
+    state.players.indices.drop(1).foreach { idx =>
+      assertEquals(state.config.seatType(idx), GameConfig.BasicBotSeat)
+    }
+    // Six-card hands and a healthy 28-card talon keep the deck mid-game.
+    assertEquals(state.players.map(_.hand.size), Vector(6, 6, 6, 6))
+    assertEquals(state.talon.size, 28)
+    assertEquals(state.bottomTrumpCard.map(_.suit), Some(Suit.Hearts))
+    assertEquals(state.tablePairs, Vector.empty)
+    assertEquals(state.boutPhase, BoutPhase.InitialAttack)
+    assertEquals(state.attackerIdx, 1)
+    assertEquals(state.defenderIdx, 2)
+    // The bot driver finds Bob on turn and he has a legal opening attack.
+    assertEquals(state.promptedPlayerIds, Set("p1"))
+    assertEquals(GameActor.promptedBotId(state), Some("p1"))
+    assert(RandomBot.legalActionsFor(state, "p1").nonEmpty)
+
+    val allCards = state.players.flatMap(_.hand) ++ state.talon ++ state.tablePairs.flatMap(pair =>
+      pair.attack :: pair.defense.toList
+    )
+    assertEquals(allCards.distinct.size, 52)
+  }
+
+  test("qa-fast-bots is routable and its BasicBots play several moves within seconds") {
+    // Production bot pacing, so the test measures the real 75%-faster cadence.
+    val manager = GameManager.create(BotTiming.Default).unsafeRunSync()
+    val (gameId, json) = startPresetPath(manager, "qa-fast-bots")
+
+    assertEquals(json.hcursor.get[String]("defaultPlayerId").toOption, Some("p0"))
+    assertEquals(
+      json.hcursor.downField("players").as[List[Json]].map(_.size).toOption,
+      Some(4)
+    )
+    assertEquals(
+      json.hcursor.downField("playerTypes").as[List[String]].toOption,
+      Some(List("human", "basicBot", "basicBot", "basicBot"))
+    )
+    assertEquals(json.hcursor.get[Boolean]("devMode").toOption, Some(true))
+
+    val alice = view(manager, gameId, "p0")
+    assertEquals(alice.myName, "Alice")
+    assertEquals(alice.isBot, false)
+    assertEquals(alice.trumpSuit, Suit.Hearts)
+    assertConserved(manager, gameId, 52)
+
+    // The three bots drive the game themselves at the new cadence: several
+    // recorded moves land in the first seconds, all of them legal bot moves.
+    val room = manager.getRoom(gameId).unsafeRunSync().getOrElse(fail("room is missing"))
+    val startedAt = System.currentTimeMillis()
+    val deadline = startedAt + 5000L
+    var replay = room.replay.get.unsafeRunSync()
+    while replay.moves.size < 3 && System.currentTimeMillis() < deadline do
+      Thread.sleep(25L)
+      replay = room.replay.get.unsafeRunSync()
+    val elapsedMs = System.currentTimeMillis() - startedAt
+    GameActor.stopClock(room).unsafeRunSync()
+
+    assert(
+      replay.moves.size >= 3,
+      s"only ${replay.moves.size} bot moves in ${elapsedMs}ms: ${replay.moves.map(_.action)}"
+    )
+    assert(elapsedMs < 5000L, s"the bots took ${elapsedMs}ms to move")
+    val botIds = Set("p1", "p2", "p3")
+    replay.moves.foreach { move =>
+      assert(botIds.contains(move.playerId), s"${move.playerId} is not a bot seat")
+    }
+    GameReplay.verifyReplay(replay) match
+      case Left(error) => fail(s"the bot history is not legal: $error")
+      case Right(_)    => ()
   }
 
   test("POST /api/games reads chaosMode and opens every seat as a target") {

@@ -543,7 +543,73 @@ class GameActorSuite extends munit.FunSuite:
     assert(elapsedMs < 2000L, s"the random bot used the basic bot delay: ${elapsedMs}ms")
   }
 
-  test("bot timing: a randomBot waits 2 s once then 200 ms, a basicBot keeps the window") {
+  // --- Bot speed (ITEM-NEW3: every bot pause is 75% shorter) ---
+
+  test("every default bot delay is exactly 75% shorter than before (ITEM-NEW3)") {
+    // Before ITEM-NEW3: 500 ms / 2000 ms / 200 ms / 2 s.
+    assertEquals(GameActor.DefaultBotDelayMin, 500.millis / 4)
+    assertEquals(GameActor.DefaultBotDelayMin, 125.millis)
+    assertEquals(GameActor.DefaultBotDelayMax, 2000.millis / 4)
+    assertEquals(GameActor.DefaultBotDelayMax, 500.millis)
+    assertEquals(GameActor.DefaultRandomBotDelay, 200.millis / 4)
+    assertEquals(GameActor.DefaultRandomBotDelay, 50.millis)
+    assertEquals(GameActor.DefaultInitialBotStartDelay, 2.seconds / 4)
+    assertEquals(GameActor.DefaultInitialBotStartDelay, 500.millis)
+
+    // A production room is built from those very constants.
+    val room = newRoom()
+    GameActor.stopClock(room).unsafeRunSync()
+    assertEquals(room.botDelayMin, GameActor.DefaultBotDelayMin)
+    assertEquals(room.botDelayMax, GameActor.DefaultBotDelayMax)
+    assertEquals(room.randomBotDelay, GameActor.DefaultRandomBotDelay)
+    assertEquals(room.initialBotStartDelay, GameActor.DefaultInitialBotStartDelay)
+  }
+
+  test("four BasicBots chain several turns in a bout well under five seconds") {
+    val room = GameActor
+      .create(
+        GameConfig(
+          playerCount = 4,
+          seed = 21L,
+          playerTypes = Vector.fill(4)(GameConfig.BasicBotSeat)
+        ),
+        Vector("Bot A", "Bot B", "Bot C", "Bot D")
+      )
+      .unsafeRunSync()
+    val startedAt = System.currentTimeMillis()
+
+    def replay = room.replay.get.unsafeRunSync()
+
+    val deadline = startedAt + 5000L
+    while replay.moves.size < 5 && System.currentTimeMillis() < deadline do
+      IO.sleep(25.millis).unsafeRunSync()
+    val elapsedMs = System.currentTimeMillis() - startedAt
+    GameActor.stopClock(room).unsafeRunSync()
+
+    // A whole attack -> defense -> throw-in/pass chain at the new cadence.
+    assert(
+      replay.moves.size >= 5,
+      s"only ${replay.moves.size} bot moves in ${elapsedMs}ms: ${replay.moves.map(_.action)}"
+    )
+    assert(elapsedMs < 5000L, s"the bot chain took ${elapsedMs}ms")
+
+    val roomState = room.stateRef.get.unsafeRunSync()
+    replay.moves.foreach { move =>
+      assertEquals(
+        GameActor.botSeatType(roomState, move.playerId),
+        GameConfig.BasicBotSeat,
+        s"${move.playerId} is not a basic bot"
+      )
+    }
+    // Every recorded move re-applies legally and reproduces its state.
+    GameReplay.verifyReplay(replay) match
+      case Left(error) => fail(s"the bot history is not legal: $error")
+      case Right(_)    => ()
+    // The opening bout is over, so the bots kept playing past the first move.
+    assertNotEquals(roomState.boutPhase, BoutPhase.InitialAttack)
+  }
+
+  test("bot timing: a randomBot waits 500 ms once then 50 ms, a basicBot keeps the window") {
     // An all-human room starts no bot fiber, so this only inspects the timing rule.
     val room = newRoom()
     val state = room.stateRef.get.unsafeRunSync().copy(
@@ -555,11 +621,11 @@ class GameActorSuite extends munit.FunSuite:
     )
     GameActor.stopClock(room).unsafeRunSync()
 
-    // ITEM-9a/9b: production defaults are 0.2 s between moves and 2 s at start.
-    assertEquals(GameActor.DefaultRandomBotDelay, 200.millis)
-    assertEquals(GameActor.DefaultInitialBotStartDelay, 2.seconds)
-    assertEquals(room.randomBotDelay, 200.millis)
-    assertEquals(room.initialBotStartDelay, 2.seconds)
+    // ITEM-9a/9b at the ITEM-NEW3 cadence: 50 ms between moves, 500 ms at start.
+    assertEquals(GameActor.DefaultRandomBotDelay, 50.millis)
+    assertEquals(GameActor.DefaultInitialBotStartDelay, 500.millis)
+    assertEquals(room.randomBotDelay, 50.millis)
+    assertEquals(room.initialBotStartDelay, 500.millis)
 
     assertEquals(GameActor.botSeatType(state, "p0"), GameConfig.RandomBotSeat)
     assertEquals(GameActor.botDelayFor(room, state, "p0"), Some(GameActor.DefaultRandomBotDelay))
@@ -570,8 +636,8 @@ class GameActorSuite extends munit.FunSuite:
         assert(delay >= GameActor.DefaultBotDelayMin, delay.toString)
         assert(delay <= GameActor.DefaultBotDelayMax, delay.toString)
 
-    // No move has been recorded yet, so the first bot action owes the 2 s start
-    // pause whichever bot kind it is.
+    // No move has been recorded yet, so the first bot action owes the 500 ms
+    // start pause whichever bot kind it is.
     val emptyReplay = room.replay.get.unsafeRunSync()
     assert(GameActor.isOpeningPosition(emptyReplay), emptyReplay.moves.toString)
     assertEquals(
