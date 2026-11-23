@@ -21,6 +21,7 @@ import {
 import { CARD_INDEX_STRIP_WIDTH_PX, type CardData } from '../components/Card';
 import {
   ELIGIBLE_LIFT_PX,
+  HAND_SMALL_HAND_OVERLAP_RATIO,
   SELECTED_LIFT_PX,
   computeHandLayout,
 } from '../utils/handLayout';
@@ -186,7 +187,7 @@ describe('T-95 #2: card dimensions match the throw-in and redirect outlines', ()
 describe('T-95 #3: active hand overlap stays inside 20%-80% and the zone', () => {
   const available = HAND_FALLBACK_WIDTH - HAND_CONTOUR_PADDING * 2;
 
-  it('keeps small hands (2-6 cards) at the 20% overlap floor without overflowing', () => {
+  it('keeps small hands (2-6 cards) at the Item 6b resting overlap without overflowing', () => {
     for (const count of [2, 3, 4, 5, 6]) {
       const view = mountTable(DECK.slice(0, count), { awaitingAttack: true });
       const box = screen.getByTestId('hand-turn-highlight') as HTMLElement;
@@ -195,7 +196,7 @@ describe('T-95 #3: active hand overlap stays inside 20%-80% and the zone', () =>
 
       expect(wrappers).toHaveLength(count);
       expect(Number(box.getAttribute('data-overlap-ratio'))).toBeCloseTo(
-        HAND_MIN_OVERLAP_RATIO,
+        HAND_SMALL_HAND_OVERLAP_RATIO,
         5,
       );
       expect(stride).toBeGreaterThanOrEqual(CARD_WIDTH * HAND_MIN_OVERLAP_RATIO - 1e-9);

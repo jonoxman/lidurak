@@ -6,17 +6,22 @@
  * them:
  *
  * 1. [[computeHandLayout]] — the **Option B** box progression: cards always keep
- *    their full, constant footprint; a hand of up to six cards sits at the
- *    minimum overlap (`0.20`), a larger hand first *expands* toward
- *    `maximalBoxWidth` at that same overlap, then *compresses* inside the box
- *    up to the maximal allowable overlap (the exposed strip is still wide enough
- *    for the full-size `"10"` rank and the enlarged suit pip), and finally
- *    super-compresses inside the same box for extreme hands (30-46+ cards).
- *    Cards are never scaled down and never overflow the box.
- * 2. [[computePartedCardPositions]] — the smooth hover-parting solver: the
- *    hovered card never moves, its close neighbours expose more of their
- *    faces, distant cards compress, and the whole row stays ordered inside the
- *    maximal box.
+ *    their full, constant footprint; a small hand (`2..6` cards) rests at a
+ *    default overlap *slightly past* the minimum (`0.36`, so `64%` of every
+ *    desktop card stays exposed — still well above the `36px` rank/suit strip)
+ *    and is centred inside the six-card default box, which leaves explicit
+ *    expansion margin for the hover parting animation. A larger hand first
+ *    *expands* toward `maximalBoxWidth` at the minimum overlap, then
+ *    *compresses* inside the box up to the maximal allowable overlap (the
+ *    exposed strip is still wide enough for the full-size `"10"` rank and the
+ *    enlarged suit pip), and finally super-compresses inside the same box for
+ *    extreme hands (30-46+ cards). Cards are never scaled down and never
+ *    overflow the box.
+ * 2. [[computePartedCardLayout]] / [[computePartedCardPositions]] — the smooth
+ *    hover-parting solver: the hovered card never moves, a Gaussian falloff
+ *    widens the gaps closest to it, distant gaps compress to keep the row
+ *    bounded, and the exported per-card `deltas` feed GPU-composited
+ *    `translate3d(...)` transforms without a layout reflow.
  * 3. [[buildHandContourPath]] — the tight, non-rectangular SVG outline that hugs
  *    every laid-out card, including the two raised tiers and hover-parted `x`
  *    positions.
@@ -41,6 +46,29 @@ export const HAND_MIN_OVERLAP_RATIO = 0.2;
  * from the exposed index strip: see [[DEFAULT_MIN_VISIBLE_INDEX_STRIP_PX]].
  */
 export const HAND_MAX_OVERLAP_RATIO = 0.8;
+
+/**
+ * ITEM-6b: the resting overlap of a small hand (`2..6` cards).
+ *
+ * `0.36` leaves `64%` of each card exposed (`64px` on the canonical `100px`
+ * desktop card, `30.72px` on the `48px` mobile card), comfortably above the
+ * `36px` `"10"` rank/suit strip, while still overlapping slightly more than the
+ * `0.20` minimum. The extra `16px` of resting overlap per adjacent card is the
+ * expansion margin the hover-parting animation needs: without it small hands
+ * sat at the minimum step (or fully spread) and had nowhere to part to.
+ */
+export const HAND_SMALL_HAND_OVERLAP_RATIO = 0.36;
+/** Largest hand that uses the small-hand resting overlap (`2..6`). */
+export const HAND_SMALL_HAND_MAX_CARDS = 6;
+/**
+ * ITEM-6b: symmetric breathing room around a small hand, as a share of the card
+ * width (`0.32` -> `32px` desktop / `15.36px` mobile). It is capped by the
+ * remaining space in the six-card default box, so a five- or six-card hand
+ * still fills that box exactly. The runway gives even a two-card hand the
+ * slack it needs to open a gap around *either* hovered card, while the hovered
+ * card itself stays pinned.
+ */
+export const HAND_SMALL_HAND_PARTING_PAD_RATIO = 0.32;
 /** Canonical desktop card footprint. */
 export const HAND_BASE_CARD_WIDTH = 100;
 export const HAND_BASE_CARD_HEIGHT = 140;
@@ -82,8 +110,13 @@ export const HAND_CONTOUR_PADDING = 6;
 /** Corner radius of the highlight contour. */
 export const HAND_CONTOUR_CORNER_RADIUS = 12;
 
-/** How quickly the hover-parting extra spacing decays with distance. */
-const HOVER_PARTING_DECAY = 0.55;
+/**
+ * ITEM-6a: width of the smooth (Gaussian) hover-parting falloff, in card
+ * distances. The nearest gap gets ~`0.92` of the available extra spacing, the
+ * next ~`0.71`, then `0.46`, `0.25`, `0.11`, ... so pointer motion across the
+ * hand produces a continuous bulge instead of an abrupt single-card step.
+ */
+const HOVER_PARTING_SIGMA = 2.4;
 /** Distance factor used when a side has no room at all (degenerate input). */
 const HOVER_PARTING_DEGENERATE_FIT = 1e-3;
 
@@ -206,7 +239,10 @@ export interface HandLayoutResult {
   cardPositions: number[];
   /** Width of the whole hand: the last card's right edge. */
   totalWidth: number;
-  /** Width of a six-card hand at [[HAND_MIN_OVERLAP_RATIO]]. */
+  /**
+   * Width of the six-card default box at the ITEM-6b resting overlap
+   * (`cardWidth + 5 * smallHandStep`). Small hands are centred inside it.
+   */
   defaultSixCardBoxWidth: number;
   /** Widest box the hand may occupy (never exceeded). */
   maximalBoxWidth: number;
@@ -268,9 +304,11 @@ const EMPTY_LAYOUT: HandLayoutResult = {
  *
  * Guarantees, for any count in `0..52` and any reasonable width:
  * - `cardWidth` / `cardHeight` are the constant full card size — never scaled;
- * - `1..6` cards use the minimum overlap (`step = cardWidth * (1 - minOverlapRatio)`)
- *   and stay inside [[HandLayoutResult.defaultSixCardBoxWidth]];
- * - `7+` cards expand at that same overlap until they reach `maximalBoxWidth`,
+ * - `2..6` cards rest at the ITEM-6b small-hand overlap
+ *   (`step = max(cardWidth * 0.64, minVisibleStripPx)`, never wider than the
+ *   minimum-overlap step), centred inside [[HandLayoutResult.defaultSixCardBoxWidth]]
+ *   so both edges keep parting headroom;
+ * - `7+` cards expand at the minimum overlap until they reach `maximalBoxWidth`,
  *   then compress inside it (`step = (box - cardWidth) / (count - 1)`) while the
  *   step stays at or above `minVisibleStripPx`, and only afterwards
  *   super-compress (`isSuperCompressed`) inside the same box;
@@ -297,7 +335,19 @@ export function computeHandLayout(options: HandLayoutOptions): HandLayoutResult 
   // ITEM-2c: the step at the smallest allowed overlap, and the overlap ceiling
   // that still leaves the `"10"`-wide index strip fully uncovered.
   const minOverlapStep = cardWidth * (1 - minOverlapRatio);
-  const defaultSixCardBoxWidth = cardWidth + 5 * minOverlapStep;
+  // ITEM-6b: small hands rest at a slightly larger overlap than the minimum so
+  // the hover parting has room to expand into. The step never exceeds the
+  // minimum-overlap step (so it is always *more* overlap than the floor) and
+  // never drops below the exposed index strip.
+  const smallHandStep = Math.min(
+    minOverlapStep,
+    Math.max(
+      cardWidth * (1 - HAND_SMALL_HAND_OVERLAP_RATIO),
+      Math.min(minVisibleStripPx, minOverlapStep),
+    ),
+  );
+  const defaultSixCardBoxWidth =
+    cardWidth + (HAND_SMALL_HAND_MAX_CARDS - 1) * smallHandStep;
   const maxAllowableOverlapRatio = Math.max(
     0,
     Math.min(0.85, 1 - minVisibleStripPx / cardWidth),
@@ -325,9 +375,37 @@ export function computeHandLayout(options: HandLayoutOptions): HandLayoutResult 
   // --- Option B progression -------------------------------------------------
   let step: number;
   let totalWidth: number;
+  // ITEM-6b: left edge of the first card. Only small hands get a non-zero
+  // inset (symmetric padding around the resting row).
+  let startX = 0;
   if (cardCount === 1) {
     step = cardWidth;
     totalWidth = cardWidth;
+  } else if (cardCount <= HAND_SMALL_HAND_MAX_CARDS) {
+    const gaps = cardCount - 1;
+    const widthAtSmallOverlap = cardWidth + gaps * smallHandStep;
+    if (widthAtSmallOverlap <= maximalBoxWidth) {
+      step = smallHandStep;
+    } else {
+      // A very narrow lane still never overflows: compress inside it, keeping
+      // the cards distinct when the 4px floor fits.
+      step = Math.max(0, (maximalBoxWidth - cardWidth) / gaps);
+      if (
+        step > 0 &&
+        step < HAND_MIN_DISTINCT_CARD_STEP_PX &&
+        cardWidth + gaps * HAND_MIN_DISTINCT_CARD_STEP_PX <= maximalBoxWidth
+      ) {
+        step = HAND_MIN_DISTINCT_CARD_STEP_PX;
+      }
+    }
+    const rowExtent = cardWidth + gaps * step;
+    const boxCap = Math.min(defaultSixCardBoxWidth, maximalBoxWidth);
+    // Centre the row inside its default box, capped by the parting runway.
+    startX = Math.min(
+      cardWidth * HAND_SMALL_HAND_PARTING_PAD_RATIO,
+      Math.max(0, (boxCap - rowExtent) / 2),
+    );
+    totalWidth = rowExtent + 2 * startX;
   } else {
     const gaps = cardCount - 1;
     const widthAtMinOverlap = cardWidth + gaps * minOverlapStep;
@@ -370,7 +448,7 @@ export function computeHandLayout(options: HandLayoutOptions): HandLayoutResult 
     const appliedLift = isSelected ? selectedLiftPx : isEligible ? liftPx : BASELINE_LIFT_PX;
     lifts.push(appliedLift);
     maxLift = Math.max(maxLift, appliedLift);
-    const x = round2(index * step);
+    const x = round2(startX + index * step);
     cardPositions.push(x);
     cards.push({
       index,
@@ -435,35 +513,71 @@ function gapFitScale(gaps: readonly number[], span: number): number {
   return span / total;
 }
 
+/** ITEM-6a: absolute parted positions plus their GPU-friendly displacement. */
+export interface PartedCardLayout {
+  /** Absolute left edge of every card in the parted row. */
+  positions: readonly number[];
+  /** `positions[i] - restingPositions[i]`, exact `0` for the hovered card. */
+  deltas: readonly number[];
+  /** Integer index under the pointer, or `null` when parting is inactive. */
+  hoveredIndex: number | null;
+  /** True when at least one card actually moves. */
+  isParted: boolean;
+  /** Largest `|delta|` in px (useful for allocating a transform layer). */
+  maxAbsDelta: number;
+}
+
+/** A row of `count` zero deltas (the inactive parting state). */
+function zeroDeltas(count: number): number[] {
+  const deltas = new Array<number>(count);
+  for (let index = 0; index < count; index += 1) deltas[index] = 0;
+  return deltas;
+}
+
 /**
- * ITEM-6a/6b/6c: smooth hover-parting positions for one hand row.
+ * ITEM-6a/6b/6c: smooth hover-parting geometry for one hand row.
  *
  * - `basePositions` are the resting left edges (from [[computeHandLayout]]).
- * - The hovered card never moves: `result[hoveredIndex] === basePositions[hoveredIndex]`.
- * - Gaps next to the hovered card open up to the widest comfortable stride
- *   (`max(cardWidth * 0.8, minVisibleStripPx)`), decaying geometrically with
- *   distance; gaps far from it fall back to the resting stride and compress
- *   further when the widened run no longer fits.
- * - Left cards stay in `[0, hoveredX]`, right cards in
- *   `[hoveredX, maximalBoxWidth - cardWidth]`, so the parted row is strictly
- *   left-to-right ordered and never overflows the hand box.
- * - A one-card hand, a missing/out-of-range hover, or an empty hand returns
- *   `basePositions` untouched (the very same array — zero delta).
+ * - The hovered card never moves: `positions[hoveredIndex] === basePositions[hoveredIndex]`
+ *   and `deltas[hoveredIndex] === 0`.
+ * - Gaps next to the hovered card open toward the widest comfortable stride
+ *   (`max(cardWidth * 0.8, minVisibleStripPx)`) with a Gaussian falloff by
+ *   distance, so motion across the hand never snaps: ~`92%` of the expansion
+ *   lands on the immediate neighbour, ~`71%` on the next gap, and so on.
+ * - Removing the extra spacing from the far gaps keeps the row bounded:
+ *   left cards stay in `[0, hoveredX]`, right cards in
+ *   `[hoveredX, maximalBoxWidth - cardWidth]`, so the row stays strictly
+ *   ordered and never overflows the maximal hand lane. Even a fully compressed
+ *   30/46-card hand reveals at least `minVisibleStripPx` next to the hovered
+ *   card.
+ * - Parting is disabled for `cardCount <= 1`, an empty hand, or an inactive /
+ *   out-of-range hover: `positions` is the very same `basePositions` array and
+ *   every delta is strictly `0`.
+ *
+ * The returned `deltas` are what Wave 3 animates with
+ * `transform: translate3d(deltaX, liftY, 0)` — no layout reflow per frame.
  */
-export function computePartedCardPositions(
+export function computePartedCardLayout(
   basePositions: readonly number[],
   cardWidth: number,
   maximalBoxWidth: number,
   hoveredIndex: number | null,
   minVisibleStripPx: number = DEFAULT_MIN_VISIBLE_INDEX_STRIP_PX,
-): readonly number[] {
+): PartedCardLayout {
   const count = basePositions.length;
+  const resting: PartedCardLayout = {
+    positions: basePositions,
+    deltas: zeroDeltas(count),
+    hoveredIndex: null,
+    isParted: false,
+    maxAbsDelta: 0,
+  };
   // ITEM-6c: nothing to part with a single card (or none at all).
-  if (count <= 1) return basePositions;
-  if (hoveredIndex === null || hoveredIndex === undefined) return basePositions;
-  if (!Number.isFinite(hoveredIndex)) return basePositions;
+  if (count <= 1) return resting;
+  if (hoveredIndex === null || hoveredIndex === undefined) return resting;
+  if (!Number.isFinite(hoveredIndex)) return resting;
   const hovered = Math.floor(hoveredIndex);
-  if (hovered !== hoveredIndex || hovered < 0 || hovered >= count) return basePositions;
+  if (hovered !== hoveredIndex || hovered < 0 || hovered >= count) return resting;
 
   const width = Math.max(1, cardWidth);
   const boxWidth = Math.max(width, maximalBoxWidth);
@@ -474,9 +588,12 @@ export function computePartedCardPositions(
   const leftBound = 0;
   const rightBound = boxWidth - width;
 
+  // ITEM-6a: smooth Gaussian kernel — no abrupt one-neighbour-only jump.
+  const hoverWeight = (distance: number): number =>
+    Math.exp(-(distance * distance) / (2 * HOVER_PARTING_SIGMA * HOVER_PARTING_SIGMA));
   const desiredGap = (distance: number, baseGap: number): number => {
     const extra = Math.max(0, spreadStep - baseGap);
-    return baseGap + extra * Math.pow(HOVER_PARTING_DECAY, Math.max(0, distance - 1));
+    return baseGap + extra * hoverWeight(distance);
   };
 
   const leftGaps: number[] = [];
@@ -492,28 +609,65 @@ export function computePartedCardPositions(
     rightGaps.push(desiredGap(distance, baseGap));
   }
 
+  // Uniform fit scaling preserves the smooth falloff while guaranteeing that
+  // the nearest gap still gains spacing (small hands now have edge runway and
+  // medium/large hands have enough far gaps to give the extra spacing back).
   const leftScale = gapFitScale(leftGaps, Math.max(0, pivot - leftBound));
   const rightScale = gapFitScale(rightGaps, Math.max(0, rightBound - pivot));
 
-  const result = basePositions.slice() as number[];
+  const positions = basePositions.slice() as number[];
 
   let offset = 0;
   for (let distance = 1; distance <= hovered; distance += 1) {
     offset += leftGaps[distance - 1] * leftScale;
-    // Never leave the box on the left; convex gaps keep the order intact.
-    result[hovered - distance] = Math.max(leftBound, pivot - offset);
+    // Never leave the lane on the left; positive gaps keep the order intact.
+    positions[hovered - distance] = Math.max(leftBound, pivot - offset);
   }
 
   offset = 0;
   for (let distance = 1; distance <= count - 1 - hovered; distance += 1) {
     offset += rightGaps[distance - 1] * rightScale;
     const x = pivot + offset;
-    result[hovered + distance] = rightBound >= pivot ? Math.min(rightBound, x) : x;
+    positions[hovered + distance] = rightBound >= pivot ? Math.min(rightBound, x) : x;
   }
 
   // ITEM-6b: the hovered card is pinned — never moves, not even by rounding.
-  result[hovered] = pivot;
-  return result;
+  positions[hovered] = pivot;
+
+  const deltas = positions.map((x, index) =>
+    index === hovered ? 0 : round2(x - basePositions[index]),
+  );
+  let maxAbsDelta = 0;
+  for (const delta of deltas) maxAbsDelta = Math.max(maxAbsDelta, Math.abs(delta));
+
+  return {
+    positions,
+    deltas,
+    hoveredIndex: hovered,
+    isParted: maxAbsDelta > 0,
+    maxAbsDelta: round2(maxAbsDelta),
+  };
+}
+
+/**
+ * ITEM-6a: backward-compatible position-only view of
+ * [[computePartedCardLayout]]. Returns the very same `basePositions` array when
+ * parting is inactive.
+ */
+export function computePartedCardPositions(
+  basePositions: readonly number[],
+  cardWidth: number,
+  maximalBoxWidth: number,
+  hoveredIndex: number | null,
+  minVisibleStripPx: number = DEFAULT_MIN_VISIBLE_INDEX_STRIP_PX,
+): readonly number[] {
+  return computePartedCardLayout(
+    basePositions,
+    cardWidth,
+    maximalBoxWidth,
+    hoveredIndex,
+    minVisibleStripPx,
+  ).positions;
 }
 
 export interface HandContourOptions {
