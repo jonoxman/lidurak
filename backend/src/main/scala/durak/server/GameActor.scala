@@ -53,23 +53,31 @@ object GameActor:
   /** Grace period a defender with no legal defense gets before auto-surrender. */
   val DefenselessGraceSeconds: Int = 3
 
-  /** Shortest pause a BasicBot takes before it plays, so moves stay readable. */
-  val DefaultBotDelayMin: FiniteDuration = 500.millis
+  /**
+   * Shortest pause a BasicBot takes before it plays, so moves stay readable.
+   * ITEM-NEW3 cut every bot pause by 75%: `500 ms -> 125 ms`.
+   */
+  val DefaultBotDelayMin: FiniteDuration = 125.millis
 
-  /** Longest pause a BasicBot takes before it plays. */
-  val DefaultBotDelayMax: FiniteDuration = 2000.millis
+  /**
+   * Longest pause a BasicBot takes before it plays. ITEM-NEW3 cut every bot
+   * pause by 75%: `2000 ms -> 500 ms`.
+   */
+  val DefaultBotDelayMax: FiniteDuration = 500.millis
 
   /**
    * Pause a RandomBot takes between moves: fast enough to feel live, slow enough
    * that each move is visible instead of the whole match resolving instantly.
+   * ITEM-NEW3 cut every bot pause by 75%: `200 ms -> 50 ms`.
    */
-  val DefaultRandomBotDelay: FiniteDuration = 200.millis
+  val DefaultRandomBotDelay: FiniteDuration = 50.millis
 
   /**
    * One-off pause before the very first bot move of a match. It gives a reviewer
    * time to click the game link and open the table between two RandomBots.
+   * ITEM-NEW3 cut every bot pause by 75%: `2 s -> 500 ms`.
    */
-  val DefaultInitialBotStartDelay: FiniteDuration = 2.seconds
+  val DefaultInitialBotStartDelay: FiniteDuration = 500.millis
 
   /**
    * How long the server waits before auto-passing players who hold no legal
@@ -663,11 +671,11 @@ object GameActor:
 
   /**
    * The pause before `botId`'s next move. Before the match's first recorded
-   * move the room's `initialBotStartDelay` (`2 s` by default) is used, so a
-   * reviewer can click the game link and open the table between two bots
-   * (ITEM-9b). Afterwards a `"randomBot"` waits only `room.randomBotDelay`
-   * (`200 ms` by default, ITEM-9a), while a `"basicBot"` keeps its human-like
-   * `500 ms`–`2000 ms` window.
+   * move the room's `initialBotStartDelay` (`500 ms` by default, ITEM-NEW3) is
+   * used, so a reviewer can click the game link and open the table between two
+   * bots (ITEM-9b). Afterwards a `"randomBot"` waits only `room.randomBotDelay`
+   * (`50 ms` by default, ITEM-9a/ITEM-NEW3), while a `"basicBot"` keeps its
+   * human-like `125 ms`–`500 ms` window (ITEM-NEW3).
    */
   def botPause(room: GameRoom, state: GameState, botId: String): IO[FiniteDuration] =
     val moveDelay = botDelayFor(room, state, botId).getOrElse(Duration.Zero)
@@ -686,9 +694,9 @@ object GameActor:
   /**
    * The per-move pause of a bot seat: a `"randomBot"` waits the room's
    * `randomBotDelay` (fast, but never instant, ITEM-9a), a `"basicBot"` keeps
-   * the room's human-like pause in `minBotDelay..maxBotDelay` (`500 ms`–
-   * `2000 ms` unless the room was constructed with other bounds), and a human or
-   * unknown seat has no bot pause at all.
+   * the room's human-like pause in `minBotDelay..maxBotDelay` (`125 ms`–
+   * `500 ms` unless the room was constructed with other bounds, ITEM-NEW3), and
+   * a human or unknown seat has no bot pause at all.
    */
   def botDelayFor(room: GameRoom, state: GameState, botId: String): Option[FiniteDuration] =
     botSeatType(state, botId) match
