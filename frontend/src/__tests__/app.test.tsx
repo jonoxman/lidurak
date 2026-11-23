@@ -200,7 +200,15 @@ describe('T-90 semantic feature color system', () => {
     // Trump / redirect / clock tokens.
     expect(cssRule(tableCss, ':root')).toContain('--trump-accent: #f59e0b');
     expect(cssRule(tableCss, ":root[data-theme='light']")).toContain('--trump-accent: #d4943a');
-    expect(cssRule(tableCss, '.card-slot.trump')).toContain('var(--trump-accent)');
+    // T-96: the slot itself is border-free (the zero-width border only keeps
+    // the accent token) and the inner face owns the single 2px gold ring, so
+    // every trump card measures exactly 100x140.
+    expect(cssRule(tableCss, '.card-slot.trump')).toContain(
+      'border: 0 solid var(--trump-accent)',
+    );
+    expect(cssRule(tableCss, '.playing-card.trump-card')).toContain(
+      'border: 2px solid var(--trump-border, #f59e0b)',
+    );
     expect(cssRule(tableCss, '.trump-badge')).toContain('var(--trump-border)');
     expect(cssRule(tableCss, ':root')).toContain('--redirect-accent: #a855f7');
     expect(cssRule(tableCss, ":root[data-theme='light']")).toContain('--redirect-accent: #a375e6');
