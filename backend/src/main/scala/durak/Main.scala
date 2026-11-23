@@ -41,19 +41,44 @@ object Main extends IOApp.Simple:
         .withIdleTimeout(IdleTimeout)
         .withHttpWebSocketApp { ws =>
           given WebSocketBuilder2[IO] = ws
-          val local = GameRoutes.routes(manager)
-          val multiplayer = MultiplayerRoutes.routes(sessions, rooms, quickPairing)
-          val app =
-            sharedGameCreation(local, multiplayer) <+>
-              local <+>
-              SessionRoutes.routes(sessions) <+>
-              QaPresetRoutes.routes(sessions, rooms)
-          app.orNotFound
+          httpApp(
+            local = GameRoutes.routes(manager),
+            multiplayer = MultiplayerRoutes.routes(sessions, rooms, quickPairing),
+            sessions = SessionRoutes.routes(sessions),
+            presets = QaPresetRoutes.routes(sessions, rooms)
+          ).orNotFound
         }
         .build
     yield server).use { _ =>
       IO.println("Durak server running on 0.0.0.0:8080") *> IO.never
     }
+
+  /**
+   * The complete route tree of the server: every M1 router and every M2 router,
+   * side by side.
+   *
+   * `multiplayer` is mounted in its own right, not only through the
+   * `POST /api/games` dispatcher, so `/api/lobby`, `/api/games/:gameId`,
+   * `/api/games/:gameId/join|leave`, `/api/quick-pair` and both WebSockets are
+   * served by the running app.
+   *
+   * `local` comes first among the routers proper because `GameRoutes` is the
+   * legacy surface for local/bot tables. The only path both milestones share is
+   * `POST /api/games`, which `sharedGameCreation` resolves before either router
+   * sees it; every other M1 path (`/api/games/:gameId/view`, `/ws/games/…/:seat`)
+   * is more specific than its M2 neighbour, so neither shadows the other.
+   */
+  private[durak] def httpApp(
+      local: HttpRoutes[IO],
+      multiplayer: HttpRoutes[IO],
+      sessions: HttpRoutes[IO],
+      presets: HttpRoutes[IO]
+  ): HttpRoutes[IO] =
+    sharedGameCreation(local, multiplayer) <+>
+      local <+>
+      multiplayer <+>
+      sessions <+>
+      presets
 
   /**
    * `POST /api/games` predates M2 and still creates the local/bot table of the

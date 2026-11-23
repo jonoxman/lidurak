@@ -1,18 +1,25 @@
 package durak.http
 
-import cats.effect.IO
+import cats.effect.{Fiber, IO}
+import cats.effect.std.Queue
+import cats.effect.syntax.all.*
 import cats.effect.unsafe.implicits.global
 import cats.syntax.all.*
+import durak.engine.JsonCodecs.given
 import durak.lobby.QuickPairingService
-import durak.protocol.WsServerMessage
+import durak.protocol.{PlayerGameView, WsServerMessage}
 import durak.rooms.RoomManager
-import durak.session.{SessionCookie, SessionStore}
+import durak.server.{GameManager, GameRoutes}
+import durak.session.{SessionCookie, SessionRoutes, SessionStore}
+import fs2.Stream
 import io.circe.{Json, parser}
 import io.circe.syntax.*
 import org.http4s.*
 import org.http4s.circe.CirceEntityDecoder.*
 import org.http4s.circe.CirceEntityEncoder.*
 import org.http4s.headers.`Content-Type`
+import org.http4s.server.websocket.WebSocketBuilder2
+import org.http4s.websocket.WebSocketFrame
 
 import scala.concurrent.duration.*
 
@@ -465,4 +472,230 @@ class MultiplayerRoutesSpec extends munit.FunSuite:
       body = Some(parser.parse("""{"playerCount":7}""").getOrElse(fail("bad fixture")))
     )
     assertEquals(rejected.status, Status.BadRequest)
+  }
+
+  // --- Game WebSocket ------------------------------------------------------
+
+  private final case class LiveSocket(
+      socket: MultiplayerRoutes.GameSocket,
+      inbound: Queue[IO, WebSocketFrame],
+      initial: PlayerGameView,
+      inboundFiber: Fiber[IO, Throwable, Unit],
+      release: IO[Unit]
+  ):
+    def sendFrame(text: String): Unit =
+      inbound.offer(WebSocketFrame.Text(text)).unsafeRunSync()
+
+    def close(): Unit =
+      inboundFiber.cancel.unsafeRunSync()
+      release.unsafeRunSync()
+
+  /** Opens the exact socket the route opens and consumes its first frame. */
+  private def openSocket(h: Harness, gameId: String, viewerId: String): LiveSocket =
+    val (socket, release) =
+      MultiplayerRoutes.gameSocket(h.rooms, gameId, viewerId).allocated.unsafeRunSync()
+    val initial = socket.messages.take(1).compile.toList.timeout(5.seconds).unsafeRunSync().head
+    val inbound = Queue.unbounded[IO, WebSocketFrame].unsafeRunSync()
+    val fiber =
+      socket.handle(Stream.fromQueueUnterminated(inbound)).compile.drain.start.unsafeRunSync()
+    LiveSocket(socket, inbound, viewOf(initial), fiber, release)
+
+  private def nextMessages(
+      socket: MultiplayerRoutes.GameSocket,
+      count: Int = 1
+  ): List[WsServerMessage] =
+    socket.messages.take(count.toLong).compile.toList.timeout(5.seconds).unsafeRunSync()
+
+  private def viewOf(message: WsServerMessage): PlayerGameView = message match
+    case WsServerMessage.GameViewUpdate(view) => view
+    case other                               => fail(s"expected a game view update, got $other")
+
+  private def startedRoom(h: Harness): (String, String, String) =
+    val (gameId, hostToken) = createRoom(h, playerCount = 2)
+    val opponent = h.store.createGuest().unsafeRunSync()
+    assertEquals(send(h, Method.POST, s"/api/games/$gameId/join", Some(opponent.token)).status, Status.Ok)
+    val hostId = h.store
+      .findByToken(hostToken)
+      .unsafeRunSync()
+      .map(_.playerId)
+      .getOrElse(fail("host session disappeared"))
+    (gameId, hostToken, hostId)
+
+  test("the game socket projects the seat immediately and flips presence on close") {
+    val h = harness()
+    val (gameId, _, hostId) = startedRoom(h)
+
+    val live = openSocket(h, gameId, hostId)
+    assertEquals(live.initial.viewerId, hostId)
+    assertEquals(live.initial.viewerSeat, Some(0))
+    assert(live.initial.hand.nonEmpty, "a seated viewer must receive their own hand")
+    assertEquals(live.initial.seats.find(_.seatIndex == 0).map(_.isConnected), Some(true))
+
+    // Peers are told when this socket goes away, without any close handshake.
+    live.close()
+    val afterClose = h.rooms
+      .getRoomView(gameId, hostId)
+      .unsafeRunSync()
+      .getOrElse(fail("room disappeared"))
+    assertEquals(afterClose.seats.find(_.seatIndex == 0).map(_.isConnected), Some(false))
+    assertEquals(afterClose.hand, live.initial.hand)
+  }
+
+  test("the game socket answers Ping and rejects malformed payloads without dying") {
+    val h = harness()
+    val (gameId, _, hostId) = startedRoom(h)
+    val live = openSocket(h, gameId, hostId)
+
+    live.sendFrame("""{"type":"ping"}""")
+    assertEquals(nextMessages(live.socket).head, WsServerMessage.Pong)
+
+    // Malformed JSON is answered with INVALID_PAYLOAD, not a dead stream.
+    live.sendFrame("this is not json")
+    val malformed = nextMessages(live.socket).head match
+      case WsServerMessage.ActionRejected(code, message) => (code, message)
+      case other                                        => fail(s"expected a rejection, got $other")
+    assertEquals(malformed._1, MultiplayerRoutes.InvalidPayloadCode)
+    assert(malformed._2.nonEmpty)
+
+    // The socket still works after the rejection.
+    live.sendFrame("""{"type":"ping"}""")
+    assertEquals(nextMessages(live.socket).head, WsServerMessage.Pong)
+
+    // A well-formed frame of an unknown type is rejected the same way.
+    live.sendFrame("""{"type":"teleport"}""")
+    nextMessages(live.socket).head match
+      case WsServerMessage.ActionRejected(code, _) =>
+        assertEquals(code, MultiplayerRoutes.InvalidPayloadCode)
+      case other => fail(s"expected a rejection, got $other")
+
+    live.close()
+  }
+
+  test("the game socket rejects a spectator's action and leaves the game untouched") {
+    val h = harness()
+    val (gameId, _, _) = startedRoom(h)
+    val before = h.rooms.getRoom(gameId).unsafeRunSync().flatMap(_.gameState)
+
+    val live = openSocket(h, gameId, "nosy-spectator")
+    assertEquals(live.initial.viewerSeat, None)
+    assertEquals(live.initial.hand, Nil)
+    assertEquals(live.initial.seats.size, 2)
+
+    live.sendFrame("""{"type":"passTurn"}""")
+    nextMessages(live.socket).head match
+      case WsServerMessage.ActionRejected(code, message) =>
+        assertEquals(code, "UNAUTHORIZED")
+        assert(message.nonEmpty)
+      case other => fail(s"expected an unauthorized rejection, got $other")
+
+    assertEquals(h.rooms.getRoom(gameId).unsafeRunSync().flatMap(_.gameState), before)
+    live.close()
+  }
+
+  test("a seated player's action is applied and broadcast to every socket") {
+    val h = harness()
+    val (gameId, _, hostId) = startedRoom(h)
+    val state = h.rooms
+      .getRoom(gameId)
+      .unsafeRunSync()
+      .flatMap(_.gameState)
+      .getOrElse(fail("started room has no game state"))
+    val attackerId = state.players(state.attackerIdx).id
+    val attackerCard = state.players(state.attackerIdx).hand.head
+    // Open the spectator first, so the only frame it receives before the move
+    // is the attacker's own presence broadcast.
+    val spectator = openSocket(h, gameId, "watcher")
+    val attacker = openSocket(h, gameId, attackerId)
+
+    attacker.sendFrame(
+      s"""{"type":"playAttack","cards":[${attackerCard.asJson.noSpaces}]}"""
+    )
+
+    val attackerFrame = viewOf(nextMessages(attacker.socket).head)
+    assert(attackerFrame.tablePairs.nonEmpty, "the attacker's own frame shows the attack")
+    val spectatorFrame = viewOf(nextMessages(spectator.socket, 2).last)
+    assert(spectatorFrame.tablePairs.nonEmpty, "the spectator's frame follows the same table")
+    assertEquals(spectatorFrame.viewerSeat, None)
+    assertEquals(spectatorFrame.hand, Nil)
+
+    attacker.close()
+    spectator.close()
+  }
+
+  // --- Server wiring -------------------------------------------------------
+
+  test("Main.httpApp mounts the M1 and M2 routers side by side") {
+    val h = harness()
+    val manager = GameManager.create.unsafeRunSync()
+    val wsBuilder = WebSocketBuilder2[IO].unsafeRunSync()
+    val app = durak.Main.httpApp(
+      local = GameRoutes.restRoutes(manager),
+      multiplayer = MultiplayerRoutes.routes(h.store, h.rooms, h.quickPairing)(using wsBuilder),
+      sessions = SessionRoutes.routes(h.store),
+      presets = QaPresetRoutes.routes(h.store, h.rooms)
+    )
+
+    def sendApp(
+        method: Method,
+        path: String,
+        token: Option[String] = None,
+        body: Option[Json] = None
+    ): Response[IO] =
+      app.orNotFound(request(method, path, token, body)).unsafeRunSync()
+
+    // M2: the lobby mints the guest cookie on the first visit.
+    val lobby = sendApp(Method.GET, "/api/lobby")
+    assertEquals(lobby.status, Status.Ok)
+    assert(lobby.cookies.exists(_.name == SessionCookie.CookieName), "lobby did not set a cookie")
+
+    // M2: room creation, projection, joining and leaving are reachable.
+    val created = sendApp(Method.POST, "/api/games", body = Some(Json.obj("playerCount" -> 3.asJson)))
+    assertEquals(created.status, Status.Created)
+    val cookie = cookieOf(created)
+    val gameId = stringField(bodyOf(created), "gameId")
+    assertEquals(sendApp(Method.GET, s"/api/games/$gameId", Some(cookie)).status, Status.Ok)
+
+    val joiner = h.store.createGuest().unsafeRunSync()
+    assertEquals(sendApp(Method.POST, s"/api/games/$gameId/join", Some(joiner.token)).status, Status.Ok)
+    assertEquals(sendApp(Method.POST, s"/api/games/$gameId/leave", Some(joiner.token)).status, Status.NoContent)
+
+    // M2: quick pairing, its cancellation and the QA presets.
+    assertEquals(
+      sendApp(
+        Method.POST,
+        "/api/quick-pair",
+        Some(cookie),
+        Some(Json.obj("playerCount" -> 3.asJson))
+      ).status,
+      Status.Ok
+    )
+    assertEquals(sendApp(Method.DELETE, "/api/quick-pair", Some(cookie)).status, Status.NoContent)
+    assertEquals(sendApp(Method.POST, "/api/qa/presets/seed-lobby").status, Status.Ok)
+
+    // M1: the legacy local/bot creation still lands on the GameRoutes router.
+    val legacy = sendApp(
+      Method.POST,
+      "/api/games",
+      body = Some(
+        Json.obj(
+          "playerCount" -> 2.asJson,
+          "playerNames" -> List("Alice", "Bob").asJson
+        )
+      )
+    )
+    assertEquals(legacy.status, Status.Ok)
+    val legacyBody = bodyOf(legacy)
+    assert(legacyBody.hcursor.downField("players").focus.isDefined, legacyBody.noSpaces)
+    assert(legacyBody.noSpaces.contains("\"playerTypes\""), legacyBody.noSpaces)
+    val legacyId = stringField(legacyBody, "gameId")
+
+    // M1: its own view route and the M1 session routes are still mounted.
+    assertEquals(sendApp(Method.GET, s"/api/games/$legacyId/view?player=p0").status, Status.Ok)
+    assertEquals(sendApp(Method.GET, "/api/session").status, Status.Ok)
+
+    // Both WebSocket routes are mounted: the standalone builder answers a
+    // non-upgrade GET with its 501 default, which only a matched WS route can
+    // produce, and an unknown game socket is a clean 404.
+    assertEquals(sendApp(Method.GET, "/ws/lobby").status, Status.NotImplemented)
+    assertEquals(sendApp(Method.GET, "/ws/games/doesNotEx").status, Status.NotFound)
   }
