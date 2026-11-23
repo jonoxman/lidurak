@@ -220,7 +220,10 @@ describe('GamePage', () => {
 
     expect(wrapper.isConnected).toBe(true);
     expect(wrapper.getAttribute('data-dragging')).toBe('true');
-    expect(wrapper.style.transform).toBe('translate3d(60px, 30px, 0)');
+    // ITEM-6b: the first small-hand slot carries a 32px runway, so the
+    // transform is relative to that slot (60 - 32 = 28) while the rendered
+    // card still tracks the pointer exactly.
+    expect(wrapper.style.transform).toBe('translate3d(28px, 30px, 0)');
     expect(wrapper.style.opacity === '' || wrapper.style.opacity === '1').toBe(true);
     expect(wrapper.querySelector('.card-slot')).not.toBeNull();
     fireEvent.mouseUp(document, { clientX: 70, clientY: 50 });

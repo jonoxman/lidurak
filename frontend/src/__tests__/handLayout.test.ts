@@ -9,9 +9,13 @@ import {
   HAND_CONTOUR_CORNER_RADIUS,
   HAND_CONTOUR_PADDING,
   HAND_MIN_OVERLAP_RATIO,
+  HAND_SMALL_HAND_MAX_CARDS,
+  HAND_SMALL_HAND_OVERLAP_RATIO,
+  HAND_SMALL_HAND_PARTING_PAD_RATIO,
   SELECTED_LIFT_PX,
   buildHandContourPath,
   computeHandLayout,
+  computePartedCardLayout,
   computePartedCardPositions,
   getCardVerticalLiftPx,
   type CardRect,
@@ -24,7 +28,10 @@ const CARD_HEIGHT = HAND_BASE_CARD_HEIGHT; // 140
 const BOX = 632; // a 640px hand column minus the 4px contour padding each side
 const STRIP = DEFAULT_MIN_VISIBLE_INDEX_STRIP_PX; // 36
 const MIN_STEP = CARD_WIDTH * (1 - HAND_MIN_OVERLAP_RATIO); // 80
-const DEFAULT_SIX_CARD_BOX = CARD_WIDTH + 5 * MIN_STEP; // 500
+// ITEM-6b: small hands rest slightly past the minimum overlap.
+const SMALL_STEP = CARD_WIDTH * (1 - HAND_SMALL_HAND_OVERLAP_RATIO); // 64
+const SMALL_PAD = CARD_WIDTH * HAND_SMALL_HAND_PARTING_PAD_RATIO; // 32
+const DEFAULT_SIX_CARD_BOX = CARD_WIDTH + 5 * SMALL_STEP; // 420
 const MAX_ALLOWABLE_OVERLAP_RATIO = 1 - STRIP / CARD_WIDTH; // 0.64
 
 /** End points (absolute M/L/A targets) of a path built by this module. */
@@ -118,13 +125,13 @@ describe('T-90-feedback-20261122_171451-3 ITEM-5b: Option B box progression', ()
     expect(layout.isSuperCompressed).toBe(false);
   });
 
-  it('fills exactly the default six-card box at the minimum overlap', () => {
+  it('fills exactly the default six-card box at the small-hand overlap', () => {
     const layout = layoutFor(6);
     expect(layout.defaultSixCardBoxWidth).toBe(DEFAULT_SIX_CARD_BOX);
     expect(layout.totalWidth).toBe(DEFAULT_SIX_CARD_BOX);
-    expect(layout.step).toBeCloseTo(MIN_STEP, 5);
-    expect(layout.overlapRatio).toBeCloseTo(HAND_MIN_OVERLAP_RATIO, 5);
-    expect(layout.cardPositions).toEqual([0, 80, 160, 240, 320, 400]);
+    expect(layout.step).toBeCloseTo(SMALL_STEP, 5);
+    expect(layout.overlapRatio).toBeCloseTo(HAND_SMALL_HAND_OVERLAP_RATIO, 5);
+    expect(layout.cardPositions).toEqual([0, 64, 128, 192, 256, 320]);
     expect(layout.isSuperCompressed).toBe(false);
   });
 
@@ -273,10 +280,191 @@ describe('T-90-feedback-20261122_171451-3 ITEM-6c: hover-parting guards', () => 
     expect(computePartedCardPositions(base, CARD_WIDTH, BOX, 2.5)).toBe(base);
   });
 
-  it('leaves a two-card hand unchanged (no room to part)', () => {
-    const base = [0, MIN_STEP];
-    const parted = computePartedCardPositions(base, CARD_WIDTH, BOX, 0);
-    expect(Array.from(parted)).toEqual(base);
+  it('gives a two-card hand real parting room on both sides', () => {
+    const base = layoutFor(2).cardPositions;
+    const restingStep = base[1] - base[0];
+    for (const hovered of [0, 1]) {
+      const parted = computePartedCardPositions(base, CARD_WIDTH, BOX, hovered);
+      expect(parted[hovered]).toBe(base[hovered]);
+      expect(parted[1] - parted[0]).toBeGreaterThan(restingStep);
+    }
+  });
+});
+
+describe('T-90-feedback-20261122_193457-2 ITEM-6b: small-hand resting overlap', () => {
+  it('rests 2..6 cards slightly past the minimum overlap with the strip visible', () => {
+    expect(HAND_SMALL_HAND_MAX_CARDS).toBe(6);
+    expect(HAND_SMALL_HAND_OVERLAP_RATIO).toBeGreaterThan(HAND_MIN_OVERLAP_RATIO);
+    expect(SMALL_STEP).toBeGreaterThanOrEqual(STRIP);
+    expect(SMALL_STEP).toBeLessThan(MIN_STEP);
+
+    for (const cardCount of [2, 3, 4, 5, 6]) {
+      const layout = layoutFor(cardCount);
+      expect(layout.step).toBeCloseTo(SMALL_STEP, 5);
+      expect(layout.cardStep).toBeCloseTo(SMALL_STEP, 5);
+      expect(layout.overlap).toBeCloseTo(CARD_WIDTH - SMALL_STEP, 5);
+      expect(layout.overlapRatio).toBeCloseTo(HAND_SMALL_HAND_OVERLAP_RATIO, 5);
+      // The full-size `"10"` rank and enlarged suit stay uncovered.
+      expect(CARD_WIDTH - layout.overlap).toBeGreaterThanOrEqual(STRIP - EPS);
+      expect(layout.defaultSixCardBoxWidth).toBeCloseTo(DEFAULT_SIX_CARD_BOX, 5);
+      expect(layout.totalWidth).toBeLessThanOrEqual(DEFAULT_SIX_CARD_BOX + EPS);
+      for (let index = 1; index < cardCount; index += 1) {
+        expect(layout.cardPositions[index] - layout.cardPositions[index - 1]).toBeCloseTo(
+          SMALL_STEP,
+          5,
+        );
+      }
+      // Centred in the default box, leaving expansion runway on both edges.
+      const rowExtent = CARD_WIDTH + (cardCount - 1) * SMALL_STEP;
+      expect(layout.cardPositions[0]).toBeCloseTo(
+        (layout.totalWidth - rowExtent) / 2,
+        5,
+      );
+    }
+  });
+
+  it('centres smaller hands in the default box with the documented runway', () => {
+    for (const cardCount of [2, 3, 4, 5]) {
+      const layout = layoutFor(cardCount);
+      expect(layout.cardPositions[0]).toBeCloseTo(SMALL_PAD, 5);
+      expect(layout.totalWidth - (layout.cardPositions[cardCount - 1] + CARD_WIDTH)).toBeCloseTo(
+        SMALL_PAD,
+        5,
+      );
+    }
+    // Six cards fill the box exactly, so no inset is needed.
+    const six = layoutFor(6);
+    expect(six.cardPositions[0]).toBe(0);
+    expect(six.totalWidth).toBeCloseTo(DEFAULT_SIX_CARD_BOX, 5);
+  });
+
+  it('keeps medium and large hands unchanged by the small-hand rule', () => {
+    const fourteen = layoutFor(14);
+    expect(fourteen.step).toBeCloseTo((BOX - CARD_WIDTH) / 13, 1);
+    expect(fourteen.step).toBeGreaterThanOrEqual(STRIP - EPS);
+    expect(fourteen.cardPositions[0]).toBe(0);
+
+    const thirty = layoutFor(30);
+    expect(thirty.totalWidth).toBeCloseTo(BOX, 5);
+    expect(thirty.step).toBeLessThan(STRIP - EPS);
+    expect(thirty.cardPositions[0]).toBe(0);
+    expect(thirty.isSuperCompressed).toBe(true);
+  });
+
+  it('scales the small-hand resting step proportionally on mobile', () => {
+    const strip = (STRIP * 48) / 100;
+    const layout = computeHandLayout({
+      cardCount: 6,
+      containerWidth: 292,
+      baseCardWidth: 48,
+      baseCardHeight: 68,
+      minVisibleStripPx: strip,
+      maximalBoxWidth: 292,
+    });
+    expect(layout.cardWidth).toBe(48);
+    expect(layout.step).toBeCloseTo(48 * (1 - HAND_SMALL_HAND_OVERLAP_RATIO), 5);
+    expect(48 - layout.overlap).toBeGreaterThanOrEqual(strip - EPS);
+    expect(layout.totalWidth).toBeLessThanOrEqual(292 + EPS);
+  });
+
+  it('compresses a small hand inside a lane narrower than its default box', () => {
+    const narrow = layoutFor(6, 300, { maximalBoxWidth: 300 });
+    expect(narrow.step).toBeCloseTo((300 - CARD_WIDTH) / 5, 5);
+    expect(narrow.step).toBeGreaterThanOrEqual(STRIP - EPS);
+    expect(narrow.totalWidth).toBeLessThanOrEqual(300 + EPS);
+    expect(
+      narrow.cards[narrow.cards.length - 1].x + CARD_WIDTH,
+    ).toBeLessThanOrEqual(300 + EPS);
+  });
+});
+
+describe('T-90-feedback-20261122_193457-2 ITEM-6a/6b: parting math for every hand size', () => {
+  it('returns all-zero deltas for a 1-card hand and inactive hovers', () => {
+    for (const cardCount of [1, 2, 6, 14, 30]) {
+      const base = layoutFor(cardCount).cardPositions;
+      for (const hovered of [null, -1, cardCount, 2.5] as const) {
+        const layout = computePartedCardLayout(base, CARD_WIDTH, BOX, hovered);
+        expect(layout.positions).toBe(base);
+        expect(Array.from(layout.deltas)).toEqual(new Array(base.length).fill(0));
+        expect(layout.isParted).toBe(false);
+        expect(layout.maxAbsDelta).toBe(0);
+      }
+    }
+  });
+
+  it('keeps the hovered card strictly stationary for n = 1, 2, 3, 7, 14, 30', () => {
+    for (const cardCount of [1, 2, 3, 7, 14, 30]) {
+      const base = layoutFor(cardCount).cardPositions;
+      if (cardCount === 1) {
+        // ITEM-6a 1-card guard: a lone card can never part.
+        const single = computePartedCardLayout(base, CARD_WIDTH, BOX, 0);
+        expect(single.hoveredIndex).toBeNull();
+        expect(single.positions).toBe(base);
+        expect(single.deltas).toEqual([0]);
+        expect(single.isParted).toBe(false);
+        continue;
+      }
+      const indices = new Set([0, Math.floor((cardCount - 1) / 2), cardCount - 1]);
+      for (const hovered of indices) {
+        const layout = computePartedCardLayout(base, CARD_WIDTH, BOX, hovered);
+        expect(layout.hoveredIndex).toBe(hovered);
+        expect(layout.positions[hovered]).toBe(base[hovered]);
+        expect(layout.deltas[hovered]).toBe(0);
+        for (let index = 0; index < base.length; index += 1) {
+          expect(layout.deltas[index]).toBeCloseTo(
+            layout.positions[index] - base[index],
+            2,
+          );
+        }
+        expectOrderedPositions(layout.positions);
+      }
+    }
+  });
+
+  it('parts every hover in a 2..6-card hand (the ITEM-6b complaint)', () => {
+    for (const cardCount of [2, 3, 4, 5, 6]) {
+      const base = layoutFor(cardCount).cardPositions;
+      const restingStep = base[1] - base[0];
+      for (let hovered = 0; hovered < cardCount; hovered += 1) {
+        const parted = computePartedCardPositions(base, CARD_WIDTH, BOX, hovered);
+        expect(parted[hovered]).toBe(base[hovered]);
+        const leftGap = hovered > 0 ? parted[hovered] - parted[hovered - 1] : 0;
+        const rightGap =
+          hovered < cardCount - 1 ? parted[hovered + 1] - parted[hovered] : 0;
+        expect(Math.max(leftGap, rightGap)).toBeGreaterThan(restingStep);
+        expectOrderedPositions(parted);
+      }
+    }
+  });
+
+  it('reveals >= the index strip beside the hovered card on a 30-card hand', () => {
+    const base = layoutFor(30).cardPositions;
+    const restingStep = base[1] - base[0];
+    for (const hovered of [0, 15, 29]) {
+      const parted = computePartedCardPositions(base, CARD_WIDTH, BOX, hovered);
+      const gaps: number[] = [];
+      if (hovered > 0) gaps.push(parted[hovered] - parted[hovered - 1]);
+      if (hovered < 29) gaps.push(parted[hovered + 1] - parted[hovered]);
+      expect(Math.max(...gaps)).toBeGreaterThan(restingStep);
+      expect(Math.max(...gaps)).toBeGreaterThanOrEqual(STRIP - EPS);
+      expectOrderedPositions(parted);
+    }
+  });
+
+  it('keeps GPU deltas consistent and bounded on 14 and 30-card hands', () => {
+    for (const cardCount of [14, 30]) {
+      const base = layoutFor(cardCount).cardPositions;
+      for (let hovered = 0; hovered < cardCount; hovered += 2) {
+        const layout = computePartedCardLayout(base, CARD_WIDTH, BOX, hovered);
+        expect(layout.isParted).toBe(true);
+        expect(layout.maxAbsDelta).toBeGreaterThan(0);
+        for (let index = 0; index < cardCount; index += 1) {
+          expect(layout.positions[index]).toBeGreaterThanOrEqual(-EPS);
+          expect(layout.positions[index] + CARD_WIDTH).toBeLessThanOrEqual(BOX + EPS);
+          expect(Math.abs(layout.deltas[index])).toBeLessThanOrEqual(CARD_WIDTH);
+        }
+      }
+    }
   });
 });
 
@@ -526,8 +714,10 @@ describe('T-90-feedback-20261122_171451-3 ITEM-8: tight contour across lifted ti
     const contour = buildHandContourPath(layout.cards, { padding: 0, cornerRadius: 0 });
     expect(contour.isNonRectangular).toBe(false);
     expect(points(contour.pathD)).toHaveLength(4);
+    // The contour hugs the cards, so it ignores the small-hand runway and
+    // spans from the first card's left edge to the last card's right edge.
     expect(contour.viewBox.width).toBeCloseTo(
-      layout.cardPositions[4] + layout.cardWidth,
+      layout.cardPositions[4] + layout.cardWidth - layout.cardPositions[0],
       5,
     );
     expect(contour.viewBox.height).toBeCloseTo(layout.cardHeight, 5);

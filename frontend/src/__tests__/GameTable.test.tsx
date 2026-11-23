@@ -59,6 +59,10 @@ import {
 } from '../components/GameTable';
 import { ActionBar } from '../components/ActionBar';
 import { CARD_INDEX_STRIP_WIDTH_PX } from '../components/Card';
+import {
+  HAND_SMALL_HAND_OVERLAP_RATIO,
+  HAND_SMALL_HAND_PARTING_PAD_RATIO,
+} from '../utils/handLayout';
 import { DEFAULT_SETTINGS, setSettings } from '../state/settings';
 import type { CardData } from '../components/Card';
 import tableCss from '../styles/table.css?raw';
@@ -783,13 +787,14 @@ describe('single-row hand overlap', () => {
     rank: 'six',
   }));
 
-  it('keeps a hand that fits at the 20% minimum overlap', () => {
+  it('keeps a small hand at the Item 6b resting overlap', () => {
     const layout = handLayout(4, 720);
 
     expect(layout.hiddenLeft + layout.hiddenRight).toBe(0);
-    expect(layout.overlapRatio).toBeCloseTo(HAND_MIN_OVERLAP_RATIO, 5);
-    expect(layout.overlap).toBe(HAND_MIN_OVERLAP);
-    expect(handMargins(layout, 4)[1]).toBe(-HAND_MIN_OVERLAP);
+    expect(layout.overlapRatio).toBeCloseTo(HAND_SMALL_HAND_OVERLAP_RATIO, 5);
+    // Slightly larger than the 20% minimum, so hover parting has headroom.
+    expect(layout.overlap).toBeGreaterThan(HAND_MIN_OVERLAP);
+    expect(handMargins(layout, 4)[1]).toBe(-layout.overlap);
   });
 
   it('clamps the overlap into the 20%-80% band on a normal hand', () => {
@@ -1184,7 +1189,7 @@ describe('hand highlight geometry, redirect double-click and review mode', () =>
     return tableCss.slice(start, end);
   };
 
-  it('anchors the highlight from slot margins: first 0, the rest negative', () => {
+  it('anchors the highlight from slot margins: first at the runway, the rest negative', () => {
     renderSortableTable({ awaitingAttack: true });
 
     const highlight = screen.getByTestId('hand-turn-highlight') as HTMLElement;
@@ -1193,7 +1198,11 @@ describe('hand highlight geometry, redirect double-click and review mode', () =>
     ) as HTMLElement[];
     expect(slots).toHaveLength(sortableHand.length);
 
-    expect(slots[0].style.marginLeft).toBe('0px');
+    // ITEM-6b: the first small-hand slot carries the symmetric parting runway.
+    expect(parseFloat(slots[0].style.marginLeft)).toBeCloseTo(
+      HAND_CARD_WIDTH * HAND_SMALL_HAND_PARTING_PAD_RATIO,
+      5,
+    );
     for (const slot of slots.slice(1)) {
       expect(parseFloat(slot.style.marginLeft)).toBeLessThan(0);
     }
@@ -1641,7 +1650,11 @@ describe('feedback 7: tight glow, discard pile and reflection alignment', () => 
       expect(slot.style.marginRight).toBe('');
       expect(slot.style.padding).toBe('');
     }
-    expect(slots[0].style.marginLeft).toBe('0px');
+    // ITEM-6b: small hands keep a symmetric runway, not a zero first margin.
+    expect(parseFloat(slots[0].style.marginLeft)).toBeCloseTo(
+      HAND_CARD_WIDTH * HAND_SMALL_HAND_PARTING_PAD_RATIO,
+      5,
+    );
   });
 
   // --- ITEM-3b: glowing for every player able to throw in ---
@@ -3894,7 +3907,11 @@ describe('T-90-4: larger cards, aura containment, throw-in slot, hand reorder an
     // close the gap as if the card had been removed from the hand entirely.
     expect(handBox.getAttribute('data-gap-closed')).toBe('true');
     expect(wrappers[0].getAttribute('data-collapsed')).toBe('true');
-    expect(wrappers[0].style.marginLeft).toBe('0px');
+    // The dragged slot keeps the small-hand runway margin it started with.
+    expect(parseFloat(wrappers[0].style.marginLeft)).toBeCloseTo(
+      HAND_CARD_WIDTH * HAND_SMALL_HAND_PARTING_PAD_RATIO,
+      5,
+    );
     // The dragged card itself stays under the cursor; every other card left of
     // the insertion slot parts to the left.
     expect(wrappers.map((node) => node.getAttribute('data-part-direction'))).toEqual([
@@ -4230,12 +4247,11 @@ describe('T-90-feedback-20261104_195410-2: drag animation, pointer cursor, throw
       /\.hand-card-wrapper\s*{[^}]*width: var\(--hand-card-width, 100px\);[^}]*height: var\(--hand-card-height, 140px\);[^}]*flex: 0 0 var\(--hand-card-width, 100px\);/,
     );
 
-    // The box width is exactly `100 + (visibleCount - 1) * stride`.
+    // ITEM-6b: a small hand rests at the larger default overlap and is centred
+    // in its six-card box, so the reported row carries the parting runway.
     const layout = handLayout(3, 720, 0.5, HAND_CARD_WIDTH);
-    expect(layout.overlap).toBe(HAND_MIN_OVERLAP);
-    expect(rowWidth(layout, HAND_CARD_WIDTH)).toBe(
-      HAND_CARD_WIDTH + (layout.visibleCount - 1) * (HAND_CARD_WIDTH - layout.overlap),
-    );
+    expect(layout.overlap).toBeGreaterThan(HAND_MIN_OVERLAP);
+    expect(rowWidth(layout, HAND_CARD_WIDTH)).toBe(layout.totalWidth);
   });
 
   it('ITEM-13c: opponent mini-cards overlap by at least 10% of their own width', () => {
@@ -4782,8 +4798,11 @@ describe('T-90-feedback-20261105_221105-2: card size, hand overlap, contour and 
       expect(layout.stride).toBeGreaterThan(0);
     }
 
-    // A very wide column never parts the cards past the 20% overlap.
-    expect(handLayout(4, 2000).overlapRatio).toBeCloseTo(HAND_MIN_OVERLAP_RATIO, 5);
+    // A very wide column still uses the Item 6b small-hand resting overlap.
+    expect(handLayout(4, 2000).overlapRatio).toBeCloseTo(
+      HAND_SMALL_HAND_OVERLAP_RATIO,
+      5,
+    );
 
     render(
       <GameTable
@@ -4804,12 +4823,11 @@ describe('T-90-feedback-20261105_221105-2: card size, hand overlap, contour and 
       handLayout(3, 720).overlap,
       5,
     );
-    expect(Number(box.getAttribute('data-stride-px'))).toBe(
-      HAND_CARD_WIDTH - HAND_MIN_OVERLAP,
-    );
-    expect(Number(box.getAttribute('data-hand-width'))).toBe(
-      HAND_CARD_WIDTH + 2 * (HAND_CARD_WIDTH - HAND_MIN_OVERLAP),
-    );
+    const smallStep = HAND_CARD_WIDTH * (1 - HAND_SMALL_HAND_OVERLAP_RATIO);
+    expect(Number(box.getAttribute('data-stride-px'))).toBeCloseTo(smallStep, 5);
+    // Three cards centred in the four-hundred-and-twenty-pixel default box:
+    // a 32px runway each side around two 64px strides and the 100px card.
+    expect(Number(box.getAttribute('data-hand-width'))).toBe(292);
   });
 
   it('ITEM-2: wraps the hand tightly and distorts over raised cards', () => {
@@ -4836,7 +4854,7 @@ describe('T-90-feedback-20261105_221105-2: card size, hand overlap, contour and 
       Number(box.getAttribute('data-hand-width')),
     );
     expect(Number(contour.getAttribute('data-contour-width'))).toBe(
-      HAND_CARD_WIDTH + 2 * layout.stride,
+      layout.totalWidth,
     );
 
     // The raised middle card steps the outline up and back down tightly.
@@ -4892,7 +4910,10 @@ describe('T-90-feedback-20261105_221105-2: card size, hand overlap, contour and 
     expect(wrapper.style.opacity === '' || wrapper.style.opacity === '1').toBe(true);
     expect(wrapper.style.visibility).not.toBe('hidden');
     expect(wrapper.style.display).not.toBe('none');
-    expect(wrapper.style.transform).toBe('translate3d(120px, 40px, 0)');
+    // The card's own resting slot now carries the 32px small-hand runway, so
+    // the transform is relative to that slot (120 - 32 = 88). The rendered
+    // left edge still tracks the pointer exactly.
+    expect(wrapper.style.transform).toBe('translate3d(88px, 40px, 0)');
 
     const card = wrapper.querySelector('.card-slot') as HTMLElement;
     expect(card).not.toBeNull();
@@ -5025,7 +5046,8 @@ describe('T-90-feedback-20261105_221105-2: card size, hand overlap, contour and 
 
     const box = screen.getByTestId('hand-turn-highlight') as HTMLElement;
     vi.spyOn(box, 'getBoundingClientRect').mockReturnValue(fakeRect(300));
-    expect(Number(box.getAttribute('data-hand-width'))).toBe(260);
+    // Three cards: 32px runway + two 64px strides + the 100px card + 32px.
+    expect(Number(box.getAttribute('data-hand-width'))).toBe(292);
 
     fireEvent.mouseDown(screen.getByLabelText('six of spades'), {
       button: 0,
@@ -5035,23 +5057,22 @@ describe('T-90-feedback-20261105_221105-2: card size, hand overlap, contour and 
     fireEvent.mouseMove(document, { clientX: 400, clientY: 900 });
 
     // The dragged card floats under the pointer, so the hand (and the contour)
-    // wrap the compacted N-1 row of 100 + 80 = 180px.
+    // wrap the compacted two-card row: 32px runway + 164px + 32px = 228px.
     expect(box.getAttribute('data-gap-closed')).toBe('true');
-    expect(Number(box.getAttribute('data-hand-width'))).toBe(180);
+    expect(Number(box.getAttribute('data-hand-width'))).toBe(228);
     const contour = screen.getByTestId('hand-highlight-contour');
     const path = screen.getByTestId('hand-highlight-path');
-    expect(Number(contour.getAttribute('data-contour-width'))).toBe(180);
+    expect(Number(contour.getAttribute('data-contour-width'))).toBe(228);
     const d = path.getAttribute('d') ?? '';
     // The rounded Wave-1 path uses `L` / `A` corners instead of square `H` / `V`
-    // commands; its right edge still equals the SVG width in the contour's own
-    // coordinate space (2 * 4px padding).
+    // commands; its width is the two cards plus the 4px padding on each side.
     expect(d.length).toBeGreaterThan(0);
-    expect(d).toContain(String(180 + 8));
-    expect(Number(contour.getAttribute('width'))).toBe(180 + 8);
+    expect(d).toContain(String(164 + 8));
+    expect(Number(contour.getAttribute('width'))).toBe(164 + 8);
 
     fireEvent.mouseUp(document, { clientX: 400, clientY: 900 });
     expect(Number(screen.getByTestId('hand-turn-highlight').getAttribute('data-hand-width'))).toBe(
-      260,
+      292,
     );
   });
 
