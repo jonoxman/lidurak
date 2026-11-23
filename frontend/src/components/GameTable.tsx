@@ -1685,12 +1685,15 @@ export function GameTable({
   /**
    * Index of the hand card under a pointer event, or `null`.
    *
-   * T-96: the hit test is resolved from the RESTING row geometry, never from
-   * `elementFromPoint` / `closest()`. Parting moves the cards out from under a
-   * stationary cursor, so DOM hit-testing fed the transformed row back into the
-   * hover state and made the parting oscillate (7 backward jumps across the
-   * 30-card compressed preset). Resting geometry is monotonic by construction:
-   * a left-to-right sweep can only select the same card or the next one.
+   * T-96: the hit test is resolved from the LIVE rendered row geometry —
+   * `partedCardLayout.positions` while hover-parting runs, `baseCardPositions`
+   * otherwise — never from `elementFromPoint` / `closest()`. The rendered row is
+   * the only geometry whose exposed strip matches what the player sees: resting
+   * slots pushed a hovered card's right neighbours past their own resting edges,
+   * so a resting lookup selected the card after the strip under the pointer.
+   * Because parting is single-sided, the live row is still monotonic and stable:
+   * once card `j` is hovered, `positions[j] <= x < positions[j + 1]` holds, so a
+   * left-to-right sweep can only select the same card or the next one.
    */
   const handPointerIndex = (event: Event): number | null => {
     const pointer = event as MouseEvent;
@@ -1705,7 +1708,7 @@ export function GameTable({
       if (!Number.isFinite(pointer.clientX)) return null;
       return resolveHoveredCardIndex(
         pointer.clientX,
-        baseCardPositions,
+        renderedHoverPositionsRef.current,
         cardWidth,
         rect.left,
       );
@@ -2046,6 +2049,15 @@ export function GameTable({
       ),
     [basePositionsKey, cardWidth, maximalBoxWidth, partingActive, hoveredCardIndex],
   );
+  // T-96: the live, non-drag left edge of every card in the row currently
+  // rendered. Refreshed on every render so the synchronous leading-edge hit
+  // test in `handleHandPointerMove` and its trailing `requestAnimationFrame`
+  // callback always resolve against the cards the player actually sees, never
+  // a stale closure over the resting row.
+  const renderedHoverPositionsRef = useRef<readonly number[]>(baseCardPositions);
+  renderedHoverPositionsRef.current = partingActive
+    ? partedCardLayout.positions
+    : baseCardPositions;
   // T-90-feedback-20261123_020207-4 ITEM-NEW2: while a hand card is dragged, the
   // N - 1 remaining cards rest exactly where they would without it and part
   // around the live insertion slot. The solve only reruns when the slot (or the
@@ -2082,8 +2094,7 @@ export function GameTable({
           if (index === draggedCardIndex) return baseCardPositions[index] ?? 0;
           const remainingIndex = index > draggedCardIndex ? index - 1 : index;
           return dragParting.positions[remainingIndex] ?? baseCardPositions[index] ?? 0;
-        })
-      : partingActive
+        })          : partingActive
         ? partedCardLayout.positions
         : baseCardPositions;
   // ITEM-8: two vertical tiers — eligible cards rise halfway, selected cards

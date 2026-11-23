@@ -6357,6 +6357,50 @@ describe('T-96: re-drag reliability, selection lock and 30-card parting stabilit
     expect(zone.getAttribute('data-hovered-card-index')).toBe('16');
   });
 
+  it('T-96: hit-tests the live parted row so the exposed strip under the pointer wins', () => {
+    const view = renderHand(30);
+    const box = mockHandBox(HAND_FALLBACK_WIDTH);
+    const zone = document.querySelector('[data-zone="player-hand"]') as HTMLElement;
+    const cards = wrappers(view.container);
+    fireEvent.mouseLeave(zone);
+
+    const resting = cards.map((card) => Number(card.getAttribute('data-card-x')));
+    // `data-card-x` is the exact rendered left edge; `data-part-delta-x` is the
+    // parting displacement already folded into it.
+    const liveRow = () => cards.map((card) => Number(card.getAttribute('data-card-x')));
+
+    // Hover card 15: its right neighbours part rightward, pushing card 16's
+    // rendered left edge past card 17's resting slot.
+    fireEvent.mouseMove(box, { clientX: resting[15] + 1, clientY: 40 });
+    expect(zone.getAttribute('data-hovered-card-index')).toBe('15');
+    const after15 = liveRow();
+    expect(after15[16]).toBeGreaterThan(resting[17]);
+
+    // The strip under the pointer belongs to card 16, so card 16 must open. A
+    // resting lookup used to resolve this exact point to card 17.
+    fireEvent.mouseMove(box, { clientX: after15[16] + 5, clientY: 40 });
+    expect(zone.getAttribute('data-hovered-card-index')).toBe('16');
+
+    // Sweep into card 17's live left edge, then into the middle of the widened
+    // strip it exposes once it is the hovered card.
+    const after16 = liveRow();
+    fireEvent.mouseMove(box, { clientX: after16[17] + 1, clientY: 40 });
+    expect(zone.getAttribute('data-hovered-card-index')).toBe('17');
+
+    const after17 = liveRow();
+    const widenedMiddle = (after17[17] + after17[18]) / 2;
+    expect(widenedMiddle).toBeGreaterThan(resting[18]);
+    fireEvent.mouseMove(box, { clientX: widenedMiddle, clientY: 40 });
+    expect(zone.getAttribute('data-hovered-card-index')).toBe('17');
+
+    // Zero oscillation: repeated moves at the same and neighbouring coordinates
+    // keep the pinned hovered card selected.
+    for (const x of [widenedMiddle - 0.5, widenedMiddle, widenedMiddle + 0.5]) {
+      fireEvent.mouseMove(box, { clientX: x, clientY: 40 });
+      expect(zone.getAttribute('data-hovered-card-index')).toBe('17');
+    }
+  });
+
   it('coalesces hover tracking through one rAF pass and ignores unchanged indices', async () => {
     const view = renderHand(14);
     const box = mockHandBox(HAND_FALLBACK_WIDTH);
@@ -6380,6 +6424,10 @@ describe('T-96: re-drag reliability, selection lock and 30-card parting stabilit
     try {
       const resting = cards.map((card) => Number(card.getAttribute('data-card-x')));
       const at = (index: number) => resting[index] + 1;
+      // T-96: hover resolves against the live parted row, so aim at the strip
+      // each card is actually painted at after the previous commit.
+      const liveLeft = (index: number) =>
+        Number(cards[index].getAttribute('data-card-x'));
 
       // The first resolved index of a frame commits on the leading edge.
       fireEvent.mouseMove(box, { clientX: at(3), clientY: 40 });
@@ -6387,12 +6435,13 @@ describe('T-96: re-drag reliability, selection lock and 30-card parting stabilit
       expect(frames).toHaveLength(1);
 
       // Every further move in the same frame shares that single rAF pass.
-      fireEvent.mouseMove(box, { clientX: at(5), clientY: 40 });
-      fireEvent.mouseMove(box, { clientX: at(7), clientY: 40 });
+      fireEvent.mouseMove(box, { clientX: liveLeft(5) + 1, clientY: 40 });
+      fireEvent.mouseMove(box, { clientX: liveLeft(7) + 1, clientY: 40 });
       expect(frames).toHaveLength(1);
+      expect(zone.getAttribute('data-hovered-card-index')).toBe('7');
 
       // A move that still resolves to the same card does no work at all.
-      fireEvent.mouseMove(box, { clientX: at(7) + 0.5, clientY: 40 });
+      fireEvent.mouseMove(box, { clientX: liveLeft(7) + 0.5, clientY: 40 });
       expect(frames).toHaveLength(1);
       expect(zone.getAttribute('data-hovered-card-index')).toBe('7');
 
