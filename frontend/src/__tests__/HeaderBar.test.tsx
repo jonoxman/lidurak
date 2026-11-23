@@ -1029,6 +1029,185 @@ describe('T-90-feedback-4 light page background & inverse header gradient', () =
 });
 
 /**
+ * T-90-feedback-3: clicking anywhere outside the profile menu (including the
+ * page background and controls that stop propagation) dismisses the dropdown,
+ * while presses inside it or on its own trigger leave it alone.
+ */
+describe('T-90-feedback-3 profile menu outside-click dismissal', () => {
+  beforeEach(() => {
+    resetSettings();
+    window.localStorage.clear();
+  });
+
+  afterEach(() => {
+    cleanup();
+    resetSettings();
+    window.localStorage.clear();
+    vi.restoreAllMocks();
+  });
+
+  const profileMenu = () => screen.queryByRole('menu', { name: 'Profile menu' });
+
+  it('opens the dropdown and closes it when the page background is clicked', () => {
+    render(<HeaderBar />);
+    expect(profileMenu()).toBeNull();
+
+    openProfile();
+    expect(profileMenu()).not.toBeNull();
+
+    // The document body is entirely outside the header.
+    fireEvent.click(document.body);
+    expect(profileMenu()).toBeNull();
+
+    // A bare press (no click) also dismisses it.
+    openProfile();
+    expect(profileMenu()).not.toBeNull();
+    fireEvent.mouseDown(document.body);
+    expect(profileMenu()).toBeNull();
+  });
+
+  it('closes the dropdown when another header control is clicked', () => {
+    render(<HeaderBar />);
+
+    openProfile();
+    expect(profileMenu()).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'PLAY' }));
+    expect(profileMenu()).toBeNull();
+
+    // The brand link and a hover menu wrapper are outside the profile menu too.
+    openProfile();
+    fireEvent.click(screen.getByRole('link', { name: 'LIDURAK' }));
+    expect(profileMenu()).toBeNull();
+
+    openProfile();
+    fireEvent.click(screen.getByRole('button', { name: 'WATCH' }));
+    expect(profileMenu()).toBeNull();
+  });
+
+  it('closes the dropdown even when the outside element stops propagation', () => {
+    const { container } = render(<HeaderBar />);
+
+    const outside = document.createElement('button');
+    outside.textContent = 'felt table';
+    // A page control that swallows the bubbling click, like the game arena.
+    outside.addEventListener('pointerdown', (event) => event.stopPropagation());
+    outside.addEventListener('mousedown', (event) => event.stopPropagation());
+    outside.addEventListener('click', (event) => event.stopPropagation());
+    document.body.appendChild(outside);
+
+    openProfile();
+    expect(profileMenu()).not.toBeNull();
+
+    fireEvent.pointerDown(outside);
+    fireEvent.mouseDown(outside);
+    fireEvent.click(outside);
+
+    expect(profileMenu()).toBeNull();
+
+    outside.remove();
+    expect(container.querySelector('.header-profile')).not.toBeNull();
+  });
+
+  it('keeps the dropdown open for presses inside the profile menu', () => {
+    render(<HeaderBar />);
+    openProfile();
+
+    const menu = profileMenu()!;
+    // A row without a submenu does not change the menu state.
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Profile' }));
+    expect(profileMenu()).not.toBeNull();
+
+    // The connection tracker and the panel's own padding are inside as well.
+    fireEvent.mouseDown(screen.getByTestId('ping-value'));
+    fireEvent.click(document.querySelector('.connection-tracker') as HTMLElement);
+    fireEvent.mouseDown(menu);
+    expect(profileMenu()).not.toBeNull();
+
+    // Submenus stay open when their controls are used.
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Sound' }));
+    expect(screen.getByTestId('submenu-sound')).toBeTruthy();
+    fireEvent.click(screen.getByLabelText('Master volume'));
+    expect(screen.getByTestId('submenu-sound')).toBeTruthy();
+
+    // And the trigger still toggles it closed exactly once.
+    openProfile();
+    expect(profileMenu()).toBeNull();
+  });
+
+  it('toggles cleanly from the trigger without double-toggling', () => {
+    render(<HeaderBar />);
+    const trigger = screen.getByRole('button', { name: 'Account menu' });
+
+    fireEvent.pointerDown(trigger);
+    fireEvent.mouseDown(trigger);
+    fireEvent.click(trigger);
+    expect(profileMenu()).not.toBeNull();
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+
+    fireEvent.pointerDown(trigger);
+    fireEvent.mouseDown(trigger);
+    fireEvent.click(trigger);
+    expect(profileMenu()).toBeNull();
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+
+    fireEvent.click(trigger);
+    expect(profileMenu()).not.toBeNull();
+  });
+
+  it('closes the profile menu when a submenu was open', () => {
+    render(<HeaderBar />);
+    openSubmenu('Theme');
+    expect(screen.getByTestId('submenu-theme')).toBeTruthy();
+
+    fireEvent.click(document.body);
+
+    expect(profileMenu()).toBeNull();
+    expect(screen.queryByTestId('submenu-theme')).toBeNull();
+
+    // Reopening starts from the main list, not the stale submenu.
+    openProfile();
+    expect(within(profileMenu()!).getByRole('menuitem', { name: 'Profile' })).toBeTruthy();
+  });
+
+  it('listens in the capture phase and removes every listener on close/unmount', () => {
+    const addSpy = vi.spyOn(document, 'addEventListener');
+    const removeSpy = vi.spyOn(document, 'removeEventListener');
+
+    render(<HeaderBar />);
+    openProfile();
+
+    for (const type of ['pointerdown', 'mousedown', 'click']) {
+      const call = addSpy.mock.calls.find(([eventType]) => eventType === type);
+      expect(call, type).toBeTruthy();
+      expect(call![2], type).toEqual({ capture: true });
+    }
+
+    fireEvent.click(document.body);
+    expect(profileMenu()).toBeNull();
+
+    const removed = removeSpy.mock.calls.map(([eventType]) => eventType);
+    for (const type of ['pointerdown', 'mousedown', 'click']) {
+      expect(removed, type).toContain(type);
+    }
+
+    // Pressing outside again after the cleanup is a harmless no-op.
+    expect(() => fireEvent.click(document.body)).not.toThrow();
+
+    // Unmounting while open tears the listeners down without errors.
+    cleanup();
+    addSpy.mockClear();
+    removeSpy.mockClear();
+    const view = render(<HeaderBar />);
+    openProfile();
+    expect(addSpy.mock.calls.some(([eventType]) => eventType === 'pointerdown')).toBe(true);
+    expect(() => view.unmount()).not.toThrow();
+    expect(
+      removeSpy.mock.calls.some(([eventType]) => eventType === 'pointerdown'),
+    ).toBe(true);
+  });
+});
+
+/**
  * T-90-2 ITEM-1b / ITEM-4: the palette slider is labelled `Glow` and its live
  * value reaches the player-box / PLAYERS-row aura token.
  */
