@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   BASELINE_LIFT_PX,
   DEFAULT_MIN_VISIBLE_INDEX_STRIP_PX,
+  DRAG_INSERT_GAP_RATIO,
+  HAND_DRAG_PARTING_RADIUS,
   ELIGIBLE_LIFT_PX,
   FULL_SELECTED_LIFT_PX,
   HAND_BASE_CARD_HEIGHT,
@@ -16,12 +18,14 @@ import {
   SELECTED_LIFT_PX,
   buildHandContourPath,
   cardTranslate3d,
+  computeDragPartedCardPositions,
   computeHandLayout,
   computeLocalizedPartingDeltas,
   computePartedCardLayout,
   computePartedCardPositions,
   computeRestingCardPositions,
   getCardVerticalLiftPx,
+  resolveDragInsertIndex,
   resolveHoveredCardIndex,
   type CardRect,
   type HandLayoutResult,
@@ -914,5 +918,113 @@ describe('T-90-feedback-20261122_171451-3 ITEM-8: tight contour across lifted ti
     const contour = buildHandContourPath(layout.cards);
     expect(contour.pathD).not.toMatch(/NaN|Infinity|undefined/);
     expect(contour.isNonRectangular).toBe(true);
+  });
+});
+
+describe('T-90-feedback-20261123_020207-4 ITEM-NEW2: in-hand drag reorder parting', () => {
+  const dragRow = (cardCount: number, dragInsertIndex: number | null) =>
+    computeDragPartedCardPositions({
+      cardCount,
+      containerWidth: 640,
+      dragSourceIndex: 0,
+      dragInsertIndex,
+      maximalBoxWidth: BOX,
+    });
+
+  const gapAt = (positions: readonly number[], insert: number): number =>
+    insert === 0
+      ? positions[0]
+      : insert === positions.length
+        ? BOX - CARD_WIDTH - positions[positions.length - 1]
+        : positions[insert] - positions[insert - 1];
+
+  it('opens an unmistakable full-card gap at the left edge, the middle and the right edge', () => {
+    const remainingCount = 8; // a 9-card hand
+    for (const insert of [0, 3, remainingCount]) {
+      const layout = dragRow(remainingCount + 1, insert);
+      expect(layout.positions).toHaveLength(remainingCount);
+      expect(layout.deltas.some((delta) => delta !== 0)).toBe(true);
+      // A whole card fits into the parted slot (a hand already resting at a
+      // wider stride keeps its own, larger gap).
+      expect(layout.gapPx).toBeGreaterThanOrEqual(CARD_WIDTH - EPS);
+      expect(gapAt(layout.positions, insert)).toBeGreaterThanOrEqual(CARD_WIDTH - EPS);
+      // Strictly ordered and always inside the maximal hand lane.
+      expectOrderedPositions(layout.positions);
+    }
+  });
+
+  it('keeps every distant card of a 30-card hand exactly anchored', () => {
+    const layout = dragRow(30, 15);
+    expect(layout.positions).toHaveLength(29);
+    expect(layout.gapPx).toBeGreaterThanOrEqual(CARD_WIDTH - EPS);
+    expectOrderedPositions(layout.positions);
+
+    const moved = layout.deltas
+      .map((delta, index) => (delta !== 0 ? index : -1))
+      .filter((index) => index >= 0);
+    expect(moved.length).toBeGreaterThan(0);
+    // Only the local window either side of the insertion slot moves at all.
+    for (const index of moved) {
+      expect(Math.abs(index - 15)).toBeLessThanOrEqual(HAND_DRAG_PARTING_RADIUS);
+    }
+    for (const index of [0, 3, 10, 20, 25, 28]) {
+      expect(layout.deltas[index]).toBe(0);
+      expect(layout.positions[index]).toBe(layout.restingPositions[index]);
+    }
+  });
+
+  it('resolves a monotonic insertion slot from the pointer and closes outside the lane', () => {
+    const options = {
+      cardCount: 6,
+      containerWidth: 640,
+      dragSourceIndex: 2,
+      maximalBoxWidth: BOX,
+    };
+    expect(resolveDragInsertIndex({ ...options, pointerX: 0 })).toBe(0);
+    expect(resolveDragInsertIndex({ ...options, pointerX: 100 })).toBe(1);
+    expect(resolveDragInsertIndex({ ...options, pointerX: 250 })).toBe(3);
+    expect(
+      resolveDragInsertIndex({ ...options, pointerX: 10_000, tolerancePx: 40 }),
+    ).toBeNull();
+    expect(
+      resolveDragInsertIndex({ ...options, pointerX: -200, tolerancePx: 20 }),
+    ).toBeNull();
+    // The empty runway right of the row still targets the rightmost slot.
+    expect(
+      resolveDragInsertIndex({ ...options, pointerX: BOX - CARD_WIDTH / 2 }),
+    ).toBe(options.cardCount - 1);
+
+    let previous = -1;
+    for (let pointerX = 0; pointerX <= BOX; pointerX += 5) {
+      const index = resolveDragInsertIndex({ ...options, pointerX });
+      expect(index).not.toBeNull();
+      expect(index as number).toBeGreaterThanOrEqual(previous);
+      previous = index as number;
+    }
+    // A one-card hand has no reorder slot at all.
+    expect(
+      resolveDragInsertIndex({ ...options, cardCount: 1, pointerX: 100 }),
+    ).toBeNull();
+  });
+
+  it('closes the gap when no slot is active and never breaks tiny hands', () => {
+    const closed = dragRow(6, null);
+    expect(closed.deltas.every((delta) => delta === 0)).toBe(true);
+    expect(closed.positions).toEqual(closed.restingPositions);
+    expect(closed.isParted).toBe(false);
+    expect(closed.insertIndex).toBeNull();
+
+    const two = dragRow(2, 0);
+    expect(two.positions).toHaveLength(1);
+    expect(two.gapPx).toBeGreaterThanOrEqual(CARD_WIDTH - EPS);
+
+    const one = dragRow(1, 0);
+    expect(one.positions).toHaveLength(0);
+    expect(one.insertIndex).toBeNull();
+  });
+
+  it('documents the full-card target and the local parting window', () => {
+    expect(DRAG_INSERT_GAP_RATIO).toBe(1);
+    expect(HAND_DRAG_PARTING_RADIUS).toBe(3);
   });
 });

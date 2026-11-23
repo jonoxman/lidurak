@@ -767,6 +767,263 @@ export function cardTranslate3d(x: number, y: number): string {
 }
 
 /**
+ * T-90-feedback-20261123_020207-4 ITEM-NEW2: how wide the in-hand drag
+ * insertion slot opens, as a share of the card width. A full card fits into the
+ * parted slot (`100px` on desktop, `48px` on mobile), so there is never any
+ * doubt where the dragged card will land.
+ */
+export const DRAG_INSERT_GAP_RATIO = 1;
+/**
+ * ITEM-NEW2: how many neighbours on each side of the insertion slot may move.
+ * Matches the hover-parting radius, so the drag parting is equally local: a
+ * 30-card hand keeps every distant card exactly where it rests.
+ */
+export const HAND_DRAG_PARTING_RADIUS = 3;
+/** Smallest gap the parted row may leave between two moved cards, in px. */
+const DRAG_PARTING_MIN_GAP_PX = 1;
+
+/** Geometry shared by both in-hand drag reorder helpers. */
+export interface DragHandGeometryOptions {
+  /** Total hand size, including the card being dragged. */
+  cardCount: number;
+  /** Live width of `[data-zone="player-hand"]`. */
+  containerWidth: number;
+  /** Index of the dragged card in the full (N-card) hand order. */
+  dragSourceIndex: number;
+  /** Canonical card width: `100` desktop, `48` mobile. */
+  baseCardWidth?: number;
+  /** Canonical card height: `140` desktop, `68` mobile. */
+  baseCardHeight?: number;
+  /** The widest box the remaining hand may occupy (the Option B maximal box). */
+  maximalBoxWidth?: number;
+  /** Exposed left strip used by the resting row (`CARD_INDEX_STRIP_WIDTH_PX`). */
+  minVisibleStripPx?: number;
+}
+
+/** The resting row of the `N - 1` cards left once the dragged one is removed. */
+export interface DragHandRow {
+  cardCount: number;
+  remainingCount: number;
+  dragSourceIndex: number;
+  cardWidth: number;
+  /** Rightmost left edge the row may use (`maximalBoxWidth - cardWidth`). */
+  maximalLeftEdge: number;
+  restingPositions: readonly number[];
+}
+
+/**
+ * ITEM-NEW2: the resting row with the dragged card's old spot collapsed.
+ *
+ * The `N - 1` remaining cards are laid out exactly as if the dragged card had
+ * been removed from the hand, so its original slot closes and the rest of the
+ * row keeps the natural overlap the hand size demands. Both the live insertion
+ * resolver and the parting solver start from this row.
+ */
+function resolveDragHandRow(options: DragHandGeometryOptions): DragHandRow {
+  const cardCount = Math.max(0, Math.floor(finiteOr(options.cardCount, 0)));
+  const remainingCount = Math.max(0, cardCount - 1);
+  const layout = computeHandLayout({
+    cardCount: remainingCount,
+    containerWidth: finiteOr(options.containerWidth, 0),
+    baseCardWidth: options.baseCardWidth,
+    baseCardHeight: options.baseCardHeight,
+    maximalBoxWidth: options.maximalBoxWidth,
+    minVisibleStripPx: options.minVisibleStripPx,
+  });
+  const cardWidth =
+    layout.cardWidth > 0
+      ? layout.cardWidth
+      : Math.max(1, finiteOr(options.baseCardWidth, HAND_BASE_CARD_WIDTH));
+  return {
+    cardCount,
+    remainingCount,
+    dragSourceIndex: Math.max(
+      0,
+      Math.min(remainingCount, Math.floor(finiteOr(options.dragSourceIndex, 0))),
+    ),
+    cardWidth,
+    maximalLeftEdge: Math.max(0, layout.maximalBoxWidth - cardWidth),
+    restingPositions: layout.cardPositions,
+  };
+}
+
+export interface DragInsertOptions extends DragHandGeometryOptions {
+  /** Live pointer x in the hand lane's coordinate space (`clientX - laneLeft`). */
+  pointerX: number;
+  /** Extra px left/right of the lane that still count as inside the hand. */
+  tolerancePx?: number;
+}
+
+/**
+ * ITEM-NEW2: the insertion slot `0..remainingCount` the pointer is aiming at,
+ * or `null` when the pointer is outside the hand lane.
+ *
+ * The slot is resolved from the RESTING row of the remaining cards, never from
+ * the parted transforms: a left-to-right sweep is therefore strictly
+ * non-decreasing (`0 -> 1 -> ... -> remainingCount`), so the slot animation can
+ * never oscillate while the row moves under a stationary cursor. A pointer left
+ * of the first remaining card's centre resolves to `0`, and one past the last
+ * card's centre resolves to the rightmost slot.
+ */
+export function resolveDragInsertIndex(options: DragInsertOptions): number | null {
+  const row = resolveDragHandRow(options);
+  // A one-card hand has no reorder slot, and an empty hand has no row at all.
+  if (row.cardCount <= 1 || row.remainingCount === 0) return null;
+  const pointerX = finiteOr(options.pointerX, 0);
+  const tolerance = Math.max(0, finiteOr(options.tolerancePx, 0));
+  if (pointerX < -tolerance) return null;
+  // The lane, not the tight card row, is the drop surface: the empty runway
+  // right of a small hand still targets the rightmost slot.
+  if (pointerX > row.maximalLeftEdge + row.cardWidth + tolerance) return null;
+
+  let insertIndex = 0;
+  for (let index = 0; index < row.restingPositions.length; index += 1) {
+    if (row.restingPositions[index] + row.cardWidth / 2 <= pointerX) {
+      insertIndex = index + 1;
+    }
+  }
+  return clamp(insertIndex, 0, row.remainingCount);
+}
+
+export interface DragPartingOptions extends DragHandGeometryOptions {
+  /** Live insertion slot `0..remainingCount`, or `null` outside the hand. */
+  dragInsertIndex: number | null;
+}
+
+export interface DragPartedLayout {
+  /** Resting left edges of the `N - 1` remaining cards. */
+  restingPositions: readonly number[];
+  /** Parted left edges of the `N - 1` remaining cards. */
+  positions: readonly number[];
+  /** `positions[i] - restingPositions[i]`; exact `0` outside the local window. */
+  deltas: readonly number[];
+  /** Active insertion slot, or `null` when the row is closed. */
+  insertIndex: number | null;
+  /** Realised width of the insertion gap, in px (`0` when closed). */
+  gapPx: number;
+  isParted: boolean;
+  remainingCount: number;
+}
+
+/**
+ * ITEM-NEW2: pure drag-parting geometry for the remaining hand row.
+ *
+ * - The dragged card's old spot is excluded, so the `N - 1` cards rest in their
+ *   natural overlapping arrangement (see [[resolveDragHandRow]]).
+ * - At an active `dragInsertIndex` the row opens a gap of up to one full card
+ *   width at exactly that slot. Only [[HAND_DRAG_PARTING_RADIUS]] neighbours on
+ *   each side move; every distant card keeps an exact `0` delta, so a 30-card
+ *   compressed hand stays anchored.
+ * - Each side's opening is capped by the resting slack inside its local window,
+ *   which keeps the row strictly ordered and every card inside the lane
+ *   (`maximalBoxWidth - cardWidth`).
+ * - `dragInsertIndex === null` returns the resting row unchanged (every delta
+ *   `0`), which is what smoothly closes the gap when the pointer leaves the
+ *   hand.
+ */
+export function computeDragPartedCardPositions(
+  options: DragPartingOptions,
+): DragPartedLayout {
+  const row = resolveDragHandRow(options);
+  const resting = row.restingPositions;
+  const count = resting.length;
+  const positions = resting.slice();
+  const closed: DragPartedLayout = {
+    restingPositions: resting,
+    positions,
+    deltas: zeroDeltas(count),
+    insertIndex: null,
+    gapPx: 0,
+    isParted: false,
+    remainingCount: row.remainingCount,
+  };
+  if (count === 0) return closed;
+  const requested = options.dragInsertIndex;
+  if (requested === null || requested === undefined) return closed;
+  if (!Number.isFinite(requested)) return closed;
+  const insertIndex = clamp(Math.floor(requested), 0, count);
+
+  const cardWidth = row.cardWidth;
+  // The inserted card needs a full card width, but a hand already resting at a
+  // wider stride keeps its own (larger) gap rather than closing back up.
+  const targetGap = cardWidth * DRAG_INSERT_GAP_RATIO;
+  const laneRightEdge = row.maximalLeftEdge;
+  const laneRight = laneRightEdge + cardWidth;
+  const baseGap =
+    insertIndex === 0
+      ? Math.max(0, resting[0])
+      : insertIndex === count
+        ? Math.max(0, laneRightEdge - resting[count - 1])
+        : Math.max(0, resting[insertIndex] - resting[insertIndex - 1]);
+  const needed = Math.max(0, targetGap - baseGap);
+
+  const leftWindow = Math.min(HAND_DRAG_PARTING_RADIUS, insertIndex);
+  const rightWindow = Math.min(HAND_DRAG_PARTING_RADIUS, count - insertIndex);
+
+  // How far each side may move before its outermost moved card would cross the
+  // wall card (or the lane edge) and the row would lose its ordering.
+  let maxLeftOpen = 0;
+  if (leftWindow > 0) {
+    let minGap = Number.POSITIVE_INFINITY;
+    for (let index = insertIndex - leftWindow; index < insertIndex; index += 1) {
+      const leftEdge = index - 1 >= 0 ? resting[index - 1] : 0;
+      minGap = Math.min(minGap, resting[index] - leftEdge);
+    }
+    maxLeftOpen = leftWindow * Math.max(0, minGap - DRAG_PARTING_MIN_GAP_PX);
+  }
+  let maxRightOpen = 0;
+  if (rightWindow > 0) {
+    let minGap = Number.POSITIVE_INFINITY;
+    for (let index = insertIndex; index < insertIndex + rightWindow; index += 1) {
+      const rightEdge = index + 1 < count ? resting[index + 1] : laneRightEdge;
+      minGap = Math.min(minGap, rightEdge - resting[index]);
+    }
+    maxRightOpen = rightWindow * Math.max(0, minGap - DRAG_PARTING_MIN_GAP_PX);
+  }
+
+  // Split the opening between both sides, spilling any shortfall onto the side
+  // that still has room.
+  let leftOpen = Math.min(needed / 2, maxLeftOpen);
+  let rightOpen = Math.min(needed - leftOpen, maxRightOpen);
+  const leftover = needed - leftOpen - rightOpen;
+  if (leftover > 0) leftOpen += Math.min(leftover, maxLeftOpen - leftOpen);
+
+  if (leftWindow > 0) {
+    for (let distance = 1; distance <= leftWindow; distance += 1) {
+      const index = insertIndex - distance;
+      const share = (leftWindow - distance + 1) / leftWindow;
+      positions[index] = resting[index] - leftOpen * share;
+    }
+  }
+  if (rightWindow > 0) {
+    for (let distance = 1; distance <= rightWindow; distance += 1) {
+      const index = insertIndex + distance - 1;
+      const share = (rightWindow - distance + 1) / rightWindow;
+      positions[index] = resting[index] + rightOpen * share;
+    }
+  }
+
+  const rounded = positions.map((position) => round2(position));
+  const deltas = rounded.map((position, index) => round2(position - resting[index]));
+  const realisedGap =
+    insertIndex === 0
+      ? Math.max(0, rounded[0])
+      : insertIndex === count
+        ? Math.max(0, laneRightEdge - rounded[count - 1])
+        : Math.max(0, rounded[insertIndex] - rounded[insertIndex - 1]);
+
+  return {
+    restingPositions: resting,
+    positions: rounded,
+    deltas,
+    insertIndex,
+    gapPx: round2(Math.min(realisedGap, laneRight)),
+    isParted: deltas.some((delta) => delta !== 0),
+    remainingCount: row.remainingCount,
+  };
+}
+
+/**
  * T-96: resolves the hand card under a live pointer from the RESTING row.
  *
  * Hit-testing the animated DOM (`closest('.hand-card-wrapper')`) is unstable

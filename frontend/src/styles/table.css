@@ -2658,8 +2658,10 @@ body[data-dragging='true'] * {
 /* T-90-feedback-6 ITEM-3: while the preview floats under the cursor the source
    slot keeps its internal drag math but must never paint a second copy of the
    card. Higher specificity than the `opacity: 1` dragged-slot rule above. */
-.hand-cards[data-drag-preview='true'] .hand-slot[data-dragging='true'] {
+.hand-cards[data-drag-preview='true'] .hand-slot[data-dragging='true'],
+.hand-cards[data-drag-preview='true'] .hand-slot[data-drag-source='true'] {
   opacity: 0;
+  pointer-events: none;
   transition: none;
 }
 
@@ -2702,15 +2704,11 @@ body[data-dragging='true'] * {
   pointer-events: none;
 }
 
-.hand-card-wrapper[data-part-direction='left'] {
-  transform: translateX(-22px);
-}
-
-.hand-card-wrapper[data-part-direction='right'] {
-  transform: translateX(22px);
-}
-
-/* ITEM-6a/3: released over the felt, the hand stays closed with no gap. */
+/* T-90-feedback-20261123_020207-4 ITEM-NEW2: the parting itself is an exact
+   per-card `translate3d(...)` written inline from `handLayout.ts` (a full-card
+   insertion gap at the live slot, exact `0` for every distant card).
+   `data-part-direction` stays on the wrapper as a testable hint only — no
+   stylesheet may add a second, fixed offset to a card that must stay anchored. */
 .hand-card-wrapper[data-part-direction='none'] {
   transform: none;
 }
