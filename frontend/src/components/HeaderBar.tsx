@@ -567,6 +567,9 @@ export function HeaderBar({ pingMs = 24, serverDelayMs = 12 }: HeaderBarProps) {
   const [submenu, setSubmenu] = useState<SubmenuId | null>(null);
   const [barsUpdating, setBarsUpdating] = useState(false);
   const previousLevel = useRef<number | null>(null);
+  // T-90-feedback-3: wraps the profile trigger *and* its dropdown panel, so a
+  // press on either counts as inside and everything else closes the menu.
+  const profileMenuRef = useRef<HTMLDivElement | null>(null);
   // T-90-feedback-4: expose the page gradient direction for deterministic CSS
   // and tests — Light is the inverse ("lightening") of Dark ("darkening").
   const settings = useSettings();
@@ -577,6 +580,39 @@ export function HeaderBar({ pingMs = 24, serverDelayMs = 12 }: HeaderBarProps) {
   // Tier colour: green only for a good connection, yellow for two bars and red
   // for the last remaining bar, so the tracker reads at a glance.
   const barColor: BarColor = level >= 3 ? 'green' : level === 2 ? 'yellow' : 'red';
+
+  // T-90-feedback-3: clicking anywhere outside the profile menu closes it.
+  // The listeners run in the capture phase, so even page controls that call
+  // `stopPropagation()` on the way up (the felt table, cards, sidebars) still
+  // dismiss the dropdown.
+  useEffect(() => {
+    if (!profileOpen) return;
+
+    const closeProfileMenu = () => {
+      setProfileOpen(false);
+      setSubmenu(null);
+    };
+
+    const handleOutsidePress = (event: Event) => {
+      const container = profileMenuRef.current;
+      const target = event.target;
+      if (container && target instanceof Node && container.contains(target)) return;
+      closeProfileMenu();
+    };
+
+    const eventTypes = ['pointerdown', 'mousedown', 'click'] as const;
+    for (const type of eventTypes) {
+      document.addEventListener(type, handleOutsidePress as EventListener, { capture: true });
+    }
+
+    return () => {
+      for (const type of eventTypes) {
+        document.removeEventListener(type, handleOutsidePress as EventListener, {
+          capture: true,
+        });
+      }
+    };
+  }, [profileOpen]);
 
   // Bars animate once per quality-tier change; a steady connection stays still.
   useEffect(() => {
@@ -668,7 +704,7 @@ export function HeaderBar({ pingMs = 24, serverDelayMs = 12 }: HeaderBarProps) {
         })}
       </nav>
 
-      <div class="header-profile">
+      <div class="header-profile" ref={profileMenuRef}>
         <button
           type="button"
           class="profile-button"
