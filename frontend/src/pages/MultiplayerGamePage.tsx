@@ -85,6 +85,21 @@ export function connectionLabel(status: SocketStatus): string {
   }
 }
 
+/** How tightly the viewer's hand fans inside its single nowrap row. */
+export type HandDensity = 'normal' | 'compact' | 'dense' | 'packed';
+
+/**
+ * T-96 ITEM-3: the hand is always one horizontal row. A hand that outgrows its
+ * column fans (`margin-left` overlap in `lobby.css`) instead of wrapping onto a
+ * second row, which was what displaced `hand-card-5` ~60px below `hand-card-0`.
+ */
+export function handDensity(cardCount: number): HandDensity {
+  if (cardCount >= 13) return 'packed';
+  if (cardCount >= 9) return 'dense';
+  if (cardCount >= 6) return 'compact';
+  return 'normal';
+}
+
 /** Screen-reader label for one card. */
 export function cardLabel(card: CardData): string {
   const rank = RANK_LABELS[card.rank.toLowerCase()] ?? card.rank;
@@ -692,7 +707,12 @@ function ProjectedTable({
             ) : null}
           </div>
 
-          <div class="mp-hand" data-zone="player-hand" data-testid="player-hand">
+          <div
+            class="mp-hand"
+            data-zone="player-hand"
+            data-density={handDensity(view.hand.length)}
+            data-testid="player-hand"
+          >
             {seated ? (
               view.hand.map((card, index) => {
                 const isSelected = selection.includes(index);

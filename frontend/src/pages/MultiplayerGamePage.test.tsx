@@ -18,7 +18,8 @@ vi.mock('../api/gameSocket', () => ({
 import * as gameSocketApi from '../api/gameSocket';
 import * as lobbyApi from '../api/lobbyClient';
 import * as sessionApi from '../api/sessionClient';
-import { MultiplayerGamePage } from './MultiplayerGamePage';
+import { MultiplayerGamePage, handDensity } from './MultiplayerGamePage';
+import lobbyCss from '../styles/lobby.css?raw';
 import type {
   Card,
   PlayerGameView,
@@ -410,5 +411,79 @@ describe('MultiplayerGamePage projected table', () => {
       'Durak: Guest-AB12',
     );
     expect(screen.getByTestId('action-pass')).toHaveProperty('disabled', true);
+  });
+});
+
+describe('MultiplayerGamePage projected table layout', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    handlers = null;
+    sent = [];
+    order = [];
+    dispose = vi.fn();
+    installSocket();
+    getOrCreateSession.mockResolvedValue({
+      playerId: 'guest-abcd1234',
+      displayName: 'Guest-AB12',
+      isGuest: true,
+    });
+    // Six cards is the hand size that used to wrap onto a second row.
+    fetchGameView.mockResolvedValue(
+      makeView({
+        hand: [
+          CARD('hearts', 'six'),
+          CARD('spades', 'seven'),
+          CARD('clubs', 'eight'),
+          CARD('diamonds', 'nine'),
+          CARD('hearts', 'ten'),
+          CARD('spades', 'jack'),
+        ],
+      }),
+    );
+  });
+
+  it('fans a six-card hand inside one row instead of wrapping it', async () => {
+    renderPage();
+    await screen.findByTestId('projected-table');
+
+    const hand = screen.getByTestId('player-hand');
+    expect(hand.getAttribute('data-density')).toBe('compact');
+    const cards = screen.getAllByTestId(/^hand-card-/);
+    expect(cards).toHaveLength(6);
+    expect(cards.every((card) => hand.contains(card))).toBe(true);
+  });
+});
+
+describe('lobby.css projected table invariants', () => {
+  it('keeps the M2 arena, talon and hand ahead of the M1 data-zone rules', () => {
+    expect(lobbyCss).toContain(".multiplayer-page .mp-arena[data-zone='table-arena']");
+    expect(lobbyCss).toContain(
+      "html .multiplayer-page .mp-arena[data-zone='table-arena']::before",
+    );
+    expect(lobbyCss).toContain(".multiplayer-page .mp-deck[data-zone='table-deck']");
+    expect(lobbyCss).toContain(".multiplayer-page .mp-hand[data-zone='player-hand']");
+    expect(lobbyCss).toMatch(
+      /\.multiplayer-page \.mp-hand\[data-zone='player-hand'\] \{[^}]*flex-wrap: nowrap/,
+    );
+    // The 960px `.page` cap must not squeeze the projected table any more.
+    expect(lobbyCss).toMatch(/\.page\.multiplayer-page \{[^}]*max-width: 1440px/);
+  });
+
+  it('never uses freeform positioning', () => {
+    expect(lobbyCss).not.toMatch(/position:\s*(absolute|fixed)/);
+  });
+
+  it('draws a single selection ring, on the card itself', () => {
+    expect(lobbyCss).not.toMatch(/\.mp-hand-card\.selected \{[^}]*box-shadow/);
+  });
+
+  it('maps the hand length onto fanning tiers', () => {
+    expect(handDensity(0)).toBe('normal');
+    expect(handDensity(5)).toBe('normal');
+    expect(handDensity(6)).toBe('compact');
+    expect(handDensity(8)).toBe('compact');
+    expect(handDensity(9)).toBe('dense');
+    expect(handDensity(12)).toBe('dense');
+    expect(handDensity(13)).toBe('packed');
   });
 });

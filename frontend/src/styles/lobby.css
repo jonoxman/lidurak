@@ -7,7 +7,13 @@
  * `min-width: 0` so long names and preset labels wrap instead of overflowing.
  */
 
-.m2-lobby {
+/* T-96 ITEM-2: the M2 palette is shared by both M2 shells. `MultiplayerGamePage`
+   renders `.m2-button` and `.m2-status-text` too, so declaring the tokens on
+   `.m2-lobby` alone left every table action button with undefined custom
+   properties (dark `#14130f` text on a transparent background over the dark
+   `#262421` shell, and borderless secondary buttons). */
+.m2-lobby,
+.multiplayer-page {
   --m2-bg: #161512;
   --m2-surface: #262421;
   --m2-surface-raised: #2f2c28;
@@ -19,7 +25,9 @@
   --m2-green-soft: rgba(98, 153, 36, 0.16);
   --m2-red: #c33;
   --m2-red-soft: rgba(204, 51, 51, 0.16);
+}
 
+.m2-lobby {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 1rem;
@@ -222,7 +230,11 @@
   border-radius: 10px;
 }
 
-.m2-panel-title {
+/* T-96 ITEM-3: `.lobby-page h2` in `app.css` is `(0,1,1)` and paints
+   `--app-text-strong` (`#1e293b` under a light OS scheme). Scoping the panel
+   title to its shell raises it to `(0,2,0)`, so the M2 headings stay
+   `#f1f1f1` on `#262421`. */
+.m2-lobby .m2-panel-title {
   margin: 0;
   color: var(--m2-text-strong);
   font-size: 1.05rem;
@@ -269,6 +281,21 @@
   border-color: var(--m2-green);
   color: var(--m2-green);
   filter: none;
+}
+
+/* T-96 ITEM-2: inside the multiplayer shell the secondary actions
+   (`Back to Lobby`, `Redirect`, `Pass`, `Leave Room`) sit on the `#1e2923`
+   felt, so they need a real surface, a visible border and a light label. */
+.multiplayer-page .m2-button.secondary {
+  background: var(--m2-surface);
+  border-color: var(--m2-border);
+  color: var(--m2-text-strong);
+}
+
+.multiplayer-page .m2-button.secondary:hover:not(:disabled),
+.multiplayer-page .m2-button.secondary:focus-visible:not(:disabled) {
+  border-color: var(--m2-green);
+  color: var(--m2-green);
 }
 
 .m2-button:disabled {
@@ -1079,9 +1106,10 @@
   opacity: 0.85;
 }
 
-.mp-hand-card.selected {
-  box-shadow: 0 0 0 2px var(--mp-green);
-}
+/* T-96 ITEM-4: no selection ring on the stationary wrapper. The inner
+   `<PlayingCard selected>` already lifts the card by 8px and draws the only
+   ring (`0 0 0 3px`), so a second `box-shadow` here left two offset outlines
+   floating around one card. */
 
 .mp-spectator-hand {
   min-height: 4rem;
@@ -1156,6 +1184,101 @@
   font-size: 0.82rem;
 }
 
+/* --- T-96: the M2 arena wins over the M1 `[data-zone]` sheets ---------------
+   `MultiplayerGamePage` reuses the M1 `data-zone` contract, so `table.css` (loaded
+   by `LobbyPage`) and `app.css` also target these nodes: they forced the felt into
+   `1fr 2fr 1fr` / four fixed rows, painted a light `#e8ecf1` talon panel and
+   pushed the hand onto its own grid row. The scoped rules below add two classes
+   to every selector (three against one), so they always win while keeping the
+   M2 `minmax(0, 1fr)` single-column felt. No freeform positioning is used. */
+
+.multiplayer-page .mp-arena[data-zone='table-arena'] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(10rem, 1fr) auto;
+  gap: 0.85rem;
+  min-width: 0;
+  min-height: 0;
+  padding: 0.85rem;
+  background: var(--mp-felt);
+  border: 1px solid var(--mp-border);
+  border-radius: 12px;
+  overflow: visible;
+}
+
+/* `html [data-zone='table-arena']::before` paints the light M1 `--durak-felt`
+   over the arena; the M2 arena paints its own dark felt on the element itself. */
+html .multiplayer-page .mp-arena[data-zone='table-arena']::before {
+  content: none;
+  display: none;
+}
+
+/* The talon is a bare column on the felt, so the `#f1f1f1` count keeps its
+   contrast instead of sitting white-on-light-grey inside the M1 panel. */
+.multiplayer-page .mp-deck[data-zone='table-deck'] {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+
+/* The hand stays a single horizontal row (`Row 3, column 2`), beside the talon
+   and the action buttons, never on its own grid row. */
+.multiplayer-page .mp-hand[data-zone='player-hand'] {
+  grid-column: auto;
+  grid-row: auto;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 0.35rem;
+  row-gap: 0;
+  padding: 0;
+  min-width: 0;
+  min-height: 6rem;
+  overflow: visible;
+}
+
+/* A nowrap row can still overflow when a hand grows, so larger hands fan with a
+   negative `margin-left` overlap (the same technique the M1 hand uses) instead
+   of wrapping onto a second row, which is what displaced `hand-card-5` ~60px
+   below `hand-card-0`. */
+.multiplayer-page .mp-hand[data-density='compact'],
+.multiplayer-page .mp-hand[data-density='dense'],
+.multiplayer-page .mp-hand[data-density='packed'] {
+  gap: 0;
+}
+
+.multiplayer-page .mp-hand[data-density='compact'] > .mp-hand-card + .mp-hand-card {
+  margin-left: -2rem;
+}
+
+.multiplayer-page .mp-hand[data-density='dense'] > .mp-hand-card + .mp-hand-card {
+  margin-left: -2.6rem;
+}
+
+.multiplayer-page .mp-hand[data-density='packed'] > .mp-hand-card + .mp-hand-card {
+  margin-left: -3.1rem;
+}
+
+/* T-96 ITEM-1: `.page` caps every shell at `960px`. The multiplayer shell takes
+   the full desktop width (capped at `1440px`) from `1101px` up, which is where
+   the 3-column shell still applies, so `1280x800` gets a ~760px arena instead
+   of the 404px one that wrapped the 6-card hand. */
+@media (min-width: 1101px) {
+  .page.multiplayer-page {
+    width: min(1440px, calc(100% - 2rem));
+    max-width: 1440px;
+    margin-inline: auto;
+    padding: 1.25rem;
+  }
+}
+
 @media (max-width: 1100px) {
   .mp-shell {
     grid-template-columns: minmax(0, 1fr);
@@ -1165,9 +1288,22 @@
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
 
-  .mp-hand {
+  .multiplayer-page .mp-hand[data-zone='player-hand'] {
     grid-column: 1 / -1;
     order: 3;
+  }
+
+  /* The hand owns the whole width here, so it no longer needs to fan. */
+  .multiplayer-page .mp-hand[data-density='compact'] > .mp-hand-card + .mp-hand-card,
+  .multiplayer-page .mp-hand[data-density='dense'] > .mp-hand-card + .mp-hand-card,
+  .multiplayer-page .mp-hand[data-density='packed'] > .mp-hand-card + .mp-hand-card {
+    margin-left: 0;
+  }
+
+  .multiplayer-page .mp-hand[data-density='compact'],
+  .multiplayer-page .mp-hand[data-density='dense'],
+  .multiplayer-page .mp-hand[data-density='packed'] {
+    gap: 0.35rem;
   }
 }
 
@@ -1175,6 +1311,16 @@
   .multiplayer-page {
     padding: 0.75rem;
     gap: 0.75rem;
+  }
+
+  /* A phone cannot hold a full hand side by side, so every hand fans instead
+     of wrapping: one row, no vertical misalignment. */
+  .multiplayer-page .mp-hand[data-zone='player-hand'] > .mp-hand-card + .mp-hand-card {
+    margin-left: -1.5rem;
+  }
+
+  .multiplayer-page .mp-hand[data-zone='player-hand'] {
+    gap: 0;
   }
 
   .mp-seats-row {
@@ -1193,13 +1339,5 @@
   .mp-pair .card-slot {
     width: 48px;
     height: 68px;
-  }
-}
-
-@media (min-width: 1400px) {
-  .multiplayer-page {
-    max-width: 1500px;
-    margin-inline: auto;
-    padding: 1.25rem;
   }
 }
