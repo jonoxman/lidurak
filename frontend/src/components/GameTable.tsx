@@ -22,6 +22,7 @@ import {
   buildHandContourPath,
   computeHandLayout as computeUtilsHandLayout,
   computePartedCardPositions,
+  resolveHoveredCardIndex,
   getCardVerticalLiftPx,
   ELIGIBLE_LIFT_PX,
   SELECTED_LIFT_PX,
@@ -1463,6 +1464,10 @@ export function GameTable({
   // The inner card and its wrapper both receive the bubbled `dragstart`; this
   // marker makes sure only the first invocation opens the drag/preview.
   const nativeDragEventRef = useRef<Event | null>(null);
+  // T-96: `beginNativeDrag` cancels the browser's own drag, so the browser
+  // fires a `dragend` immediately afterwards. This marker keeps that synthetic
+  // end from tearing down the live pointer gesture (the re-drag failure).
+  const nativeDragCancelledRef = useRef(false);
   // T-90-feedback-5 ITEM-6a/6b: the hand card currently under the pointer, or
   // `null` when the pointer is outside the hand / a drag is running.
   const [hoveredCardIndex, setHoveredCardIndex] = useState<number | null>(null);
@@ -1500,8 +1505,34 @@ export function GameTable({
 
   const hand = sortHand(myHand, sortMode, trumpSuit);
 
-  /** Index of the hand card under a pointer event, or `null`. */
+  /**
+   * Index of the hand card under a pointer event, or `null`.
+   *
+   * T-96: the hit test is resolved from the RESTING row geometry, never from
+   * `elementFromPoint` / `closest()`. Parting moves the cards out from under a
+   * stationary cursor, so DOM hit-testing fed the transformed row back into the
+   * hover state and made the parting oscillate (7 backward jumps across the
+   * 30-card compressed preset). Resting geometry is monotonic by construction:
+   * a left-to-right sweep can only select the same card or the next one.
+   */
   const handPointerIndex = (event: Event): number | null => {
+    const pointer = event as MouseEvent;
+    const box = handRef.current;
+    const rect =
+      box && typeof box.getBoundingClientRect === 'function'
+        ? box.getBoundingClientRect()
+        : null;
+    // A laid-out hand box means the resting geometry is authoritative. jsdom
+    // reports a zero-sized box, which falls back to the event target below.
+    if (rect && (rect.width > 0 || rect.left !== 0 || rect.top !== 0)) {
+      if (!Number.isFinite(pointer.clientX)) return null;
+      return resolveHoveredCardIndex(
+        pointer.clientX,
+        baseCardPositions,
+        cardWidth,
+        rect.left,
+      );
+    }
     const target = event.target as HTMLElement | null;
     const wrapper = target?.closest?.('.hand-card-wrapper') as HTMLElement | null;
     if (!wrapper) return null;
@@ -2153,12 +2184,26 @@ export function GameTable({
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') cancel();
     };
+    // T-96: `beginNativeDrag` cancels the browser's drag, and the browser then
+    // fires `dragend` immediately. While a pointer gesture is live that end is
+    // synthetic: ignore it (resetting the once-per-event marker) so the preview
+    // and `.dragging` survive a re-drag. Every other `dragend` still cancels.
+    const onDragEnd = () => {
+      nativeDragEventRef.current = null;
+      const pointerGestureLive = pointerDragRef.current !== null;
+      if (nativeDragCancelledRef.current && pointerGestureLive) {
+        nativeDragCancelledRef.current = false;
+        return;
+      }
+      nativeDragCancelledRef.current = false;
+      cancel();
+    };
     // Capture phase: a nested drop zone calling `stopPropagation()` in its own
     // `dragover` / `drag` handler must not be able to freeze the preview.
     window.addEventListener('dragover', follow, true);
     window.addEventListener('drag', follow, true);
     window.addEventListener('keydown', onKeyDown);
-    document.addEventListener('dragend', cancel, true);
+    document.addEventListener('dragend', onDragEnd, true);
     // Drops are cleaned up in capture phase too, but the actual state clear is
     // deferred to a microtask so the target's React `onDrop` handler runs first
     // and can still read the dragged card. This guarantees dismissal even when
@@ -2172,7 +2217,7 @@ export function GameTable({
       window.removeEventListener('dragover', follow, true);
       window.removeEventListener('drag', follow, true);
       window.removeEventListener('keydown', onKeyDown);
-      document.removeEventListener('dragend', cancel, true);
+      document.removeEventListener('dragend', onDragEnd, true);
       document.removeEventListener('drop', cancelAfterDrop, true);
     };
   }, [dragCard]);
@@ -2378,6 +2423,9 @@ export function GameTable({
     // drag before the gesture reaches the card wrapper.)
     if (nativeDragEventRef.current === event) return;
     nativeDragEventRef.current = event;
+    // T-96: this handler suppresses the native drag, so the browser will fire
+    // `dragend` right away; remember that so the pointer gesture survives it.
+    nativeDragCancelledRef.current = true;
     const transfer = event.dataTransfer;
     if (transfer) {
       transfer.effectAllowed = 'move';
@@ -2393,9 +2441,12 @@ export function GameTable({
         }
       }
     }
-    // Pointer-driven gesture stays; native drag is suppressed after.
+    // Pointer-driven gesture stays; native drag is suppressed after. The
+    // pointer fallback is deliberately NOT cleared: on a re-drag the browser
+    // may fire a native `dragstart` (for example when an earlier gesture left a
+    // text selection behind) even though the card is not natively draggable,
+    // and the pointer gesture has to keep driving the centre-locked preview.
     event.preventDefault();
-    pointerDragRef.current = null;
     dragPreviewSizeRef.current = { width: cardWidth, height: cardHeight };
     const hasCoords =
       Number.isFinite(event.clientX) &&
@@ -2415,6 +2466,18 @@ export function GameTable({
   // non-primary buttons are ignored so they keep their read-only behaviour.
   const beginPointerDrag = (card: CardData) => (event: MouseEvent) => {
     if (reviewMode || event.button !== 0) return;
+    // T-96: never let the browser start a text selection (or a native drag of
+    // an existing selection) from the hand. Cancelling the mouse default keeps
+    // click / double-click and the pointer drag intact while making the table
+    // immune to the native blue selection that broke visual QA.
+    if (event.type === 'mousedown' && typeof event.preventDefault === 'function') {
+      event.preventDefault();
+    }
+    // A new press always clears the terminal state of the previous gesture, so
+    // a drag that ended off the hand can never block the next one.
+    suppressClickRef.current = false;
+    nativeDragEventRef.current = null;
+    nativeDragCancelledRef.current = false;
     const boxRect =
       handRef.current && typeof handRef.current.getBoundingClientRect === 'function'
         ? handRef.current.getBoundingClientRect()
@@ -3091,6 +3154,10 @@ export function GameTable({
                 draggable={false}
                 onDragStart={(event) => beginNativeDrag(card, event)}
                 onDragEnd={() => {
+                  // T-96: a completed native drag also resets the once-per-event
+                  // guard, so the very next drag always opens its own preview.
+                  nativeDragEventRef.current = null;
+                  nativeDragCancelledRef.current = false;
                   setDragCard(null);
                   setDragPointer(null);
                   setSnapZone(null);

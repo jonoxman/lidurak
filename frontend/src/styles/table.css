@@ -2576,6 +2576,18 @@ body[data-dragging='true'] *,
   cursor: pointer !important;
 }
 
+/* T-96: while a card is in flight nothing on the page may be text-selected —
+   not even the labels that are normally selectable (game id, display names,
+   How to Play). This freezes the blue native selection that a cancelled browser
+   drag used to paint across the sidebars and opponent seat boxes. */
+html[data-dragging='true'],
+html[data-dragging='true'] *,
+body[data-dragging='true'],
+body[data-dragging='true'] * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
 /* ITEM-6a: every other card parts around the insertion slot while a card is
    dragged through the hand. */
 .hand-card-wrapper {
@@ -2601,6 +2613,13 @@ body[data-dragging='true'] *,
     transform 200ms cubic-bezier(0.22, 1, 0.36, 1),
     margin-left 200ms cubic-bezier(0.22, 1, 0.36, 1),
     opacity 120ms ease;
+  /* T-96: the hand is a gesture surface, never a text surface. Suppressing the
+     selection (and the browser's native drag of a selection) here is what keeps
+     a re-drag from falling back to a blue text selection instead of the
+     centre-locked preview. */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
 }
 
 /* T-90-feedback-6 ITEM-3: the transient, center-locked drag preview — a
@@ -2611,6 +2630,9 @@ body[data-dragging='true'] *,
   position: fixed;
   left: 0;
   top: 0;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
   margin: 0;
   padding: 0;
   border: 0;

@@ -6097,3 +6097,185 @@ describe('T-95-audit-gap-20261122_203506-1: center-locked card dragging', () => 
     }
   });
 });
+
+/**
+ * T-96: the centre-locked drag preview must survive a re-drag (and the native
+ * `dragend` the browser fires when our own handler cancels its native drag),
+ * no native text selection may start from the hand, and hover-parting on the
+ * 30-card compressed preset must never reverse.
+ */
+describe('T-96: re-drag reliability, selection lock and 30-card parting stability', () => {
+  const bobSeat: OpponentSummary = {
+    id: 'p1',
+    name: 'Bob',
+    cardCount: 6,
+    hasPassed: false,
+    finishRank: null,
+  };
+
+  const makeHand = (count: number): CardData[] => {
+    const suits = ['spades', 'hearts', 'clubs', 'diamonds'];
+    const ranks = ['six', 'seven', 'eight', 'nine', 'ten', 'jack', 'queen', 'king', 'ace'];
+    return Array.from({ length: count }, (_, index) => ({
+      suit: suits[Math.floor(index / ranks.length) % suits.length],
+      rank: ranks[index % ranks.length],
+    }));
+  };
+
+  const renderHand = (count: number) =>
+    render(
+      <GameTable
+        myId="p0"
+        myHand={makeHand(count)}
+        opponents={[bobSeat]}
+        tablePairs={[]}
+        trumpSuit="diamonds"
+        defenderId="p1"
+        onReorderHand={vi.fn()}
+      />,
+    );
+
+  const wrappers = (container: Element): HTMLElement[] =>
+    Array.from(container.querySelectorAll('.hand-card-wrapper')) as HTMLElement[];
+
+  const mockHandBox = (width: number): HTMLElement => {
+    const box = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+    vi.spyOn(box, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      right: width,
+      bottom: CARD_HEIGHT,
+      width,
+      height: CARD_HEIGHT,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+    return box;
+  };
+
+  const previewCenter = (): { x: number; y: number } => {
+    const preview = screen.getByTestId('drag-card-preview') as HTMLElement;
+    const width = Number(preview.getAttribute('data-card-width'));
+    const height = Number(preview.getAttribute('data-card-height'));
+    const match = preview.style.transform.match(
+      /translate3d\((-?[\d.]+)px, (-?[\d.]+)px, 0\)/,
+    );
+    return {
+      x: match ? Number(match[1]) + width / 2 : Number.NaN,
+      y: match ? Number(match[2]) + height / 2 : Number.NaN,
+    };
+  };
+
+  const draggingArena = (): HTMLElement =>
+    document.querySelector('[data-zone="table-arena"]') as HTMLElement;
+
+  it('cancels the native mouse default so no text selection can start', () => {
+    const view = renderHand(6);
+    const slot = wrappers(view.container)[2].querySelector('.card-slot') as HTMLElement;
+
+    // `fireEvent` returns false once the handler calls `preventDefault()`.
+    expect(fireEvent.mouseDown(slot, { button: 0, clientX: 120, clientY: 240 })).toBe(false);
+    // The preview only appears after the 4px activation threshold.
+    expect(screen.queryByTestId('drag-card-preview')).toBeNull();
+
+    // The stylesheet locks the hand and the whole page during a drag.
+    const wrapperRule = cssRule(tableCss, '.hand-card-wrapper {');
+    expect(wrapperRule).toContain('user-select: none');
+    expect(wrapperRule).toContain('-webkit-user-drag: none');
+    const dragLock = tableCss.slice(tableCss.indexOf("html[data-dragging='true'],"));
+    expect(dragLock).toContain('user-select: none !important');
+    expect(dragLock).toContain('-webkit-user-select: none !important');
+  });
+
+  it('survives the dragend the browser fires after our own dragstart cancels it', () => {
+    const view = renderHand(6);
+    mockHandBox(600);
+    const slot = wrappers(view.container)[2].querySelector('.card-slot') as HTMLElement;
+
+    fireEvent.mouseDown(slot, { button: 0, clientX: 120, clientY: 240 });
+    fireEvent.mouseMove(document, { clientX: 300, clientY: 320 });
+    expect(screen.getByTestId('drag-card-preview')).toBeTruthy();
+
+    // The wrapper / card `dragstart` suppresses the native drag; Chromium then
+    // emits `dragend` straight away. That synthetic end must not tear down the
+    // live pointer gesture, which is what produced "preview not found".
+    fireEvent.dragStart(slot, {
+      dataTransfer: { setData: vi.fn(), setDragImage: vi.fn(), effectAllowed: 'move' },
+    });
+    fireEvent.dragEnd(document);
+
+    expect(screen.getByTestId('drag-card-preview')).toBeTruthy();
+    expect(draggingArena().classList.contains('dragging')).toBe(true);
+    expect(draggingArena().getAttribute('data-dragging')).toBe('true');
+
+    fireEvent.mouseMove(document, { clientX: 360, clientY: 340 });
+    const center = previewCenter();
+    expect(Math.abs(center.x - 360)).toBeLessThanOrEqual(1);
+    expect(Math.abs(center.y - 340)).toBeLessThanOrEqual(1);
+
+    fireEvent.mouseUp(document, { clientX: 360, clientY: 340 });
+    expect(screen.queryByTestId('drag-card-preview')).toBeNull();
+  });
+
+  it('opens the centre-locked preview again on every re-drag', () => {
+    const view = renderHand(6);
+    mockHandBox(600);
+    const drags: Array<{ index: number; pointer: { x: number; y: number } }> = [
+      { index: 1, pointer: { x: 220, y: 300 } },
+      { index: 4, pointer: { x: 480, y: 360 } },
+      { index: 0, pointer: { x: 160, y: 260 } },
+    ];
+
+    for (const { index, pointer } of drags) {
+      const slot = wrappers(view.container)[index].querySelector('.card-slot') as HTMLElement;
+      fireEvent.mouseDown(slot, { button: 0, clientX: 60, clientY: 200 });
+      fireEvent.mouseMove(document, { clientX: pointer.x, clientY: pointer.y });
+
+      const center = previewCenter();
+      expect(Math.abs(center.x - pointer.x)).toBeLessThanOrEqual(1);
+      expect(Math.abs(center.y - pointer.y)).toBeLessThanOrEqual(1);
+
+      fireEvent.mouseUp(document, { clientX: pointer.x, clientY: pointer.y });
+      expect(screen.queryByTestId('drag-card-preview')).toBeNull();
+    }
+  });
+
+  it('resolves hover from the resting row so a 30-card sweep never reverses', () => {
+    const view = renderHand(30);
+    const box = mockHandBox(HAND_FALLBACK_WIDTH);
+    const zone = document.querySelector('[data-zone="player-hand"]') as HTMLElement;
+    const cards = wrappers(view.container);
+
+    // Clear any hover so `data-card-x` below is the resting slot geometry.
+    fireEvent.mouseLeave(zone);
+    const restingPositions = cards.map((card) => Number(card.getAttribute('data-card-x')));
+    const sweepEnd = restingPositions[restingPositions.length - 1] + CARD_WIDTH + 20;
+
+    let previous = -1;
+    let reversals = 0;
+    const seen = new Set<number>();
+    for (let x = 1; x <= sweepEnd; x += 3) {
+      fireEvent.mouseMove(box, { clientX: x, clientY: 40 });
+      const raw = zone.getAttribute('data-hovered-card-index');
+      if (raw === null) continue;
+      const index = Number(raw);
+      if (index < previous) reversals += 1;
+      expect(index).toBeGreaterThanOrEqual(previous);
+      previous = index;
+      seen.add(index);
+    }
+
+    expect(seen.size).toBe(30);
+    expect(reversals).toBe(0);
+
+    // The moved DOM never decides the target: an event dispatched on a card far
+    // from the pointer still resolves to the resting slot under `clientX`.
+    fireEvent.mouseLeave(zone);
+    fireEvent.mouseMove(cards[2], {
+      clientX: restingPositions[16] + 1,
+      clientY: 40,
+    });
+    expect(zone.getAttribute('data-hovered-card-index')).toBe('16');
+  });
+});

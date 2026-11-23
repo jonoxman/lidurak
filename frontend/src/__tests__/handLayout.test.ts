@@ -18,6 +18,7 @@ import {
   computePartedCardLayout,
   computePartedCardPositions,
   getCardVerticalLiftPx,
+  resolveHoveredCardIndex,
   type CardRect,
   type HandLayoutResult,
 } from '../utils/handLayout';
@@ -262,6 +263,63 @@ describe('T-90-feedback-20261122_171451-3 ITEM-2c: visible "10" strip', () => {
     expect(layout.minVisibleStripPx).toBe(36);
     expect(DEFAULT_MIN_VISIBLE_INDEX_STRIP_PX).toBe(36);
     expect(layout.maxAllowableOverlapRatio).toBeCloseTo(1 - 36 / CARD_WIDTH, 5);
+  });
+});
+
+/**
+ * T-96: the hovered card is resolved from the resting row, so the parting
+ * transform can never feed back into the hit test and oscillate.
+ */
+describe('T-96: resting-geometry hover lookup', () => {
+  it('maps a left-to-right sweep across the 30-card compressed hand to a monotonic index', () => {
+    const layout = layoutFor(30);
+    const positions = layout.cardPositions;
+    expect(layout.totalWidth).toBeCloseTo(BOX, 5);
+
+    let previous = -1;
+    let reversals = 0;
+    const seen = new Set<number>();
+    for (let x = 0; x <= BOX + CARD_WIDTH; x += 1) {
+      const index = resolveHoveredCardIndex(x, positions, CARD_WIDTH, 0);
+      if (index === null) continue;
+      if (index < previous) reversals += 1;
+      expect(index).toBeGreaterThanOrEqual(previous);
+      previous = index;
+      seen.add(index);
+    }
+
+    // Every card is reachable and the sweep never jumps backwards (the visual
+    // QA failure was 7 reversals around neighbor index 16).
+    expect(reversals).toBe(0);
+    expect(seen.size).toBe(30);
+  });
+
+  it('picks the top-most overlapping card and honours the hand box offset', () => {
+    const positions = layoutFor(14).cardPositions;
+    const boxLeft = 240;
+    const index = 7;
+    const x = boxLeft + positions[index] + 1;
+    expect(resolveHoveredCardIndex(x, positions, CARD_WIDTH, boxLeft)).toBe(index);
+    // The next card's resting left edge wins immediately, with no dead zone.
+    expect(
+      resolveHoveredCardIndex(
+        boxLeft + positions[index + 1],
+        positions,
+        CARD_WIDTH,
+        boxLeft,
+      ),
+    ).toBe(index + 1);
+  });
+
+  it('returns null outside the resting row instead of inventing a card', () => {
+    const positions = layoutFor(6).cardPositions;
+    expect(resolveHoveredCardIndex(-1, positions, CARD_WIDTH, 0)).toBeNull();
+    expect(resolveHoveredCardIndex(positions[0] - 1, positions, CARD_WIDTH, 0)).toBeNull();
+    const pastLast =
+      positions[positions.length - 1] + CARD_WIDTH + 1;
+    expect(resolveHoveredCardIndex(pastLast, positions, CARD_WIDTH, 0)).toBeNull();
+    expect(resolveHoveredCardIndex(Number.NaN, positions, CARD_WIDTH, 0)).toBeNull();
+    expect(resolveHoveredCardIndex(0, [], CARD_WIDTH, 0)).toBeNull();
   });
 });
 
