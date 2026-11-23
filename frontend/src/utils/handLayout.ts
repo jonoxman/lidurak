@@ -670,6 +670,44 @@ export function computePartedCardPositions(
   ).positions;
 }
 
+/**
+ * T-96: resolves the hand card under a live pointer from the RESTING row.
+ *
+ * Hit-testing the animated DOM (`closest('.hand-card-wrapper')`) is unstable
+ * while hover-parting runs: transforming cards out from under the cursor
+ * changes the very next hit test, so a neighboring card takes over, parts the
+ * row back, and the highlight oscillates (the `7 reversals` seen at neighbor
+ * index 16 on a 30-card compressed hand). This resolver ignores every animated
+ * transform and maps the pointer's viewport x onto the resting slot that paints
+ * on top at that x: in an overlapping row that is the right-most card whose
+ * resting left edge the pointer has reached. A left-to-right sweep therefore
+ * yields a strictly non-decreasing index.
+ *
+ * Returns `null` for a pointer left of the first card or past the last card's
+ * right edge, so the caller can keep the previous hover while the cursor is in
+ * the row's runway.
+ */
+export function resolveHoveredCardIndex(
+  clientX: number,
+  positions: readonly number[],
+  cardWidth: number,
+  boxLeft = 0,
+): number | null {
+  const count = positions.length;
+  if (count === 0) return null;
+  if (!Number.isFinite(clientX)) return null;
+  const width = Math.max(1, finiteOr(cardWidth, HAND_BASE_CARD_WIDTH));
+  const left = finiteOr(boxLeft, 0);
+  const x = clientX - left;
+  let found = -1;
+  for (let index = 0; index < count; index += 1) {
+    if (positions[index] <= x + EPS) found = index;
+  }
+  if (found < 0) return null;
+  if (x > positions[found] + width + EPS) return null;
+  return found;
+}
+
 export interface HandContourOptions {
   /** Space the contour keeps around the cards (default `6`). */
   padding?: number;
