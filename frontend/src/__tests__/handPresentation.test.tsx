@@ -1091,3 +1091,117 @@ describe('T-90-feedback-20261123_020207-4 ITEM-NEW2: drag reorder parting', () =
     view.unmount();
   });
 });
+
+describe('T-96: hover-parting direction hints and mount-time parting', () => {
+  const directions = (): Array<string | null> =>
+    handWrappers().map((wrapper) => wrapper.getAttribute('data-part-direction'));
+  const deltas = (): number[] =>
+    handWrappers().map((wrapper) =>
+      Number(wrapper.getAttribute('data-part-delta-x')),
+    );
+
+  it('rests a 30-card hand at delta 0 / direction none and never parts on pointerenter', () => {
+    mountTable(DECK.slice(0, 30), { awaitingAttack: true });
+    const zone = document.querySelector('[data-zone="player-hand"]') as HTMLElement;
+    const resting = new Array(30).fill(0) as number[];
+    const restingDirections = new Array(30).fill('none') as string[];
+
+    expect(deltas()).toEqual(resting);
+    expect(directions()).toEqual(restingDirections);
+
+    // The lobby's QA preset button leaves the stationary pointer over the lane,
+    // so Chromium fires `pointerenter` on navigation. That must never part the
+    // hand before the player actually moves over the cards.
+    fireEvent.pointerEnter(zone, { bubbles: true });
+    expect(zone.getAttribute('data-hovered-card-index')).toBeNull();
+    expect(zone.getAttribute('data-parting-active')).toBe('false');
+    expect(deltas()).toEqual(resting);
+    expect(directions()).toEqual(restingDirections);
+  });
+
+  it('reports left/right on parted neighbours and none on the hovered and distant cards', () => {
+    mountTable(DECK.slice(0, 30), { awaitingAttack: true });
+    const zone = document.querySelector('[data-zone="player-hand"]') as HTMLElement;
+
+    fireEvent.mouseMove(handWrappers()[15], { bubbles: true });
+    expect(zone.getAttribute('data-parting-active')).toBe('true');
+
+    const cardDeltas = deltas();
+    const cardDirections = directions();
+    // The hovered card stays pinned and reports `none`.
+    expect(cardDeltas[15]).toBe(0);
+    expect(cardDirections[15]).toBe('none');
+    // Its immediate neighbours report the direction they actually moved.
+    expect(cardDeltas[14]).toBeLessThan(0);
+    expect(cardDirections[14]).toBe('left');
+    expect(cardDeltas[16]).toBeGreaterThan(0);
+    expect(cardDirections[16]).toBe('right');
+    // Distant, unmoved cards keep an exact zero delta and `none`.
+    for (const index of [0, 8, 29]) {
+      expect(cardDeltas[index], `card ${index}`).toBe(0);
+      expect(cardDirections[index], `card ${index}`).toBe('none');
+    }
+  });
+
+  it('reports delta 0 / direction none on a 1-card hand under hover', () => {
+    mountTable(DECK.slice(0, 1), { awaitingAttack: true });
+    const wrapper = handWrappers()[0];
+
+    fireEvent.pointerMove(wrapper, { bubbles: true });
+
+    expect(Number(wrapper.getAttribute('data-part-delta-x'))).toBe(0);
+    expect(wrapper.getAttribute('data-part-direction')).toBe('none');
+    expect(wrapper.style.transform).toBe('');
+  });
+
+  it('keeps a lifted card vertical translate under direction none', () => {
+    const myHand = DECK.slice(0, 3);
+    mountTable(myHand, {
+      awaitingAttack: true,
+      playableKeys: [cardKey(myHand[0])],
+      selectedKeys: [cardKey(myHand[1])],
+    });
+    const wrappers = handWrappers();
+
+    expect(wrappers[0].getAttribute('data-part-direction')).toBe('none');
+    expect(wrappers[1].getAttribute('data-part-direction')).toBe('none');
+    expect(wrappers[0].style.transform).toBe(
+      `translate3d(0px, ${-ELIGIBLE_LIFT_PX}px, 0)`,
+    );
+    expect(wrappers[1].style.transform).toBe(
+      `translate3d(0px, ${-SELECTED_LIFT_PX}px, 0)`,
+    );
+    // `data-part-direction` is a declarative hint only: no stylesheet rule may
+    // flatten the lifted card's vertical transform.
+    expect(tableCss).not.toContain("[data-part-direction='none']");
+  });
+
+  it('ignores moves above or below the card row while preserving the zero-rect fallback', () => {
+    mountTable(DECK.slice(0, 6), { awaitingAttack: true });
+    const zone = document.querySelector('[data-zone="player-hand"]') as HTMLElement;
+    const box = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+    vi.spyOn(box, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 100,
+      right: 300,
+      bottom: 240,
+      width: 300,
+      height: 140,
+      x: 0,
+      y: 100,
+      toJSON: () => ({}),
+    } as DOMRect);
+    const targetX =
+      Number(handWrappers()[1].getAttribute('data-card-x')) + CARD_WIDTH / 2;
+
+    // Inside the reserved timer clearance above the row: no parting at all.
+    fireEvent.mouseMove(zone, { clientX: targetX, clientY: 30 });
+    expect(zone.getAttribute('data-hovered-card-index')).toBeNull();
+    expect(zone.getAttribute('data-parting-active')).toBe('false');
+
+    // Inside the real card row: the hover resolves normally.
+    fireEvent.mouseMove(zone, { clientX: targetX, clientY: 150 });
+    expect(zone.getAttribute('data-hovered-card-index')).toBe('1');
+    expect(zone.getAttribute('data-parting-active')).toBe('true');
+  });
+});
