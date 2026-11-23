@@ -116,28 +116,38 @@
   grid-template-columns: 1fr 2fr 1fr;
   /* T-90-3 ITEM-ADD-6: every row is a fixed or viewport-clamped track. A seat
      that runs out of cards or a hand that empties never resizes the table. */
-  --seat-row-height: 150px;
-  --battlefield-height: clamp(240px, 30vh, 320px);
-  /* T-90-4 ITEM-4: the hand row opens with a dedicated turn-timer band. Its
-     top clearance absorbs the part of a surrendered bottom-seat bout that
+  /* T-96: every vertical track is viewport-clamped so a 1280x800 desktop can
+     hold the seats, the bout, the hand and the Row 4 controls without the hand
+     ever sliding below the fold. At 800px tall the tracks resolve to
+     116 + 182 + 280 + 52, with three 8px gaps and 16px of arena padding —
+     670px in total, which ends well above the 800px fold. */
+  --seat-row-height: clamp(116px, 14.5vh, 150px);
+  --battlefield-height: clamp(182px, 20vh, 320px);
+  /* T-90-4 ITEM-4 / T-96: the hand row opens with a dedicated turn-timer band.
+     Its top clearance absorbs the part of a surrendered bottom-seat bout that
      hangs below the tinted box, so incoming cards can never reach the clock:
-     half a pair box (`140 + 18`) + 12px translation - the 18px pair reserve =
-     73px below the box, minus the 18px arena gap = 55px into this row. 64px
-     leaves 9px of slack. The `+ 66px` after the card is the existing clearance
-     below the clock for a fully raised selected card + contour stroke. */
-  --hand-timer-clearance: 64px;
+     the pair box (`140 + 18` = 158) hangs `158 - 12 + 12` = 79px past the
+     tinted box, minus the arena row gap (8px at the 1280x800 minimum) = 71px
+     into this row, so 76px of clearance keeps 5px of slack. The `+ 64px`
+     after the card covers the clock line plus the raised-card contour
+     clearance below it. */
+  --hand-timer-clearance: 76px;
   --hand-row-height: calc(
-    var(--hand-card-height, 140px) + 66px + var(--hand-timer-clearance, 64px)
+    var(--hand-card-height, 140px) + 64px + var(--hand-timer-clearance, 76px)
   );
   /* ITEM-7: the dedicated lower-table control band (Row 4). */
-  --actions-row-height: 64px;
+  --actions-row-height: clamp(48px, 6.5vh, 64px);
   grid-template-rows: var(--seat-row-height) var(--battlefield-height) var(--hand-row-height) var(--actions-row-height);
-  gap: 18px;
+  /* T-96: the row gap compresses on short viewports, never below 6px. */
+  gap: clamp(6px, 1vh, 16px);
   min-width: 0;
-  min-height: 700px;
+  /* T-96: the floor may never exceed the tracks above, otherwise a 800px-tall
+     viewport would be forced to 700px+ and clip the hand. */
+  min-height: 620px;
   /* ITEM-1: 28px of felt on every side means the full hand / player-box
-     highlight aura always fits on the table itself, never off it. */
-  padding: 24px 28px 28px 28px;
+     highlight aura always fits on the table itself, never off it.
+     T-96: the vertical padding is tight (8px) so the arena fits 800px. */
+  padding: 8px 28px;
   /* ITEM-NEW-1a / ITEM-NEW-1b: the Theme menu Roundness slider rounds the felt
      table itself. The 1.5 factor keeps the table's corner just outside the
      cards' own radius, so the two roundings stay visually nested. */
@@ -165,7 +175,7 @@
      every edge and let the hand overhang onto the page background. Negative
      grid margins pull the painted felt out through the padding to fill the
      whole padding box — still no absolute positioning, so nothing overlaps. */
-  margin: -24px -28px -28px -28px;
+  margin: -8px -28px;
   z-index: 0;
   border-radius: calc(var(--app-roundness, 8px) * 1.5);
   background-color: var(--table-felt, #1e2923);
@@ -190,6 +200,9 @@
   width: 100%;
   max-width: var(--seat-width, 240px);
   height: var(--seat-height, 140px);
+  /* T-96: the seat may never grow past its (height-clamped) grid track, so on a
+     short viewport the box shrinks instead of pushing the bout down. */
+  max-height: 100%;
   box-sizing: border-box;
 }
 
@@ -393,9 +406,11 @@
   justify-self: center;
   align-self: center;
   width: 88%;
-  height: var(--battlefield-height, clamp(240px, 30vh, 320px));
-  min-height: 180px;
-  max-height: var(--battlefield-height, clamp(240px, 30vh, 320px));
+  height: var(--battlefield-height, clamp(182px, 20vh, 320px));
+  /* T-96: 182px is one 140px card + the 18px pair reserve + the 24px inner
+     padding, so the bout row still fits its own box at the 1280x800 minimum. */
+  min-height: 182px;
+  max-height: var(--battlefield-height, clamp(182px, 20vh, 320px));
   /* Small, consistent inner margin between the border and any anchored card. */
   padding: 12px;
   background: rgba(38, 36, 33, 0.55);
@@ -648,16 +663,27 @@
   grid-template-columns: var(--pair-card-w, var(--card-w, 100px));
   grid-template-rows: var(--pair-card-h, var(--card-h, 140px));
   /* Item 8: cards start flush with the top of the pair box, so the attack cards
-     and the reflection outline share one top edge. The bottom/right reserve is
-     the space the overlapping defence card needs. */
+     and the reflection outline share one top edge. The bottom reserve is the
+     space the overlapping defence card needs. */
   align-content: start;
   flex: 0 0 auto;
   gap: 0;
-  /* ITEM-NEW-2b: only the card itself is reserved horizontally; the defence
-     card overhangs to the right, and the compact row spacing comes from the
-     inline `margin-left` on every slot. */
-  padding: 0 var(--pair-defense-offset, 36px) var(--bout-card-offset, 18px) 0;
+  /* T-96: an UNCOVERED pair reserves horizontal space for the card only, so its
+     DOM width is exactly `cardWidth` (100px desktop / 48px mobile) and matches
+     `computeTableBoutLayout`'s `uncoveredWidthAt` 1:1. The right reserve that
+     holds the defence card's overhang is added by the `data-covered` rule
+     below, so a row of several uncovered pairs + outlines never overflows the
+     tinted box by 36px per pair. */
+  padding: 0 0 var(--bout-card-offset, 18px) 0;
   box-sizing: border-box;
+}
+
+/* T-96: only a covered pair is wider than one card — it reserves the defence
+   overhang its shifted cover card hangs into. This keeps the covered stack's
+   `coveredPairWidth` (`136px` desktop / `66px` mobile) intact while leaving
+   every uncovered pair exactly `cardWidth` wide. */
+.table-pair[data-covered='true'] {
+  padding-right: var(--pair-defense-offset, 36px);
 }
 
 .table-pair-attack,
@@ -1166,7 +1192,7 @@
   /* T-90-4 ITEM-4: the dedicated turn-timer band. This top clearance keeps the
      clock below any surrendered bout card that hangs past the Row 2 box, and
      the row-gap below keeps raised hand cards below the clock. */
-  padding: var(--hand-timer-clearance, 64px) 0 8px;
+  padding: var(--hand-timer-clearance, 76px) 0 8px;
   /* T-90-feedback-2 ITEM-3: the hand column never clips a dragged card. */
   overflow: visible;
 }
@@ -1775,6 +1801,8 @@
     height: auto;
     /* ITEM-ADD-6: the empty seat box stays exactly as tall as a full one. */
     min-height: 120px;
+    /* T-96: the mobile seat track is auto-sized, so lift the desktop clamp. */
+    max-height: none;
   }
 
   .seat-clock,
@@ -1832,7 +1860,12 @@
     --pair-defense-offset: 18px;
     grid-template-columns: var(--card-w, 48px);
     grid-template-rows: var(--card-h, 68px);
-    padding: 0 var(--pair-defense-offset, 18px) var(--bout-card-offset, 10px) 0;
+    /* T-96: uncovered pairs are exactly one 48px card wide here as well. */
+    padding: 0 0 var(--bout-card-offset, 10px) 0;
+  }
+
+  .table-pair[data-covered='true'] {
+    padding-right: var(--pair-defense-offset, 18px);
   }
 
   .bout-area[data-anchor] {

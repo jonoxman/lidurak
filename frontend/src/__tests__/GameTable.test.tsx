@@ -2001,8 +2001,11 @@ describe('feedback 7: tight glow, discard pile and reflection alignment', () => 
     const pairRule = cssRule('.table-pair');
     expect(pairRule).toContain('grid-template-rows: var(--pair-card-h, var(--card-h, 140px))');
     expect(pairRule).toContain('align-content: start');
-    expect(pairRule).toContain(
-      'padding: 0 var(--pair-defense-offset, 36px) var(--bout-card-offset, 18px) 0',
+    // T-96: an uncovered pair reserves no horizontal overhang, so its DOM width
+    // is exactly `cardWidth`; only a covered pair adds the defence strip.
+    expect(pairRule).toContain('padding: 0 0 var(--bout-card-offset, 18px) 0');
+    expect(cssRule(".table-pair[data-covered='true']")).toContain(
+      'padding-right: var(--pair-defense-offset, 36px)',
     );
     expect(pairRule).toContain('box-sizing: border-box');
 
@@ -2673,8 +2676,11 @@ describe('T-90-3 ITEM-NEW: compact single-row play area and roundness', () => {
     expect(pairRule).toContain(
       '--pair-defense-offset: var(--card-index-strip-width, 36px)',
     );
-    expect(pairRule).toContain(
-      'padding: 0 var(--pair-defense-offset, 36px) var(--bout-card-offset, 18px) 0',
+    // T-96: the overhang is only reserved by a COVERED pair, so an uncovered
+    // pair stays exactly one card wide.
+    expect(pairRule).toContain('padding: 0 0 var(--bout-card-offset, 18px) 0');
+    expect(cssRule(".table-pair[data-covered='true']")).toContain(
+      'padding-right: var(--pair-defense-offset, 36px)',
     );
     // `.table-pair-defense` is first declared in the grouped grid-column rule,
     // so match its own margin rule directly.
@@ -2684,8 +2690,10 @@ describe('T-90-3 ITEM-NEW: compact single-row play area and roundness', () => {
     // The 48px mobile layout scales the same strip (18px) instead of the
     // former narrower 14px offset.
     expect(tableCss).toMatch(/--pair-defense-offset: 18px/);
-    expect(tableCss).toContain(
-      'padding: 0 var(--pair-defense-offset, 18px) var(--bout-card-offset, 10px) 0',
+    expect(tableCss).toContain('padding: 0 0 var(--bout-card-offset, 10px) 0');
+    // The mobile covered pair adds its own 18px strip inside the media query.
+    expect(tableCss.slice(tableCss.indexOf('@media (max-width: 899px)'))).toContain(
+      'padding-right: var(--pair-defense-offset, 18px)',
     );
     expect(tableCss).toContain('margin: 10px 0 0 var(--pair-defense-offset, 18px)');
   });
@@ -3782,17 +3790,20 @@ describe('T-90-4: larger cards, aura containment, throw-in slot, hand reorder an
     );
 
     const arenaRule = cssRule(tableCss, "[data-zone='table-arena']");
-    expect(arenaRule).toContain('padding: 24px 28px 28px 28px');
+    // T-96: the vertical padding is tight so a 1280x800 viewport fits.
+    expect(arenaRule).toContain('padding: 8px 28px');
     // T-96: the felt layer pulls out through the padding, so the painted surface
     // fills the whole padding box instead of stopping 28px short on each side.
     expect(tableCss).toMatch(
-      /\[data-zone='table-arena'\]::before\s*{[^}]*margin: -24px -28px -28px -28px;/,
+      /\[data-zone='table-arena'\]::before\s*{[^}]*margin: -8px -28px;/,
     );
     // ... and the small-screen 12px inset is pulled out by the same amount.
     expect(tableCss).toMatch(
       /\[data-zone='table-arena'\]::before\s*{[^}]*margin: -12px;/,
     );
-    expect(cssRule(tableCss, '.battlefield-tinted-box')).toContain('clamp(240px, 30vh, 320px)');
+    expect(cssRule(tableCss, '.battlefield-tinted-box')).toContain(
+      'clamp(182px, 20vh, 320px)',
+    );
     expect(
       cssRule(tableCss, "[data-zone='table-arena'][data-aura-contained='true'] .opponent-seat"),
     ).toContain('margin-inline: 4px');
@@ -5595,10 +5606,10 @@ describe('T-90-feedback-20261122_171451-6 ITEM-4/ITEM-7: tabletimer clearance & 
     // ... and the hand row itself reserves the timer band clearance plus that
     // raise clearance (T-90-4 ITEM-4).
     const arenaRule = rule("[data-zone='table-arena']");
-    expect(arenaRule).toContain('--hand-timer-clearance: 64px;');
+    expect(arenaRule).toContain('--hand-timer-clearance: 76px;');
     expect(arenaRule).toContain('--hand-row-height: calc(');
-    expect(arenaRule).toContain('var(--hand-timer-clearance, 64px)');
-    expect(66).toBeGreaterThan(-HAND_SELECTED_RAISED_OFFSET + 20);
+    expect(arenaRule).toContain('var(--hand-timer-clearance, 76px)');
+    expect(64).toBeGreaterThan(-HAND_SELECTED_RAISED_OFFSET + 20);
   });
 
   it('ITEM-7: dispatches Surrender and Pass from the new lower-table location', () => {
@@ -5768,17 +5779,22 @@ describe('T-90-4 ITEM-1/ITEM-4: covered-pair edge collapsing and the turn-timer 
     expect(clock.textContent).toBe('00:09');
 
     const zoneRule = cssRule(tableCss, "[data-zone='player-hand']");
-    expect(zoneRule).toContain('padding: var(--hand-timer-clearance, 64px) 0 8px;');
+    expect(zoneRule).toContain('padding: var(--hand-timer-clearance, 76px) 0 8px;');
     expect(zoneRule).toContain('row-gap: calc(');
     expect(zoneRule).not.toContain('position: absolute');
 
-    // The band's top clearance exceeds the deepest surrendered-bout overhang:
-    // half a pair box (140 + 18) + 12px translation - 18px reserve = 73px past
-    // the tinted box, minus the 18px arena row gap = 55px into the hand row.
+    // The band's top clearance exceeds the deepest surrendered-bout overhang.
+    // A bottom surrender translates the pair box by `50% + 12px`, so the card
+    // bottoms land at `12 (inner padding) + 140 (card) + 158 / 2 + 12` = 243px
+    // below the tinted box's top edge — 61px past its 182px height.
     const pairBox = BOUT_CARD_HEIGHT + 18;
-    const surrenderOverhang = pairBox / 2 + 12 - 18 - 18;
-    expect(surrenderOverhang).toBe(55);
-    expect(64).toBeGreaterThan(surrenderOverhang);
+    const pastTintedBox = 12 + BOUT_CARD_HEIGHT + pairBox / 2 + 12 - 182;
+    expect(pastTintedBox).toBe(61);
+    // T-96: at the 1280x800 minimum the arena row gap is 8px, so the incoming
+    // cards reach 53px into the hand row; the 76px clearance clears them.
+    const surrenderOverhang = pastTintedBox - 8;
+    expect(surrenderOverhang).toBe(53);
+    expect(76).toBeGreaterThan(surrenderOverhang);
 
     // The incoming cards stay in the single-row bout area above the band.
     expect(screen.getByTestId('table-bout-row')).not.toBeNull();
@@ -5789,6 +5805,141 @@ describe('T-90-4 ITEM-1/ITEM-4: covered-pair edge collapsing and the turn-timer 
     const controls = container.querySelector('[data-zone="player-controls"]');
     expect(controls).not.toBeNull();
     expect(zone.contains(controls)).toBe(false);
+  });
+});
+
+/**
+ * T-96-visual-qa: the uncovered `.table-pair` box and the desktop vertical
+ * rhythm are measured against the SAME numbers `computeTableBoutLayout` uses,
+ * so the DOM can never drift from the solver and the hand never slides below
+ * the `1280x800` fold.
+ */
+describe('T-96: uncovered pair width and the 1280x800 viewport fit', () => {
+  /** Evaluates a `clamp(min, vh, max)` track at a given viewport height. */
+  const clampAt = (declarationText: string, viewportHeight: number): number => {
+    const match = /clamp\(\s*([\d.]+)px,\s*([\d.]+)vh,\s*([\d.]+)px\s*\)/.exec(declarationText);
+    expect(match, declarationText).not.toBeNull();
+    const min = Number(match![1]);
+    const vh = Number(match![2]);
+    const max = Number(match![3]);
+    return Math.min(max, Math.max(min, (vh * viewportHeight) / 100));
+  };
+
+  /** Raw value of one declaration inside a rule block. */
+  const declaration = (ruleText: string, name: string): string => {
+    const match = new RegExp(`(?:^|[;\\s])${name}:\\s*([^;]+);`).exec(ruleText);
+    expect(match, name).not.toBeNull();
+    return match![1].trim();
+  };
+
+  /** Block of the first rule whose selector is exactly `selector` on its line. */
+  const ruleBlock = (selector: string): string => {
+    const start = tableCss.indexOf(`\n${selector} {`);
+    expect(start, selector).toBeGreaterThan(-1);
+    const end = tableCss.indexOf('}', start);
+    return tableCss.slice(start, end);
+  };
+
+  it('only reserves the defence overhang on covered pairs', () => {
+    const pairRule = ruleBlock('.table-pair');
+    // An uncovered pair is exactly one card wide: no horizontal reserve at all.
+    expect(pairRule).toContain('padding: 0 0 var(--bout-card-offset, 18px) 0');
+    expect(pairRule).not.toContain('padding: 0 var(--pair-defense-offset');
+    expect(ruleBlock(".table-pair[data-covered='true']")).toContain(
+      'padding-right: var(--pair-defense-offset, 36px)',
+    );
+
+    // The DOM widths now match the solver: `cardW` per uncovered slot,
+    // `cardW + defenseOverhang` for a covered pair.
+    expect(BOUT_DEFENSE_OVERHANG_RATIO * BOUT_CARD_WIDTH).toBe(
+      CARD_INDEX_STRIP_WIDTH_PX,
+    );
+    expect(BOUT_CARD_WIDTH).toBe(100);
+    expect(BOUT_CARD_WIDTH + CARD_INDEX_STRIP_WIDTH_PX).toBe(136);
+
+    const { container } = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={activeOpponents}
+        tablePairs={[
+          { attack: { suit: 'spades', rank: 'six' }, defense: null },
+          { attack: { suit: 'clubs', rank: 'nine' }, defense: null },
+        ]}
+        trumpSuit="diamonds"
+        defenderId="p1"
+      />,
+    );
+
+    const uncoveredPairs = Array.from(
+      container.querySelectorAll('.table-pair'),
+    ) as HTMLElement[];
+    expect(uncoveredPairs).toHaveLength(2);
+    for (const pair of uncoveredPairs) {
+      expect(pair.getAttribute('data-covered')).toBe('false');
+      // Both uncovered pairs share the one `cardWidth` the row was solved for.
+      expect(Number(pair.getAttribute('data-card-width'))).toBe(BOUT_CARD_WIDTH);
+    }
+  });
+
+  it('keeps the arena, the hand and the controls inside a 1280x800 viewport', () => {
+    const VIEWPORT_HEIGHT = 800;
+    // Real-Chromium measurement of the arena's top edge BEFORE T-96 trimmed the
+    // header, so it is the conservative upper bound for the trimmed layout.
+    const ARENA_TOP_PX = 127;
+
+    const arenaRule = ruleBlock("[data-zone='table-arena']");
+    const seatRow = clampAt(declaration(arenaRule, '--seat-row-height'), VIEWPORT_HEIGHT);
+    const battlefield = clampAt(
+      declaration(arenaRule, '--battlefield-height'),
+      VIEWPORT_HEIGHT,
+    );
+    const actionsRow = clampAt(
+      declaration(arenaRule, '--actions-row-height'),
+      VIEWPORT_HEIGHT,
+    );
+    const gap = clampAt(declaration(arenaRule, 'gap'), VIEWPORT_HEIGHT);
+    const padding = declaration(arenaRule, 'padding').split(/\s+/);
+    const padTop = Number(padding[0].replace('px', ''));
+    const padBottom = Number((padding[2] ?? padding[0]).replace('px', ''));
+
+    // `calc(140px + 64px + 76px)` — card + clock/raise band + timer clearance.
+    const handRow = (declaration(arenaRule, '--hand-row-height').match(/([\d.]+)px/g) ?? [])
+      .map((value) => Number(value.replace('px', '')))
+      .reduce((total, value) => total + value, 0);
+
+    expect({ seatRow, battlefield, actionsRow, gap }).toEqual({
+      seatRow: 116,
+      battlefield: 182,
+      actionsRow: 52,
+      gap: 8,
+    });
+    expect(handRow).toBe(280);
+
+    const arenaHeight =
+      padTop + seatRow + gap + battlefield + gap + handRow + gap + actionsRow + padBottom;
+    expect(arenaHeight).toBe(670);
+    // The whole felt table ends above the fold.
+    expect(ARENA_TOP_PX + arenaHeight).toBeLessThanOrEqual(VIEWPORT_HEIGHT);
+
+    // The hand (a full 30+ card row, lifted/selected cards included) and the
+    // Row 4 controls are both fully inside the viewport.
+    const handZoneBottom = ARENA_TOP_PX + arenaHeight - padBottom - actionsRow - gap;
+    const handRule = ruleBlock("[data-zone='player-hand']");
+    expect(handRule).toContain('padding: var(--hand-timer-clearance, 76px) 0 8px;');
+    const cardsBottom = handZoneBottom - 8;
+    expect(cardsBottom).toBeLessThanOrEqual(VIEWPORT_HEIGHT);
+    expect(handZoneBottom + gap + actionsRow).toBeLessThanOrEqual(VIEWPORT_HEIGHT);
+
+    // ... and an incoming bottom-seat surrender still stops above the hand clock.
+    const clearance = Number(/--hand-timer-clearance:\s*(\d+)px;/.exec(arenaRule)?.[1]);
+    const surrenderOverhang = (BOUT_CARD_HEIGHT + 18) / 2 + 12 - 18 - gap;
+    expect(clearance).toBe(76);
+    expect(clearance).toBeGreaterThan(surrenderOverhang);
+
+    // The header / shell gutters that buy the room stay trimmed.
+    expect(cssRule(appCss, '.game-header')).toContain('padding: 6px 16px;');
+    expect(cssRule(appCss, '.game-shell')).toContain('padding: 10px 16px 12px;');
   });
 });
 
