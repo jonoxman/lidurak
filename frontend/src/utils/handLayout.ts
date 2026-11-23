@@ -111,8 +111,21 @@ export const HAND_MAX_ROWS = 2;
 export const HAND_ROW_GAP = 12;
 /** Space between the cards and the highlight contour. */
 export const HAND_CONTOUR_PADDING = 6;
-/** Corner radius of the highlight contour. */
+/** Corner radius of the highlight contour at the default Roundness (8px). */
 export const HAND_CONTOUR_CORNER_RADIUS = 12;
+/**
+ * T-90-feedback-20261123_130625-2 ITEM-2: the contour radius scales with the
+ * Theme menu's Roundness slider exactly like the arena around it
+ * (`calc(var(--app-roundness) * 1.5)`), so the hand outline highlight is never
+ * detached from the panel roundness. `8 * 1.5` reproduces the historical 12px.
+ */
+export const HAND_CONTOUR_ROUNDNESS_RATIO = 1.5;
+
+/** Corner radius (px) the hand outline highlight uses for a Roundness value. */
+export function handContourCornerRadius(roundness: number): number {
+  if (!Number.isFinite(roundness)) return HAND_CONTOUR_CORNER_RADIUS;
+  return Math.max(0, roundness * HAND_CONTOUR_ROUNDNESS_RATIO);
+}
 
 /**
  * T-90-feedback-20261123_020207-2 ITEM-QA6: how many neighbours to the right of
