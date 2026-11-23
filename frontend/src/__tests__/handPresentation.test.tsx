@@ -857,10 +857,14 @@ describe('T-90-feedback-5 ITEM-3: zero horizontal drag drift', () => {
         // from the reported `data-card-x`, so a stylesheet margin override can
         // never hide a horizontal offset.
         const currentBaseX = flexRowLefts(handWrappers())[index];
-        const renderedLeft =
-          stageLeft + currentBaseX + translateX(wrapper.style.transform);
-        // ITEM-3: the rendered card stays under the mouse's grab point.
-        expect(renderedLeft).toBeCloseTo(cardLeft + (clientX - startX), 5);
+        const renderedCenterX =
+          stageLeft +
+          currentBaseX +
+          translateX(wrapper.style.transform) +
+          CARD_WIDTH / 2;
+        // T-95-audit-gap-20261122_203506-1: the card's exact centre — not its
+        // grab point — is locked to the pointer, for every hand index.
+        expect(renderedCenterX).toBeCloseTo(clientX, 5);
       }
 
       fireEvent.mouseUp(document, { clientX: startX + 220, clientY: startY + 120 });
