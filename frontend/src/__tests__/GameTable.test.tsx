@@ -6435,6 +6435,87 @@ describe('T-90-feedback-20261123_020207-4: drag reorder slot and consecutive thr
     expect(handBox.getAttribute('data-drag-insert-index')).toBeNull();
   });
 
+  it('T-96: a 6-card leftmost drag resolves midpoints to slots 1 and 3 and commits them', () => {
+    // Pin the display schema so the rendered row is deterministic: the table
+    // sorts for display, and diamonds are trump here (trump last in `rank`).
+    setSettings(DEFAULT_SETTINGS);
+    const onReorderHand = vi.fn();
+    const sixHand: CardData[] = [
+      { suit: 'diamonds', rank: 'six' },
+      { suit: 'diamonds', rank: 'nine' },
+      { suit: 'clubs', rank: 'ten' },
+      { suit: 'diamonds', rank: 'jack' },
+      { suit: 'clubs', rank: 'jack' },
+      { suit: 'clubs', rank: 'queen' },
+    ];
+    const displayed = sortHand(sixHand, DEFAULT_SETTINGS.sortMode, 'diamonds');
+    const view = render(
+      <GameTable
+        myId="p0"
+        myHand={sixHand}
+        opponents={opponents}
+        tablePairs={[]}
+        trumpSuit="diamonds"
+        defenderId="p1"
+        onReorderHand={onReorderHand}
+      />,
+    );
+    const handBox = screen.getByTestId('hand-turn-highlight') as HTMLElement;
+    vi.spyOn(handBox, 'getBoundingClientRect').mockReturnValue(dragRect(640));
+    const wrappers = () =>
+      Array.from(handBox.querySelectorAll('.hand-card-wrapper')) as HTMLElement[];
+    // Press the card actually rendered in slot 0 and clear the 4px threshold.
+    const grabLeftmost = () =>
+      fireEvent.mouseDown(wrappers()[0].querySelector('.card-slot') as HTMLElement, {
+        button: 0,
+        clientX: 10,
+        clientY: 20,
+      });
+
+    // `146` is the midpoint between the resting card 1 and card 2 centres.
+    grabLeftmost();
+    fireEvent.mouseMove(document, { clientX: 146, clientY: 22 });
+
+    expect(handBox.getAttribute('data-drag-insert-index')).toBe('1');
+    // The row parts at slot 1: the second card shifts left and the third
+    // shifts right, opening a whole-card gap for the dragged card.
+    expect(wrappers()[1].getAttribute('data-part-direction')).toBe('left');
+    expect(Number(wrappers()[1].getAttribute('data-part-delta-x'))).toBeLessThan(0);
+    expect(wrappers()[2].getAttribute('data-part-direction')).toBe('right');
+    expect(Number(wrappers()[2].getAttribute('data-part-delta-x'))).toBeGreaterThan(0);
+    const partedGap =
+      Number(wrappers()[2].getAttribute('data-card-x')) -
+      Number(wrappers()[1].getAttribute('data-card-x'));
+    expect(partedGap).toBeGreaterThanOrEqual(CARD_WIDTH - 0.01);
+
+    fireEvent.mouseUp(document, { clientX: 146, clientY: 22 });
+    expect(onReorderHand).toHaveBeenLastCalledWith([
+      displayed[1],
+      displayed[0],
+      displayed[2],
+      displayed[3],
+      displayed[4],
+      displayed[5],
+    ]);
+
+    // `274` is the midpoint between cards 3 and 4: slot 3, never slot 4.
+    grabLeftmost();
+    fireEvent.mouseMove(document, { clientX: 274, clientY: 22 });
+    expect(handBox.getAttribute('data-drag-insert-index')).toBe('3');
+    fireEvent.mouseUp(document, { clientX: 274, clientY: 22 });
+    expect(onReorderHand).toHaveBeenLastCalledWith([
+      displayed[1],
+      displayed[2],
+      displayed[3],
+      displayed[0],
+      displayed[4],
+      displayed[5],
+    ]);
+
+    view.unmount();
+    setSettings(DEFAULT_SETTINGS);
+  });
+
   const sevenClubs: CardData = { suit: 'clubs', rank: 'seven' };
   const eightHearts: CardData = { suit: 'hearts', rank: 'eight' };
   const collapseHand: CardData[] = [
