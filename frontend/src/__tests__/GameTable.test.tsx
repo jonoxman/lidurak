@@ -1990,8 +1990,10 @@ describe('feedback 7: tight glow, discard pile and reflection alignment', () => 
     expect(outline.getAttribute('data-align')).toBe('card');
 
     const groupRule = cssRule('.table-pairs-group');
-    expect(groupRule).toContain('flex-wrap: wrap');
-    expect(groupRule).toContain('align-items: flex-start');
+    // T-90-4 ITEM-1a: the bout never wraps any more; the solver compresses gaps.
+    expect(groupRule).toContain('flex-wrap: nowrap');
+    expect(groupRule).toContain('align-items: center');
+    expect(cssRule('.table-bout-row')).toContain('flex-wrap: nowrap');
     expect(groupRule).toContain('--bout-card-width: var(--card-w, 100px)');
     expect(groupRule).toContain('--bout-card-height: var(--card-h, 140px)');
     expect(groupRule).toContain('--bout-card-offset: 18px');
@@ -2603,7 +2605,8 @@ describe('T-90-3 ITEM-NEW: compact single-row play area and roundness', () => {
     const group = screen.getByTestId('table-pairs-group');
     expect(group.getAttribute('data-single-row')).toBe('true');
     expect(group.getAttribute('data-min-visible-left')).toBe(String(BOUT_MIN_VISIBLE_LEFT));
-    expect(cssRule('.table-pairs-group')).toContain('flex-wrap: wrap');
+    expect(cssRule('.table-pairs-group')).toContain('flex-wrap: nowrap');
+    expect(cssRule('.table-bout-row')).toContain('flex-wrap: nowrap');
 
     // The whole bout is anchored at the defender's edge of the play area.
     expect(group.getAttribute('data-anchor-seat')).toBe('top-left');
@@ -5246,8 +5249,9 @@ describe('T-90-feedback-20261106_111512-3: throw-in gate, card tokens, drag visi
     const throwIn = (tableCss.match(/\.throw-in-outline \{[^}]*\}/g) ?? []).find((b) => b.includes('max-width')) ?? '';
     expect(throwIn).toContain('var(--card-w, 100px)');
     expect(throwIn).toContain('var(--card-h, 140px)');
-    expect(block('.table-pairs-group')).toContain('flex-wrap: wrap');
-    expect(block('.table-pairs-group')).toMatch(/gap: var\(--bout-gap, 4px\)/);
+    expect(block('.table-pairs-group')).toContain('flex-wrap: nowrap');
+    expect(block('.table-bout-row')).toContain('flex-wrap: nowrap');
+    expect(block('.table-pairs-group')).toMatch(/gap: 0;/);
     expect(block('.playing-card')).toContain('width: 100%');
     expect(block('.playing-card')).toContain('height: 100%');
     expect(block('.card-slot')).not.toMatch(/transform:\s*scale\(/);
@@ -5547,10 +5551,12 @@ describe('T-90-feedback-20261122_171451-6 ITEM-4/ITEM-7: tabletimer clearance & 
     expect(reservedGap).toBeGreaterThanOrEqual(
       -HAND_SELECTED_RAISED_OFFSET + HAND_CONTOUR_PADDING + 2.5,
     );
-    // ... and the hand row itself reserves the timer plus that clearance.
-    expect(rule("[data-zone='table-arena']")).toContain(
-      '--hand-row-height: calc(var(--hand-card-height, 140px) + 66px);',
-    );
+    // ... and the hand row itself reserves the timer band clearance plus that
+    // raise clearance (T-90-4 ITEM-4).
+    const arenaRule = rule("[data-zone='table-arena']");
+    expect(arenaRule).toContain('--hand-timer-clearance: 64px;');
+    expect(arenaRule).toContain('--hand-row-height: calc(');
+    expect(arenaRule).toContain('var(--hand-timer-clearance, 64px)');
     expect(66).toBeGreaterThan(-HAND_SELECTED_RAISED_OFFSET + 20);
   });
 
@@ -5568,5 +5574,179 @@ describe('T-90-feedback-20261122_171451-6 ITEM-4/ITEM-7: tabletimer clearance & 
     fireEvent.click(pass);
     expect(onAction).toHaveBeenNthCalledWith(2, { type: 'passTurn' });
     expect(onAction).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('T-90-4 ITEM-1/ITEM-4: covered-pair edge collapsing and the turn-timer band', () => {
+  const fourOpponents: OpponentSummary[] = [
+    { id: 'p1', name: 'Bob', cardCount: 4, hasPassed: false, finishRank: null },
+    { id: 'p2', name: 'Carol', cardCount: 4, hasPassed: false, finishRank: null },
+    { id: 'p3', name: 'Dan', cardCount: 4, hasPassed: false, finishRank: null },
+  ];
+
+  const coveredThenUncovered: TablePairData[] = [
+    { attack: { suit: 'spades', rank: 'six' }, defense: { suit: 'spades', rank: 'seven' } },
+    { attack: { suit: 'clubs', rank: 'king' }, defense: null },
+  ];
+
+  /** Four seats: p1 top-left, p2 top-center, p3 top-right, p0 bottom. */
+  const renderForDefender = (defenderId: string, pairs = coveredThenUncovered) =>
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={fourOpponents}
+        tablePairs={pairs}
+        trumpSuit="diamonds"
+        defenderId={defenderId}
+      />,
+    );
+
+  it.each([
+    { defenderId: 'p1', edge: 'left', seat: 'top-left' },
+    { defenderId: 'p2', edge: 'left', seat: 'top-center' },
+    { defenderId: 'p3', edge: 'right', seat: 'top-right' },
+    { defenderId: 'p0', edge: 'left', seat: 'bottom' },
+  ])(
+    'ITEM-1b: snaps covered pairs to the $edge edge for the $seat defender',
+    ({ defenderId, edge }) => {
+      const { unmount } = renderForDefender(defenderId);
+
+      const row = screen.getByTestId('table-bout-row');
+      const stack = screen.getByTestId('covered-pairs-stack');
+      const uncovered = screen.getByTestId('uncovered-pairs-row');
+
+      expect(row.getAttribute('data-covered-edge')).toBe(edge);
+      expect(stack.getAttribute('data-edge')).toBe(edge);
+      expect(uncovered.querySelectorAll('.table-pair')).toHaveLength(1);
+      // The covered pair has left the interactive row for good.
+      expect(stack.querySelectorAll('.table-pair-covered-collapsed')).toHaveLength(1);
+      expect(stack.querySelector('[data-drop-zone]')).toBeNull();
+
+      if (edge === 'left') {
+        expect(row.firstElementChild).toBe(stack);
+        expect(row.lastElementChild).toBe(uncovered);
+      } else {
+        expect(row.firstElementChild).toBe(uncovered);
+        expect(row.lastElementChild).toBe(stack);
+        expect(cssRule(tableCss, ".covered-pairs-stack[data-edge='right']")).toContain(
+          'margin-left: auto',
+        );
+      }
+
+      const covered = Array.from(stack.querySelectorAll('.table-pair')) as HTMLElement[];
+      expect(covered[0].style.zIndex).toBe('1');
+      expect(covered[0].style.marginLeft).toBe('0px');
+      unmount();
+    },
+  );
+
+  it('ITEM-1c: maximally overlaps covered pairs while both rank strips stay visible', () => {
+    const threeCovered: TablePairData[] = Array.from({ length: 3 }, () => ({
+      attack: { suit: 'hearts', rank: 'ten' },
+      defense: { suit: 'clubs', rank: 'jack' },
+    }));
+    renderForDefender('p1', [...threeCovered, { attack: { suit: 'spades', rank: 'six' }, defense: null }]);
+
+    const stack = screen.getByTestId('covered-pairs-stack');
+    // defence overhang (36) + index strip (36) = the documented 72px step.
+    expect(Number(stack.getAttribute('data-step'))).toBe(72);
+    const covered = Array.from(stack.querySelectorAll('.table-pair')) as HTMLElement[];
+    expect(covered).toHaveLength(3);
+    expect(covered[0].style.marginLeft).toBe('0px');
+    for (const [index, pair] of covered.slice(1).entries()) {
+      // coveredPairStep (72) - coveredPairWidth (136) = -64px overlap.
+      expect(pair.style.marginLeft).toBe('-64px');
+      expect(pair.style.zIndex).toBe(String(index + 2));
+    }
+  });
+
+  it('ITEM-1d: submits the original attackIndex for uncovered cards after covered ones', () => {
+    const onTableCardClick = vi.fn();
+    const onCoverDrop = vi.fn();
+    const mixed: TablePairData[] = [
+      { attack: { suit: 'spades', rank: 'six' }, defense: { suit: 'spades', rank: 'seven' } },
+      { attack: { suit: 'clubs', rank: 'king' }, defense: null },
+      { attack: { suit: 'hearts', rank: 'ten' }, defense: { suit: 'hearts', rank: 'jack' } },
+      { attack: { suit: 'diamonds', rank: 'nine' }, defense: null },
+    ];
+    render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={fourOpponents}
+        tablePairs={mixed}
+        trumpSuit="diamonds"
+        defenderId="p1"
+        onTableCardClick={onTableCardClick}
+        onCoverDrop={onCoverDrop}
+      />,
+    );
+
+    const row = screen.getByTestId('uncovered-pairs-row');
+    const attacks = Array.from(row.querySelectorAll('.table-pair-attack')) as HTMLElement[];
+    expect(attacks).toHaveLength(2);
+    expect(attacks[0].getAttribute('data-drop-zone')).toBe('cover:1');
+    expect(attacks[1].getAttribute('data-drop-zone')).toBe('cover:3');
+
+    fireEvent.click(attacks[1].querySelector('.card-slot') as HTMLElement);
+    expect(onTableCardClick).toHaveBeenCalledWith(3);
+
+    fireEvent.drop(attacks[1], { dataTransfer: { getData: () => 'spades:six' } });
+    expect(onCoverDrop).toHaveBeenCalledWith({ suit: 'spades', rank: 'six' }, 3);
+  });
+
+  it('ITEM-4: keeps the turn timer in its dedicated band above the raised hand', () => {
+    const { container } = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={fourOpponents}
+        tablePairs={coveredThenUncovered}
+        trumpSuit="diamonds"
+        boutPhase="SurrenderThrowIn"
+        defending
+        isSurrenderingDefender
+        defenderId="p0"
+        selectedKeys={hand.map(cardKey)}
+        playableKeys={[]}
+        turnPlayerId="p0"
+        turnSecondsRemaining={9}
+      />,
+    );
+
+    const zone = container.querySelector('[data-zone="player-hand"]') as HTMLElement;
+    const clock = screen.getByTestId('hand-clock');
+    const cards = zone.querySelector('.hand-cards') as HTMLElement;
+
+    // The timer band is the first, clearly separated row of the hand area.
+    expect(zone.getAttribute('data-timer-band')).toBe('true');
+    expect(zone.firstElementChild).toBe(clock);
+    expect(clock.nextElementSibling).toBe(cards);
+    expect(cards.contains(clock)).toBe(false);
+    expect(clock.textContent).toBe('00:09');
+
+    const zoneRule = cssRule(tableCss, "[data-zone='player-hand']");
+    expect(zoneRule).toContain('padding: var(--hand-timer-clearance, 64px) 0 8px;');
+    expect(zoneRule).toContain('row-gap: calc(');
+    expect(zoneRule).not.toContain('position: absolute');
+
+    // The band's top clearance exceeds the deepest surrendered-bout overhang:
+    // half a pair box (140 + 18) + 12px translation - 18px reserve = 73px past
+    // the tinted box, minus the 18px arena row gap = 55px into the hand row.
+    const pairBox = BOUT_CARD_HEIGHT + 18;
+    const surrenderOverhang = pairBox / 2 + 12 - 18 - 18;
+    expect(surrenderOverhang).toBe(55);
+    expect(64).toBeGreaterThan(surrenderOverhang);
+
+    // The incoming cards stay in the single-row bout area above the band.
+    expect(screen.getByTestId('table-bout-row')).not.toBeNull();
+    expect(screen.getByTestId('covered-pairs-stack')).not.toBeNull();
+    expect(screen.getByTestId('uncovered-pairs-row').querySelectorAll('.table-pair')).toHaveLength(1);
+    // ... and the contextual controls band never enters the timer band.
+    expect(zone.querySelector('[data-zone="player-controls"]')).toBeNull();
+    const controls = container.querySelector('[data-zone="player-controls"]');
+    expect(controls).not.toBeNull();
+    expect(zone.contains(controls)).toBe(false);
   });
 });
