@@ -224,10 +224,11 @@ describe('GamePage', () => {
 
     expect(wrapper.isConnected).toBe(true);
     expect(wrapper.getAttribute('data-dragging')).toBe('true');
-    // ITEM-6b: the first small-hand slot carries a 32px runway, so the
-    // transform is relative to that slot (60 - 32 = 28) while the rendered
-    // card still tracks the pointer exactly.
-    expect(wrapper.style.transform).toBe('translate3d(28px, 30px, 0)');
+    // T-95-audit-gap-20261122_203506-1: the card's exact 100x140 centre — not
+    // the clicked pixel at (10, 20) — is locked to the pointer (70, 50). The
+    // translate is relative to the first small-hand slot's 32px runway:
+    // x = 70 - 100 / 2 - 32 = -12, y = 50 - 140 / 2 = -20.
+    expect(wrapper.style.transform).toBe('translate3d(-12px, -20px, 0)');
     expect(wrapper.style.opacity === '' || wrapper.style.opacity === '1').toBe(true);
     expect(wrapper.querySelector('.card-slot')).not.toBeNull();
     fireEvent.mouseUp(document, { clientX: 70, clientY: 50 });

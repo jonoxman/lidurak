@@ -4913,10 +4913,11 @@ describe('T-90-feedback-20261105_221105-2: card size, hand overlap, contour and 
     expect(wrapper.style.opacity === '' || wrapper.style.opacity === '1').toBe(true);
     expect(wrapper.style.visibility).not.toBe('hidden');
     expect(wrapper.style.display).not.toBe('none');
-    // The card's own resting slot now carries the 32px small-hand runway, so
-    // the transform is relative to that slot (120 - 32 = 88). The rendered
-    // left edge still tracks the pointer exactly.
-    expect(wrapper.style.transform).toBe('translate3d(88px, 40px, 0)');
+    // T-95-audit-gap-20261122_203506-1: the card's exact centre is locked to
+    // the pointer (130, 60), independent of the (10, 20) grab point. The
+    // translate is relative to the 32px small-hand runway: 130 - 50 - 32 = 48
+    // and 60 - 70 = -10.
+    expect(wrapper.style.transform).toBe('translate3d(48px, -10px, 0)');
 
     const card = wrapper.querySelector('.card-slot') as HTMLElement;
     expect(card).not.toBeNull();
@@ -5028,7 +5029,9 @@ describe('T-90-feedback-20261105_221105-2: card size, hand overlap, contour and 
       clientY: 20,
     });
     fireEvent.mouseMove(document, { clientX: 70, clientY: 50 });
-    expect(cards[0].style.transform).toBe('translate3d(60px, 30px, 0)');
+    // T-95-audit-gap-20261122_203506-1: the 52-card row starts at x = 0, so the
+    // centre-locked translate is `70 - 50` / `50 - 70` — no grab offset.
+    expect(cards[0].style.transform).toBe('translate3d(20px, -20px, 0)');
     expect(cards[0].style.transformOrigin).toBe('');
     expect(cards[0].style.zIndex).toBe('1000');
     fireEvent.mouseUp(document, { clientX: 70, clientY: 50 });
@@ -5786,5 +5789,160 @@ describe('T-90-4 ITEM-1/ITEM-4: covered-pair edge collapsing and the turn-timer 
     const controls = container.querySelector('[data-zone="player-controls"]');
     expect(controls).not.toBeNull();
     expect(zone.contains(controls)).toBe(false);
+  });
+});
+
+/**
+ * T-95-audit-gap-20261122_203506-1: the dragged card's exact geometric centre —
+ * never the pressed pixel — is locked to the pointer for BOTH drag paths: the
+ * mouse hand-reorder drag (`.hand-card-wrapper[data-dragging='true']`) and the
+ * HTML5 play-drag preview (`[data-testid="drag-card-preview"]`).
+ */
+describe('T-95-audit-gap-20261122_203506-1: center-locked card dragging', () => {
+  const bobSeat: OpponentSummary = {
+    id: 'p1',
+    name: 'Bob',
+    cardCount: 6,
+    hasPassed: false,
+    finishRank: null,
+  };
+
+  /** `count` unique cards, enough for the 30-card hands used below. */
+  const makeHand = (count: number): CardData[] => {
+    const suits = ['spades', 'hearts', 'clubs', 'diamonds'];
+    const ranks = ['six', 'seven', 'eight', 'nine', 'ten', 'jack', 'queen', 'king', 'ace'];
+    return Array.from({ length: count }, (_, index) => ({
+      suit: suits[Math.floor(index / ranks.length) % suits.length],
+      rank: ranks[index % ranks.length],
+    }));
+  };
+
+  const renderHand = (count: number) =>
+    render(
+      <GameTable
+        myId="p0"
+        myHand={makeHand(count)}
+        opponents={[bobSeat]}
+        tablePairs={[]}
+        trumpSuit="diamonds"
+        defenderId="p1"
+        onReorderHand={vi.fn()}
+      />,
+    );
+
+  const wrappers = (container: HTMLElement): HTMLElement[] =>
+    Array.from(container.querySelectorAll('.hand-card-wrapper')) as HTMLElement[];
+
+  const translate = (value: string): { x: number; y: number } => {
+    const match = value.match(/translate3d\((-?[\d.]+)px, (-?[\d.]+)px, 0\)/);
+    return { x: match ? Number(match[1]) : Number.NaN, y: match ? Number(match[2]) : Number.NaN };
+  };
+
+  it('mouse reorder: locks the card centre to the pointer from every click point', () => {
+    // Top-left corner, the visible 36px strip, dead centre and the bottom-right
+    // corner of the SAME card, all released at the same pointer position.
+    const clickPoints: Array<[number, number]> = [
+      [5, 5],
+      [18, 20],
+      [50, 70],
+      [95, 135],
+    ];
+    const pointer = { x: 500, y: 400 };
+
+    for (const [offsetX, offsetY] of clickPoints) {
+      const view = renderHand(6);
+      const target = wrappers(view.container)[2];
+      const card = target.querySelector('.card-slot') as HTMLElement;
+
+      fireEvent.mouseDown(card, {
+        button: 0,
+        clientX: 200 + offsetX,
+        clientY: 240 + offsetY,
+      });
+      fireEvent.mouseMove(document, { clientX: pointer.x, clientY: pointer.y });
+
+      expect(target.getAttribute('data-dragging')).toBe('true');
+      const { x, y } = translate(target.style.transform);
+      const slotRestingOffsetX = Number(target.getAttribute('data-card-x'));
+      // The wrapper's resting left inside the zero-origin jsdom hand box plus
+      // its translate is the rendered left edge; its centre must be the pointer.
+      expect(slotRestingOffsetX + x).toBeCloseTo(pointer.x - CARD_WIDTH / 2, 1);
+      expect(y).toBeCloseTo(pointer.y - CARD_HEIGHT / 2, 5);
+
+      fireEvent.mouseUp(document, { clientX: pointer.x, clientY: pointer.y });
+      view.unmount();
+    }
+  });
+
+  it('mouse reorder: centres the leftmost, middle and rightmost card of small and large hands', () => {
+    const pointer = { x: 420, y: 380 };
+    const cases: Array<{ count: number; indices: number[] }> = [
+      // 6 cards keeps the 32px small-hand parting runway.
+      { count: 6, indices: [0, 2, 5] },
+      { count: 14, indices: [0, 7, 13] },
+      { count: 30, indices: [0, 15, 29] },
+    ];
+
+    for (const { count, indices } of cases) {
+      const view = renderHand(count);
+      for (const index of indices) {
+        const target = wrappers(view.container)[index];
+        const card = target.querySelector('.card-slot') as HTMLElement;
+
+        fireEvent.mouseDown(card, { button: 0, clientX: 60, clientY: 90 });
+        fireEvent.mouseMove(document, { clientX: pointer.x, clientY: pointer.y });
+
+        const { x, y } = translate(target.style.transform);
+        const slotRestingOffsetX = Number(target.getAttribute('data-card-x'));
+        // Zero index-dependent horizontal drift: the lane origin cancels out.
+        expect(slotRestingOffsetX + x).toBeCloseTo(pointer.x - CARD_WIDTH / 2, 1);
+        expect(y).toBeCloseTo(pointer.y - CARD_HEIGHT / 2, 5);
+
+        fireEvent.mouseUp(document, { clientX: pointer.x, clientY: pointer.y });
+      }
+      view.unmount();
+    }
+  });
+
+  it('play drag: the HTML5 preview stays centre-locked for every click point and index', () => {
+    const pointer = { x: 520, y: 420 };
+    const cases: Array<{ count: number; index: number; grab: [number, number] }> = [
+      { count: 6, index: 0, grab: [5, 5] },
+      { count: 6, index: 3, grab: [50, 70] },
+      { count: 6, index: 5, grab: [95, 135] },
+      { count: 14, index: 13, grab: [95, 135] },
+    ];
+
+    for (const { count, index, grab } of cases) {
+      const view = renderHand(count);
+      const card = wrappers(view.container)[index].querySelector('.card-slot') as HTMLElement;
+      const grabPoint = { x: 100 + grab[0], y: 140 + grab[1] };
+
+      // jsdom has no `DragEvent` coordinates, so a real grab pre-captures them.
+      fireEvent.mouseDown(card, {
+        button: 0,
+        clientX: grabPoint.x,
+        clientY: grabPoint.y,
+      });
+      fireEvent.dragStart(card, {
+        dataTransfer: { setData: vi.fn(), setDragImage: vi.fn(), effectAllowed: 'move' },
+      });
+
+      // From `dragstart` onwards the preview is centred on the pointer, never
+      // offset by the pressed pixel or the card index.
+      const preview = screen.getByTestId('drag-card-preview') as HTMLElement;
+      let previewTranslate = translate(preview.style.transform);
+      expect(previewTranslate.x).toBeCloseTo(grabPoint.x - CARD_WIDTH / 2, 5);
+      expect(previewTranslate.y).toBeCloseTo(grabPoint.y - CARD_HEIGHT / 2, 5);
+
+      window.dispatchEvent(new window.MouseEvent('dragover', { clientX: pointer.x, clientY: pointer.y }));
+      previewTranslate = translate(preview.style.transform);
+      expect(previewTranslate.x).toBeCloseTo(pointer.x - CARD_WIDTH / 2, 5);
+      expect(previewTranslate.y).toBeCloseTo(pointer.y - CARD_HEIGHT / 2, 5);
+
+      fireEvent.dragEnd(card);
+      expect(screen.queryByTestId('drag-card-preview')).toBeNull();
+      view.unmount();
+    }
   });
 });

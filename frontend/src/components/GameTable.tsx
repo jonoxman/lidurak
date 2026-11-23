@@ -1439,16 +1439,15 @@ export function GameTable({
     active: boolean;
   } | null>(null);
   /**
-   * T-90-feedback-5 ITEM-3: the exact pointer grab offset captured from the live
-   * card rectangle at `pointerdown`, plus the stage origin at that moment. Every
-   * pointermove is resolved from these constants, so the card's index, overlap
-   * step or row compaction can never add horizontal drift.
+   * T-95-audit-gap-20261122_203506-1: the hand box origin captured at
+   * `pointerdown`. Every pointermove expresses the dragged card as a translate
+   * from its own resting slot inside this box, and the card's exact geometric
+   * centre — never the grab point — is locked to the pointer. The click point,
+   * the card index and the row compaction therefore never create an offset.
    */
   const pointerDragOriginRef = useRef<{
-    grabOffsetX: number;
-    grabOffsetY: number;
-    stageLeft: number;
-    stageTop: number;
+    boxLeft: number;
+    boxTop: number;
   } | null>(null);
   const suppressClickRef = useRef(false);
   /**
@@ -1780,20 +1779,27 @@ export function GameTable({
   // compresses the overlap instead, so the cards keep their exact footprint.
   const handFitScale = 1;
   const handRenderedWidth = Math.max(0, Math.round(totalHandWidth));
-  // ITEM-3: exact 1:1 pointer tracking. The grabbed card is placed at
-  // `(clientX - grabOffsetX, clientY - grabOffsetY)` in viewport coordinates,
-  // expressed as a translate from its own live layout slot. The card's index,
-  // overlap step, hover state or row compaction never enter the formula.
+  // T-95-audit-gap-20261122_203506-1: the dragged card's exact geometric centre
+  // — `cardWidth / 2`, `cardHeight / 2` — is locked to the pointer, completely
+  // independent of where on the card the user pressed. The translate is
+  // expressed from the wrapper's untransformed resting slot inside the hand box
+  // (`boxLeft + slotRestingOffsetX`, `boxTop`):
+  //   tx = (clientX - boxLeft - cardWidth / 2) - slotRestingOffsetX
+  //   ty = clientY - boxTop - cardHeight / 2
+  // so the card's index, the small-hand parting runway, the overlap step, an
+  // active hover parting or a vertical lift can never add drift.
   const dragOrigin = pointerDragOriginRef.current;
+  const draggedSlotRestingOffsetX =
+    draggedCardIndex >= 0 ? (baseCardPositions[draggedCardIndex] ?? 0) : 0;
   const draggedTranslate =
     dragPointer && dragOrigin
       ? {
           x:
             dragPointer.x -
-            dragOrigin.grabOffsetX -
-            dragOrigin.stageLeft -
-            (baseCardPositions[draggedCardIndex] ?? 0),
-          y: dragPointer.y - dragOrigin.grabOffsetY - dragOrigin.stageTop,
+            dragOrigin.boxLeft -
+            cardWidth / 2 -
+            draggedSlotRestingOffsetX,
+          y: dragPointer.y - dragOrigin.boxTop - cardHeight / 2,
         }
       : { x: 0, y: 0 };
   const roundedDragX = Math.round(draggedTranslate.x * 100) / 100;
@@ -2409,23 +2415,16 @@ export function GameTable({
   // non-primary buttons are ignored so they keep their read-only behaviour.
   const beginPointerDrag = (card: CardData) => (event: MouseEvent) => {
     if (reviewMode || event.button !== 0) return;
-    const cardEl = (event.currentTarget as HTMLElement | null) ?? null;
-    const cardRect =
-      cardEl && typeof cardEl.getBoundingClientRect === 'function'
-        ? cardEl.getBoundingClientRect()
-        : null;
-    const stageRect =
+    const boxRect =
       handRef.current && typeof handRef.current.getBoundingClientRect === 'function'
         ? handRef.current.getBoundingClientRect()
         : null;
-    // ITEM-3: capture the exact grab offset from the LIVE card rectangle once.
-    // Every later pointermove resolves the card from these constants, so the
-    // hand index / overlap step / compaction can never add horizontal drift.
+    // T-95-audit-gap-20261122_203506-1: only the hand box origin is captured.
+    // The grab point is deliberately ignored so the card's centre — not the
+    // pressed pixel — follows the cursor.
     pointerDragOriginRef.current = {
-      grabOffsetX: cardRect ? event.clientX - cardRect.left : 0,
-      grabOffsetY: cardRect ? event.clientY - cardRect.top : 0,
-      stageLeft: stageRect?.left ?? 0,
-      stageTop: stageRect?.top ?? 0,
+      boxLeft: boxRect?.left ?? 0,
+      boxTop: boxRect?.top ?? 0,
     };
     // T-90-feedback-6 ITEM-3: record the exact rendered footprint and the
     // initial pointer position, so the preview is already correctly centred
