@@ -7,6 +7,7 @@ import {
   createPresetGame,
   getGameReplay,
   getGameView,
+  QA_SCENARIOS,
   sendAction as sendActionRest,
 } from '../api/client';
 import { GameWebSocket } from '../api/websocket';
@@ -265,17 +266,6 @@ export function playReplayFrameSound(frames: ReplayFrame[], targetIdx: number): 
       soundEngine.playAttackCard(sound.count);
   }
 }
-
-/**
- * The four current-round scripted positions offered in the lobby and the game
- * sidebar. Obsolete presets of previous rounds are pruned.
- */
-export const QA_SCENARIOS: { id: string; label: string }[] = [
-  { id: 'qa-normal-6-actions', label: '6-Card 10s & Actions' },
-  { id: 'qa-medium-14-expand', label: '14-Card Expand Box' },
-  { id: 'qa-large-30-compress', label: '30-Card Compress & Part' },
-  { id: 'qa-single-card', label: '1-Card Hand (No Part)' },
-];
 
 /**
  * ITEM-9 / ITEM-12: a match is finished when the authoritative view, the frame

@@ -1,12 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/preact';
 
-vi.mock('../api/client', () => ({
-  checkServerHealth: vi.fn(async () => true),
-  createGame: vi.fn(),
-  getGameView: vi.fn(),
-  sendAction: vi.fn(),
-}));
+vi.mock('../api/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api/client')>();
+  return {
+    ...actual,
+    checkServerHealth: vi.fn(async () => true),
+    createGame: vi.fn(),
+    getGameView: vi.fn(),
+    sendAction: vi.fn(),
+  };
+});
 
 import * as client from '../api/client';
 import { App, parseRoute } from '../app';

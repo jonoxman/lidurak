@@ -232,12 +232,15 @@ class ThrowInClockSuite extends munit.FunSuite:
   }
 
   test("the delayed auto-pass honours the room's configured noThrowInAutoPassDelay") {
+    // A 2-second delay proves the room's own value wins over the 1-second
+    // default. The assertion is a lower bound on the elapsed wall clock, so a
+    // loaded CI scheduler can only make it pass later, never flake it early.
     val room = GameActor
       .create(
         GameConfig(playerCount = 2, seed = 9L),
         Vector("Alice", "Bob"),
         turnSeconds = 15,
-        noThrowInAutoPassDelay = 100.millis
+        noThrowInAutoPassDelay = 2.seconds
       )
       .unsafeRunSync()
     val now = System.currentTimeMillis()
@@ -251,15 +254,19 @@ class ThrowInClockSuite extends munit.FunSuite:
       defenderInitialHandSize = 6,
       turnDeadlineMs = now + 15_000L
     )
-    assertEquals(room.noThrowInAutoPassDelay, 100.millis)
+    assertEquals(room.noThrowInAutoPassDelay, 2.seconds)
     room.stateRef.set(waiting).unsafeRunSync()
     val startedAt = System.currentTimeMillis()
 
-    val settled = awaitState(room, 5.seconds)(_.tablePairs.isEmpty)
+    val settled = awaitState(room, 10.seconds)(_.tablePairs.isEmpty)
     val elapsedMs = System.currentTimeMillis() - startedAt
     GameActor.stopClock(room).unsafeRunSync()
 
-    assert(elapsedMs < 900L, s"the configured auto-pass delay was ignored: ${elapsedMs}ms")
+    // The 1-second default would have settled the bout already.
+    assert(
+      elapsedMs >= 1_900L,
+      s"the configured auto-pass delay fired too early: ${elapsedMs}ms"
+    )
     assertEquals(settled.boutPhase, BoutPhase.InitialAttack)
   }
 
