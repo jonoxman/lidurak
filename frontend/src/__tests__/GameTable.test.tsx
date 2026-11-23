@@ -2745,22 +2745,33 @@ describe('T-90-3 ITEM-NEW: compact single-row play area and roundness', () => {
     );
 
     const contour = () => screen.getByTestId('hand-highlight-contour');
-    const path = () => screen.getByTestId('hand-highlight-path').getAttribute('d') ?? '';
+    const pathElement = () => screen.getByTestId('hand-highlight-path');
+    const path = () => pathElement().getAttribute('d') ?? '';
 
-    // Roundness 0 → a sharp, arc-free contour.
+    // Roundness 0 → a sharp, arc-free contour and a mitered stroke join, so the
+    // 2.5px stroke cannot soften the vertices the arc-free path just drew.
     expect(contour().getAttribute('data-contour-radius')).toBe('0');
     expect(path()).not.toMatch(/A [\d.]/);
+    expect(pathElement().getAttribute('stroke-linejoin')).toBe('miter');
+    expect(pathElement().getAttribute('stroke-linecap')).toBe('square');
+    expect(
+      cssRule(".hand-highlight-contour[data-contour-radius='0'] .hand-highlight-path"),
+    ).toContain('stroke-linejoin: miter');
 
     // Every later change repaints the outline live from the settings store.
     act(() => setSettings({ roundness: DEFAULT_SETTINGS.roundness }));
     expect(document.documentElement.style.getPropertyValue('--app-roundness')).toBe('8px');
     expect(contour().getAttribute('data-contour-radius')).toBe('12');
     expect(path()).toMatch(/A 12 12 /);
+    expect(pathElement().getAttribute('stroke-linejoin')).toBe('round');
+    expect(pathElement().getAttribute('stroke-linecap')).toBe('round');
 
     act(() => setSettings({ roundness: 16 }));
     expect(document.documentElement.style.getPropertyValue('--app-roundness')).toBe('16px');
     expect(contour().getAttribute('data-contour-radius')).toBe('24');
     expect(path()).toMatch(/A 24 24 /);
+    expect(pathElement().getAttribute('stroke-linejoin')).toBe('round');
+    expect(pathElement().getAttribute('stroke-linecap')).toBe('round');
 
     view.unmount();
     setSettings({ roundness: DEFAULT_SETTINGS.roundness });
@@ -3868,6 +3879,13 @@ describe('T-90-4: larger cards, aura containment, throw-in slot, hand reorder an
     const outline = screen.getByTestId('throw-in-outline');
     expect(outline.classList.contains('target-outline')).toBe(true);
     expect(outline.getAttribute('data-drop-zone')).toBe('throw-in');
+    // T-96: the icon fills the whole 100x140 card slot with centred artwork, so
+    // the wrapper and its child report the same bounds in visual QA.
+    const icon = outline.querySelector('svg.throw-in-icon') as SVGElement;
+    expect(icon.getAttribute('viewBox')).toBe('0 0 100 140');
+    expect(icon.querySelector('path')?.getAttribute('d')).toBe('M50 53 L50 87 M33 70 L67 70');
+    expect(cssRule(tableCss, '.throw-in-icon')).toContain('width: 100%');
+    expect(cssRule(tableCss, '.throw-in-icon')).toContain('height: 100%');
     expect(outline.closest('.table-pairs-group')).not.toBeNull();
     // The generic "drop anywhere on the battlefield" fallback is gone.
     expect(container.querySelector('.bout-area')?.hasAttribute('data-drop-zone')).toBe(false);
