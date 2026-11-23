@@ -331,6 +331,19 @@ describe('lobby.css visual invariants', () => {
     expect(lobbyCss).not.toMatch(/position:\s*(absolute|fixed)/);
   });
 
+  it('keeps the M2 panel headings light on the dark panel', () => {
+    // T-96 ITEM-3: `.lobby-page h2` (0,1,1) must lose to the scoped panel title.
+    expect(lobbyCss).toContain('.m2-lobby .m2-panel-title');
+    expect(lobbyCss).toContain('color: var(--m2-text-strong);');
+  });
+
+  it('shares the M2 palette and button styling with the multiplayer shell', () => {
+    // T-96 ITEM-2: the tokens live on both M2 shells, not the lobby alone.
+    expect(lobbyCss).toMatch(/\.m2-lobby,\s*\n\.multiplayer-page \{/);
+    expect(lobbyCss).toContain('--m2-text-strong: #f1f1f1;');
+    expect(lobbyCss).toContain('.multiplayer-page .m2-button.secondary');
+  });
+
   it('adapts below 640px and caps the desktop shell', () => {
     expect(lobbyCss).toMatch(/@media \(max-width: 640px\)/);
     expect(lobbyCss).toMatch(/@media \(min-width: 1400px\)/);
