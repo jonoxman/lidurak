@@ -3,20 +3,13 @@ import {
   checkServerHealth,
   createGame,
   createPresetGame,
+  QA_SCENARIOS,
   type CreatedGame,
 } from '../api/client';
 import type { PlayerType } from '../types';
 import '../styles/table.css';
 
 const DEFAULT_NAMES = ['Alice', 'Bob', 'Carol', 'Dave'];
-
-/** The four current-round scripted positions, mirrored in the game sidebar. */
-const QA_SCENARIOS: { id: string; label: string }[] = [
-  { id: 'qa-normal-6-actions', label: '6-Card 10s & Actions' },
-  { id: 'qa-medium-14-expand', label: '14-Card Expand Box' },
-  { id: 'qa-large-30-compress', label: '30-Card Compress & Part' },
-  { id: 'qa-single-card', label: '1-Card Hand (No Part)' },
-];
 
 /** Seat choices offered per player row; values match the backend's `playerTypes`. */
 const SEAT_TYPES = [

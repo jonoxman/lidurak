@@ -1,11 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/preact';
 
-vi.mock('../api/client', () => ({
-  checkServerHealth: vi.fn(),
-  createGame: vi.fn(),
-  createPresetGame: vi.fn(),
-}));
+vi.mock('../api/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api/client')>();
+  return {
+    ...actual,
+    checkServerHealth: vi.fn(),
+    createGame: vi.fn(),
+    createPresetGame: vi.fn(),
+  };
+});
 
 import * as client from '../api/client';
 import { LobbyPage } from '../pages/LobbyPage';
@@ -301,21 +305,25 @@ describe('LobbyPage', () => {
     );
   });
 
-  /** ITEM-9: the lobby lists exactly the four current-round QA scenarios. */
-  it('lists only the four current-round QA scenarios', () => {
+  /** T-90: the lobby lists exactly the six current-round QA scenarios. */
+  it('lists only the six current-round QA scenarios', () => {
     render(<LobbyPage initialServerReady />);
 
     const panel = screen.getByTestId('qa-scenarios');
     const buttons = within(panel).getAllByRole('button');
-    // ITEM-9: exactly four presets — no legacy scenario can hide in the list.
-    expect(buttons).toHaveLength(4);
+    // Exactly six presets — no legacy scenario can hide in the list.
+    expect(buttons).toHaveLength(6);
     expect(buttons.map((button) => button.getAttribute('data-preset'))).toEqual([
+      'qa-table-collapse-right',
+      'qa-surrender-timer',
       'qa-normal-6-actions',
       'qa-medium-14-expand',
       'qa-large-30-compress',
       'qa-single-card',
     ]);
     expect(buttons.map((button) => button.textContent)).toEqual([
+      'Table Collapse (Edge & Row)',
+      'Active Surrender & Timer',
       '6-Card 10s & Actions',
       '14-Card Expand Box',
       '30-Card Compress & Part',
@@ -422,6 +430,8 @@ describe('LobbyPage', () => {
     const panel = screen.getByTestId('qa-scenarios');
     expect(within(panel).getByRole('heading', { name: '⚡ QA Scenarios' })).toBeTruthy();
     const presets = {
+      'qa-table-collapse-right': 'Table Collapse (Edge & Row)',
+      'qa-surrender-timer': 'Active Surrender & Timer',
       'qa-normal-6-actions': '6-Card 10s & Actions',
       'qa-medium-14-expand': '14-Card Expand Box',
       'qa-large-30-compress': '30-Card Compress & Part',

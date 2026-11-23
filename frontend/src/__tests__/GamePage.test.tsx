@@ -2,13 +2,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/preact';
 import type { PlayerGameView } from '../types';
 
-vi.mock('../api/client', () => ({
-  getGameView: vi.fn(),
-  getGameReplay: vi.fn(),
-  sendAction: vi.fn(),
-  createGame: vi.fn(),
-  createPresetGame: vi.fn(),
-}));
+vi.mock('../api/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api/client')>();
+  return {
+    ...actual,
+    getGameView: vi.fn(),
+    getGameReplay: vi.fn(),
+    sendAction: vi.fn(),
+    createGame: vi.fn(),
+    createPresetGame: vi.fn(),
+  };
+});
 
 const wsState = vi.hoisted(() => ({
   onUpdate: null as ((view: unknown) => void) | null,
@@ -2429,7 +2433,7 @@ describe('GamePage', () => {
     expect(screen.getByTestId('player-status-tag-p2').textContent).toBe('WINNER');
   });
 
-  it('ITEM-9: lists only the four current-round QA presets and opens one in a click', async () => {
+  it('T-90: lists only the six current-round QA presets and opens them in a click', async () => {
     getGameView.mockResolvedValue(view);
     getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
     createPresetGameMock.mockResolvedValue({
@@ -2451,11 +2455,13 @@ describe('GamePage', () => {
 
     const panel = await screen.findByTestId('qa-scenarios');
     expect(panel.closest('[data-zone="sidebar-left"]')).not.toBeNull();
-    // ITEM-9: exactly four presets — no legacy scenario can hide in the list.
-    expect(within(panel).getAllByRole('button')).toHaveLength(4);
+    // Exactly six presets — no legacy scenario can hide in the list.
+    expect(within(panel).getAllByRole('button')).toHaveLength(6);
     expect(
       within(panel).getAllByRole('button').map((button) => button.getAttribute('data-preset')),
     ).toEqual([
+      'qa-table-collapse-right',
+      'qa-surrender-timer',
       'qa-normal-6-actions',
       'qa-medium-14-expand',
       'qa-large-30-compress',
@@ -2464,6 +2470,8 @@ describe('GamePage', () => {
     expect(
       within(panel).getAllByRole('button').map((button) => button.textContent),
     ).toEqual([
+      'Table Collapse (Edge & Row)',
+      'Active Surrender & Timer',
       '6-Card 10s & Actions',
       '14-Card Expand Box',
       '30-Card Compress & Part',
@@ -2492,10 +2500,32 @@ describe('GamePage', () => {
       expect(within(panel).queryByTestId(`preset-btn-${legacy}`)).toBeNull();
     }
 
+    // ITEM-1e: the collapse scenario sends its exact preset id.
+    const collapse = within(panel).getByRole('button', {
+      name: 'Table Collapse (Edge & Row)',
+    }) as HTMLButtonElement;
+    fireEvent.click(collapse);
+
+    await waitFor(() =>
+      expect(createPresetGameMock).toHaveBeenCalledWith('qa-table-collapse-right'),
+    );
+    await waitFor(() => expect(onNavigateGame).toHaveBeenCalledWith('preset-1', 'p1'));
+    await waitFor(() => expect(collapse.disabled).toBe(false));
+
+    // ITEM-4b: the surrender timer scenario sends its exact preset id.
+    const surrender = within(panel).getByRole('button', {
+      name: 'Active Surrender & Timer',
+    }) as HTMLButtonElement;
+    fireEvent.click(surrender);
+
+    await waitFor(() => expect(createPresetGameMock).toHaveBeenCalledWith('qa-surrender-timer'));
+    await waitFor(() => expect(onNavigateGame).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(surrender.disabled).toBe(false));
+
     fireEvent.click(within(panel).getByRole('button', { name: '6-Card 10s & Actions' }));
 
     await waitFor(() => expect(createPresetGameMock).toHaveBeenCalledWith('qa-normal-6-actions'));
-    await waitFor(() => expect(onNavigateGame).toHaveBeenCalledWith('preset-1', 'p1'));
+    await waitFor(() => expect(onNavigateGame).toHaveBeenCalledTimes(3));
   });
 
   it('T-90-feedback-3: light mode paints the paler highlights live', async () => {
