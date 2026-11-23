@@ -305,14 +305,14 @@ describe('LobbyPage', () => {
     );
   });
 
-  /** T-90: the lobby lists exactly the six current-round QA scenarios. */
-  it('lists only the six current-round QA scenarios', () => {
+  /** T-90 / T-90-feedback-*: the lobby lists exactly the seven current-round QA scenarios. */
+  it('lists only the seven current-round QA scenarios', () => {
     render(<LobbyPage initialServerReady />);
 
     const panel = screen.getByTestId('qa-scenarios');
     const buttons = within(panel).getAllByRole('button');
-    // Exactly six presets — no legacy scenario can hide in the list.
-    expect(buttons).toHaveLength(6);
+    // Exactly seven presets — no legacy scenario can hide in the list.
+    expect(buttons).toHaveLength(7);
     expect(buttons.map((button) => button.getAttribute('data-preset'))).toEqual([
       'qa-table-collapse-right',
       'qa-surrender-timer',
@@ -320,6 +320,7 @@ describe('LobbyPage', () => {
       'qa-medium-14-expand',
       'qa-large-30-compress',
       'qa-single-card',
+      'qa-fast-bots',
     ]);
     expect(buttons.map((button) => button.textContent)).toEqual([
       'Table Collapse (Edge & Row)',
@@ -328,6 +329,7 @@ describe('LobbyPage', () => {
       '14-Card Expand Box',
       '30-Card Compress & Part',
       '1-Card Hand (No Part)',
+      'Fast Bots (75% Faster)',
     ]);
 
     // Every preset of the previous rounds is gone from the panel.
@@ -436,6 +438,7 @@ describe('LobbyPage', () => {
       'qa-medium-14-expand': '14-Card Expand Box',
       'qa-large-30-compress': '30-Card Compress & Part',
       'qa-single-card': '1-Card Hand (No Part)',
+      'qa-fast-bots': 'Fast Bots (75% Faster)',
     };
     for (const [id, label] of Object.entries(presets)) {
       const button = within(panel).getByTestId(`preset-btn-${id}`);
@@ -449,6 +452,29 @@ describe('LobbyPage', () => {
       await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
       window.location.hash = '';
     }
+  });
+
+  /** T-90-feedback-20261123_020207-5 ITEM-NEW3: one click opens the fast-bot room. */
+  it('T-90-feedback-5: starts the Fast Bots preset and opens its default seat', async () => {
+    createPresetGame.mockResolvedValue({
+      gameId: 'fast-bots',
+      players: ['p0', 'p1', 'p2', 'p3'],
+      playerTypes: ['human', 'basicBot', 'basicBot', 'basicBot'],
+      defaultPlayerId: 'p0',
+    });
+
+    render(<LobbyPage initialServerReady />);
+
+    const panel = screen.getByTestId('qa-scenarios');
+    const button = within(panel).getByTestId('preset-btn-qa-fast-bots');
+    expect(button.textContent).toBe('Fast Bots (75% Faster)');
+    expect(button.getAttribute('data-preset')).toBe('qa-fast-bots');
+
+    fireEvent.click(button);
+
+    await waitFor(() => expect(createPresetGame).toHaveBeenCalledWith('qa-fast-bots'));
+    // The reviewer lands on the human seat and watches the bots play.
+    await waitFor(() => expect(window.location.hash).toBe('#/g/fast-bots?player=p0'));
   });
 
   it('surfaces a failed QA preset instead of navigating', async () => {
