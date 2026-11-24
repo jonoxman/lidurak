@@ -3,7 +3,7 @@ package durak.http
 import cats.effect.{IO, Ref, Resource}
 import cats.effect.std.Queue
 import cats.syntax.all.*
-import durak.lobby.{QuickPairRequest, QuickPairingService}
+import durak.lobby.{QuickPairOutcome, QuickPairRequest, QuickPairingService}
 import durak.protocol.ProtocolCodecs.given
 import durak.protocol.{LobbyRoomSummary, WsClientMessage, WsServerMessage}
 import durak.rooms.{ActionRejected, CreateRoomConfig, RoomManager, UnknownRoom}
@@ -84,7 +84,7 @@ object MultiplayerRoutes:
       quickPairing: QuickPairingService[IO]
   )(using webSockets: WebSocketBuilder2[IO]): HttpRoutes[IO] =
     restRoutes(store, roomManager, quickPairing) <+>
-      webSocketRoutes(store, roomManager)(using webSockets)
+      webSocketRoutes(store, roomManager, quickPairing)(using webSockets)
 
   // --- REST ----------------------------------------------------------------
 
@@ -177,11 +177,22 @@ object MultiplayerRoutes:
             case Right(pairRequest) =>
               withSession(req, store) { (session, _) =>
                 quickPairing.pair(session, pairRequest).flatMap {
-                  case Right((gameId, seatIndex)) =>
+                  case Right(QuickPairOutcome.Matched(gameId, seatIndex)) =>
                     Ok(
                       Json.obj(
+                        "status" -> "matched".asJson,
                         "gameId" -> gameId.asJson,
                         "seatIndex" -> seatIndex.asJson
+                      )
+                    )
+                  case Right(QuickPairOutcome.Queued(waiting, required)) =>
+                    // The player owns no room yet: the lobby socket announces
+                    // `MatchFound` only once the preset is full.
+                    Accepted(
+                      Json.obj(
+                        "status" -> "queued".asJson,
+                        "waiting" -> waiting.asJson,
+                        "required" -> required.asJson
                       )
                     )
                   case Left(error) => BadRequest(errorJson(error))
@@ -200,14 +211,24 @@ object MultiplayerRoutes:
   /** The two live sockets; both are anonymous-readable, the game one personal. */
   def webSocketRoutes(
       store: SessionStore[IO],
-      roomManager: RoomManager[IO]
+      roomManager: RoomManager[IO],
+      quickPairing: QuickPairingService[IO]
   )(using webSockets: WebSocketBuilder2[IO]): HttpRoutes[IO] = HttpRoutes.of[IO] {
 
-    case GET -> Root / "ws" / "lobby" =>
-      webSockets.build(
-        lobbyMessages(roomManager).map(toFrame).merge(keepAlive),
-        (incoming: Stream[IO, WebSocketFrame]) => incoming.drain
-      )
+    case req @ GET -> Root / "ws" / "lobby" =>
+      // The lobby socket is personal too: Quick Pairing answers the viewer who
+      // queued through `MatchFound`, so the session is resolved on the upgrade
+      // exactly like `/ws/games/:gameId`.
+      viewerFor(req, store).flatMap { viewerId =>
+        webSockets.build(
+          lobbyMessages(roomManager, quickPairing, viewerId)
+            .map(toFrame)
+            .merge(keepAlive)
+            .onFinalize(quickPairing.disconnect(viewerId)),
+          (incoming: Stream[IO, WebSocketFrame]) =>
+            incoming.drain.onFinalize(quickPairing.disconnect(viewerId))
+        )
+      }
 
     case req @ GET -> Root / "ws" / "games" / gameId =>
       viewerFor(req, store).flatMap { viewerId =>
@@ -217,15 +238,20 @@ object MultiplayerRoutes:
 
   /**
    * The lobby stream: one `LobbySnapshot` with the rooms open right now, then a
-   * `LobbyUpdated` frame for every later change to the pool.
+   * `LobbyUpdated` frame for every later change to the pool and a `MatchFound`
+   * frame for every Quick Pairing table `viewerId` was just seated in.
    */
   private[http] def lobbyMessages(
-      roomManager: RoomManager[IO]
+      roomManager: RoomManager[IO],
+      quickPairing: QuickPairingService[IO],
+      viewerId: String
   ): Stream[IO, WsServerMessage] =
     Stream
       .eval(roomManager.listOpenPublicRooms)
       .map(WsServerMessage.LobbySnapshot.apply) ++
-      roomManager.lobbyUpdates.map(WsServerMessage.LobbyUpdated.apply)
+      roomManager.lobbyUpdates.map(WsServerMessage.LobbyUpdated.apply).merge(
+        quickPairing.matches(viewerId).map(WsServerMessage.MatchFound.apply)
+      )
 
   /**
    * Streams one viewer's projected room and applies their incoming frames.

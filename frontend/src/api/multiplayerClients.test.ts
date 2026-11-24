@@ -251,11 +251,19 @@ describe('lobbyClient REST', () => {
   });
 
   it('joins and cancels Quick Pairing', async () => {
-    mockFetch.mockResolvedValue(jsonResponse({ gameId: 'pair-1', seatIndex: 0 }));
+    mockFetch.mockResolvedValue(
+      jsonResponse({ status: 'matched', gameId: 'pair-1', seatIndex: 0 }),
+    );
 
     await expect(
       joinQuickPair({ playerCount: 3, turnTimeoutSeconds: 30, allowRedirect: false }),
-    ).resolves.toEqual({ gameId: 'pair-1', seatIndex: 0 });
+    ).resolves.toEqual({
+      status: 'matched',
+      gameId: 'pair-1',
+      seatIndex: 0,
+      waiting: 0,
+      required: 3,
+    });
     expect(mockFetch).toHaveBeenCalledWith(
       '/api/quick-pair',
       expect.objectContaining({
@@ -268,6 +276,21 @@ describe('lobbyClient REST', () => {
         }),
       }),
     );
+
+    // A queued reply (202) carries no room yet: the match arrives over
+    // `/ws/lobby` as `matchFound`.
+    mockFetch.mockResolvedValue(
+      jsonResponse({ status: 'queued', waiting: 1, required: 3 }, { status: 202 }),
+    );
+    await expect(
+      joinQuickPair({ playerCount: 3, turnTimeoutSeconds: 30, allowRedirect: false }),
+    ).resolves.toEqual({
+      status: 'queued',
+      gameId: null,
+      seatIndex: null,
+      waiting: 1,
+      required: 3,
+    });
 
     mockFetch.mockResolvedValue({ ok: true, status: 204, json: async () => null });
     await expect(cancelQuickPair()).resolves.toBeUndefined();

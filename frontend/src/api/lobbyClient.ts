@@ -83,12 +83,25 @@ export async function leaveRoom(gameId: string): Promise<void> {
   await apiRequest(`/api/games/${encodeURIComponent(gameId)}/leave`, { method: 'POST' });
 }
 
-/** Joins the Quick Pairing pool, matching an existing room when possible. */
+/**
+ * Joins the Quick Pairing queue for one preset.
+ *
+ * A queued reply carries no `gameId`: the server creates the room only once the
+ * preset is full and announces it over `/ws/lobby` as `matchFound`.
+ */
 export async function joinQuickPair(req: QuickPairRequest): Promise<QuickPairResponse> {
   const body = await apiRequest('/api/quick-pair', { method: 'POST', body: req });
+  const raw = asObject(body, 'QuickPairResponse');
+  const gameId =
+    typeof raw.gameId === 'string' && raw.gameId.length > 0 ? raw.gameId : null;
+  const matched = raw.status === 'matched' || (gameId !== null && raw.status !== 'queued');
   return {
-    gameId: readGameId(body, 'QuickPairResponse'),
-    seatIndex: readSeat(body),
+    status: matched ? 'matched' : 'queued',
+    gameId,
+    seatIndex: typeof raw.seatIndex === 'number' ? raw.seatIndex : null,
+    waiting: typeof raw.waiting === 'number' ? raw.waiting : matched ? 0 : 1,
+    required:
+      typeof raw.required === 'number' ? raw.required : req.playerCount,
   };
 }
 

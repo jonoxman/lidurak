@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { cancelQuickPair, joinQuickPair } from '../../api/lobbyClient';
+import {
+  cancelQuickPair,
+  connectLobbySocket,
+  joinQuickPair,
+  type LobbySocket,
+} from '../../api/lobbyClient';
 import type { PlayerCount, QuickPairRequest } from '../../types/multiplayer';
 
 /** The six Lichess-style Quick Pairing presets, all with redirects enabled. */
@@ -24,45 +29,117 @@ const DECK_FOR_PLAYERS: Record<PlayerCount, string> = {
 };
 
 /**
- * Quick Pairing: pick a table size and turn clock, and the server either seats
- * the player in a matching waiting room or opens one for them.
+ * Quick Pairing: pick a table size and turn clock and wait in the server's
+ * pairing queue.
  *
- * While the request is in flight the tab shows a searching indicator with a
- * Cancel action, so a queued player is never stuck without a way out.
+ * No room exists until `playerCount` players ask for the same preset, so the
+ * tab stays on the lobby showing the searching state (with a Cancel action)
+ * and only opens `/g/:gameId` when the server announces `matchFound` over
+ * `/ws/lobby`. A queued player is never stuck without a way out.
  */
 export function QuickPairingTab({ onMatched }: QuickPairingTabProps) {
   const [pending, setPending] = useState<QuickPairRequest | null>(null);
+  const [waiting, setWaiting] = useState(0);
   const [error, setError] = useState<string | null>(null);
   // Bumped by Cancel, so a late match response cannot navigate after cancel.
   const attempt = useRef(0);
+  // True only once the server confirmed the player is in the queue.
+  const queued = useRef(false);
+  const socket = useRef<LobbySocket | null>(null);
+
+  const closeSocket = () => {
+    socket.current?.close();
+    socket.current = null;
+  };
+
+  /** Returns the tab to idle without navigating. */
+  const leaveQueue = () => {
+    attempt.current += 1;
+    queued.current = false;
+    closeSocket();
+    setPending(null);
+    setWaiting(0);
+  };
+
+  const openMatchedGame = (gameId: string) => {
+    leaveQueue();
+    onMatched(gameId);
+  };
+
+  /**
+   * Re-reads the queue once the socket is connected. It catches a match that
+   * landed in the window between the POST and the socket subscription.
+   */
+  const recheck = async (preset: QuickPairRequest, current: number) => {
+    try {
+      const status = await joinQuickPair(preset);
+      if (attempt.current !== current) return;
+      if (status.status === 'matched' && status.gameId) openMatchedGame(status.gameId);
+      else setWaiting(status.waiting);
+    } catch {
+      // Keep waiting: the socket may still deliver the match.
+    }
+  };
 
   const start = async (preset: QuickPairRequest) => {
     if (pending) return;
     const current = ++attempt.current;
     setPending(preset);
+    setWaiting(0);
     setError(null);
+
+    // Listen before queueing, so a match cannot be missed while the POST is in
+    // flight.
+    closeSocket();
+    socket.current = connectLobbySocket({
+      onMatchFound: (gameId) => {
+        if (attempt.current === current) openMatchedGame(gameId);
+      },
+      onStatusChange: (status) => {
+        if (status === 'connected' && queued.current && attempt.current === current) {
+          void recheck(preset, current);
+        }
+      },
+    });
+
     try {
-      const matched = await joinQuickPair(preset);
-      if (attempt.current === current) onMatched(matched.gameId);
-    } catch (reason) {
-      if (attempt.current === current) {
-        setError(reason instanceof Error ? reason.message : String(reason));
+      const reply = await joinQuickPair(preset);
+      if (attempt.current !== current) return;
+      if (reply.status === 'matched' && reply.gameId) {
+        openMatchedGame(reply.gameId);
+        return;
       }
-    } finally {
-      if (attempt.current === current) setPending(null);
+      queued.current = true;
+      setWaiting(reply.waiting);
+    } catch (reason) {
+      if (attempt.current !== current) return;
+      leaveQueue();
+      setError(reason instanceof Error ? reason.message : String(reason));
     }
   };
 
-  const cancel = async () => {
-    // Invalidate the in-flight request before telling the server to drop it.
-    attempt.current += 1;
-    setPending(null);
-    try {
-      await cancelQuickPair();
-    } catch {
-      // A cancel that fails only means the room was already gone.
-    }
+  const cancel = () => {
+    leaveQueue();
+    void cancelQuickPair().catch(() => {
+      // A cancel that fails only means the queue entry was already gone.
+    });
   };
+
+  // Leaving the tab or the lobby must not hold a queue slot for nobody.
+  useEffect(
+    () => () => {
+      const wasWaiting = queued.current;
+      attempt.current += 1;
+      queued.current = false;
+      closeSocket();
+      if (wasWaiting) {
+        void cancelQuickPair().catch(() => {
+          // The queue entry is already gone.
+        });
+      }
+    },
+    [],
+  );
 
   return (
     <section class="m2-panel quick-pair" aria-label="Quick Pairing">
@@ -78,7 +155,12 @@ export function QuickPairingTab({ onMatched }: QuickPairingTabProps) {
           <span>
             Searching for a {pending.playerCount}P • {pending.turnTimeoutSeconds}s table…
           </span>
-          <button type="button" class="m2-button secondary" onClick={() => void cancel()}>
+          {waiting > 0 ? (
+            <span class="quick-pair-queue-count" data-testid="quick-pair-queue-count">
+              {Math.min(waiting, pending.playerCount)} / {pending.playerCount} queued
+            </span>
+          ) : null}
+          <button type="button" class="m2-button secondary" onClick={cancel}>
             Cancel
           </button>
         </div>

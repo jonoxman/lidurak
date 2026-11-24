@@ -69,6 +69,15 @@ const ROOM: LobbyRoomSummary = {
 
 let socketHandlers: import('../api/lobbyClient').LobbySocketHandlers | null = null;
 
+/** Declarations of the first rule whose selector text contains `selector`. */
+function cssRule(css: string, selector: string): string {
+  const start = css.indexOf(selector);
+  if (start === -1) return '';
+  const open = css.indexOf('{', start);
+  const close = css.indexOf('}', open);
+  return open === -1 || close === -1 ? '' : css.slice(open + 1, close);
+}
+
 const renderLobby = () => render(<LobbyPage initialServerReady />);
 
 /** The SPA opens M2 rooms with the History API, never a hash route. */
@@ -94,7 +103,13 @@ describe('M2 LobbyPage', () => {
     getOrCreateSession.mockResolvedValue(GUEST);
     updateGuestName.mockResolvedValue({ ...GUEST, displayName: 'Ace' });
     fetchLobbyRooms.mockResolvedValue([]);
-    joinQuickPair.mockResolvedValue({ gameId: 'qp-1', seatIndex: 0 });
+    joinQuickPair.mockResolvedValue({
+      status: 'queued',
+      gameId: null,
+      seatIndex: null,
+      waiting: 1,
+      required: 2,
+    });
     cancelQuickPair.mockResolvedValue(undefined);
     joinRoom.mockResolvedValue({ gameId: 'room-1', seatIndex: 1, view: {} as never });
     createRoom.mockResolvedValue({
@@ -127,7 +142,7 @@ describe('M2 LobbyPage', () => {
       screen.getByRole('tab', { name: 'Quick Pairing' }).getAttribute('aria-selected'),
     ).toBe('true');
     expect(screen.getByRole('tab', { name: /Lobby Pool/ })).toBeTruthy();
-    expect(screen.getByRole('tab', { name: 'Create Invite Link' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Create a Game' })).toBeTruthy();
     expect(screen.getByTestId('lobby-connection').textContent).toContain('Lobby idle');
   });
 
@@ -156,7 +171,7 @@ describe('M2 LobbyPage', () => {
     expect(screen.getByRole('button', { name: /4P • 30s/ })).toBeTruthy();
   });
 
-  it('joins a Quick Pairing preset and navigates to its game table', async () => {
+  it('stays queued on the lobby until the server announces the match', async () => {
     renderLobby();
 
     fireEvent.click(screen.getByRole('button', { name: /2P • 15s/ }));
@@ -168,12 +183,24 @@ describe('M2 LobbyPage', () => {
         allowRedirect: true,
       }),
     );
+
+    // A queued reply owns no room: the lobby stays put and keeps searching.
+    const searching = await screen.findByTestId('quick-pair-searching');
+    expect(searching.textContent).toContain('2P • 15s');
+    expect(window.location.pathname).toBe('/');
+    expect(window.location.hash).toBe('');
+
+    // `/ws/lobby` delivers the match only once the preset is full.
+    act(() => {
+      socketHandlers?.onMatchFound?.('qp-1');
+    });
+
     await waitFor(() => expect(window.location.pathname).toBe('/g/qp-1'));
     expect(window.location.hash).toBe('');
+    expect(screen.queryByTestId('quick-pair-searching')).toBeNull();
   });
 
-  it('shows a searching state whose Cancel leaves the pairing queue', async () => {
-    joinQuickPair.mockReturnValue(new Promise(() => {}));
+  it('cancels a queued search without navigating', async () => {
     renderLobby();
 
     fireEvent.click(screen.getByRole('button', { name: /3P • 30s/ }));
@@ -184,6 +211,7 @@ describe('M2 LobbyPage', () => {
 
     await waitFor(() => expect(cancelQuickPair).toHaveBeenCalledTimes(1));
     expect(screen.queryByTestId('quick-pair-searching')).toBeNull();
+    expect(window.location.pathname).toBe('/');
   });
 
   it('streams the live pool snapshot and joins a room in one click', async () => {
@@ -236,10 +264,29 @@ describe('M2 LobbyPage', () => {
     expect(await screen.findByTestId('pool-room-room-1')).toBeTruthy();
   });
 
+  it('renames the third tab and panel to "Create a Game" with Visibility first', async () => {
+    renderLobby();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Create a Game' }));
+
+    const panel = screen.getByRole('region', { name: 'Create a Game' });
+    expect(within(panel).getByRole('heading', { name: 'Create a Game' })).toBeTruthy();
+
+    const form = panel.querySelector('.create-invite-form');
+    expect(form).not.toBeNull();
+    const legends = Array.from(form?.querySelectorAll('legend') ?? []).map(
+      (legend) => legend.textContent,
+    );
+    // T-96 ITEM-2: Visibility is the first field, then the table settings.
+    expect(legends).toEqual(['Visibility', 'Players', 'Time control per turn']);
+    expect(within(form as HTMLElement).getByRole('button', { name: 'Private invite link' })).toBeTruthy();
+    expect(within(form as HTMLElement).getByRole('button', { name: 'Public lobby pool' })).toBeTruthy();
+  });
+
   it('creates a configured invite room and opens it', async () => {
     renderLobby();
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Create Invite Link' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Create a Game' }));
     fireEvent.click(screen.getByRole('button', { name: '4 players' }));
     fireEvent.click(screen.getByLabelText(/Redirect \/ reflect/));
     fireEvent.click(screen.getByRole('button', { name: '30s' }));
@@ -314,12 +361,36 @@ describe('M2 LobbyPage', () => {
 });
 
 describe('lobby.css visual invariants', () => {
-  it('uses the dark Lichess palette', () => {
-    expect(lobbyCss).toContain('#161512');
-    expect(lobbyCss).toContain('#262421');
-    expect(lobbyCss).toContain('#bababa');
-    expect(lobbyCss).toContain('#629924');
-    expect(lobbyCss).toContain('#c33');
+  it('adopts the Milestone 1 tokens instead of a hardcoded dark palette', () => {
+    // T-96 ITEM-3: every M2 surface resolves through app.css, so Light / Dark /
+    // Device theme and the Roundness slider repaint it immediately.
+    expect(lobbyCss).toContain('--m2-bg: var(--app-bg-soft, var(--app-bg));');
+    expect(lobbyCss).toContain('--m2-surface: var(--app-panel);');
+    expect(lobbyCss).toContain('--m2-surface-raised: var(--bg-elevated, var(--app-panel));');
+    expect(lobbyCss).toContain('--m2-border: var(--app-border);');
+    expect(lobbyCss).toContain('--m2-text: var(--app-text);');
+    expect(lobbyCss).toContain('--m2-text-strong: var(--app-text-strong);');
+    expect(lobbyCss).toContain('--mp-felt: var(--durak-felt, #1e2923);');
+    expect(lobbyCss).toContain('--ui-select-accent');
+    expect(lobbyCss).toContain('--ui-select-bg');
+    expect(lobbyCss).toContain('--ui-select-text');
+    expect(lobbyCss).toContain('--app-roundness');
+
+    // ...and the old dark-only literals are gone from the stylesheet.
+    for (const literal of ['#161512', '#262421', '#2f2c28', '#3d3a35', '#bababa', '#f1f1f1']) {
+      expect(lobbyCss).not.toContain(literal);
+    }
+  });
+
+  it('doubles the Quick Pairing tile height and keeps the 3x2 grid', () => {
+    // T-96 ITEM-2: a ~132px tile, centred title/meta, same 3-column desktop
+    // grid and the same 2-column mobile fallback.
+    expect(cssRule(lobbyCss, '.quick-pair-tile')).toContain('min-height: 132px');
+    expect(cssRule(lobbyCss, '.quick-pair-tile')).toContain('align-content: center');
+    expect(lobbyCss).toContain('grid-template-columns: repeat(3, minmax(0, 1fr))');
+    expect(lobbyCss).toContain('grid-template-columns: repeat(2, minmax(0, 1fr))');
+    expect(lobbyCss).toContain('.quick-pair-tile-title');
+    expect(lobbyCss).toContain('.quick-pair-tile-meta');
   });
 
   it('lays out with Grid/Flexbox gaps only and never freeform positioning', () => {
@@ -340,7 +411,7 @@ describe('lobby.css visual invariants', () => {
   it('shares the M2 palette and button styling with the multiplayer shell', () => {
     // T-96 ITEM-2: the tokens live on both M2 shells, not the lobby alone.
     expect(lobbyCss).toMatch(/\.m2-lobby,\s*\n\.multiplayer-page \{/);
-    expect(lobbyCss).toContain('--m2-text-strong: #f1f1f1;');
+    expect(lobbyCss).toContain('--m2-text-strong: var(--app-text-strong);');
     expect(lobbyCss).toContain('.multiplayer-page .m2-button.secondary');
   });
 

@@ -1,30 +1,33 @@
 /*
- * M2 homepage lobby — dark Lichess-inspired palette.
+ * M2 homepage lobby — Milestone 1 surface.
  *
- * Page background #161512, surfaces #262421, primary text #bababa, live/CTA
- * green #629924 and the trump/accent red #c33. Layout is CSS Grid and Flexbox
- * only: no absolutely or fixed-positioned panels, and every grid child keeps
- * `min-width: 0` so long names and preset labels wrap instead of overflowing.
+ * T-96: the M2 shells no longer hardcode a dark palette. Every colour and
+ * radius resolves through the Milestone 1 tokens declared in `app.css`
+ * (`--app-*`, `--bg-*`, `--durak-*`, `--ui-select-*`), so the lobby, the pool
+ * and the waiting room follow Dark / Light / Device theme and the Roundness
+ * slider exactly like the local game panel below them. Layout is CSS Grid and
+ * Flexbox only: no absolutely or fixed-positioned panels, and every grid child
+ * keeps `min-width: 0` so long names and preset labels wrap instead of
+ * overflowing.
  */
 
-/* T-96 ITEM-2: the M2 palette is shared by both M2 shells. `MultiplayerGamePage`
-   renders `.m2-button` and `.m2-status-text` too, so declaring the tokens on
-   `.m2-lobby` alone left every table action button with undefined custom
-   properties (dark `#14130f` text on a transparent background over the dark
-   `#262421` shell, and borderless secondary buttons). */
+/* T-96 ITEM-3: the `--m2-*` names stay as aliases so every M2 rule keeps one
+   readable vocabulary while the values come from the M1 tokens. Both M2 shells
+   declare them because `MultiplayerGamePage` renders `.m2-button` and
+   `.m2-status-text` too. */
 .m2-lobby,
 .multiplayer-page {
-  --m2-bg: #161512;
-  --m2-surface: #262421;
-  --m2-surface-raised: #2f2c28;
-  --m2-border: #3d3a35;
-  --m2-text: #bababa;
-  --m2-text-strong: #f1f1f1;
-  --m2-muted: #8f8b84;
-  --m2-green: #629924;
-  --m2-green-soft: rgba(98, 153, 36, 0.16);
-  --m2-red: #c33;
-  --m2-red-soft: rgba(204, 51, 51, 0.16);
+  --m2-bg: var(--app-bg-soft, var(--app-bg));
+  --m2-surface: var(--app-panel);
+  --m2-surface-raised: var(--bg-elevated, var(--app-panel));
+  --m2-border: var(--app-border);
+  --m2-text: var(--app-text);
+  --m2-text-strong: var(--app-text-strong);
+  --m2-muted: color-mix(in srgb, var(--app-text) 74%, var(--app-bg));
+  --m2-green: var(--app-accent);
+  --m2-green-soft: var(--app-accent-soft);
+  --m2-red: var(--durak-danger, #c33);
+  --m2-red-soft: rgba(204, 51, 51, 0.14);
 }
 
 .m2-lobby {
@@ -37,7 +40,7 @@
   background: var(--m2-bg);
   color: var(--m2-text);
   border: 1px solid var(--m2-border);
-  border-radius: 12px;
+  border-radius: calc(var(--app-roundness) * 1.5);
   font-size: 0.95rem;
 }
 
@@ -147,8 +150,8 @@
 
 .m2-guest-badge:hover,
 .m2-guest-badge:focus-visible {
-  border-color: var(--m2-green);
-  color: var(--m2-green);
+  border-color: var(--ui-select-border);
+  color: var(--ui-select-text);
   outline: none;
 }
 
@@ -165,8 +168,8 @@
   width: 9rem;
   padding: 0.35rem 0.55rem;
   border: 1px solid var(--m2-border);
-  border-radius: 6px;
-  background: var(--m2-bg);
+  border-radius: calc(var(--app-roundness) * 0.65);
+  background: var(--app-input-bg);
   color: var(--m2-text-strong);
   font: inherit;
   font-size: 0.85rem;
@@ -185,7 +188,7 @@
   gap: 0.4rem;
   padding: 0.5rem 0.9rem;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: calc(var(--app-roundness) * 0.9);
   background: transparent;
   color: var(--m2-text);
   font: inherit;
@@ -195,22 +198,23 @@
 
 .m2-lobby-tab:hover,
 .m2-lobby-tab:focus-visible {
-  background: var(--m2-surface);
+  background: var(--ui-select-bg);
+  color: var(--ui-select-text);
   outline: none;
 }
 
 .m2-lobby-tab.active {
-  background: var(--m2-surface);
-  border-color: var(--m2-border);
-  color: var(--m2-text-strong);
-  box-shadow: inset 0 -2px 0 var(--m2-green);
+  background: var(--ui-select-bg);
+  border-color: var(--ui-select-border);
+  color: var(--ui-select-text);
+  box-shadow: inset 0 -2px 0 var(--ui-select-accent);
 }
 
 .m2-tab-count {
   padding: 0.05rem 0.4rem;
   border-radius: 999px;
-  background: var(--m2-green);
-  color: #14130f;
+  background: var(--ui-select-accent);
+  color: #f8fafc;
   font-size: 0.75rem;
   font-weight: 700;
 }
@@ -227,13 +231,13 @@
   padding: 1rem;
   background: var(--m2-surface);
   border: 1px solid var(--m2-border);
-  border-radius: 10px;
+  border-radius: calc(var(--app-roundness) * 1.25);
 }
 
 /* T-96 ITEM-3: `.lobby-page h2` in `app.css` is `(0,1,1)` and paints
-   `--app-text-strong` (`#1e293b` under a light OS scheme). Scoping the panel
-   title to its shell raises it to `(0,2,0)`, so the M2 headings stay
-   `#f1f1f1` on `#262421`. */
+   `--app-text-strong`. Scoping the panel title to its shell raises it to
+   `(0,2,0)`, so the M2 headings always read the same token as the panel they
+   sit on, in both themes. */
 .m2-lobby .m2-panel-title {
   margin: 0;
   color: var(--m2-text-strong);
@@ -255,18 +259,20 @@
   gap: 0.35rem;
   min-width: 0;
   padding: 0.5rem 0.9rem;
-  border: 1px solid var(--m2-green);
-  border-radius: 7px;
-  background: var(--m2-green);
-  color: #14130f;
+  border: 1px solid var(--ui-select-accent);
+  border-radius: calc(var(--app-roundness) * 0.85);
+  background: var(--ui-select-accent);
+  color: #f8fafc;
   font: inherit;
   font-weight: 700;
   cursor: pointer;
+  box-shadow: 0 0 10px 2px var(--ui-select-glow);
 }
 
 .m2-button:hover:not(:disabled),
 .m2-button:focus-visible:not(:disabled) {
-  filter: brightness(1.12);
+  filter: brightness(1.08);
+  box-shadow: 0 0 14px 3px var(--ui-select-glow);
   outline: none;
 }
 
@@ -274,12 +280,14 @@
   background: transparent;
   border-color: var(--m2-border);
   color: var(--m2-text);
+  box-shadow: none;
 }
 
 .m2-button.secondary:hover:not(:disabled),
 .m2-button.secondary:focus-visible:not(:disabled) {
-  border-color: var(--m2-green);
-  color: var(--m2-green);
+  border-color: var(--ui-select-border);
+  color: var(--ui-select-text);
+  background: var(--ui-select-bg);
   filter: none;
 }
 
@@ -287,15 +295,17 @@
    (`Back to Lobby`, `Redirect`, `Pass`, `Leave Room`) sit on the `#1e2923`
    felt, so they need a real surface, a visible border and a light label. */
 .multiplayer-page .m2-button.secondary {
-  background: var(--m2-surface);
+  background: var(--app-input-bg);
   border-color: var(--m2-border);
   color: var(--m2-text-strong);
+  box-shadow: none;
 }
 
 .multiplayer-page .m2-button.secondary:hover:not(:disabled),
 .multiplayer-page .m2-button.secondary:focus-visible:not(:disabled) {
-  border-color: var(--m2-green);
-  color: var(--m2-green);
+  border-color: var(--ui-select-border);
+  color: var(--ui-select-text);
+  background: var(--ui-select-bg);
 }
 
 .m2-button:disabled {
@@ -307,7 +317,7 @@
   margin: 0;
   padding: 0.45rem 0.65rem;
   border: 1px solid var(--m2-red);
-  border-radius: 7px;
+  border-radius: calc(var(--app-roundness) * 0.85);
   color: var(--m2-red);
   background: var(--m2-red-soft);
   font-size: 0.82rem;
@@ -323,15 +333,20 @@
   min-width: 0;
 }
 
+/* T-96 ITEM-2: the tiles are twice as tall as the first pass (a ~65px button
+   read as a tag, not a pairing choice) while the 3-column / 2-column grid and
+   the title-over-meta structure stay exactly as they were. */
 .quick-pair-tile {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
+  align-content: center;
   gap: 0.3rem;
   min-width: 0;
+  min-height: 132px;
   padding: 0.85rem 0.75rem;
   border: 1px solid var(--m2-border);
-  border-radius: 9px;
-  background: var(--m2-surface-raised);
+  border-radius: calc(var(--app-roundness) * 1.1);
+  background: var(--app-input-bg);
   color: var(--m2-text);
   font: inherit;
   text-align: left;
@@ -340,7 +355,9 @@
 
 .quick-pair-tile:hover:not(:disabled),
 .quick-pair-tile:focus-visible:not(:disabled) {
-  border-color: var(--m2-green);
+  border-color: var(--ui-select-border);
+  background: var(--ui-select-bg);
+  box-shadow: 0 0 10px 2px var(--ui-select-glow);
   outline: none;
 }
 
@@ -368,18 +385,26 @@
   gap: 0.6rem;
   min-width: 0;
   padding: 0.6rem 0.75rem;
-  border: 1px solid var(--m2-green);
-  border-radius: 8px;
-  background: var(--m2-green-soft);
+  border: 1px solid var(--ui-select-border);
+  border-radius: calc(var(--app-roundness) * 0.9);
+  background: var(--ui-select-bg);
   color: var(--m2-text-strong);
   font-size: 0.85rem;
+}
+
+.quick-pair-queue-count {
+  color: var(--ui-select-text);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .quick-pair-spinner {
   width: 0.9rem;
   height: 0.9rem;
-  border: 2px solid var(--m2-green-soft);
-  border-top-color: var(--m2-green);
+  border: 2px solid var(--ui-select-bg);
+  border-top-color: var(--ui-select-accent);
   border-radius: 50%;
   animation: m2-spin 0.9s linear infinite;
 }
@@ -411,7 +436,7 @@
   padding: 0.6rem 0.7rem;
   background: var(--m2-surface-raised);
   border: 1px solid var(--m2-border);
-  border-radius: 8px;
+  border-radius: calc(var(--app-roundness) * 0.9);
 }
 
 .lobby-pool-host {
@@ -480,7 +505,7 @@
   min-width: 0;
   padding: 1.25rem 0.9rem;
   border: 1px dashed var(--m2-border);
-  border-radius: 9px;
+  border-radius: calc(var(--app-roundness) * 1.1);
   text-align: center;
 }
 
@@ -497,7 +522,7 @@
   min-width: 0;
 }
 
-/* --- Create Invite Link ------------------------------------------------- */
+/* --- Create a Game ------------------------------------------------------ */
 
 .create-invite-form {
   display: grid;
@@ -535,8 +560,8 @@
   min-width: 0;
   padding: 0.4rem 0.75rem;
   border: 1px solid var(--m2-border);
-  border-radius: 7px;
-  background: var(--m2-surface-raised);
+  border-radius: calc(var(--app-roundness) * 0.85);
+  background: var(--app-input-bg);
   color: var(--m2-text);
   font: inherit;
   font-size: 0.85rem;
@@ -544,15 +569,17 @@
 }
 
 .segmented-option[aria-pressed='true'] {
-  border-color: var(--m2-green);
-  background: var(--m2-green-soft);
-  color: var(--m2-green);
+  border-color: var(--ui-select-border);
+  background: var(--ui-select-bg);
+  color: var(--ui-select-text);
   font-weight: 700;
+  box-shadow: 0 0 10px 2px var(--ui-select-glow);
 }
 
 .segmented-option:hover,
 .segmented-option:focus-visible {
-  border-color: var(--m2-green);
+  border-color: var(--ui-select-border);
+  color: var(--ui-select-text);
   outline: none;
 }
 
@@ -571,7 +598,7 @@
 }
 
 .create-invite-toggle input {
-  accent-color: var(--m2-green);
+  accent-color: var(--ui-select-accent);
 }
 
 .create-invite-form > .m2-button {
@@ -640,19 +667,22 @@
 
 /* --- M2 live room & projected table ------------------------------------- */
 
+/* T-96 ITEM-3: the room shell and the waiting room read the same M1 tokens, so
+   toggling Light theme in the Profile menu repaints them immediately instead of
+   leaving a dark card behind. */
 .multiplayer-page {
-  --mp-bg: #161512;
-  --mp-surface: #262421;
-  --mp-surface-raised: #2f2c28;
-  --mp-border: #3d3a35;
-  --mp-felt: #1e2923;
-  --mp-text: #bababa;
-  --mp-text-strong: #f1f1f1;
-  --mp-muted: #8f8b84;
-  --mp-green: #629924;
-  --mp-green-soft: rgba(98, 153, 36, 0.16);
-  --mp-red: #c33;
-  --mp-red-soft: rgba(204, 51, 51, 0.16);
+  --mp-bg: var(--app-bg-soft, var(--app-bg));
+  --mp-surface: var(--app-panel);
+  --mp-surface-raised: var(--bg-elevated, var(--app-panel));
+  --mp-border: var(--app-border);
+  --mp-felt: var(--durak-felt, #1e2923);
+  --mp-text: var(--app-text);
+  --mp-text-strong: var(--app-text-strong);
+  --mp-muted: color-mix(in srgb, var(--app-text) 74%, var(--app-bg));
+  --mp-green: var(--app-accent);
+  --mp-green-soft: var(--app-accent-soft);
+  --mp-red: var(--durak-danger, #c33);
+  --mp-red-soft: rgba(204, 51, 51, 0.14);
 
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -663,7 +693,7 @@
   background: var(--mp-bg);
   color: var(--mp-text);
   border: 1px solid var(--mp-border);
-  border-radius: 12px;
+  border-radius: calc(var(--app-roundness) * 1.5);
 }
 
 .multiplayer-page *,
@@ -794,16 +824,16 @@
   padding: 0.75rem;
   background: var(--mp-surface);
   border: 1px solid var(--mp-border);
-  border-radius: 9px;
+  border-radius: calc(var(--app-roundness) * 1.1);
 }
 
 .mp-invite-url {
   flex: 1 1 16rem;
   min-width: 0;
   padding: 0.4rem 0.55rem;
-  background: var(--mp-bg);
+  background: var(--app-input-bg);
   border: 1px solid var(--mp-border);
-  border-radius: 6px;
+  border-radius: calc(var(--app-roundness) * 0.65);
   color: var(--mp-text-strong);
   font-size: 0.8rem;
   overflow-wrap: anywhere;
@@ -835,7 +865,7 @@
   padding: 0.6rem 0.75rem;
   background: var(--mp-surface);
   border: 1px solid var(--mp-border);
-  border-radius: 8px;
+  border-radius: calc(var(--app-roundness) * 0.9);
 }
 
 .mp-seat-number {
@@ -875,7 +905,7 @@
   padding: 0.85rem;
   background: var(--mp-surface);
   border: 1px solid var(--mp-border);
-  border-radius: 10px;
+  border-radius: calc(var(--app-roundness) * 1.25);
 }
 
 .mp-sidebar-section {
@@ -904,7 +934,7 @@
   padding: 0.35rem 0.45rem;
   background: var(--mp-surface-raised);
   border: 1px solid var(--mp-border);
-  border-radius: 6px;
+  border-radius: calc(var(--app-roundness) * 0.65);
   font-size: 0.82rem;
 }
 
@@ -929,7 +959,7 @@
   padding: 0.85rem;
   background: var(--mp-felt);
   border: 1px solid var(--mp-border);
-  border-radius: 12px;
+  border-radius: calc(var(--app-roundness) * 1.5);
 }
 
 .mp-seats-row {
@@ -945,9 +975,9 @@
   gap: 0.25rem;
   min-width: 0;
   padding: 0.5rem 0.6rem;
-  background: rgba(38, 36, 33, 0.82);
+  background: var(--mp-surface);
   border: 1px solid var(--mp-border);
-  border-radius: 8px;
+  border-radius: calc(var(--app-roundness) * 0.9);
   text-align: center;
 }
 
@@ -1018,7 +1048,7 @@
   min-width: 0;
   padding: 0.3rem;
   border: 2px solid transparent;
-  border-radius: 9px;
+  border-radius: calc(var(--app-roundness) * 1.1);
 }
 
 .mp-pair[data-targeted='true'] {
@@ -1042,8 +1072,8 @@
 .mp-pair-slot {
   width: 72px;
   height: 100px;
-  border: 1px dashed rgba(143, 139, 132, 0.5);
-  border-radius: 8px;
+  border: 1px dashed var(--mp-border);
+  border-radius: calc(var(--app-roundness) * 0.9);
 }
 
 .mp-bottom-row {
@@ -1126,9 +1156,9 @@
   justify-content: center;
   padding: 0.5rem 0.9rem;
   border: 1px solid var(--mp-red);
-  border-radius: 7px;
+  border-radius: calc(var(--app-roundness) * 0.85);
   background: var(--mp-red-soft);
-  color: #f3b6b6;
+  color: var(--mp-red);
   font: inherit;
   font-weight: 700;
   cursor: pointer;
@@ -1137,7 +1167,7 @@
 .mp-button-danger:hover:not(:disabled),
 .mp-button-danger:focus-visible:not(:disabled) {
   background: var(--mp-red);
-  color: #14130f;
+  color: #f8fafc;
   outline: none;
 }
 
@@ -1202,7 +1232,7 @@
   padding: 0.85rem;
   background: var(--mp-felt);
   border: 1px solid var(--mp-border);
-  border-radius: 12px;
+  border-radius: calc(var(--app-roundness) * 1.5);
   overflow: visible;
 }
 
@@ -1213,8 +1243,8 @@ html .multiplayer-page .mp-arena[data-zone='table-arena']::before {
   display: none;
 }
 
-/* The talon is a bare column on the felt, so the `#f1f1f1` count keeps its
-   contrast instead of sitting white-on-light-grey inside the M1 panel. */
+/* The talon is a bare column on the felt, so the count keeps its strong text
+   token instead of sitting inside the M1 panel surface. */
 .multiplayer-page .mp-deck[data-zone='table-deck'] {
   display: flex;
   flex-direction: column;

@@ -17,7 +17,7 @@ export interface LobbyPoolTabProps {
   onRoomsChange?: (rooms: LobbyRoomSummary[]) => void;
   /** Feeds the page's live-lobby indicator. */
   onStatusChange?: (status: SocketStatus) => void;
-  /** Switches to the Create Invite Link tab from the empty state. */
+  /** Switches to the Create a Game tab from the empty state. */
   onCreateRoom?: () => void;
 }
 
@@ -118,7 +118,7 @@ export function LobbyPoolTab({
           <div class="lobby-pool-empty-actions">
             {onCreateRoom ? (
               <button type="button" class="m2-button" onClick={onCreateRoom}>
-                Create a room
+                Create a Game
               </button>
             ) : null}
             <button

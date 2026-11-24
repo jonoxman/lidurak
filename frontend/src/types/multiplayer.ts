@@ -132,10 +132,21 @@ export interface QuickPairRequest {
   allowRedirect?: boolean;
 }
 
-/** Response of `POST /api/quick-pair`. */
+/**
+ * Response of `POST /api/quick-pair`.
+ *
+ * A queued player owns no room yet: the match id only arrives once the preset
+ * is full, either in this response (`status: 'matched'`) or over `/ws/lobby`
+ * as a `matchFound` frame.
+ */
 export interface QuickPairResponse {
-  gameId: string;
-  seatIndex: number;
+  status: 'queued' | 'matched';
+  gameId: string | null;
+  seatIndex: number | null;
+  /** Players waiting in this preset's queue, including the caller. */
+  waiting: number;
+  /** Players the preset needs before a room is created. */
+  required: number;
 }
 
 /** Response of `POST /api/qa/presets/seed-lobby`. */
