@@ -643,7 +643,11 @@ export function computeLocalizedPartingDeltas(
     Math.floor(finiteOr(radius, HAND_HOVER_PARTING_RADIUS)),
   );
   const pivot = basePositions[hovered];
-  const rightBound = Math.max(pivot, boxWidth - width);
+  // T-96 item 2: a hand that rests narrower than the maximal box keeps its own
+  // resting right edge as the bound. Using `maximalBoxWidth - width` here let a
+  // small hand flare all the way to the lane wall, which grew the overall hand
+  // width on hover. The resting last-card slot is the hard limit; the lane wall
+  // only applies when the hand already fills it.
 
   // Single-card reveal: only the right side opens. A left neighbour at its
   // resting overlap keeps `x(h) - x(h - 1) === restingStep`, so the hovered
@@ -658,21 +662,55 @@ export function computeLocalizedPartingDeltas(
   // the right end can still use the parting runway around it.
   const wallIndex = hovered + window + 1;
   const hasWall = wallIndex < count;
-  // The gaps that share the fixed span: the moved gaps plus, when a wall
-  // exists, the gap that ends on it (weight `0`, so it keeps its resting share
-  // and only scales with the rest).
-  const gapCount = hasWall ? window + 1 : window;
-  const gaps: number[] = [];
-  for (let distance = 1; distance <= gapCount; distance += 1) {
-    const left = hovered + distance - 1;
-    const baseGap = Math.max(0, basePositions[left + 1] - basePositions[left]);
-    const extra = Math.max(0, spreadStep - baseGap) * hoverPartingWeight(distance);
-    gaps.push(baseGap + extra);
-  }
+  const laneBound = Math.max(pivot, boxWidth - width);
+  // A hand with a wall already bounds its window by that card's resting slot.
+  // Without one, the resting right edge (never the lane wall) bounds the flare,
+  // so `W_hover === W_rest` for every hand narrower than the maximal box.
+  const rightBound = hasWall
+    ? laneBound
+    : Math.min(laneBound, Math.max(pivot, basePositions[count - 1]));
   const span = hasWall
     ? Math.max(0, basePositions[wallIndex] - pivot)
     : Math.max(0, rightBound - pivot);
-  const scale = localPartingFitScale(gaps, span);
+  let gaps: number[];
+  let scale = 1;
+  if (hasWall) {
+    // The gaps that share the fixed span: the moved gaps plus the gap that
+    // ends on the wall (weight `0`, so it keeps its resting share and only
+    // scales with the rest).
+    const gapCount = window + 1;
+    gaps = [];
+    for (let distance = 1; distance <= gapCount; distance += 1) {
+      const left = hovered + distance - 1;
+      const baseGap = Math.max(0, basePositions[left + 1] - basePositions[left]);
+      const extra = Math.max(0, spreadStep - baseGap) * hoverPartingWeight(distance);
+      gaps.push(baseGap + extra);
+    }
+    scale = localPartingFitScale(gaps, span);
+  } else {
+    // T-96 item 2: with no wall card the resting right edge of the last card
+    // is the bound. Open the hovered gap and fund it by compressing only the
+    // FARTHER interior gaps, so the cards spread apart and push together while
+    // the hand's outer width never changes. `window === 1` has no interior gap
+    // to borrow from (a two-card hand), so it stays put.
+    const resting: number[] = [];
+    for (let distance = 1; distance <= window; distance += 1) {
+      const left = hovered + distance - 1;
+      resting.push(Math.max(0, basePositions[left + 1] - basePositions[left]));
+    }
+    if (window >= 2) {
+      const minPerGap = Math.min(strip, span / window);
+      const maxFirst = span - (window - 1) * minPerGap;
+      const canOpen = maxFirst > resting[0];
+      const first = canOpen ? Math.min(spreadStep, maxFirst) : resting[0];
+      const laterRest = resting.slice(1).reduce((sum, gap) => sum + gap, 0);
+      const remaining = Math.max(0, span - first);
+      const laterScale = laterRest > 0 ? remaining / laterRest : 0;
+      gaps = [first, ...resting.slice(1).map((gap) => gap * laterScale)];
+    } else {
+      gaps = resting;
+    }
+  }
   let offset = 0;
   for (let distance = 1; distance <= window; distance += 1) {
     offset += gaps[distance - 1] * scale;

@@ -509,10 +509,12 @@ describe('T-90-feedback-5 ITEM-6a/6b/6c: smooth hover parting', () => {
 
   it('ITEM-6b: visibly parts every multi-card hand size around the hovered card', () => {
     const cases: Array<{ count: number; index: number; left?: number; right?: number }> = [
-      { count: 2, index: 0, right: 1 },
-      { count: 3, index: 1, left: 0, right: 2 },
-      { count: 4, index: 2, left: 1, right: 3 },
-      { count: 5, index: 3, left: 2, right: 4 },
+      // T-96 item 2: a two-card hand has no interior gap to borrow from, so it
+      // stays exactly at its resting span instead of widening on hover.
+      { count: 2, index: 0 },
+      { count: 3, index: 0, right: 1 },
+      { count: 4, index: 1, left: 0, right: 2 },
+      { count: 5, index: 2, left: 1, right: 3 },
       { count: 6, index: 2, left: 1, right: 3 },
       { count: 14, index: 7, left: 6, right: 8 },
       { count: 30, index: 15, left: 14, right: 16 },
@@ -531,6 +533,9 @@ describe('T-90-feedback-5 ITEM-6a/6b/6c: smooth hover parting', () => {
       // The hovered card never moves; only its right neighbour visibly parts.
       expect(after[index], `${count}-card hovered card`).toBe(before[index]);
       expect(Number(handWrappers()[index].getAttribute('data-part-delta-x'))).toBe(0);
+      // T-96 item 2: the hand's outer edges are pinned for every hover.
+      expect(after[0], `${count}-card left edge`).toBe(before[0]);
+      expect(after[count - 1], `${count}-card right edge`).toBe(before[count - 1]);
       if (left !== undefined) {
         expect(after[left], `${count}-card left neighbour`).toBe(before[left]);
         expect(handWrappers()[left].getAttribute('data-part-direction')).toBe('none');
@@ -989,9 +994,10 @@ describe('T-96 item 6: contour expansion never shifts the hand row', () => {
     // ... its right neighbour parts outward while the left one never moves ...
     expect(deltas[1]).toBe(0);
     expect(deltas[3]).toBeCloseTo(28, 1);
-    // ... and the contour widens WITHOUT changing the stage's track width, so
-    // no `justify-content` re-centring can move the row (the old -17px jump).
-    expect(Number.parseFloat(contour.style.width)).toBeGreaterThan(contourWidthAtRest);
+    // ... and T-96 item 2 keeps the contour at its resting width too: the
+    // interior cards spread, but neither outer edge moves, so the stage track
+    // can never re-centre the row (the old -17px jump).
+    expect(Number.parseFloat(contour.style.width)).toBeCloseTo(contourWidthAtRest, 1);
     expect(box.style.width).toBe(stageWidthAtRest);
   });
 });

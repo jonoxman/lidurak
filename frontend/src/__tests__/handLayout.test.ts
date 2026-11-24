@@ -406,18 +406,17 @@ describe('T-90-feedback-20261122_171451-3 ITEM-6c: hover-parting guards', () => 
     expect(computePartedCardPositions(base, CARD_WIDTH, BOX, 2.5)).toBe(base);
   });
 
-  it('parts a two-card hand only to the right of the hovered card', () => {
+  it('keeps a two-card hand at its resting width while hovering', () => {
     const base = layoutFor(2).cardPositions;
-    const restingStep = base[1] - base[0];
-    const parted = computePartedCardPositions(base, CARD_WIDTH, BOX, 0);
-    expect(parted[0]).toBe(base[0]);
-    expect(parted[1] - parted[0]).toBeGreaterThan(restingStep);
-
-    // The rightmost card already paints fully on top: nothing may open behind
-    // it, or the card beneath would compete for the widest reveal.
-    const top = computePartedCardLayout(base, CARD_WIDTH, BOX, 1);
-    expect(top.deltas).toEqual([0, 0]);
-    expect(top.isParted).toBe(false);
+    // T-96 item 2: two cards have no interior gap to borrow from, so the outer
+    // edges cannot move and the hand simply stays at its resting span.
+    for (const hovered of [0, 1]) {
+      const layout = computePartedCardLayout(base, CARD_WIDTH, BOX, hovered);
+      expect(layout.deltas).toEqual([0, 0]);
+      expect(layout.isParted).toBe(false);
+      expect(layout.positions).toEqual(base);
+    }
+    expect(computePartedCardPositions(base, CARD_WIDTH, BOX, 0)).toEqual(base);
   });
 });
 
@@ -558,13 +557,17 @@ describe('T-90-feedback-20261122_193457-2 ITEM-6a/6b: parting math for every han
       for (let hovered = 0; hovered < cardCount; hovered += 1) {
         const layout = computePartedCardLayout(base, CARD_WIDTH, BOX, hovered);
         expect(layout.positions[hovered]).toBe(base[hovered]);
-        if (hovered < cardCount - 1) {
+        // T-96 item 2: the outer edges never move for any small-hand hover.
+        expect(layout.positions[0]).toBe(base[0]);
+        expect(layout.positions[cardCount - 1]).toBe(base[cardCount - 1]);
+        if (hovered < cardCount - 2) {
           const rightGap = layout.positions[hovered + 1] - layout.positions[hovered];
           expect(rightGap, `${cardCount}-card hover ${hovered}`).toBeGreaterThan(
             restingStep,
           );
         } else {
-          // Rightmost hover: already fully uncovered, so nothing moves.
+          // The last two hovers have no farther interior gap to compress (the
+          // right edge is pinned), so they open nothing.
           expect(layout.deltas.every((delta) => delta === 0)).toBe(true);
         }
         // The left neighbour never opens a competing margin.
@@ -777,10 +780,13 @@ describe('T-90-feedback-20261123_020207-2 ITEM-QA6: strictly localized parting',
     const six = layoutFor(6).cardPositions;
     const restingStep = six[1] - six[0];
 
-    for (const hovered of [0, 2, 4]) {
+    for (const hovered of [0, 2, 3]) {
       const layout = computePartedCardLayout(six, CARD_WIDTH, BOX, hovered);
       expect(layout.isParted).toBe(true);
       expect(layout.positions[hovered]).toBe(six[hovered]);
+      // T-96 item 2: spreading inside the resting span never widens the hand.
+      expect(layout.positions[0]).toBe(six[0]);
+      expect(layout.positions[5]).toBe(six[5]);
       // Only the right neighbour parts; the left one keeps its resting overlap.
       expect(layout.deltas[hovered + 1]).toBeGreaterThan(0);
       const gap = layout.positions[hovered + 1] - layout.positions[hovered];
