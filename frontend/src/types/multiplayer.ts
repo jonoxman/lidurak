@@ -132,11 +132,22 @@ export interface QuickPairRequest {
   allowRedirect?: boolean;
 }
 
-/** Response of `POST /api/quick-pair`. */
-export interface QuickPairResponse {
-  gameId: string;
-  seatIndex: number;
-}
+/**
+ * Response of `POST /api/quick-pair`.
+ *
+ * `matched` means a full table of queued players was just dealt and the caller
+ * holds `seatIndex`. `searching` means the caller is now in the queue and no
+ * room exists yet: they stay on the lobby until `/ws/lobby` sends
+ * `matchFound`.
+ */
+export type QuickPairResponse =
+  | { status: 'matched'; gameId: string; seatIndex: number }
+  | {
+      status: 'searching';
+      playerCount: number;
+      turnTimeoutSeconds: number;
+      playersWaiting: number;
+    };
 
 /** Response of `POST /api/qa/presets/seed-lobby`. */
 export interface SeedLobbyPresetResponse {

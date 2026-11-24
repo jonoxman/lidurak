@@ -1,30 +1,53 @@
 /*
- * M2 homepage lobby — dark Lichess-inspired palette.
+ * M2 homepage lobby shell.
  *
- * Page background #161512, surfaces #262421, primary text #bababa, live/CTA
- * green #629924 and the trump/accent red #c33. Layout is CSS Grid and Flexbox
+ * Every colour and radius below derives from the Milestone 1 tokens in
+ * `app.css` through the `--m2-*` / `--mp-*` alias layer, so the lobby and the
+ * waiting room follow Profile Theme (`Light` / `Dark` / `Device theme`), the
+ * accent colour and the roundness setting. Layout is CSS Grid and Flexbox
  * only: no absolutely or fixed-positioned panels, and every grid child keeps
  * `min-width: 0` so long names and preset labels wrap instead of overflowing.
  */
 
-/* T-96 ITEM-2: the M2 palette is shared by both M2 shells. `MultiplayerGamePage`
-   renders `.m2-button` and `.m2-status-text` too, so declaring the tokens on
-   `.m2-lobby` alone left every table action button with undefined custom
-   properties (dark `#14130f` text on a transparent background over the dark
-   `#262421` shell, and borderless secondary buttons). */
+/* T-96-visual-qa ITEM-3: the M2 palette is an alias layer over the Milestone 1
+   design tokens in `app.css`. `MultiplayerGamePage` renders `.m2-button` and
+   `.m2-status-text` too, so the aliases live on both M2 shells. Every surface,
+   border, label, input, tab, badge and button below reads these tokens, which
+   is what makes the lobby and the waiting room switch cleanly between Light
+   and Dark instead of painting a hardcoded dark palette. */
 .m2-lobby,
 .multiplayer-page {
-  --m2-bg: #161512;
-  --m2-surface: #262421;
-  --m2-surface-raised: #2f2c28;
-  --m2-border: #3d3a35;
-  --m2-text: #bababa;
-  --m2-text-strong: #f1f1f1;
-  --m2-muted: #8f8b84;
-  --m2-green: #629924;
-  --m2-green-soft: rgba(98, 153, 36, 0.16);
-  --m2-red: #c33;
+  --m2-bg: var(--app-bg);
+  --m2-surface: var(--app-panel);
+  --m2-surface-raised: var(--bg-elevated);
+  --m2-input-bg: var(--app-input-bg);
+  --m2-border: var(--app-border);
+  --m2-text: var(--app-text);
+  --m2-text-strong: var(--app-text-strong);
+  --m2-muted: var(--app-muted);
+  --m2-green: var(--app-accent);
+  --m2-green-soft: var(--app-accent-soft);
+  --m2-on-accent: var(--app-bg);
+  --m2-red: var(--durak-danger, #c33);
   --m2-red-soft: rgba(204, 51, 51, 0.16);
+}
+
+/* The M1 light palette is a neutral cool-grey family, so a 16% red wash is too
+   heavy there; the error surface uses a lighter tint instead. The darker light
+   accent needs the near-white label M1 already uses for its own primary
+   action, where the dark accent keeps the dark `--app-bg` label. */
+html[data-theme='light'] .m2-lobby,
+html[data-theme='light'] .multiplayer-page {
+  --m2-red-soft: rgba(179, 38, 30, 0.1);
+  --m2-on-accent: #f8fafc;
+}
+
+@media (prefers-color-scheme: light) {
+  html:not([data-theme]) .m2-lobby,
+  html:not([data-theme]) .multiplayer-page {
+    --m2-red-soft: rgba(179, 38, 30, 0.1);
+    --m2-on-accent: #f8fafc;
+  }
 }
 
 .m2-lobby {
@@ -37,7 +60,7 @@
   background: var(--m2-bg);
   color: var(--m2-text);
   border: 1px solid var(--m2-border);
-  border-radius: 12px;
+  border-radius: calc(var(--app-roundness, 8px) * 1.5);
   font-size: 0.95rem;
 }
 
@@ -165,8 +188,8 @@
   width: 9rem;
   padding: 0.35rem 0.55rem;
   border: 1px solid var(--m2-border);
-  border-radius: 6px;
-  background: var(--m2-bg);
+  border-radius: calc(var(--app-roundness, 8px) * 0.75);
+  background: var(--m2-input-bg);
   color: var(--m2-text-strong);
   font: inherit;
   font-size: 0.85rem;
@@ -185,7 +208,7 @@
   gap: 0.4rem;
   padding: 0.5rem 0.9rem;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--app-roundness, 8px);
   background: transparent;
   color: var(--m2-text);
   font: inherit;
@@ -210,7 +233,7 @@
   padding: 0.05rem 0.4rem;
   border-radius: 999px;
   background: var(--m2-green);
-  color: #14130f;
+  color: var(--m2-on-accent);
   font-size: 0.75rem;
   font-weight: 700;
 }
@@ -227,13 +250,12 @@
   padding: 1rem;
   background: var(--m2-surface);
   border: 1px solid var(--m2-border);
-  border-radius: 10px;
+  border-radius: calc(var(--app-roundness, 8px) * 1.25);
 }
 
-/* T-96 ITEM-3: `.lobby-page h2` in `app.css` is `(0,1,1)` and paints
-   `--app-text-strong` (`#1e293b` under a light OS scheme). Scoping the panel
-   title to its shell raises it to `(0,2,0)`, so the M2 headings stay
-   `#f1f1f1` on `#262421`. */
+/* T-96 ITEM-3: `.lobby-page h2` in `app.css` is `(0,1,1)`. Scoping the panel
+   title to its shell raises it to `(0,2,0)`, so the M2 heading always reads its
+   own themed `--m2-text-strong` instead of the inherited page heading. */
 .m2-lobby .m2-panel-title {
   margin: 0;
   color: var(--m2-text-strong);
@@ -256,9 +278,9 @@
   min-width: 0;
   padding: 0.5rem 0.9rem;
   border: 1px solid var(--m2-green);
-  border-radius: 7px;
+  border-radius: calc(var(--app-roundness, 8px) * 0.75);
   background: var(--m2-green);
-  color: #14130f;
+  color: var(--m2-on-accent);
   font: inherit;
   font-weight: 700;
   cursor: pointer;
@@ -307,7 +329,7 @@
   margin: 0;
   padding: 0.45rem 0.65rem;
   border: 1px solid var(--m2-red);
-  border-radius: 7px;
+  border-radius: calc(var(--app-roundness, 8px) * 0.75);
   color: var(--m2-red);
   background: var(--m2-red-soft);
   font-size: 0.82rem;
@@ -326,15 +348,20 @@
 .quick-pair-tile {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
+  align-content: center;
+  justify-items: center;
   gap: 0.3rem;
+  /* T-96-visual-qa ITEM-1: a preset is the primary lobby action, so the tile
+     is about twice its old ~64px height while the 3x2 grid is unchanged. */
+  min-height: 8rem;
   min-width: 0;
   padding: 0.85rem 0.75rem;
   border: 1px solid var(--m2-border);
-  border-radius: 9px;
+  border-radius: var(--app-roundness, 8px);
   background: var(--m2-surface-raised);
   color: var(--m2-text);
   font: inherit;
-  text-align: left;
+  text-align: center;
   cursor: pointer;
 }
 
@@ -369,7 +396,7 @@
   min-width: 0;
   padding: 0.6rem 0.75rem;
   border: 1px solid var(--m2-green);
-  border-radius: 8px;
+  border-radius: var(--app-roundness, 8px);
   background: var(--m2-green-soft);
   color: var(--m2-text-strong);
   font-size: 0.85rem;
@@ -411,7 +438,7 @@
   padding: 0.6rem 0.7rem;
   background: var(--m2-surface-raised);
   border: 1px solid var(--m2-border);
-  border-radius: 8px;
+  border-radius: var(--app-roundness, 8px);
 }
 
 .lobby-pool-host {
@@ -480,7 +507,7 @@
   min-width: 0;
   padding: 1.25rem 0.9rem;
   border: 1px dashed var(--m2-border);
-  border-radius: 9px;
+  border-radius: var(--app-roundness, 8px);
   text-align: center;
 }
 
@@ -497,7 +524,7 @@
   min-width: 0;
 }
 
-/* --- Create Invite Link ------------------------------------------------- */
+/* --- Create a Game ------------------------------------------------------ */
 
 .create-invite-form {
   display: grid;
@@ -535,7 +562,7 @@
   min-width: 0;
   padding: 0.4rem 0.75rem;
   border: 1px solid var(--m2-border);
-  border-radius: 7px;
+  border-radius: calc(var(--app-roundness, 8px) * 0.75);
   background: var(--m2-surface-raised);
   color: var(--m2-text);
   font: inherit;
@@ -641,18 +668,23 @@
 /* --- M2 live room & projected table ------------------------------------- */
 
 .multiplayer-page {
-  --mp-bg: #161512;
-  --mp-surface: #262421;
-  --mp-surface-raised: #2f2c28;
-  --mp-border: #3d3a35;
-  --mp-felt: #1e2923;
-  --mp-text: #bababa;
-  --mp-text-strong: #f1f1f1;
-  --mp-muted: #8f8b84;
-  --mp-green: #629924;
-  --mp-green-soft: rgba(98, 153, 36, 0.16);
-  --mp-red: #c33;
-  --mp-red-soft: rgba(204, 51, 51, 0.16);
+  /* The waiting room and the projected table read the same M1 tokens as the
+     lobby; only the felt is table-specific (`--durak-felt` is light under
+     `html[data-theme='light']`). */
+  --mp-bg: var(--m2-bg);
+  --mp-surface: var(--m2-surface);
+  --mp-surface-raised: var(--m2-surface-raised);
+  --mp-input-bg: var(--m2-input-bg);
+  --mp-border: var(--m2-border);
+  --mp-felt: var(--durak-felt, #1e2923);
+  --mp-text: var(--m2-text);
+  --mp-text-strong: var(--m2-text-strong);
+  --mp-muted: var(--m2-muted);
+  --mp-green: var(--m2-green);
+  --mp-green-soft: var(--m2-green-soft);
+  --mp-on-accent: var(--m2-on-accent);
+  --mp-red: var(--m2-red);
+  --mp-red-soft: var(--m2-red-soft);
 
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -663,7 +695,7 @@
   background: var(--mp-bg);
   color: var(--mp-text);
   border: 1px solid var(--mp-border);
-  border-radius: 12px;
+  border-radius: calc(var(--app-roundness, 8px) * 1.5);
 }
 
 .multiplayer-page *,
@@ -794,16 +826,16 @@
   padding: 0.75rem;
   background: var(--mp-surface);
   border: 1px solid var(--mp-border);
-  border-radius: 9px;
+  border-radius: var(--app-roundness, 8px);
 }
 
 .mp-invite-url {
   flex: 1 1 16rem;
   min-width: 0;
   padding: 0.4rem 0.55rem;
-  background: var(--mp-bg);
+  background: var(--mp-input-bg);
   border: 1px solid var(--mp-border);
-  border-radius: 6px;
+  border-radius: calc(var(--app-roundness, 8px) * 0.75);
   color: var(--mp-text-strong);
   font-size: 0.8rem;
   overflow-wrap: anywhere;
@@ -835,7 +867,7 @@
   padding: 0.6rem 0.75rem;
   background: var(--mp-surface);
   border: 1px solid var(--mp-border);
-  border-radius: 8px;
+  border-radius: var(--app-roundness, 8px);
 }
 
 .mp-seat-number {
@@ -875,7 +907,7 @@
   padding: 0.85rem;
   background: var(--mp-surface);
   border: 1px solid var(--mp-border);
-  border-radius: 10px;
+  border-radius: calc(var(--app-roundness, 8px) * 1.25);
 }
 
 .mp-sidebar-section {
@@ -904,7 +936,7 @@
   padding: 0.35rem 0.45rem;
   background: var(--mp-surface-raised);
   border: 1px solid var(--mp-border);
-  border-radius: 6px;
+  border-radius: calc(var(--app-roundness, 8px) * 0.75);
   font-size: 0.82rem;
 }
 
@@ -929,7 +961,7 @@
   padding: 0.85rem;
   background: var(--mp-felt);
   border: 1px solid var(--mp-border);
-  border-radius: 12px;
+  border-radius: calc(var(--app-roundness, 8px) * 1.5);
 }
 
 .mp-seats-row {
@@ -945,9 +977,9 @@
   gap: 0.25rem;
   min-width: 0;
   padding: 0.5rem 0.6rem;
-  background: rgba(38, 36, 33, 0.82);
+  background: var(--mp-surface-raised);
   border: 1px solid var(--mp-border);
-  border-radius: 8px;
+  border-radius: var(--app-roundness, 8px);
   text-align: center;
 }
 
@@ -1018,7 +1050,7 @@
   min-width: 0;
   padding: 0.3rem;
   border: 2px solid transparent;
-  border-radius: 9px;
+  border-radius: var(--app-roundness, 8px);
 }
 
 .mp-pair[data-targeted='true'] {
@@ -1042,8 +1074,8 @@
 .mp-pair-slot {
   width: 72px;
   height: 100px;
-  border: 1px dashed rgba(143, 139, 132, 0.5);
-  border-radius: 8px;
+  border: 1px dashed var(--mp-border);
+  border-radius: var(--app-roundness, 8px);
 }
 
 .mp-bottom-row {
@@ -1096,7 +1128,7 @@
   min-width: 0;
   padding: 0;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--app-roundness, 8px);
   background: none;
   cursor: pointer;
 }
@@ -1126,9 +1158,9 @@
   justify-content: center;
   padding: 0.5rem 0.9rem;
   border: 1px solid var(--mp-red);
-  border-radius: 7px;
+  border-radius: calc(var(--app-roundness, 8px) * 0.75);
   background: var(--mp-red-soft);
-  color: #f3b6b6;
+  color: var(--mp-text-strong);
   font: inherit;
   font-weight: 700;
   cursor: pointer;
@@ -1137,7 +1169,7 @@
 .mp-button-danger:hover:not(:disabled),
 .mp-button-danger:focus-visible:not(:disabled) {
   background: var(--mp-red);
-  color: #14130f;
+  color: var(--mp-on-accent);
   outline: none;
 }
 
@@ -1202,7 +1234,7 @@
   padding: 0.85rem;
   background: var(--mp-felt);
   border: 1px solid var(--mp-border);
-  border-radius: 12px;
+  border-radius: calc(var(--app-roundness, 8px) * 1.5);
   overflow: visible;
 }
 

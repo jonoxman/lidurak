@@ -1,80 +1,38 @@
-import { useEffect, useState } from 'preact/hooks';
-import {
-  connectLobbySocket,
-  fetchLobbyRooms,
-  joinRoom,
-  seedLobbyPreset,
-  type LobbySocket,
-} from '../../api/lobbyClient';
-import type { LobbyRoomSummary, SocketStatus } from '../../types/multiplayer';
+import { useState } from 'preact/hooks';
+import { joinRoom, seedLobbyPreset } from '../../api/lobbyClient';
+import type { LobbyRoomSummary } from '../../types/multiplayer';
 
 export interface LobbyPoolTabProps {
   /** Opens `/g/:gameId` after a successful join. */
   onJoin: (gameId: string) => void;
-  /** Rooms already hydrated by the page, so the first paint is not empty. */
-  initialRooms?: LobbyRoomSummary[];
-  /** Keeps the tab's count badge in sync with the live socket. */
+  /**
+   * The live pool, owned by the page-level `/ws/lobby` socket. The socket is
+   * opened as soon as the lobby mounts, so the pool is already streaming when
+   * this tab is first shown.
+   */
+  rooms?: LobbyRoomSummary[];
+  /** Reports rooms this tab seeded, so the page's live list stays in sync. */
   onRoomsChange?: (rooms: LobbyRoomSummary[]) => void;
-  /** Feeds the page's live-lobby indicator. */
-  onStatusChange?: (status: SocketStatus) => void;
-  /** Switches to the Create Invite Link tab from the empty state. */
+  /** Switches to the Create a Game tab from the empty state. */
   onCreateRoom?: () => void;
 }
 
 /**
  * The live Lobby Pool.
  *
- * REST hydration renders the first paint immediately; the `/ws/lobby` socket
- * then replaces it with the authoritative `LobbySnapshot`/`LobbyUpdated`
- * frames. Every row can be joined in one click.
+ * `LobbyPage` owns the socket and hands the authoritative
+ * `LobbySnapshot`/`LobbyUpdated` rooms down as a prop; this tab only renders
+ * them and performs the one-click joins.
  */
 export function LobbyPoolTab({
   onJoin,
-  initialRooms = [],
+  rooms = [],
   onRoomsChange,
-  onStatusChange,
   onCreateRoom,
 }: LobbyPoolTabProps) {
-  const [rooms, setRooms] = useState<LobbyRoomSummary[]>(initialRooms);
   const [joining, setJoining] = useState<string | null>(null);
   const [seeding, setSeeding] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    let socket: LobbySocket | null = null;
-
-    const apply = (next: LobbyRoomSummary[]) => {
-      if (cancelled) return;
-      setRooms(next);
-      onRoomsChange?.(next);
-    };
-
-    fetchLobbyRooms()
-      .then(apply)
-      .catch(() => {
-        // The socket snapshot supersedes a failed hydration.
-      });
-
-    try {
-      socket = connectLobbySocket({
-        onSnapshot: apply,
-        onUpdated: apply,
-        onStatusChange: (status) => {
-          if (!cancelled) onStatusChange?.(status);
-        },
-      });
-    } catch {
-      // A browser without a WebSocket still gets the REST hydration.
-    }
-
-    return () => {
-      cancelled = true;
-      socket?.close();
-    };
-    // The handlers are stable for the lifetime of the tab.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const join = async (gameId: string) => {
     if (joining !== null) return;
@@ -96,7 +54,6 @@ export function LobbyPoolTab({
     setError(null);
     try {
       const seeded = await seedLobbyPreset();
-      setRooms(seeded.rooms);
       onRoomsChange?.(seeded.rooms);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
@@ -176,4 +133,3 @@ export function LobbyPoolTab({
     </section>
   );
 }
-

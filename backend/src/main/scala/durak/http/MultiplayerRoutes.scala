@@ -3,7 +3,7 @@ package durak.http
 import cats.effect.{IO, Ref, Resource}
 import cats.effect.std.Queue
 import cats.syntax.all.*
-import durak.lobby.{QuickPairRequest, QuickPairingService}
+import durak.lobby.{QuickPairOutcome, QuickPairRequest, QuickPairingService}
 import durak.protocol.ProtocolCodecs.given
 import durak.protocol.{LobbyRoomSummary, WsClientMessage, WsServerMessage}
 import durak.rooms.{ActionRejected, CreateRoomConfig, RoomManager, UnknownRoom}
@@ -84,7 +84,7 @@ object MultiplayerRoutes:
       quickPairing: QuickPairingService[IO]
   )(using webSockets: WebSocketBuilder2[IO]): HttpRoutes[IO] =
     restRoutes(store, roomManager, quickPairing) <+>
-      webSocketRoutes(store, roomManager)(using webSockets)
+      webSocketRoutes(store, roomManager, quickPairing)(using webSockets)
 
   // --- REST ----------------------------------------------------------------
 
@@ -177,14 +177,8 @@ object MultiplayerRoutes:
             case Right(pairRequest) =>
               withSession(req, store) { (session, _) =>
                 quickPairing.pair(session, pairRequest).flatMap {
-                  case Right((gameId, seatIndex)) =>
-                    Ok(
-                      Json.obj(
-                        "gameId" -> gameId.asJson,
-                        "seatIndex" -> seatIndex.asJson
-                      )
-                    )
-                  case Left(error) => BadRequest(errorJson(error))
+                  case Right(outcome) => Ok(quickPairOutcomeJson(outcome))
+                  case Left(error)    => BadRequest(errorJson(error))
                 }
               }
       }
@@ -200,14 +194,23 @@ object MultiplayerRoutes:
   /** The two live sockets; both are anonymous-readable, the game one personal. */
   def webSocketRoutes(
       store: SessionStore[IO],
-      roomManager: RoomManager[IO]
+      roomManager: RoomManager[IO],
+      quickPairing: QuickPairingService[IO]
   )(using webSockets: WebSocketBuilder2[IO]): HttpRoutes[IO] = HttpRoutes.of[IO] {
 
-    case GET -> Root / "ws" / "lobby" =>
-      webSockets.build(
-        lobbyMessages(roomManager).map(toFrame).merge(keepAlive),
-        (incoming: Stream[IO, WebSocketFrame]) => incoming.drain
-      )
+    case req @ GET -> Root / "ws" / "lobby" =>
+      // The lobby socket is also Quick Pairing's delivery channel: a queued
+      // player is told which table they were dealt into right here, so a
+      // searching player stays on the lobby until the match really exists.
+      viewerFor(req, store).flatMap { viewerId =>
+        val matchFound = quickPairing
+          .matchFound(viewerId)
+          .map(gameId => WsServerMessage.MatchFound(gameId))
+        webSockets.build(
+          (lobbyMessages(roomManager) merge matchFound).map(toFrame).merge(keepAlive),
+          (incoming: Stream[IO, WebSocketFrame]) => incoming.drain
+        )
+      }
 
     case req @ GET -> Root / "ws" / "games" / gameId =>
       viewerFor(req, store).flatMap { viewerId =>
@@ -395,6 +398,29 @@ object MultiplayerRoutes:
 
   private def errorJson(message: String): Json =
     Json.obj("error" -> Json.fromString(message))
+
+  /**
+   * The body of `POST /api/quick-pair`: a live table (`matched`) or the queue
+   * the caller is now waiting in (`searching`).
+   *
+   * A searching player is not seated and no room exists for them yet; their
+   * `MatchFound` arrives on `/ws/lobby` once the table is full.
+   */
+  private def quickPairOutcomeJson(outcome: QuickPairOutcome): Json =
+    outcome match
+      case QuickPairOutcome.Matched(gameId, seatIndex) =>
+        Json.obj(
+          "status" -> "matched".asJson,
+          "gameId" -> gameId.asJson,
+          "seatIndex" -> seatIndex.asJson
+        )
+      case QuickPairOutcome.Searching(playerCount, turnTimeoutSeconds, playersWaiting) =>
+        Json.obj(
+          "status" -> "searching".asJson,
+          "playerCount" -> playerCount.asJson,
+          "turnTimeoutSeconds" -> turnTimeoutSeconds.asJson,
+          "playersWaiting" -> playersWaiting.asJson
+        )
 
   private def describe(error: Throwable): String =
     Option(error.getMessage).getOrElse(error.getClass.getSimpleName)

@@ -6,7 +6,11 @@ import {
   QA_SCENARIOS,
   type CreatedGame,
 } from '../api/client';
-import { fetchLobbyRooms } from '../api/lobbyClient';
+import {
+  connectLobbySocket,
+  fetchLobbyRooms,
+  type LobbySocket,
+} from '../api/lobbyClient';
 import { getOrCreateSession, updateGuestName } from '../api/sessionClient';
 import { CreateInviteTab } from '../components/lobby/CreateInviteTab';
 import { LobbyPoolTab } from '../components/lobby/LobbyPoolTab';
@@ -38,7 +42,7 @@ type LobbyTabId = 'quick' | 'pool' | 'invite';
 const LOBBY_TABS: ReadonlyArray<{ id: LobbyTabId; label: string }> = [
   { id: 'quick', label: 'Quick Pairing' },
   { id: 'pool', label: 'Lobby Pool' },
-  { id: 'invite', label: 'Create Invite Link' },
+  { id: 'invite', label: 'Create a Game' },
 ];
 
 interface CreatedRoom {
@@ -122,10 +126,15 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
     };
   }, [serverReady]);
 
-  // Hydrate the guest badge and the initial pool count. Both calls fail
-  // silently: the page stays usable, and the live socket retries on its own.
+  // Hydrate the guest badge and open the lobby socket immediately.
+  //
+  // The socket carries three things the page needs while it is on any tab:
+  // the live pool, the connection badge and Quick Pairing's `matchFound`. It
+  // is not tied to the Lobby Pool tab, so a searching player is still told
+  // when their table is full.
   useEffect(() => {
     let cancelled = false;
+    let socket: LobbySocket | null = null;
 
     getOrCreateSession()
       .then((hydrated) => {
@@ -142,11 +151,31 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
         if (!cancelled) setRooms(open);
       })
       .catch(() => {
-        // The Lobby Pool tab hydrates again when it opens.
+        // The socket snapshot supersedes a failed hydration.
       });
+
+    try {
+      socket = connectLobbySocket({
+        onSnapshot: (open) => {
+          if (!cancelled) setRooms(open);
+        },
+        onUpdated: (open) => {
+          if (!cancelled) setRooms(open);
+        },
+        onMatchFound: (gameId) => {
+          if (!cancelled) openGame(gameId);
+        },
+        onStatusChange: (status) => {
+          if (!cancelled) setPoolStatus(status);
+        },
+      });
+    } catch {
+      // A browser without a WebSocket keeps the REST hydration above.
+    }
 
     return () => {
       cancelled = true;
+      socket?.close();
     };
   }, []);
 
@@ -173,7 +202,8 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
 
   const selectTab = (next: LobbyTabId) => {
     setTab(next);
-    // The pool socket starts on first open and then keeps the tab live.
+    // The pool panel mounts lazily; its rooms already stream in from the
+    // page-level socket.
     if (next === 'pool') setPoolOpened(true);
   };
 
@@ -281,9 +311,8 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
             {poolOpened ? (
               <div class="m2-tab-panel" hidden={tab !== 'pool'}>
                 <LobbyPoolTab
-                  initialRooms={rooms}
+                  rooms={rooms}
                   onRoomsChange={setRooms}
-                  onStatusChange={setPoolStatus}
                   onJoin={openGame}
                   onCreateRoom={() => setTab('invite')}
                 />

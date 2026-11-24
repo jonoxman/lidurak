@@ -83,16 +83,40 @@ export async function leaveRoom(gameId: string): Promise<void> {
   await apiRequest(`/api/games/${encodeURIComponent(gameId)}/leave`, { method: 'POST' });
 }
 
-/** Joins the Quick Pairing pool, matching an existing room when possible. */
+/**
+ * Joins the Quick Pairing queue.
+ *
+ * The server only deals a table once `playerCount` players wait for the same
+ * preset, so a lone player gets `searching` (and no room) and stays on the
+ * lobby until the lobby socket delivers `matchFound`.
+ */
 export async function joinQuickPair(req: QuickPairRequest): Promise<QuickPairResponse> {
-  const body = await apiRequest('/api/quick-pair', { method: 'POST', body: req });
-  return {
-    gameId: readGameId(body, 'QuickPairResponse'),
-    seatIndex: readSeat(body),
-  };
+  const body = asObject(
+    await apiRequest('/api/quick-pair', { method: 'POST', body: req }),
+    'QuickPairResponse',
+  );
+
+  if (body.status === 'matched') {
+    return { status: 'matched', gameId: readGameId(body, 'QuickPairResponse'), seatIndex: readSeat(body) };
+  }
+
+  if (body.status === 'searching') {
+    return {
+      status: 'searching',
+      playerCount:
+        typeof body.playerCount === 'number' ? body.playerCount : req.playerCount,
+      turnTimeoutSeconds:
+        typeof body.turnTimeoutSeconds === 'number'
+          ? body.turnTimeoutSeconds
+          : (req.turnTimeoutSeconds ?? 15),
+      playersWaiting: typeof body.playersWaiting === 'number' ? body.playersWaiting : 0,
+    };
+  }
+
+  throw new Error('Invalid QuickPairResponse: status must be matched or searching');
 }
 
-/** Leaves the Quick Pairing pool. */
+/** Leaves the Quick Pairing queue. */
 export async function cancelQuickPair(): Promise<void> {
   await apiRequest('/api/quick-pair', { method: 'DELETE' });
 }

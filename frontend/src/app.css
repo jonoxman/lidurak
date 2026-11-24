@@ -5,6 +5,9 @@
   --app-panel: #262421;
   --app-text: #bababa;
   --app-text-strong: #f5f1e6;
+  /* Secondary/help text. Added for the M2 lobby, which needs a dimmed label
+     that follows the active theme like every other M1 surface token. */
+  --app-muted: #8f8b84;
   --app-border: #3a3733;
   --app-accent: #629924;
   --app-accent-soft: rgba(98, 153, 36, 0.18);
@@ -60,6 +63,7 @@ html[data-theme='light'] {
   --app-panel: var(--bg-panel);
   --app-text: #334155;
   --app-text-strong: #1e293b;
+  --app-muted: #5b6675;
   --app-border: #b9c2ce;
   --app-accent: #4f7d1c;
   --app-accent-soft: rgba(98, 153, 36, 0.14);
@@ -110,6 +114,7 @@ html[data-theme='light'] {
     --app-panel: var(--bg-panel);
     --app-text: #334155;
     --app-text-strong: #1e293b;
+    --app-muted: #5b6675;
     --app-border: #b9c2ce;
     --app-accent: #4f7d1c;
     --app-accent-soft: rgba(98, 153, 36, 0.14);
