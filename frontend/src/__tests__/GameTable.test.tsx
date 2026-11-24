@@ -2759,14 +2759,18 @@ describe('T-90-3 ITEM-NEW: compact single-row play area and roundness', () => {
     ).toContain('stroke-linejoin: miter');
 
     // Every later change repaints the outline live from the settings store.
-    act(() => setSettings({ roundness: DEFAULT_SETTINGS.roundness }));
+    act(() => {
+      setSettings({ roundness: DEFAULT_SETTINGS.roundness });
+    });
     expect(document.documentElement.style.getPropertyValue('--app-roundness')).toBe('8px');
     expect(contour().getAttribute('data-contour-radius')).toBe('12');
     expect(path()).toMatch(/A 12 12 /);
     expect(pathElement().getAttribute('stroke-linejoin')).toBe('round');
     expect(pathElement().getAttribute('stroke-linecap')).toBe('round');
 
-    act(() => setSettings({ roundness: 16 }));
+    act(() => {
+      setSettings({ roundness: 16 });
+    });
     expect(document.documentElement.style.getPropertyValue('--app-roundness')).toBe('16px');
     expect(contour().getAttribute('data-contour-radius')).toBe('24');
     expect(path()).toMatch(/A 24 24 /);

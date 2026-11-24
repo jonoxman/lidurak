@@ -522,24 +522,44 @@ describe('T-90-feedback-5 ITEM-6a/6b/6c: smooth hover parting', () => {
       const before = handWrappers().map((wrapper) =>
         Number(wrapper.getAttribute('data-card-x')),
       );
+      const restingWidth =
+        Math.max(...before) + CARD_WIDTH - Math.min(...before);
 
       fireEvent.pointerMove(handWrappers()[index], { bubbles: true });
 
       const after = handWrappers().map((wrapper) =>
         Number(wrapper.getAttribute('data-card-x')),
       );
-      // The hovered card never moves; only its right neighbour visibly parts.
+      // The hovered card never moves, no card moves left, and T-96 keeps the
+      // overall hand width identical to its resting extent.
       expect(after[index], `${count}-card hovered card`).toBe(before[index]);
       expect(Number(handWrappers()[index].getAttribute('data-part-delta-x'))).toBe(0);
+      after.forEach((x, cardIndex) => {
+        expect(x, `${count}-card card ${cardIndex}`).toBeGreaterThanOrEqual(
+          before[cardIndex] - 0.01,
+        );
+      });
+      expect(
+        Math.max(...after) + CARD_WIDTH - Math.min(...after),
+        `${count}-card hand width`,
+      ).toBeCloseTo(restingWidth, 2);
       if (left !== undefined) {
         expect(after[left], `${count}-card left neighbour`).toBe(before[left]);
         expect(handWrappers()[left].getAttribute('data-part-direction')).toBe('none');
       }
       if (right !== undefined) {
-        expect(after[right], `${count}-card right neighbour`).toBeGreaterThan(
-          before[right],
-        );
-        expect(handWrappers()[right].getAttribute('data-part-direction')).toBe('right');
+        // A gap can only open when the local window leaves room to compress the
+        // cards behind it; a single right neighbour is already at the resting
+        // right edge, so nothing moves there.
+        if (index + 2 < count) {
+          expect(after[right], `${count}-card right neighbour`).toBeGreaterThan(
+            before[right],
+          );
+          expect(handWrappers()[right].getAttribute('data-part-direction')).toBe('right');
+        } else {
+          expect(after[right], `${count}-card right neighbour`).toBe(before[right]);
+          expect(handWrappers()[right].getAttribute('data-part-direction')).toBe('none');
+        }
       }
 
       // ITEM-6a: every parted card moves through a GPU-composited translate3d.
@@ -981,18 +1001,19 @@ describe('T-96 item 6: contour expansion never shifts the hand row', () => {
     );
     const deltas = handWrappers().map((wrapper) =>
       Number(wrapper.getAttribute('data-part-delta-x')),
-    );
-
-    // The hovered card is pinned in the resting coordinate space ...
-    expect(after[2]).toBe(before[2]);
-    expect(deltas[2]).toBe(0);
-    // ... its right neighbour parts outward while the left one never moves ...
-    expect(deltas[1]).toBe(0);
-    expect(deltas[3]).toBeCloseTo(28, 1);
-    // ... and the contour widens WITHOUT changing the stage's track width, so
-    // no `justify-content` re-centring can move the row (the old -17px jump).
-    expect(Number.parseFloat(contour.style.width)).toBeGreaterThan(contourWidthAtRest);
-    expect(box.style.width).toBe(stageWidthAtRest);
+    );      // The hovered card is pinned in the resting coordinate space ...
+      expect(after[2]).toBe(before[2]);
+      expect(deltas[2]).toBe(0);
+      // ... its right neighbour parts inward of the resting right edge while the
+      // left one never moves ...
+      expect(deltas[1]).toBe(0);
+      expect(deltas[3]).toBeGreaterThan(0);
+      expect(deltas[3]).toBeLessThan(28);
+      // ... and T-96 keeps the overall hand width (and so the contour) at its
+      // resting extent, while the stage's track width never changes either.
+      expect(after[5]).toBe(before[5]);
+      expect(Number.parseFloat(contour.style.width)).toBeCloseTo(contourWidthAtRest, 2);
+      expect(box.style.width).toBe(stageWidthAtRest);
   });
 });
 

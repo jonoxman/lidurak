@@ -18,7 +18,11 @@ vi.mock('../api/gameSocket', () => ({
 import * as gameSocketApi from '../api/gameSocket';
 import * as lobbyApi from '../api/lobbyClient';
 import * as sessionApi from '../api/sessionClient';
-import { MultiplayerGamePage, handDensity } from './MultiplayerGamePage';
+import {
+  MultiplayerGamePage,
+  multiplayerLegalActions,
+  multiplayerOpponents,
+} from './MultiplayerGamePage';
 import lobbyCss from '../styles/lobby.css?raw';
 import type {
   Card,
@@ -133,8 +137,18 @@ const installSocket = () => {
   );
 };
 
-const renderPage = (onNavigateLobby = vi.fn()) =>
-  render(<MultiplayerGamePage gameId="room-1" onNavigateLobby={onNavigateLobby} />);
+const renderPage = (onNavigateLobby = vi.fn()) => {
+  const rendered = render(
+    <MultiplayerGamePage gameId="room-1" onNavigateLobby={onNavigateLobby} />,
+  );
+  return { ...rendered, onNavigateLobby };
+};
+
+const handWrappers = (): HTMLElement[] =>
+  Array.from(document.querySelectorAll('.hand-card-wrapper')) as HTMLElement[];
+
+const arena = (): HTMLElement | null =>
+  document.querySelector('[data-zone="table-arena"]') as HTMLElement | null;
 
 describe('MultiplayerGamePage lifecycle', () => {
   beforeEach(() => {
@@ -245,7 +259,7 @@ describe('MultiplayerGamePage waiting room', () => {
     expect((await screen.findByTestId('copy-invite')).textContent).toBe('Copied!');
   });
 
-  it('joins an open seat and swaps to the returned projection', async () => {
+  it('joins an open seat and swaps to the M1 gameplay table', async () => {
     fetchGameView.mockResolvedValue(waitingView({ viewerSeat: null }));
     joinRoom.mockResolvedValue({
       gameId: 'room-1',
@@ -259,18 +273,18 @@ describe('MultiplayerGamePage waiting room', () => {
     fireEvent.click(screen.getByTestId('join-seat'));
     await waitFor(() => expect(joinRoom).toHaveBeenCalledWith('room-1'));
 
-    expect(await screen.findByTestId('projected-table')).toBeTruthy();
-    expect(screen.getAllByTestId(/^hand-card-/).length).toBe(3);
+    expect(await screen.findByTestId('hand-sort-box')).toBeTruthy();
+    expect(arena()).not.toBeNull();
+    expect(handWrappers()).toHaveLength(3);
   });
 
   it('leaves the room and returns to the lobby', async () => {
-    const onExit = vi.fn();
-    renderPage(onExit);
+    const { onNavigateLobby } = renderPage();
     await screen.findByTestId('waiting-room');
 
     fireEvent.click(screen.getByTestId('leave-room'));
     await waitFor(() => expect(leaveRoom).toHaveBeenCalledWith('room-1'));
-    expect(onExit).toHaveBeenCalledTimes(1);
+    expect(onNavigateLobby).toHaveBeenCalledTimes(1);
   });
 
   it('updates the room from incoming socket gameViewUpdate frames', async () => {
@@ -293,7 +307,7 @@ describe('MultiplayerGamePage waiting room', () => {
   });
 });
 
-describe('MultiplayerGamePage projected table', () => {
+describe('MultiplayerGamePage M1 gameplay interface', () => {
   beforeEach(() => {
     vi.resetAllMocks();
     handlers = null;
@@ -309,35 +323,54 @@ describe('MultiplayerGamePage projected table', () => {
     fetchGameView.mockResolvedValue(makeView());
   });
 
-  it("renders only the viewer's hand and sends typed attack/pass/take messages", async () => {
-    renderPage();
-    await screen.findByTestId('projected-table');
+  it('renders the GameTable, TableDeck, SortBar, ActionBar shell and no placeholder table', async () => {
+    const { container } = renderPage();
+    await screen.findByTestId('hand-sort-box');
 
-    const handCards = screen.getAllByTestId(/^hand-card-/);
-    expect(handCards).toHaveLength(3);
-    expect(screen.getByLabelText('6 of hearts')).toBeTruthy();
-    // Opponent hands are counts only — never card faces.
-    const opponent = screen.getByTestId('opponent-p1');
-    expect(opponent.textContent).toContain('6 cards');
-    expect(opponent.querySelector('.mp-seat-backs')).not.toBeNull();
+    // Lichess 3-column M1 shell.
+    expect(container.querySelector('.game-shell')).not.toBeNull();
+    expect(container.querySelectorAll('[data-zone="sidebar-left"]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-zone="sidebar-right"]')).toHaveLength(1);
+    expect(container.querySelector('.table-column')).not.toBeNull();
+    expect(container.querySelector('[data-zone="player-hand"] .hand-cards')).not.toBeNull();
+    expect(arena()).not.toBeNull();
+    expect(screen.getByTestId('clock-panel')).toBeTruthy();
+    expect(screen.getByTestId('game-clock')).toBeTruthy();
+    expect(screen.getByTestId('turn-clock')).toBeTruthy();
+    expect(screen.getByTestId('sort-bar')).toBeTruthy();
+    expect(screen.getByTestId('talon-count').textContent).toBe('20');
 
-    fireEvent.click(handCards[0]);
-    fireEvent.click(screen.getByTestId('action-play'));
-    expect(sent).toEqual([
-      { type: 'playAttack', cards: [CARD('hearts', 'six')] },
-    ]);
+    // The placeholder projected table is gone for good.
+    expect(container.querySelector('.mp-shell')).toBeNull();
+    expect(container.querySelector('.mp-arena')).toBeNull();
+    expect(screen.queryByTestId('projected-table')).toBeNull();
+    expect(screen.queryByTestId('action-play')).toBeNull();
 
-    fireEvent.click(screen.getByTestId('action-pass'));
-    expect(sent[1]).toEqual({ type: 'passTurn' });
+    // Only the viewer's hand is rendered; opponents are counts.
+    expect(handWrappers()).toHaveLength(3);
+    expect(screen.getByLabelText('six of hearts')).toBeTruthy();
+    const opponents = screen.getAllByTestId('opponent');
+    expect(opponents).toHaveLength(1);
+    expect(opponents[0].textContent).toContain('Opponent');
 
-    fireEvent.click(screen.getByTestId('action-take'));
-    expect(sent[2]).toEqual({ type: 'declareSurrender' });
+    // SortBar drives the display order.
+    const select = screen.getByTestId('sort-select') as HTMLSelectElement;
+    expect(select.getAttribute('data-sort-mode')).toBe('rank');
+    fireEvent.change(select, { target: { value: 'suit' } });
+    expect(select.getAttribute('data-sort-mode')).toBe('suit');
   });
 
-  it('covers or redirects with the selected card as the defender', async () => {
+  it('double-clicks a hand card into a playAttack over the GameSocket', async () => {
+    renderPage();
+    await screen.findByTestId('hand-sort-box');
+
+    fireEvent.dblClick(screen.getByLabelText('six of hearts'));
+    expect(sent).toEqual([{ type: 'playAttack', cards: [CARD('hearts', 'six')] }]);
+  });
+
+  it('covers with a double-clicked card as the defender', async () => {
     fetchGameView.mockResolvedValue(
       makeView({
-        viewerSeat: 0,
         defenderIdx: 0,
         attackerIdx: 1,
         phase: 'defense',
@@ -347,50 +380,104 @@ describe('MultiplayerGamePage projected table', () => {
     );
 
     renderPage();
-    await screen.findByTestId('projected-table');
+    await screen.findByTestId('hand-sort-box');
 
-    fireEvent.click(screen.getByTestId('attack-card-0'));
-    fireEvent.click(screen.getByTestId('hand-card-0'));
-    fireEvent.click(screen.getByTestId('action-cover'));
-
-    expect(sent[0]).toEqual({
-      type: 'coverCard',
-      attackIndex: 0,
-      defenseCard: CARD('diamonds', 'king'),
-    });
-
-    fireEvent.click(screen.getByTestId('hand-card-0'));
-    fireEvent.click(screen.getByTestId('action-redirect'));
-    expect(sent[1]).toEqual({
-      type: 'redirectAttack',
-      cards: [CARD('diamonds', 'king')],
-    });
+    fireEvent.dblClick(screen.getByLabelText('king of diamonds'));
+    expect(sent).toEqual([
+      {
+        type: 'coverCard',
+        attackIndex: 0,
+        defenseCard: CARD('diamonds', 'king'),
+      },
+    ]);
   });
 
-  it('renders a zero-leak read-only spectator table', async () => {
+  it('redirects a same-rank card when covering it is impossible', async () => {
+    fetchGameView.mockResolvedValue(
+      makeView({
+        defenderIdx: 0,
+        attackerIdx: 1,
+        phase: 'defense',
+        tablePairs: [{ attack: CARD('diamonds', 'eight'), defense: null }],
+        hand: [CARD('clubs', 'eight')],
+      }),
+    );
+
+    renderPage();
+    await screen.findByTestId('hand-sort-box');
+
+    expect(screen.getByTestId('redirect-outline')).toBeTruthy();
+    fireEvent.dblClick(screen.getByLabelText('eight of clubs'));
+    expect(sent).toEqual([
+      { type: 'redirectAttack', cards: [CARD('clubs', 'eight')] },
+    ]);
+  });
+
+  it('renders ActionBar Pass / Surrender from the projected phase', async () => {
+    fetchGameView.mockResolvedValue(
+      makeView({
+        defenderIdx: 1,
+        attackerIdx: 0,
+        phase: 'defense',
+        tablePairs: [
+          {
+            attack: CARD('diamonds', 'eight'),
+            defense: CARD('diamonds', 'king'),
+          },
+        ],
+      }),
+    );
+
+    const { unmount } = renderPage();
+    await screen.findByTestId('hand-sort-box');
+    expect(screen.getByTestId('pass-button')).toBeTruthy();
+    expect(screen.queryByTestId('surrender-button')).toBeNull();
+    fireEvent.click(screen.getByTestId('pass-button'));
+    expect(sent).toEqual([{ type: 'passTurn' }]);
+    unmount();
+
+    fetchGameView.mockResolvedValue(
+      makeView({
+        defenderIdx: 0,
+        attackerIdx: 1,
+        phase: 'defense',
+        tablePairs: [{ attack: CARD('diamonds', 'eight'), defense: null }],
+        hand: [CARD('hearts', 'six')],
+      }),
+    );
+    renderPage();
+    await screen.findByTestId('hand-sort-box');
+    expect(screen.getByTestId('surrender-button')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('surrender-button'));
+    expect(sent[sent.length - 1]).toEqual({ type: 'declareSurrender' });
+  });
+
+  it('renders a zero-leak read-only spectator table with no hand or controls', async () => {
     fetchGameView.mockResolvedValue(
       makeView({ viewerSeat: null, hand: [], phase: 'defense' }),
     );
 
-    renderPage();
-    await screen.findByTestId('projected-table');
+    const { container } = renderPage();
+    await screen.findByTestId('hand-sort-box');
 
     expect(screen.getByTestId('spectator-badge').textContent).toBe(
       'Spectator Mode (Read-Only)',
     );
-    expect(screen.queryAllByTestId(/^hand-card-/)).toHaveLength(0);
-    expect(screen.getByTestId('spectator-hand')).toBeTruthy();
-    expect(screen.queryByTestId('action-pass')).toBeNull();
-    expect(screen.queryByTestId('action-take')).toBeNull();
-    expect(screen.queryByTestId('action-play')).toBeNull();
-    expect(screen.queryByTestId('action-cover')).toBeNull();
-    expect(screen.queryByTestId('action-redirect')).toBeNull();
+    expect(handWrappers()).toHaveLength(0);
+    expect(arena()?.getAttribute('data-review-mode')).toBe('true');
+    expect(screen.queryByTestId('action-bar')).toBeNull();
+    expect(screen.queryByTestId('pass-button')).toBeNull();
+    expect(screen.queryByTestId('surrender-button')).toBeNull();
+    expect(container.querySelector('[data-zone="player-hand"]')).not.toBeNull();
 
-    // Public roster only: both seats are visible as names and counts.
+    // Both seats are public names and counts only.
     expect(screen.getByTestId('roster-p1').textContent).toContain('Opponent');
+    expect(screen.getByTestId('roster-guest-abcd1234').textContent).toContain(
+      'Guest-AB12',
+    );
   });
 
-  it('shows the 00:XX clock, talon and finished standings', async () => {
+  it('shows the split 00:XX clock, talon and finished standings read-only', async () => {
     fetchGameView.mockResolvedValue(
       makeView({
         status: 'Finished',
@@ -402,7 +489,7 @@ describe('MultiplayerGamePage projected table', () => {
     );
 
     renderPage();
-    await screen.findByTestId('projected-table');
+    await screen.findByTestId('hand-sort-box');
 
     expect(screen.getByTestId('turn-clock').textContent).toBe('00:00');
     expect(screen.getByTestId('talon-count').textContent).toBe('20');
@@ -410,80 +497,80 @@ describe('MultiplayerGamePage projected table', () => {
     expect(screen.getByTestId('durak-result').textContent).toBe(
       'Durak: Guest-AB12',
     );
-    expect(screen.getByTestId('action-pass')).toHaveProperty('disabled', true);
+    expect(screen.getByTestId('game-over-banner')).toBeTruthy();
+    expect(arena()?.getAttribute('data-review-mode')).toBe('true');
+    expect(screen.queryByTestId('pass-button')).toBeNull();
+    expect(screen.queryByTestId('surrender-button')).toBeNull();
   });
 });
 
-describe('MultiplayerGamePage projected table layout', () => {
-  beforeEach(() => {
-    vi.resetAllMocks();
-    handlers = null;
-    sent = [];
-    order = [];
-    dispose = vi.fn();
-    installSocket();
-    getOrCreateSession.mockResolvedValue({
-      playerId: 'guest-abcd1234',
-      displayName: 'Guest-AB12',
-      isGuest: true,
+describe('MultiplayerGamePage projection helpers', () => {
+  it('orders opponents clockwise from the viewer seat', () => {
+    const three = makeView({
+      config: { ...makeView().config, playerCount: 3 },
+      viewerSeat: 1,
+      players: [
+        { ...PLAYERS[0], seatIndex: 0 },
+        { ...PLAYERS[0], id: 'p1', name: 'Me', seatIndex: 1 },
+        { ...PLAYERS[1], id: 'p2', name: 'Next', seatIndex: 2 },
+      ],
     });
-    // Six cards is the hand size that used to wrap onto a second row.
-    fetchGameView.mockResolvedValue(
-      makeView({
-        hand: [
-          CARD('hearts', 'six'),
-          CARD('spades', 'seven'),
-          CARD('clubs', 'eight'),
-          CARD('diamonds', 'nine'),
-          CARD('hearts', 'ten'),
-          CARD('spades', 'jack'),
-        ],
-      }),
-    );
+    expect(multiplayerOpponents(three).map((opponent) => opponent.id)).toEqual([
+      'p2',
+      'guest-abcd1234',
+    ]);
+
+    // A spectator sees every seat in seat order.
+    expect(
+      multiplayerOpponents({ ...three, viewerSeat: null }).map((player) => player.id),
+    ).toEqual(['guest-abcd1234', 'p1', 'p2']);
   });
 
-  it('fans a six-card hand inside one row instead of wrapping it', async () => {
-    renderPage();
-    await screen.findByTestId('projected-table');
-
-    const hand = screen.getByTestId('player-hand');
-    expect(hand.getAttribute('data-density')).toBe('compact');
-    const cards = screen.getAllByTestId(/^hand-card-/);
-    expect(cards).toHaveLength(6);
-    expect(cards.every((card) => hand.contains(card))).toBe(true);
+  it('derives only the contextual pass / surrender commands', () => {
+    expect(multiplayerLegalActions(makeView())).toEqual(['attack']);
+    expect(
+      multiplayerLegalActions(
+        makeView({
+          attackerIdx: 0,
+          defenderIdx: 1,
+          phase: 'defense',
+          tablePairs: [{ attack: CARD('diamonds', 'eight'), defense: CARD('diamonds', 'king') }],
+        }),
+      ),
+    ).toEqual(['pass']);
+    expect(
+      multiplayerLegalActions(
+        makeView({
+          attackerIdx: 1,
+          defenderIdx: 0,
+          phase: 'defense',
+          tablePairs: [{ attack: CARD('diamonds', 'eight'), defense: null }],
+          hand: [CARD('hearts', 'six')],
+        }),
+      ),
+    ).toEqual(['surrender']);
+    expect(multiplayerLegalActions(makeView({ viewerSeat: null, status: 'Finished' }))).toEqual(
+      [],
+    );
   });
 });
 
-describe('lobby.css projected table invariants', () => {
-  it('keeps the M2 arena, talon and hand ahead of the M1 data-zone rules', () => {
-    expect(lobbyCss).toContain(".multiplayer-page .mp-arena[data-zone='table-arena']");
-    expect(lobbyCss).toContain(
-      "html .multiplayer-page .mp-arena[data-zone='table-arena']::before",
-    );
-    expect(lobbyCss).toContain(".multiplayer-page .mp-deck[data-zone='table-deck']");
-    expect(lobbyCss).toContain(".multiplayer-page .mp-hand[data-zone='player-hand']");
-    expect(lobbyCss).toMatch(
-      /\.multiplayer-page \.mp-hand\[data-zone='player-hand'\] \{[^}]*flex-wrap: nowrap/,
-    );
-    // The 960px `.page` cap must not squeeze the projected table any more.
-    expect(lobbyCss).toMatch(/\.page\.multiplayer-page \{[^}]*max-width: 1440px/);
+describe('lobby.css multiplayer invariants', () => {
+  it('no longer ships the placeholder projected-table markup or rules', () => {
+    for (const selector of [
+      '.mp-shell',
+      '.mp-arena',
+      '.mp-actions',
+      '.mp-bouts-row',
+      '.mp-hand[',
+      '.mp-deck[',
+      '.mp-seat {',
+    ]) {
+      expect(lobbyCss, selector).not.toContain(selector);
+    }
   });
 
   it('never uses freeform positioning', () => {
     expect(lobbyCss).not.toMatch(/position:\s*(absolute|fixed)/);
-  });
-
-  it('draws a single selection ring, on the card itself', () => {
-    expect(lobbyCss).not.toMatch(/\.mp-hand-card\.selected \{[^}]*box-shadow/);
-  });
-
-  it('maps the hand length onto fanning tiers', () => {
-    expect(handDensity(0)).toBe('normal');
-    expect(handDensity(5)).toBe('normal');
-    expect(handDensity(6)).toBe('compact');
-    expect(handDensity(8)).toBe('compact');
-    expect(handDensity(9)).toBe('dense');
-    expect(handDensity(12)).toBe('dense');
-    expect(handDensity(13)).toBe('packed');
   });
 });

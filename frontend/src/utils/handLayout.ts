@@ -596,14 +596,23 @@ function zeroDeltas(count: number): number[] {
  *   delta, so a 30-card hovered hand keeps 26 cards overlapping exactly as the
  *   hand size demands.
  * - Inside that window the resting span from the hovered card to the first
- *   untouched card (or to the lane edge at the end of the hand) is fixed, and
- *   the gaps inside it are re-weighted by [[hoverPartingWeight]]: full opening
- *   on the immediate neighbour, a fifth on the next, a twentieth on the third.
- *   The fit scale shrinks every gap in that window by the same factor when the
- *   span cannot hold the flare, which keeps the coordinates strictly ordered
- *   (`delta(j) - delta(j + 1)` never exceeds the resting step), keeps every
- *   card inside the hand lane, and pins every card beyond the window to its
- *   resting slot.
+ *   untouched card (or to the resting right edge at the end of the hand) is
+ *   fixed, and the gaps inside it are re-weighted by [[hoverPartingWeight]]:
+ *   full opening on the immediate neighbour, a fifth on the next, a twentieth
+ *   on the third. The fit scale shrinks every gap in that window by the same
+ *   factor when the span cannot hold the flare, which keeps the coordinates
+ *   strictly ordered (`delta(j) - delta(j + 1)` never exceeds the resting
+ *   step), keeps every card inside the hand lane, and pins every card beyond
+ *   the window to its resting slot.
+ * - T-96: a hand that already fits inside its maximal box never widens on
+ *   hover. When the window reaches the end of the hand, the right wall is the
+ *   resting rightmost card (`basePositions[count - 1]`), not the far edge of
+ *   the lane, so the flare opens the gap around the cursor by compressing the
+ *   gaps behind it. When the window owns the whole right end there is no
+ *   untouched card to hold the right edge, so its gaps are scaled to fill the
+ *   resting span exactly and the last card stays pinned. `min(positions)` and
+ *   `max(positions) + cardWidth` are therefore identical at rest and while
+ *   hovered.
  * - The hovered card itself never moves and a single-card hand never parts.
  * - Hovering the rightmost card moves nothing at all: it already paints fully
  *   on top of the stack, and opening `h - 1` behind it would re-create the
@@ -643,7 +652,12 @@ export function computeLocalizedPartingDeltas(
     Math.floor(finiteOr(radius, HAND_HOVER_PARTING_RADIUS)),
   );
   const pivot = basePositions[hovered];
-  const rightBound = Math.max(pivot, boxWidth - width);
+  // T-96: the right wall never moves past the resting last card, so opening a
+  // gap at the right end of a small hand cannot widen the hand (or its SVG
+  // highlight contour). Only a hand already compressed against the maximal box
+  // uses the lane edge as its wall.
+  const restingRight = basePositions[count - 1];
+  const rightBound = Math.max(pivot, Math.min(boxWidth - width, restingRight));
 
   // Single-card reveal: only the right side opens. A left neighbour at its
   // resting overlap keeps `x(h) - x(h - 1) === restingStep`, so the hovered
@@ -672,7 +686,16 @@ export function computeLocalizedPartingDeltas(
   const span = hasWall
     ? Math.max(0, basePositions[wallIndex] - pivot)
     : Math.max(0, rightBound - pivot);
-  const scale = localPartingFitScale(gaps, span);
+  // With an untouched wall behind the window the flare only ever shrinks inside
+  // that span; without one (the window owns the whole right end) the gaps are
+  // scaled to fill it exactly, which pins the last card at its resting edge and
+  // keeps the overall hand width constant.
+  const totalGap = gaps.reduce((sum, gap) => sum + gap, 0);
+  const scale = hasWall
+    ? localPartingFitScale(gaps, span)
+    : totalGap > 0
+      ? span / totalGap
+      : 1;
   let offset = 0;
   for (let distance = 1; distance <= window; distance += 1) {
     offset += gaps[distance - 1] * scale;
@@ -683,6 +706,17 @@ export function computeLocalizedPartingDeltas(
 
   // The hovered card is pinned and every card outside the window stays at 0.
   deltas[hovered] = 0;
+  // T-96: fit scaling and rounding must never push a card outside the resting
+  // hand's horizontal extent, so the overall width is invariant under hover.
+  const restingLeft = basePositions[0];
+  const restingMaxRight = basePositions[count - 1];
+  for (let index = 0; index < count; index += 1) {
+    deltas[index] = clamp(
+      deltas[index],
+      restingLeft - basePositions[index],
+      restingMaxRight - basePositions[index],
+    );
+  }
   for (let index = 0; index < count; index += 1) {
     deltas[index] = round2(deltas[index]);
   }
