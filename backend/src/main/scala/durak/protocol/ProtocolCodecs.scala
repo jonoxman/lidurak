@@ -228,6 +228,59 @@ object ProtocolCodecs:
     )
   }
 
+  // --- Quick-pair responses ---
+
+  given Encoder[QuickPairResponse] = Encoder.instance {
+    case QuickPairResponse.Searching(
+          playerCount,
+          turnTimeoutSeconds,
+          allowRedirect,
+          queuedCount,
+          requiredCount
+        ) =>
+      Json.obj(
+        "status" -> Json.fromString("searching"),
+        "playerCount" -> playerCount.asJson,
+        "turnTimeoutSeconds" -> turnTimeoutSeconds.asJson,
+        "allowRedirect" -> allowRedirect.asJson,
+        "queuedCount" -> queuedCount.asJson,
+        "requiredCount" -> requiredCount.asJson
+      )
+    case QuickPairResponse.Matched(gameId, seatIndex) =>
+      Json.obj(
+        "status" -> Json.fromString("matched"),
+        "gameId" -> gameId.asJson,
+        "seatIndex" -> seatIndex.asJson
+      )
+  }
+
+  given Decoder[QuickPairResponse] = Decoder.instance { cursor =>
+    cursor.downField("status").as[String].flatMap { raw =>
+      raw.trim.toLowerCase match
+        case "searching" =>
+          for
+            playerCount <- cursor.downField("playerCount").as[Int]
+            turnTimeoutSeconds <- cursor.downField("turnTimeoutSeconds").as[Int]
+            allowRedirect <- cursor.downField("allowRedirect").as[Boolean]
+            queuedCount <- cursor.downField("queuedCount").as[Int]
+            requiredCount <- cursor.downField("requiredCount").as[Int]
+          yield QuickPairResponse.Searching(
+            playerCount,
+            turnTimeoutSeconds,
+            allowRedirect,
+            queuedCount,
+            requiredCount
+          )
+        case "matched" =>
+          for
+            gameId <- cursor.downField("gameId").as[String]
+            seatIndex <- cursor.downField("seatIndex").as[Int]
+          yield QuickPairResponse.Matched(gameId, seatIndex)
+        case _ =>
+          Left(DecodingFailure(s"Unknown quick-pair status: $raw", cursor.history))
+    }
+  }
+
   // --- Client -> server frames ---
 
   given Encoder[WsClientMessage] = Encoder.instance {
@@ -323,6 +376,12 @@ object ProtocolCodecs:
         "type" -> Json.fromString("matchFound"),
         "gameId" -> gameId.asJson
       )
+    case WsServerMessage.QuickPairMatched(gameId, seatIndex) =>
+      Json.obj(
+        "type" -> Json.fromString("quickPairMatched"),
+        "gameId" -> gameId.asJson,
+        "seatIndex" -> seatIndex.asJson
+      )
     case WsServerMessage.Pong =>
       Json.obj("type" -> Json.fromString("pong"))
   }
@@ -355,6 +414,11 @@ object ProtocolCodecs:
             .downField("gameId")
             .as[String]
             .map(WsServerMessage.MatchFound.apply)
+        case "quickpairmatched" =>
+          for
+            gameId <- cursor.downField("gameId").as[String]
+            seatIndex <- cursor.downField("seatIndex").as[Int]
+          yield WsServerMessage.QuickPairMatched(gameId, seatIndex)
         case "pong" =>
           Right(WsServerMessage.Pong)
         case _ =>

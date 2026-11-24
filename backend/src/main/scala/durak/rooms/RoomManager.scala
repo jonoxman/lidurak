@@ -114,7 +114,8 @@ final class RoomManager[F[_]](
       config: CreateRoomConfig,
       prefilledSeats: Vector[(String, String)],
       autoStartIfFull: Boolean,
-      seed: Option[Long] = None
+      seed: Option[Long] = None,
+      initialHandSize: Int = GameEngine.DefaultHandSize
   ): F[GameRoom] =
     config.validate match
       case Left(error) => F.raiseError(new IllegalArgumentException(error))
@@ -149,7 +150,7 @@ final class RoomManager[F[_]](
                 for
                   stored <-
                     if autoStartIfFull && seats.forall(_.isOccupied) then
-                      startRoom(base, seed, now)
+                      startRoom(base, seed, now, initialHandSize)
                     else F.pure(base)
                   managed <- newManaged(stored)
                   _ <- rooms.update(_.updated(gameId, managed))
@@ -170,6 +171,15 @@ final class RoomManager[F[_]](
   /** The authoritative room state, for read-only inspection. */
   def getRoom(gameId: String): F[Option[GameRoom]] =
     rooms.get.flatMap(_.get(gameId).traverse(_.state.get))
+
+  /**
+   * How many rooms the pool holds right now, started or waiting.
+   *
+   * The lobby projection only ever lists open public rooms, so this is the
+   * read that lets tests prove a deferred quick-pair queue created no room.
+   */
+  def roomCount: F[Int] =
+    rooms.get.map(_.size)
 
   /**
    * Seats `session.playerId` in the lowest open seat.
@@ -436,20 +446,26 @@ final class RoomManager[F[_]](
   private def startRoom(
       room: GameRoom,
       seedOverride: Option[Long],
-      now: Long
+      now: Long,
+      initialHandSize: Int = GameEngine.DefaultHandSize
   ): F[GameRoom] =
     seedOverride match
-      case Some(seed) => F.pure(deal(room, seed, now))
-      case None       => F.delay(deal(room, RoomManager.newSeed(), now))
+      case Some(seed) => F.pure(deal(room, seed, now, initialHandSize))
+      case None       => F.delay(deal(room, RoomManager.newSeed(), now, initialHandSize))
 
-  private def deal(room: GameRoom, seed: Long, now: Long): GameRoom =
+  private def deal(
+      room: GameRoom,
+      seed: Long,
+      now: Long,
+      initialHandSize: Int = GameEngine.DefaultHandSize
+  ): GameRoom =
     val engineConfig = GameConfig(
       playerCount = room.config.playerCount,
       allowRedirect = room.config.allowRedirect,
       seed = seed
     )
     val names = room.seats.map(seat => seat.displayName.getOrElse("Player"))
-    val dealt = GameEngine.createGame(engineConfig, names)
+    val dealt = GameEngine.createGame(engineConfig, names, initialHandSize)
     val seated = dealt.copy(
       players = dealt.players.zip(room.seats).map { case (player, seat) =>
         player.copy(

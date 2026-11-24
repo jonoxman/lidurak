@@ -45,7 +45,7 @@ object Main extends IOApp.Simple:
             local = GameRoutes.routes(manager),
             multiplayer = MultiplayerRoutes.routes(sessions, rooms, quickPairing),
             sessions = SessionRoutes.routes(sessions),
-            presets = QaPresetRoutes.routes(sessions, rooms)
+            presets = QaPresetRoutes.routes(sessions, rooms, quickPairing)
           ).orNotFound
         }
         .build
