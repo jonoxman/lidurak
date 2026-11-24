@@ -1,7 +1,7 @@
 package durak.protocol
 
 import durak.engine.JsonCodecs.given
-import durak.engine.Card
+import durak.engine.{Card, PlayerStatus}
 import io.circe.{Decoder, DecodingFailure, Encoder, Json}
 import io.circe.syntax.*
 
@@ -64,7 +64,9 @@ object ProtocolCodecs:
       "isConnected" -> player.isConnected.asJson,
       "hasPassed" -> player.hasPassed.asJson,
       "finishRank" -> player.finishRank.asJson,
-      "seatIndex" -> player.seatIndex.asJson
+      "seatIndex" -> player.seatIndex.asJson,
+      "status" -> player.status.asJson,
+      "isTurn" -> player.isTurn.asJson
     )
   }
 
@@ -84,6 +86,13 @@ object ProtocolCodecs:
         .map(_.getOrElse(false))
       finishRank <- cursor.downField("finishRank").as[Option[Int]]
       seatIndex <- cursor.downField("seatIndex").as[Int]
+      // Optional additions: an older payload omits the public status and the
+      // turn flag, which then decode to an active seat that is not on the clock.
+      status <- cursor
+        .downField("status")
+        .as[Option[String]]
+        .map(_.getOrElse(PlayerStatus.Active))
+      isTurn <- cursor.downField("isTurn").as[Option[Boolean]].map(_.getOrElse(false))
     yield PublicPlayerSummary(
       id = id,
       name = name,
@@ -92,7 +101,9 @@ object ProtocolCodecs:
       isConnected = isConnected,
       hasPassed = hasPassed,
       finishRank = finishRank,
-      seatIndex = seatIndex
+      seatIndex = seatIndex,
+      status = status,
+      isTurn = isTurn
     )
   }
 
@@ -131,15 +142,32 @@ object ProtocolCodecs:
       "talonCount" -> view.talonCount.asJson,
       "bottomTrumpCard" -> view.bottomTrumpCard.asJson,
       "trumpSuit" -> view.trumpSuit.asJson,
-      "discardCount" -> view.discardCount.asJson,
-      "phase" -> view.phase.asJson,
       "attackerIdx" -> view.attackerIdx.asJson,
       "defenderIdx" -> view.defenderIdx.asJson,
+      "boutPhase" -> view.boutPhase.asJson,
       "maxBoutAttacks" -> view.maxBoutAttacks.asJson,
+      "legalActions" -> view.legalActions.asJson,
       "finishOrder" -> view.finishOrder.asJson,
       "isDraw" -> view.isDraw.asJson,
-      "durakId" -> view.durakId.asJson,
-      "turnDeadlineEpochMs" -> view.turnDeadlineEpochMs.asJson
+      "winners" -> view.winners.asJson,
+      "durak" -> view.durak.asJson,
+      "turnPlayerId" -> view.turnPlayerId.asJson,
+      "turnDeadlineMs" -> view.turnDeadlineMs.asJson,
+      "turnSecondsRemaining" -> view.turnSecondsRemaining.asJson,
+      "defenderDefenseless" -> view.defenderDefenseless.asJson,
+      "promptedPlayerIds" -> view.promptedPlayerIds.asJson,
+      "discardCount" -> view.discardCount.asJson,
+      "lastDiscardCards" -> view.lastDiscardCards.asJson,
+      "gameStartedAtMs" -> view.gameStartedAtMs.asJson,
+      "gameEndedAtMs" -> view.gameEndedAtMs.asJson,
+      "eligibleTargetIds" -> view.eligibleTargetIds.asJson,
+      "redirectTargetId" -> view.redirectTargetId.asJson,
+      "throwInCards" -> view.throwInCards.asJson,
+      "throwInCapacity" -> view.throwInCapacity.asJson,
+      "canThrowIn" -> view.canThrowIn.asJson,
+      "myHasPassed" -> view.myHasPassed.asJson,
+      "myFinishRank" -> view.myFinishRank.asJson,
+      "myStatus" -> view.myStatus.asJson
     )
   }
 
@@ -157,15 +185,94 @@ object ProtocolCodecs:
       talonCount <- cursor.downField("talonCount").as[Int]
       bottomTrumpCard <- cursor.downField("bottomTrumpCard").as[Option[Card]]
       trumpSuit <- cursor.downField("trumpSuit").as[Option[durak.engine.Suit]]
-      discardCount <- cursor.downField("discardCount").as[Int]
-      phase <- cursor.downField("phase").as[Option[String]]
       attackerIdx <- cursor.downField("attackerIdx").as[Option[Int]]
       defenderIdx <- cursor.downField("defenderIdx").as[Option[Int]]
+      // `boutPhase` is the M1 wire name; an older payload calls it `phase`.
+      boutPhase <- cursor
+        .downField("boutPhase")
+        .as[Option[String]]
+        .flatMap {
+          case some @ Some(_) => Right(some)
+          case None           => cursor.downField("phase").as[Option[String]]
+        }
       maxBoutAttacks <- cursor.downField("maxBoutAttacks").as[Int]
+      legalActions <- cursor
+        .downField("legalActions")
+        .as[Option[List[String]]]
+        .map(_.getOrElse(Nil))
       finishOrder <- cursor.downField("finishOrder").as[Vector[String]]
       isDraw <- cursor.downField("isDraw").as[Boolean]
-      durakId <- cursor.downField("durakId").as[Option[String]]
-      turnDeadlineEpochMs <- cursor.downField("turnDeadlineEpochMs").as[Option[Long]]
+      winners <- cursor
+        .downField("winners")
+        .as[Option[List[String]]]
+        .map(_.getOrElse(Nil))
+      // `durak` is the M1 wire name; an older payload calls it `durakId`.
+      durak <- cursor
+        .downField("durak")
+        .as[Option[String]]
+        .flatMap {
+          case some @ Some(_) => Right(some)
+          case None           => cursor.downField("durakId").as[Option[String]]
+        }
+      turnPlayerId <- cursor.downField("turnPlayerId").as[Option[String]]
+      // `turnDeadlineMs` is the M1 wire name; `turnDeadlineEpochMs` is the
+      // legacy M2 name for the same absolute deadline.
+      turnDeadlineMs <- cursor
+        .downField("turnDeadlineMs")
+        .as[Option[Long]]
+        .flatMap {
+          case some @ Some(_) => Right(some)
+          case None           => cursor.downField("turnDeadlineEpochMs").as[Option[Long]]
+        }
+        .map(_.getOrElse(0L))
+      turnSecondsRemaining <- cursor
+        .downField("turnSecondsRemaining")
+        .as[Option[Int]]
+        .map(_.getOrElse(0))
+      defenderDefenseless <- cursor
+        .downField("defenderDefenseless")
+        .as[Option[Boolean]]
+        .map(_.getOrElse(false))
+      promptedPlayerIds <- cursor
+        .downField("promptedPlayerIds")
+        .as[Option[Vector[String]]]
+        .map(_.getOrElse(Vector.empty))
+      discardCount <- cursor
+        .downField("discardCount")
+        .as[Option[Int]]
+        .map(_.getOrElse(0))
+      lastDiscardCards <- cursor
+        .downField("lastDiscardCards")
+        .as[Option[Vector[Card]]]
+        .map(_.getOrElse(Vector.empty))
+      gameStartedAtMs <- cursor.downField("gameStartedAtMs").as[Option[Long]]
+      gameEndedAtMs <- cursor.downField("gameEndedAtMs").as[Option[Long]]
+      eligibleTargetIds <- cursor
+        .downField("eligibleTargetIds")
+        .as[Option[Vector[String]]]
+        .map(_.getOrElse(Vector.empty))
+      redirectTargetId <- cursor.downField("redirectTargetId").as[Option[String]]
+      throwInCards <- cursor
+        .downField("throwInCards")
+        .as[Option[List[Card]]]
+        .map(_.getOrElse(Nil))
+      throwInCapacity <- cursor
+        .downField("throwInCapacity")
+        .as[Option[Int]]
+        .map(_.getOrElse(0))
+      canThrowIn <- cursor
+        .downField("canThrowIn")
+        .as[Option[Boolean]]
+        .map(_.getOrElse(false))
+      myHasPassed <- cursor
+        .downField("myHasPassed")
+        .as[Option[Boolean]]
+        .map(_.getOrElse(false))
+      myFinishRank <- cursor.downField("myFinishRank").as[Option[Int]]
+      myStatus <- cursor
+        .downField("myStatus")
+        .as[Option[String]]
+        .map(_.getOrElse(PlayerStatus.Active))
     yield PlayerGameView(
       gameId = gameId,
       status = status,
@@ -179,15 +286,32 @@ object ProtocolCodecs:
       talonCount = talonCount,
       bottomTrumpCard = bottomTrumpCard,
       trumpSuit = trumpSuit,
-      discardCount = discardCount,
-      phase = phase,
       attackerIdx = attackerIdx,
       defenderIdx = defenderIdx,
+      boutPhase = boutPhase,
       maxBoutAttacks = maxBoutAttacks,
+      legalActions = legalActions,
       finishOrder = finishOrder,
       isDraw = isDraw,
-      durakId = durakId,
-      turnDeadlineEpochMs = turnDeadlineEpochMs
+      winners = winners,
+      durak = durak,
+      turnPlayerId = turnPlayerId,
+      turnDeadlineMs = turnDeadlineMs,
+      turnSecondsRemaining = turnSecondsRemaining,
+      defenderDefenseless = defenderDefenseless,
+      promptedPlayerIds = promptedPlayerIds,
+      discardCount = discardCount,
+      lastDiscardCards = lastDiscardCards,
+      gameStartedAtMs = gameStartedAtMs,
+      gameEndedAtMs = gameEndedAtMs,
+      eligibleTargetIds = eligibleTargetIds,
+      redirectTargetId = redirectTargetId,
+      throwInCards = throwInCards,
+      throwInCapacity = throwInCapacity,
+      canThrowIn = canThrowIn,
+      myHasPassed = myHasPassed,
+      myFinishRank = myFinishRank,
+      myStatus = myStatus
     )
   }
 
