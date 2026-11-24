@@ -510,6 +510,33 @@ describe('LobbyPage', () => {
     expect(appCss).toMatch(/\.checkbox-field input\s*{[^}]*accent-color: var\(--ui-select-accent\)/);
   });
 
+  /**
+   * T-90 ITEM-2b/2c: the third lobby tab is "Create a Game", and the
+   * private/public visibility choice is the first control in its form.
+   */
+  it('renames the third lobby tab and puts visibility first', async () => {
+    render(<LobbyPage initialServerReady />);
+
+    const tab = await screen.findByRole('tab', { name: 'Create a Game' });
+    expect(screen.queryByRole('tab', { name: 'Create Invite Link' })).toBeNull();
+    fireEvent.click(tab);
+
+    const panel = screen.getByRole('region', { name: 'Create a Game' });
+    const visibility = within(panel).getByTestId('create-game-visibility');
+    expect(within(visibility).getByRole('button', { name: 'Private invite link' })).toBeTruthy();
+    expect(within(visibility).getByRole('button', { name: 'Public lobby pool' })).toBeTruthy();
+
+    for (const control of [
+      within(panel).getByRole('group', { name: 'Player count' }),
+      within(panel).getByLabelText(/Redirect \/ reflect/),
+      within(panel).getByRole('group', { name: 'Turn clock' }),
+    ]) {
+      expect(
+        visibility.compareDocumentPosition(control) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    }
+  });
+
   it('shows an error banner when game creation fails for a real reason', async () => {
     createGame.mockRejectedValue(new Error('backend down'));
     render(<LobbyPage initialServerReady />);

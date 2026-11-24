@@ -38,7 +38,7 @@ type LobbyTabId = 'quick' | 'pool' | 'invite';
 const LOBBY_TABS: ReadonlyArray<{ id: LobbyTabId; label: string }> = [
   { id: 'quick', label: 'Quick Pairing' },
   { id: 'pool', label: 'Lobby Pool' },
-  { id: 'invite', label: 'Create Invite Link' },
+  { id: 'invite', label: 'Create a Game' },
 ];
 
 interface CreatedRoom {

@@ -121,7 +121,7 @@ Implement the full **Glicko-2** algorithm ($\mu, \phi, \sigma$, system constant 
 ## 8. Milestone Roadmap
 - **Milestone M1:** Pure Scala 3 Durak Engine (`36/52` deck, 2/3/4 players, Redirects, Surrender throw-ins), REST/WS state bridge, and playable Local/Inspector Table UI at `http://localhost:5173`.
 - **Milestone M2:** Shareable Match URLs (`/g/:gameId`), Guest Tokens, strict `PlayerGameView` anti-cheat projection, and real-time Homepage Lobby Pool.
-- **Milestone M3:** AI Bot Engine (`NoviceBot`, `TacticianBot`, `GrandmasterBot` ISMCTS) + "Play with the Computer" lobby workflow.
+- **Milestone M3:** AI Bot Engine (`NoviceBot`, `TacticianBot`, `GrandmasterBot`) + "Play with the Computer" lobby workflow.
 - **Milestone M4:** MongoDB integration, `Argon2id` Auth, Pairwise Glicko-2 Rating Engine, User Profiles (`/u/:username`), and Replay Viewer (`/replay/:gameId`).
 - **Milestone M5:** High-Concurrency Bot Arena & Server Stress-Test Suite (`/arena` UI + CLI benchmark runner).
 
