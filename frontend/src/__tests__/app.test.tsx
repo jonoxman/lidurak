@@ -28,6 +28,7 @@ vi.mock('../api/lobbyClient', () => ({
   leaveRoom: vi.fn(),
   connectLobbySocket: vi.fn(),
   joinQuickPair: vi.fn(),
+  fetchQuickPairStatus: vi.fn(async () => ({ status: 'idle' })),
   cancelQuickPair: vi.fn(),
   createRoom: vi.fn(),
   seedLobbyPreset: vi.fn(),

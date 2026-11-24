@@ -11,6 +11,7 @@ import {
   type PlayerGameView,
   type QuickPairRequest,
   type QuickPairResponse,
+  type QuickPairStatusResponse,
   type SeedLobbyPresetResponse,
   type SpectatorMatchPresetResponse,
   type SocketStatus,
@@ -116,6 +117,38 @@ export async function joinQuickPair(req: QuickPairRequest): Promise<QuickPairRes
     gameId: readGameId(raw, 'QuickPairResponse'),
     seatIndex: readSeat(raw),
   };
+}
+
+/**
+ * Reads the caller's pairing state.
+ *
+ * A fallback for clients whose `/ws/lobby` socket opened before their guest
+ * session existed (or is reconnecting): it reports the queue they are in, the
+ * match they were already given, or `idle`.
+ */
+export async function fetchQuickPairStatus(): Promise<QuickPairStatusResponse> {
+  const raw = asObject(
+    await apiRequest('/api/quick-pair'),
+    'QuickPairStatusResponse',
+  );
+
+  if (raw.status === 'matched') {
+    return {
+      status: 'matched',
+      gameId: readGameId(raw, 'QuickPairStatusResponse'),
+      seatIndex: readSeat(raw),
+    };
+  }
+  if (raw.status === 'searching') {
+    return {
+      status: 'searching',
+      playerCount: typeof raw.playerCount === 'number' ? raw.playerCount : 2,
+      turnTimeoutSeconds:
+        typeof raw.turnTimeoutSeconds === 'number' ? raw.turnTimeoutSeconds : 15,
+      allowRedirect: raw.allowRedirect !== false,
+    };
+  }
+  return { status: 'idle' };
 }
 
 /** Leaves the Quick Pairing pool. */

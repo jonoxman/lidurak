@@ -81,7 +81,8 @@ final class QuickPairingService[F[_]](
     roomManager: RoomManager[F],
     mutex: Semaphore[F],
     buckets: Ref[F, Map[QuickPairBucket, Vector[QueuedPlayer]]],
-    subscribers: Ref[F, Map[String, List[Queue[F, WsServerMessage]]]]
+    subscribers: Ref[F, Map[String, List[Queue[F, WsServerMessage]]]],
+    pendingMatches: Ref[F, Map[String, (String, Int)]]
 )(using F: Async[F]):
 
   /**
@@ -103,6 +104,32 @@ final class QuickPairingService[F[_]](
   /** Removes `session` from every queue bucket, leaving no phantom entries. */
   def cancel(session: GuestSession): F[Unit] =
     mutex.permit.use(_ => removeFromBuckets(session.playerId))
+
+  /**
+   * The caller's current pairing state, for clients whose `/ws/lobby` socket
+   * opened before their guest session existed (or while it is reconnecting).
+   *
+   * `None` means idle; a queued player reports `Searching`; a player who was
+   * already matched reports the room they own. The pending match is cleared as
+   * soon as that player re-queues or cancels.
+   */
+  def status(playerId: String): F[Option[QuickPairOutcome]] =
+    mutex.permit.use(_ =>
+      (pendingMatches.get, buckets.get).mapN { (pending, all) =>
+        pending.get(playerId) match
+          case Some((gameId, seatIndex)) =>
+            Some(QuickPairOutcome.Matched(gameId, seatIndex))
+          case None =>
+            all.collectFirst {
+              case (key, queued) if queued.exists(_.playerId == playerId) =>
+                QuickPairOutcome.Searching(
+                  key.playerCount,
+                  key.turnTimeoutSeconds,
+                  key.allowRedirect
+                )
+            }
+      }
+    )
 
   /** The `quickPairMatched` frames addressed to exactly one queued player. */
   def matchedEvents(playerId: String): Stream[F, WsServerMessage] =
@@ -167,18 +194,30 @@ final class QuickPairingService[F[_]](
               matched.map(player => player.playerId -> player.displayName),
               autoStartIfFull = true
             )
+            _ <- recordMatches(room.gameId, matched)
             _ <- notifyMatched(room.gameId, matched)
           yield
             val seatIndex = matched.indexWhere(_.playerId == session.playerId)
             QuickPairOutcome.Matched(room.gameId, if seatIndex >= 0 then seatIndex else 0)
     yield Right(outcome)
 
-  /** Drops `playerId` from every bucket, discarding buckets that empty out. */
+  /**
+   * Drops `playerId` from every bucket, discarding buckets that empty out, and
+   * forgets any match it was already handed.
+   */
   private def removeFromBuckets(playerId: String): F[Unit] =
     buckets.update { all =>
       all.flatMap { case (key, queued) =>
         val remaining = queued.filterNot(_.playerId == playerId)
         if remaining.isEmpty then None else Some(key -> remaining)
+      }
+    } *> pendingMatches.update(_ - playerId)
+
+  /** Remembers the match each player was given, so a status check can recover it. */
+  private def recordMatches(gameId: String, matched: Vector[QueuedPlayer]): F[Unit] =
+    pendingMatches.update { current =>
+      matched.zipWithIndex.foldLeft(current) { case (acc, (player, seatIndex)) =>
+        acc.updated(player.playerId, (gameId, seatIndex))
       }
     }
 
@@ -212,7 +251,8 @@ object QuickPairingService:
     (
       Semaphore[F](1),
       Ref.of[F, Map[QuickPairBucket, Vector[QueuedPlayer]]](Map.empty),
-      Ref.of[F, Map[String, List[Queue[F, WsServerMessage]]]](Map.empty)
-    ).mapN { (mutex, buckets, subscribers) =>
-      new QuickPairingService[F](roomManager, mutex, buckets, subscribers)
+      Ref.of[F, Map[String, List[Queue[F, WsServerMessage]]]](Map.empty),
+      Ref.of[F, Map[String, (String, Int)]](Map.empty)
+    ).mapN { (mutex, buckets, subscribers, pendingMatches) =>
+      new QuickPairingService[F](roomManager, mutex, buckets, subscribers, pendingMatches)
     }

@@ -18,6 +18,7 @@ vi.mock('../api/lobbyClient', () => ({
   fetchLobbyRooms: vi.fn(),
   connectLobbySocket: vi.fn(),
   joinQuickPair: vi.fn(),
+  fetchQuickPairStatus: vi.fn(),
   cancelQuickPair: vi.fn(),
   joinRoom: vi.fn(),
   createRoom: vi.fn(),
@@ -41,6 +42,8 @@ const fetchLobbyRooms = lobbyApi.fetchLobbyRooms as unknown as ReturnType<typeof
 const connectLobbySocket =
   lobbyApi.connectLobbySocket as unknown as ReturnType<typeof vi.fn>;
 const joinQuickPair = lobbyApi.joinQuickPair as unknown as ReturnType<typeof vi.fn>;
+const fetchQuickPairStatus =
+  lobbyApi.fetchQuickPairStatus as unknown as ReturnType<typeof vi.fn>;
 const cancelQuickPair = lobbyApi.cancelQuickPair as unknown as ReturnType<typeof vi.fn>;
 const joinRoom = lobbyApi.joinRoom as unknown as ReturnType<typeof vi.fn>;
 const createRoom = lobbyApi.createRoom as unknown as ReturnType<typeof vi.fn>;
@@ -95,6 +98,7 @@ describe('M2 LobbyPage', () => {
     updateGuestName.mockResolvedValue({ ...GUEST, displayName: 'Ace' });
     fetchLobbyRooms.mockResolvedValue([]);
     joinQuickPair.mockResolvedValue({ status: 'matched', gameId: 'qp-1', seatIndex: 0 });
+    fetchQuickPairStatus.mockResolvedValue({ status: 'idle' });
     cancelQuickPair.mockResolvedValue(undefined);
     joinRoom.mockResolvedValue({ gameId: 'room-1', seatIndex: 1, view: {} as never });
     createRoom.mockResolvedValue({
@@ -129,7 +133,10 @@ describe('M2 LobbyPage', () => {
     expect(screen.getByRole('tab', { name: /Lobby Pool/ })).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'Create Invite Link' })).toBeTruthy();
     // The lobby socket stays open on every lobby tab, not only on the pool.
-    expect(screen.getByTestId('lobby-connection').textContent).toContain('Lobby live');
+    // It connects once the guest session (and its cookie) exists.
+    await waitFor(() =>
+      expect(screen.getByTestId('lobby-connection').textContent).toContain('Lobby live'),
+    );
   });
 
   it('renames the guest through the editable identity badge', async () => {
@@ -211,6 +218,27 @@ describe('M2 LobbyPage', () => {
     });
 
     await expectGamePath('qp-ws-1');
+  });
+
+  it('recovers a match from the status fallback when the socket cannot deliver it', async () => {
+    joinQuickPair.mockResolvedValue({
+      status: 'searching',
+      playerCount: 2,
+      turnTimeoutSeconds: 15,
+      allowRedirect: true,
+    });
+    fetchQuickPairStatus.mockResolvedValue({
+      status: 'matched',
+      gameId: 'qp-poll-1',
+      seatIndex: 0,
+    });
+    renderLobby();
+
+    fireEvent.click(screen.getByTestId('quick-pair-2-15'));
+
+    // No `quickPairMatched` frame is emitted in this test: the queued player is
+    // pulled into the table by the REST status check instead.
+    await expectGamePath('qp-poll-1');
   });
 
   it('shows a searching state whose Cancel leaves the pairing queue', async () => {

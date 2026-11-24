@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { cancelQuickPair, joinQuickPair } from '../../api/lobbyClient';
+import {
+  cancelQuickPair,
+  fetchQuickPairStatus,
+  joinQuickPair,
+} from '../../api/lobbyClient';
 import type { PlayerCount, QuickPairRequest } from '../../types/multiplayer';
 
 /** The six Lichess-style Quick Pairing presets, all with redirects enabled. */
@@ -16,6 +20,9 @@ export interface QuickPairingTabProps {
   /** Opens `/g/:gameId` once the player has a seat. */
   onMatched: (gameId: string) => void;
 }
+
+/** How often a queued player checks their pairing state over REST. */
+const QUICK_PAIR_POLL_MS = 1000;
 
 const DECK_FOR_PLAYERS: Record<PlayerCount, string> = {
   2: '36-card',
@@ -57,6 +64,34 @@ export function QuickPairingTab({ onMatched }: QuickPairingTabProps) {
       }
     }
   };
+
+  // Fallback while queued: a lobby socket that opened before this visitor had
+  // a guest session cannot receive the targeted `quickPairMatched` frame, so
+  // the queue state is also checked over REST until a match is reported.
+  useEffect(() => {
+    if (!pending) return;
+    let cancelled = false;
+
+    const check = async () => {
+      try {
+        const status = await fetchQuickPairStatus();
+        if (cancelled) return;
+        if (status.status === 'matched') {
+          setPending(null);
+          onMatched(status.gameId);
+        }
+      } catch {
+        // Keep waiting: the queue entry is still valid.
+      }
+    };
+
+    void check();
+    const timer = setInterval(() => void check(), QUICK_PAIR_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [pending, onMatched]);
 
   const cancel = async () => {
     // Invalidate the in-flight request before telling the server to drop it.

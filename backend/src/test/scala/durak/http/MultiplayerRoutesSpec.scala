@@ -304,12 +304,16 @@ class MultiplayerRoutesSpec extends munit.FunSuite:
     val bob = h.store.createGuest().unsafeRunSync()
     val preset = Json.obj("playerCount" -> 2.asJson, "turnTimeoutSeconds" -> 15.asJson)
 
-    // Alice subscribes to her own lobby frames before she starts searching.
-    val aliceFrames = h.quickPairing
-      .matchedEvents(alice.playerId)
+    // Alice subscribes to her own `/ws/lobby` frames before she starts
+    // searching, exactly as a browser does: the snapshot and the live pool
+    // stream run forever, so the targeted match frame must run concurrently.
+    val aliceFrames = MultiplayerRoutes
+      .lobbyMessages(h.rooms, h.quickPairing, Some(alice.playerId))
+      .collect { case matched: WsServerMessage.QuickPairMatched => matched }
       .take(1)
       .compile
       .toList
+      .timeout(5.seconds)
       .start
       .unsafeRunSync()
     IO.sleep(50.millis).unsafeRunSync()
@@ -336,6 +340,38 @@ class MultiplayerRoutesSpec extends munit.FunSuite:
       aliceFrames.joinWithNever.unsafeRunSync(),
       List(WsServerMessage.QuickPairMatched(gameId, 0))
     )
+  }
+
+  test("GET /api/quick-pair reports idle, searching and matched for the caller") {
+    val h = harness()
+    val alice = h.store.createGuest().unsafeRunSync()
+    val bob = h.store.createGuest().unsafeRunSync()
+    val preset = Json.obj("playerCount" -> 2.asJson, "turnTimeoutSeconds" -> 15.asJson)
+
+    def statusOf(token: String): Json =
+      val response = send(h, Method.GET, "/api/quick-pair", Some(token))
+      assertEquals(response.status, Status.Ok)
+      bodyOf(response)
+
+    assertEquals(stringField(statusOf(alice.token), "status"), "idle")
+
+    searching(h, alice.token, preset)
+    val queued = statusOf(alice.token)
+    assertEquals(stringField(queued, "status"), "searching")
+    assertEquals(intField(queued, "playerCount"), 2)
+    assertEquals(intField(queued, "turnTimeoutSeconds"), 15)
+
+    val (gameId, _) = pair(h, bob.token, preset)
+    // The waiting player's fallback status check recovers the same match.
+    val aliceStatus = statusOf(alice.token)
+    assertEquals(stringField(aliceStatus, "status"), "matched")
+    assertEquals(stringField(aliceStatus, "gameId"), gameId)
+    assertEquals(intField(aliceStatus, "seatIndex"), 0)
+    assertEquals(intField(statusOf(bob.token), "seatIndex"), 1)
+
+    // Cancelling clears the pending match again.
+    assertEquals(send(h, Method.DELETE, "/api/quick-pair", Some(alice.token)).status, Status.NoContent)
+    assertEquals(stringField(statusOf(alice.token), "status"), "idle")
   }
 
   test("3P and 4P presets wait for exactly three and four distinct players") {

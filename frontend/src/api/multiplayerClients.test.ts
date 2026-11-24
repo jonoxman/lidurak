@@ -7,6 +7,7 @@ import {
   createSpectatorMatchPreset,
   fetchGameView,
   fetchLobbyRooms,
+  fetchQuickPairStatus,
   joinQuickPair,
   joinRoom,
   leaveRoom,
@@ -296,6 +297,39 @@ describe('lobbyClient REST', () => {
       playerCount: 3,
       turnTimeoutSeconds: 30,
       allowRedirect: false,
+    });
+  });
+
+  it('reads the Quick Pairing status fallback', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ status: 'idle' }));
+    await expect(fetchQuickPairStatus()).resolves.toEqual({ status: 'idle' });
+    expect(mockFetch).toHaveBeenCalledWith(
+      '/api/quick-pair',
+      expect.objectContaining({ method: 'GET', credentials: 'include' }),
+    );
+
+    mockFetch.mockResolvedValue(
+      jsonResponse({
+        status: 'searching',
+        playerCount: 4,
+        turnTimeoutSeconds: 30,
+        allowRedirect: false,
+      }),
+    );
+    await expect(fetchQuickPairStatus()).resolves.toEqual({
+      status: 'searching',
+      playerCount: 4,
+      turnTimeoutSeconds: 30,
+      allowRedirect: false,
+    });
+
+    mockFetch.mockResolvedValue(
+      jsonResponse({ status: 'matched', gameId: 'pair-9', seatIndex: 2 }),
+    );
+    await expect(fetchQuickPairStatus()).resolves.toEqual({
+      status: 'matched',
+      gameId: 'pair-9',
+      seatIndex: 2,
     });
   });
 

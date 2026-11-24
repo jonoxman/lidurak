@@ -87,6 +87,10 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
 
   // --- M2 identity, tabs and live lobby state -----------------------------
   const [session, setSession] = useState<GuestSession | null>(null);
+  // The guest cookie is minted by the session call, so the lobby socket waits
+  // for it: a socket opened earlier would be an anonymous spectator and could
+  // never receive this player's targeted `quickPairMatched` frame.
+  const [sessionSettled, setSessionSettled] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
   const [savingName, setSavingName] = useState(false);
@@ -130,7 +134,7 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
   // Quick Pairing must receive their `quickPairMatched` frame immediately and
   // be pulled into the table without ever opening another tab.
   useEffect(() => {
-    if (!serverReady) return;
+    if (!serverReady || !sessionSettled) return;
     let socket: LobbySocket | null = null;
     try {
       socket = connectLobbySocket({
@@ -144,7 +148,7 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
       // A browser without a WebSocket still gets the REST hydration.
     }
     return () => socket?.close();
-  }, [serverReady]);
+  }, [serverReady, sessionSettled]);
 
   // Hydrate the guest badge and the initial pool count. Both calls fail
   // silently: the page stays usable, and the live socket retries on its own.
@@ -159,6 +163,9 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
       })
       .catch(() => {
         // Keep the neutral "Guest" placeholder when the session is offline.
+      })
+      .finally(() => {
+        if (!cancelled) setSessionSettled(true);
       });
 
     fetchLobbyRooms()

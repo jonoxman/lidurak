@@ -205,6 +205,36 @@ object MultiplayerRoutes:
               }
       }
 
+    // Fallback status check for a client whose lobby socket cannot carry
+    // targeted frames (for example a socket opened before its guest cookie
+    // existed). `idle` means not queued and not matched.
+    case req @ GET -> Root / "api" / "quick-pair" =>
+      withSession(req, store) { (session, _) =>
+        quickPairing.status(session.playerId).flatMap {
+          case None =>
+            Ok(Json.obj("status" -> "idle".asJson))
+          case Some(QuickPairOutcome.Matched(gameId, seatIndex)) =>
+            Ok(
+              Json.obj(
+                "status" -> "matched".asJson,
+                "gameId" -> gameId.asJson,
+                "seatIndex" -> seatIndex.asJson
+              )
+            )
+          case Some(
+                QuickPairOutcome.Searching(playerCount, turnTimeoutSeconds, allowRedirect)
+              ) =>
+            Ok(
+              Json.obj(
+                "status" -> "searching".asJson,
+                "playerCount" -> playerCount.asJson,
+                "turnTimeoutSeconds" -> turnTimeoutSeconds.asJson,
+                "allowRedirect" -> allowRedirect.asJson
+              )
+            )
+        }
+      }
+
     case req @ DELETE -> Root / "api" / "quick-pair" =>
       withSession(req, store) { (session, _) =>
         quickPairing.cancel(session) *> NoContent()
@@ -245,13 +275,17 @@ object MultiplayerRoutes:
   private[http] def lobbyMessages(
       roomManager: RoomManager[IO],
       quickPairing: QuickPairingService[IO],
-      playerId: Option[String]
-  ): Stream[IO, WsServerMessage] =
-    Stream
-      .eval(roomManager.listOpenPublicRooms)
-      .map(WsServerMessage.LobbySnapshot.apply) ++
-      roomManager.lobbyUpdates.map(WsServerMessage.LobbyUpdated.apply) ++
+      playerId: Option[String]  ): Stream[IO, WsServerMessage] =
+    val poolStream =
+      Stream
+        .eval(roomManager.listOpenPublicRooms)
+        .map(WsServerMessage.LobbySnapshot.apply) ++
+        roomManager.lobbyUpdates.map(WsServerMessage.LobbyUpdated.apply)
+    // The pool stream never ends, so the player's match frames have to run
+    // concurrently with it: `++` would never reach this branch.
+    val matchStream =
       playerId.fold(Stream.empty.covaryAll[IO, WsServerMessage])(quickPairing.matchedEvents)
+    poolStream.merge(matchStream)
 
   /**
    * Streams one viewer's projected room and applies their incoming frames.

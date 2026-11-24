@@ -148,6 +148,9 @@ export type QuickPairResponse =
     }
   | { status: 'matched'; gameId: string; seatIndex: number };
 
+/** Response of `GET /api/quick-pair`: the caller's fallback pairing state. */
+export type QuickPairStatusResponse = { status: 'idle' } | QuickPairResponse;
+
 /** Response of `POST /api/qa/presets/seed-lobby`. */
 export interface SeedLobbyPresetResponse {
   rooms: LobbyRoomSummary[];
