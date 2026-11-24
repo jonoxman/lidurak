@@ -24,11 +24,12 @@ const DECK_FOR_PLAYERS: Record<PlayerCount, string> = {
 };
 
 /**
- * Quick Pairing: pick a table size and turn clock, and the server either seats
- * the player in a matching waiting room or opens one for them.
+ * Quick Pairing: pick a table size and turn clock, and the server queues the
+ * player until a full table of the same preset is searching.
  *
- * While the request is in flight the tab shows a searching indicator with a
- * Cancel action, so a queued player is never stuck without a way out.
+ * A queued player stays right here: the searching indicator (with Cancel)
+ * remains visible until either the request itself answers `matched` or a
+ * `quickPairMatched` frame arrives over `/ws/lobby` and the lobby navigates.
  */
 export function QuickPairingTab({ onMatched }: QuickPairingTabProps) {
   const [pending, setPending] = useState<QuickPairRequest | null>(null);
@@ -42,14 +43,18 @@ export function QuickPairingTab({ onMatched }: QuickPairingTabProps) {
     setPending(preset);
     setError(null);
     try {
-      const matched = await joinQuickPair(preset);
-      if (attempt.current === current) onMatched(matched.gameId);
+      const result = await joinQuickPair(preset);
+      if (attempt.current !== current) return;
+      if (result.status === 'matched') {
+        setPending(null);
+        onMatched(result.gameId);
+      }
+      // `searching`: stay on the lobby with the indicator until a match arrives.
     } catch (reason) {
       if (attempt.current === current) {
         setError(reason instanceof Error ? reason.message : String(reason));
+        setPending(null);
       }
-    } finally {
-      if (attempt.current === current) setPending(null);
     }
   };
 

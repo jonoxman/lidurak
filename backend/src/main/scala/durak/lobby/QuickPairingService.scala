@@ -1,17 +1,19 @@
 package durak.lobby
 
-import cats.effect.Async
-import cats.effect.std.Semaphore
+import cats.effect.{Async, Ref, Resource}
+import cats.effect.std.{Queue, Semaphore}
 import cats.syntax.all.*
-import durak.rooms.{CreateRoomConfig, GameRoom, RoomManager}
+import durak.protocol.WsServerMessage
+import durak.rooms.{CreateRoomConfig, RoomManager}
 import durak.session.GuestSession
+import fs2.Stream
 import io.circe.Decoder
 
 /**
  * Body of `POST /api/quick-pair`.
  *
  * A player asking for Quick Pairing only ever states the match preset they
- * want; the server decides which open room they land in.
+ * want; the server decides which players they are matched with.
  */
 final case class QuickPairRequest(
     playerCount: Int,
@@ -39,107 +41,161 @@ object QuickPairRequest:
     yield QuickPairRequest(playerCount, turnTimeoutSeconds, allowRedirect)
   }
 
+/** The three preset fields that make two queue entries compatible. */
+private[lobby] final case class QuickPairBucket(
+    playerCount: Int,
+    turnTimeoutSeconds: Int,
+    allowRedirect: Boolean
+)
+
+/** One player waiting in the Quick Pairing queue (never seated in a room yet). */
+private[lobby] final case class QueuedPlayer(playerId: String, displayName: String)
+
+/** The two outcomes of a `POST /api/quick-pair` request. */
+enum QuickPairOutcome:
+  /** The player is queued and must stay on the lobby until a match forms. */
+  case Searching(playerCount: Int, turnTimeoutSeconds: Int, allowRedirect: Boolean)
+
+  /** A full match was formed; the player now owns `seatIndex` of `gameId`. */
+  case Matched(gameId: String, seatIndex: Int)
+
 /**
- * The Quick Pairing pool.
+ * The Quick Pairing queue.
  *
- * Every pairing decision goes through one mutex, so two simultaneous requests
- * can never both decide that no room is waiting and both create one: the
- * second request sees the first player's room and joins it instead.
+ * Players are matched **before** any room exists: a request only ever joins an
+ * in-memory bucket keyed by its preset. The `playerCount`-th distinct player in
+ * a bucket atomically drains the bucket and creates the already-dealt
+ * [[durak.rooms.GameRoom]], so a quick-pairing player is never dropped into an
+ * open `WaitingForPlayers` room (and never appears in the Lobby Pool) while
+ * they are still searching.
  *
- * The pool has no storage of its own. It reads the authoritative waiting
- * quick-pair rooms straight out of [[RoomManager]], which means a room that
- * leaves the lobby (because it fills up) disappears from the pool in the same
- * transition, with no bookkeeping to keep in sync.
+ * Every decision goes through one mutex, so two simultaneous joiners can never
+ * both form a match, and a player is deduplicated across *all* buckets, which
+ * makes it impossible to match against themselves.
+ *
+ * Each matched player also receives a targeted `quickPairMatched` frame over
+ * `/ws/lobby`, so the players who were already waiting are pulled into the
+ * table immediately without polling.
  */
 final class QuickPairingService[F[_]](
     roomManager: RoomManager[F],
-    mutex: Semaphore[F]
+    mutex: Semaphore[F],
+    buckets: Ref[F, Map[QuickPairBucket, Vector[QueuedPlayer]]],
+    subscribers: Ref[F, Map[String, List[Queue[F, WsServerMessage]]]]
 )(using F: Async[F]):
 
   /**
-   * Seats `session` in a waiting room whose preset matches `request`, or opens
-   * a new public quick-pair room when nobody is waiting.
+   * Queues `session` for the requested preset, forming a match when it is the
+   * last missing player.
    *
-   * A player who already occupies a waiting quick-pair room is handed that same
-   * room and seat back instead of being paired into a second one, so a repeated
-   * click is harmless.
+   * A player who is already queued (in this bucket or another one) is moved to
+   * this bucket's tail first, so repeated clicks are harmless and can never
+   * pair a player with themselves.
    */
   def pair(
       session: GuestSession,
       request: QuickPairRequest
-  ): F[Either[String, (String, Int)]] =
+  ): F[Either[String, QuickPairOutcome]] =
     configFor(request).validate match
       case Left(error)  => F.pure(Left(error))
       case Right(valid) => mutex.permit.use(_ => pairLocked(session, valid))
 
-  /** Removes `session` from every waiting quick-pair room they occupy. */
+  /** Removes `session` from every queue bucket, leaving no phantom entries. */
   def cancel(session: GuestSession): F[Unit] =
-    mutex.permit.use(_ =>
-      waitingQuickPairRooms.flatMap(
-        _.filter(_.seatIndexOf(session.playerId).isDefined)
-          .traverse_(room => roomManager.leaveSeat(room.gameId, session.playerId).void)
+    mutex.permit.use(_ => removeFromBuckets(session.playerId))
+
+  /** The `quickPairMatched` frames addressed to exactly one queued player. */
+  def matchedEvents(playerId: String): Stream[F, WsServerMessage] =
+    Stream
+      .resource(
+        Resource.make(
+          Queue
+            .unbounded[F, WsServerMessage]
+            .flatTap(queue =>
+              subscribers.update(current =>
+                current.updated(playerId, queue :: current.getOrElse(playerId, Nil))
+              )
+            )
+        )(queue =>
+          subscribers.update(current =>
+            current.get(playerId) match
+              case None => current
+              case Some(queues) =>
+                val remaining = queues.filterNot(_ eq queue)
+                if remaining.isEmpty then current - playerId
+                else current.updated(playerId, remaining)
+          )
+        )
       )
-    )
+      .flatMap(queue => Stream.fromQueueUnterminated(queue))
 
   private def pairLocked(
       session: GuestSession,
       config: CreateRoomConfig
-  ): F[Either[String, (String, Int)]] =
-    waitingQuickPairRooms.flatMap { rooms =>
-      rooms.find(_.seatIndexOf(session.playerId).isDefined) match
-        case Some(mine) =>
-          // Already waiting: re-attach through the same authoritative join path
-          // and answer with the seat that player already holds.
-          roomManager
-            .joinSeat(mine.gameId, session)
-            .map(_.map { case (_, seatIndex) => (mine.gameId, seatIndex) })
-        case None =>
-          val candidates =
-            rooms.filter(matches(_, config)).sortBy(_.createdAtEpochMs)
-          tryJoin(candidates, session).flatMap {
-            case Some(joined) => F.pure(Right(joined))
-            case None =>
-              roomManager.createRoom(session, config).map {
-                case Right((room, seatIndex)) => Right((room.gameId, seatIndex))
-                case Left(error)              => Left(error)
-              }
-          }
+  ): F[Either[String, QuickPairOutcome]] =
+    val key = QuickPairBucket(
+      playerCount = config.playerCount,
+      turnTimeoutSeconds = config.turnTimeoutSeconds,
+      allowRedirect = config.allowRedirect
+    )
+    val queued = QueuedPlayer(session.playerId, session.displayName)
+
+    for
+      _ <- removeFromBuckets(session.playerId)
+      current <- buckets.get.map(_.getOrElse(key, Vector.empty))
+      next = current :+ queued
+      outcome <-
+        if next.size < config.playerCount then
+          buckets
+            .update(_.updated(key, next))
+            .as(
+              QuickPairOutcome.Searching(
+                playerCount = config.playerCount,
+                turnTimeoutSeconds = config.turnTimeoutSeconds,
+                allowRedirect = config.allowRedirect
+              )
+            )
+        else
+          val matched = next.take(config.playerCount)
+          val leftover = next.drop(config.playerCount)
+          for
+            _ <- buckets.update { all =>
+              if leftover.isEmpty then all - key else all.updated(key, leftover)
+            }
+            room <- roomManager.createPresetRoom(
+              config,
+              matched.map(player => player.playerId -> player.displayName),
+              autoStartIfFull = true
+            )
+            _ <- notifyMatched(room.gameId, matched)
+          yield
+            val seatIndex = matched.indexWhere(_.playerId == session.playerId)
+            QuickPairOutcome.Matched(room.gameId, if seatIndex >= 0 then seatIndex else 0)
+    yield Right(outcome)
+
+  /** Drops `playerId` from every bucket, discarding buckets that empty out. */
+  private def removeFromBuckets(playerId: String): F[Unit] =
+    buckets.update { all =>
+      all.flatMap { case (key, queued) =>
+        val remaining = queued.filterNot(_.playerId == playerId)
+        if remaining.isEmpty then None else Some(key -> remaining)
+      }
     }
 
-  /**
-   * Joins the first candidate that still has an open seat. A room can fill up
-   * between the snapshot and the join, so a rejection simply moves on to the
-   * next one.
-   */
-  private def tryJoin(
-      candidates: List[GameRoom],
-      session: GuestSession
-  ): F[Option[(String, Int)]] =
-    candidates match
-      case Nil => F.pure(None)
-      case room :: rest =>
-        roomManager.joinSeat(room.gameId, session).flatMap {
-          case Right((_, seatIndex)) => F.pure(Some((room.gameId, seatIndex)))
-          case Left(_)               => tryJoin(rest, session)
-        }
-
-  /** Every public quick-pair room that is still waiting for players. */
-  private def waitingQuickPairRooms: F[List[GameRoom]] =
-    roomManager.listOpenPublicRooms.flatMap { summaries =>
-      summaries
-        .filter(_.isQuickPair)
-        .traverse(summary => roomManager.getRoom(summary.gameId))
-        .map(_.flatten)
+  /** Tells every matched player the same room and their own seat in it. */
+  private def notifyMatched(
+      gameId: String,
+      matched: Vector[QueuedPlayer]
+  ): F[Unit] =
+    matched.zipWithIndex.traverse_ { case (player, seatIndex) =>
+      subscribers.get.flatMap { all =>
+        all
+          .getOrElse(player.playerId, Nil)
+          .traverse_(_.offer(WsServerMessage.QuickPairMatched(gameId, seatIndex)))
+      }
     }
 
-  /** Two requests only share a room when all three preset fields agree. */
-  private def matches(room: GameRoom, config: CreateRoomConfig): Boolean =
-    room.config.playerCount == config.playerCount &&
-      room.config.turnTimeoutSeconds == config.turnTimeoutSeconds &&
-      room.config.allowRedirect == config.allowRedirect &&
-      room.filledSeats < room.config.playerCount
-
-  /** The public quick-pair room a new pairing request would create. */
+  /** The public quick-pair room a full bucket creates. */
   private def configFor(request: QuickPairRequest): CreateRoomConfig =
     CreateRoomConfig(
       playerCount = request.playerCount,
@@ -151,6 +207,12 @@ final class QuickPairingService[F[_]](
 
 object QuickPairingService:
 
-  /** Creates the single shared Quick Pairing pool of one room manager. */
+  /** Creates the single shared Quick Pairing queue of one room manager. */
   def create[F[_]: Async](roomManager: RoomManager[F]): F[QuickPairingService[F]] =
-    Semaphore[F](1).map(mutex => new QuickPairingService[F](roomManager, mutex))
+    (
+      Semaphore[F](1),
+      Ref.of[F, Map[QuickPairBucket, Vector[QueuedPlayer]]](Map.empty),
+      Ref.of[F, Map[String, List[Queue[F, WsServerMessage]]]](Map.empty)
+    ).mapN { (mutex, buckets, subscribers) =>
+      new QuickPairingService[F](roomManager, mutex, buckets, subscribers)
+    }

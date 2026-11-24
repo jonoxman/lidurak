@@ -105,14 +105,24 @@ class MultiplayerRoutesSpec extends munit.FunSuite:
     val body = bodyOf(response)
     (stringField(body, "gameId"), token.getOrElse(cookieOf(response)))
 
-  private def pair(
-      h: Harness,
-      token: String,
-      body: Json
-  ): (String, Int) =
+  private def pairResponse(h: Harness, token: String, body: Json): Json =
     val response = send(h, Method.POST, "/api/quick-pair", Some(token), Some(body))
     assertEquals(response.status, Status.Ok, response.body.compile.toList.unsafeRunSync().toString)
-    val json = bodyOf(response)
+    bodyOf(response)
+
+  /** Asserts the caller is only queued: no room exists for them yet. */
+  private def searching(h: Harness, token: String, body: Json): Json =
+    val json = pairResponse(h, token, body)
+    assertEquals(stringField(json, "status"), "searching", json.noSpaces)
+    assert(
+      json.hcursor.get[String]("gameId").isLeft,
+      s"a searching answer must not carry a gameId: ${json.noSpaces}"
+    )
+    json
+
+  private def pair(h: Harness, token: String, body: Json): (String, Int) =
+    val json = pairResponse(h, token, body)
+    assertEquals(stringField(json, "status"), "matched", json.noSpaces)
     (stringField(json, "gameId"), intField(json, "seatIndex"))
 
   // --- Room REST surface (REQ-11) ------------------------------------------
@@ -267,70 +277,143 @@ class MultiplayerRoutesSpec extends munit.FunSuite:
 
   // --- Quick pairing (REQ-11) ---------------------------------------------
 
-  test("quick pairing matches identical presets into one room and separates different ones") {
+  test("a single queued player creates no room and stays out of the Lobby Pool") {
     val h = harness()
     val alice = h.store.createGuest().unsafeRunSync()
-    val bob = h.store.createGuest().unsafeRunSync()
-    val carol = h.store.createGuest().unsafeRunSync()
     val preset = Json.obj(
-      "playerCount" -> 3.asJson,
-      "turnTimeoutSeconds" -> 30.asJson,
-      "allowRedirect" -> false.asJson
+      "playerCount" -> 2.asJson,
+      "turnTimeoutSeconds" -> 15.asJson,
+      "allowRedirect" -> true.asJson
     )
 
-    val (aliceRoom, aliceSeat) = pair(h, alice.token, preset)
-    val (bobRoom, bobSeat) = pair(h, bob.token, preset)
-    assertEquals(bobRoom, aliceRoom)
-    assertEquals(aliceSeat, 0)
-    assertEquals(bobSeat, 1)
+    val json = searching(h, alice.token, preset)
+    assertEquals(intField(json, "playerCount"), 2)
+    assertEquals(intField(json, "turnTimeoutSeconds"), 15)
+    assertEquals(json.hcursor.get[Boolean]("allowRedirect").toOption, Some(true))
 
-    // Repeating the request returns the same room and seat, never a new room.
-    assertEquals(pair(h, alice.token, preset), (aliceRoom, aliceSeat))
-
-    // A different preset gets its own room.
-    val (carolRoom, carolSeat) = pair(
-      h,
-      carol.token,
-      Json.obj(
-        "playerCount" -> 3.asJson,
-        "turnTimeoutSeconds" -> 15.asJson,
-        "allowRedirect" -> false.asJson
-      )
-    )
-    assertNotEquals(carolRoom, aliceRoom)
-    assertEquals(carolSeat, 0)
-
-    // Both waiting rooms are live and joinable in the lobby.
+    // Queue-first: no WaitingForPlayers room was ever created for the queued
+    // player, so the public pool stays empty.
     val lobby = bodyOf(send(h, Method.GET, "/api/lobby"))
-    assert(lobby.noSpaces.contains(aliceRoom), lobby.noSpaces)
-    assert(lobby.noSpaces.contains(carolRoom), lobby.noSpaces)
-    assert(lobby.noSpaces.contains("\"isQuickPair\":true"), lobby.noSpaces)
-
-    // Cancelling removes the player from their waiting room.
-    assertEquals(send(h, Method.DELETE, "/api/quick-pair", Some(carol.token)).status, Status.NoContent)
-    val afterCancel = bodyOf(send(h, Method.GET, "/api/lobby"))
-    assert(!afterCancel.noSpaces.contains(carolRoom), afterCancel.noSpaces)
-    assert(afterCancel.noSpaces.contains(aliceRoom), afterCancel.noSpaces)
+    assertEquals(lobby.asArray.map(_.size), Some(0), lobby.noSpaces)
+    assertEquals(h.rooms.listOpenPublicRooms.unsafeRunSync(), Nil)
   }
 
-  test("a full quick-pair room starts and leaves the pool") {
+  test("the last distinct player forms one dealt room and notifies the waiting player") {
     val h = harness()
     val alice = h.store.createGuest().unsafeRunSync()
     val bob = h.store.createGuest().unsafeRunSync()
     val preset = Json.obj("playerCount" -> 2.asJson, "turnTimeoutSeconds" -> 15.asJson)
 
-    val (gameId, firstSeat) = pair(h, alice.token, preset)
-    val (sameRoom, secondSeat) = pair(h, bob.token, preset)
-    assertEquals(sameRoom, gameId)
-    assertEquals(List(firstSeat, secondSeat), List(0, 1))
+    // Alice subscribes to her own lobby frames before she starts searching.
+    val aliceFrames = h.quickPairing
+      .matchedEvents(alice.playerId)
+      .take(1)
+      .compile
+      .toList
+      .start
+      .unsafeRunSync()
+    IO.sleep(50.millis).unsafeRunSync()
 
-    assertEquals(bodyOf(send(h, Method.GET, "/api/lobby")).asArray.map(_.size), Some(0))
+    searching(h, alice.token, preset)
+    assertEquals(h.rooms.listOpenPublicRooms.unsafeRunSync(), Nil)
+
+    val (gameId, bobSeat) = pair(h, bob.token, preset)
+    assertEquals(bobSeat, 1)
+
+    // Exactly one room exists, it is already in progress, and both players are
+    // seated in queue order.
+    val room = h.rooms.getRoom(gameId).unsafeRunSync().getOrElse(fail("no matched room"))
+    assertEquals(room.status, durak.protocol.RoomStatus.InProgress)
+    assert(room.gameState.nonEmpty, "a matched room must be dealt immediately")
     assertEquals(
-      send(h, Method.GET, s"/api/games/$gameId", Some(alice.token)).status,
-      Status.Ok
+      room.seats.flatMap(_.playerId),
+      Vector(alice.playerId, bob.playerId)
+    )
+    assertEquals(bodyOf(send(h, Method.GET, "/api/lobby")).asArray.map(_.size), Some(0))
+
+    // Alice, who was only waiting, is told about the same room and her seat.
+    assertEquals(
+      aliceFrames.joinWithNever.unsafeRunSync(),
+      List(WsServerMessage.QuickPairMatched(gameId, 0))
+    )
+  }
+
+  test("3P and 4P presets wait for exactly three and four distinct players") {
+    val h = harness()
+    val threePlayers = List.fill(3)(h.store.createGuest().unsafeRunSync())
+    val threePreset = Json.obj("playerCount" -> 3.asJson, "turnTimeoutSeconds" -> 15.asJson)
+
+    searching(h, threePlayers(0).token, threePreset)
+    searching(h, threePlayers(1).token, threePreset)
+    assertEquals(h.rooms.listOpenPublicRooms.unsafeRunSync(), Nil)
+
+    val (threeRoom, thirdSeat) = pair(h, threePlayers(2).token, threePreset)
+    assertEquals(thirdSeat, 2)
+    assertEquals(
+      h.rooms.getRoom(threeRoom).unsafeRunSync().map(_.seats.flatMap(_.playerId)),
+      Some(threePlayers.map(_.playerId).toVector)
     )
 
-    // An invalid preset is refused without creating anything.
+    val fourPlayers = List.fill(4)(h.store.createGuest().unsafeRunSync())
+    val fourPreset = Json.obj("playerCount" -> 4.asJson, "turnTimeoutSeconds" -> 15.asJson)
+
+    fourPlayers.take(3).foreach(player => searching(h, player.token, fourPreset))
+    assertEquals(h.rooms.listOpenPublicRooms.unsafeRunSync(), Nil)
+
+    val (fourRoom, fourthSeat) = pair(h, fourPlayers(3).token, fourPreset)
+    assertEquals(fourthSeat, 3)
+    assertEquals(
+      h.rooms.getRoom(fourRoom).unsafeRunSync().map(_.seats.flatMap(_.playerId)),
+      Some(fourPlayers.map(_.playerId).toVector)
+    )
+  }
+
+  test("cancelling removes a queued player so the next joiner does not match with them") {
+    val h = harness()
+    val alice = h.store.createGuest().unsafeRunSync()
+    val bob = h.store.createGuest().unsafeRunSync()
+    val carol = h.store.createGuest().unsafeRunSync()
+    val preset = Json.obj("playerCount" -> 2.asJson, "turnTimeoutSeconds" -> 15.asJson)
+
+    searching(h, alice.token, preset)
+    assertEquals(send(h, Method.DELETE, "/api/quick-pair", Some(alice.token)).status, Status.NoContent)
+
+    // Bob is now first in line: alone he keeps searching instead of matching
+    // with the player who cancelled.
+    searching(h, bob.token, preset)
+    val (gameId, carolSeat) = pair(h, carol.token, preset)
+    assertEquals(carolSeat, 1)
+    assertEquals(
+      h.rooms.getRoom(gameId).unsafeRunSync().map(_.seats.flatMap(_.playerId)),
+      Some(Vector(bob.playerId, carol.playerId))
+    )
+    assert(
+      !h.rooms.getRoom(gameId).unsafeRunSync().exists(_.seatIndexOf(alice.playerId).isDefined)
+    )
+  }
+
+  test("a player submitting twice is never matched with themselves") {
+    val h = harness()
+    val alice = h.store.createGuest().unsafeRunSync()
+    val bob = h.store.createGuest().unsafeRunSync()
+    val preset = Json.obj("playerCount" -> 2.asJson, "turnTimeoutSeconds" -> 15.asJson)
+
+    searching(h, alice.token, preset)
+    // The repeat request replaces her queue entry instead of filling the table.
+    searching(h, alice.token, preset)
+    assertEquals(h.rooms.listOpenPublicRooms.unsafeRunSync(), Nil)
+
+    val (gameId, bobSeat) = pair(h, bob.token, preset)
+    assertEquals(bobSeat, 1)
+    val room = h.rooms.getRoom(gameId).unsafeRunSync().getOrElse(fail("no matched room"))
+    assertEquals(room.seats.flatMap(_.playerId), Vector(alice.playerId, bob.playerId))
+    assertEquals(room.seats.flatMap(_.playerId).distinct.size, 2)
+  }
+
+  test("quick pairing rejects an invalid preset without creating anything") {
+    val h = harness()
+    val alice = h.store.createGuest().unsafeRunSync()
+
     val invalid = send(
       h,
       Method.POST,
@@ -339,6 +422,7 @@ class MultiplayerRoutesSpec extends munit.FunSuite:
       Some(Json.obj("playerCount" -> 5.asJson))
     )
     assertEquals(invalid.status, Status.BadRequest)
+    assertEquals(h.rooms.listOpenPublicRooms.unsafeRunSync(), Nil)
   }
 
   // --- QA scenario presets ------------------------------------------------
@@ -379,7 +463,7 @@ class MultiplayerRoutesSpec extends munit.FunSuite:
   test("/ws/lobby frames start with a snapshot and then stream live updates") {
     val h = harness()
     val frames = MultiplayerRoutes
-      .lobbyMessages(h.rooms)
+      .lobbyMessages(h.rooms, h.quickPairing, None)
       .take(4)
       .compile
       .toList

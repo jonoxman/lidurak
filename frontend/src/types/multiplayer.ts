@@ -132,11 +132,21 @@ export interface QuickPairRequest {
   allowRedirect?: boolean;
 }
 
-/** Response of `POST /api/quick-pair`. */
-export interface QuickPairResponse {
-  gameId: string;
-  seatIndex: number;
-}
+/**
+ * Response of `POST /api/quick-pair`.
+ *
+ * `searching` means the player is queued and must stay on the lobby until a
+ * full match forms; `matched` carries the room they were seated in. No room is
+ * ever created (and no gameId ever exists) while a player is still searching.
+ */
+export type QuickPairResponse =
+  | {
+      status: 'searching';
+      playerCount: number;
+      turnTimeoutSeconds: number;
+      allowRedirect: boolean;
+    }
+  | { status: 'matched'; gameId: string; seatIndex: number };
 
 /** Response of `POST /api/qa/presets/seed-lobby`. */
 export interface SeedLobbyPresetResponse {
@@ -171,6 +181,7 @@ export type WsServerMessage =
   | { type: 'lobbySnapshot'; rooms: LobbyRoomSummary[] }
   | { type: 'lobbyUpdated'; rooms: LobbyRoomSummary[] }
   | { type: 'matchFound'; gameId: string }
+  | { type: 'quickPairMatched'; gameId: string; seatIndex: number }
   | { type: 'pong' };
 
 // --- Parsing helpers -------------------------------------------------------
@@ -366,6 +377,12 @@ export function parseWsServerMessage(value: unknown): WsServerMessage {
       return { type: 'lobbyUpdated', rooms: parseLobbyRoomList(raw.rooms) };
     case 'matchfound':
       return { type: 'matchFound', gameId: requireString(raw, 'gameId') };
+    case 'quickpairmatched':
+      return {
+        type: 'quickPairMatched',
+        gameId: requireString(raw, 'gameId'),
+        seatIndex: numberOr(raw.seatIndex, 0),
+      };
     case 'pong':
       return { type: 'pong' };
     default:

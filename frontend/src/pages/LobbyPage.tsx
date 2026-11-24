@@ -6,7 +6,11 @@ import {
   QA_SCENARIOS,
   type CreatedGame,
 } from '../api/client';
-import { fetchLobbyRooms } from '../api/lobbyClient';
+import {
+  connectLobbySocket,
+  fetchLobbyRooms,
+  type LobbySocket,
+} from '../api/lobbyClient';
 import { getOrCreateSession, updateGuestName } from '../api/sessionClient';
 import { CreateInviteTab } from '../components/lobby/CreateInviteTab';
 import { LobbyPoolTab } from '../components/lobby/LobbyPoolTab';
@@ -87,7 +91,6 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
   const [nameDraft, setNameDraft] = useState('');
   const [savingName, setSavingName] = useState(false);
   const [tab, setTab] = useState<LobbyTabId>('quick');
-  const [poolOpened, setPoolOpened] = useState(false);
   const [rooms, setRooms] = useState<LobbyRoomSummary[]>([]);
   const [poolStatus, setPoolStatus] = useState<SocketStatus | 'idle'>('idle');
   const [notice, setNotice] = useState<string | null>(null);
@@ -120,6 +123,27 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
       cancelled = true;
       if (timer !== undefined) clearTimeout(timer);
     };
+  }, [serverReady]);
+
+  // The lobby socket is open for as long as the lobby is on screen, not only
+  // while the Lobby Pool tab is visible: a player who is still searching in
+  // Quick Pairing must receive their `quickPairMatched` frame immediately and
+  // be pulled into the table without ever opening another tab.
+  useEffect(() => {
+    if (!serverReady) return;
+    let socket: LobbySocket | null = null;
+    try {
+      socket = connectLobbySocket({
+        onSnapshot: setRooms,
+        onUpdated: setRooms,
+        onStatusChange: setPoolStatus,
+        onMatchFound: openGame,
+        onQuickPairMatched: (gameId) => openGame(gameId),
+      });
+    } catch {
+      // A browser without a WebSocket still gets the REST hydration.
+    }
+    return () => socket?.close();
   }, [serverReady]);
 
   // Hydrate the guest badge and the initial pool count. Both calls fail
@@ -171,15 +195,10 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
       .finally(() => setSavingName(false));
   };
 
-  const selectTab = (next: LobbyTabId) => {
-    setTab(next);
-    // The pool socket starts on first open and then keeps the tab live.
-    if (next === 'pool') setPoolOpened(true);
-  };
+  const selectTab = (next: LobbyTabId) => setTab(next);
 
   const handleSeeded = (seededRooms: LobbyRoomSummary[]) => {
     setRooms(seededRooms);
-    setPoolOpened(true);
     setTab('pool');
   };
 
@@ -278,16 +297,13 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
 
             {tab === 'quick' ? <QuickPairingTab onMatched={openGame} /> : null}
             {tab === 'invite' ? <CreateInviteTab onCreated={openGame} /> : null}
-            {poolOpened ? (
-              <div class="m2-tab-panel" hidden={tab !== 'pool'}>
-                <LobbyPoolTab
-                  initialRooms={rooms}
-                  onRoomsChange={setRooms}
-                  onStatusChange={setPoolStatus}
-                  onJoin={openGame}
-                  onCreateRoom={() => setTab('invite')}
-                />
-              </div>
+            {tab === 'pool' ? (
+              <LobbyPoolTab
+                rooms={rooms}
+                onRoomsChange={setRooms}
+                onJoin={openGame}
+                onCreateRoom={() => setTab('invite')}
+              />
             ) : null}
 
             <QaLobbyPresets onSeeded={handleSeeded} onOpenGame={openGame} />

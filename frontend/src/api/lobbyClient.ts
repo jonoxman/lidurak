@@ -83,12 +83,38 @@ export async function leaveRoom(gameId: string): Promise<void> {
   await apiRequest(`/api/games/${encodeURIComponent(gameId)}/leave`, { method: 'POST' });
 }
 
-/** Joins the Quick Pairing pool, matching an existing room when possible. */
+/**
+ * Joins the Quick Pairing queue.
+ *
+ * The answer distinguishes a queued player (`searching`, no room exists yet)
+ * from a completed match (`matched`, with the room and seat to open), so the
+ * lobby only navigates away once a full table has actually formed.
+ */
 export async function joinQuickPair(req: QuickPairRequest): Promise<QuickPairResponse> {
-  const body = await apiRequest('/api/quick-pair', { method: 'POST', body: req });
+  const raw = asObject(
+    await apiRequest('/api/quick-pair', { method: 'POST', body: req }),
+    'QuickPairResponse',
+  );
+
+  if (raw.status === 'searching') {
+    return {
+      status: 'searching',
+      playerCount: typeof raw.playerCount === 'number' ? raw.playerCount : req.playerCount,
+      turnTimeoutSeconds:
+        typeof raw.turnTimeoutSeconds === 'number'
+          ? raw.turnTimeoutSeconds
+          : (req.turnTimeoutSeconds ?? 15),
+      allowRedirect:
+        typeof raw.allowRedirect === 'boolean'
+          ? raw.allowRedirect
+          : (req.allowRedirect ?? true),
+    };
+  }
+
   return {
-    gameId: readGameId(body, 'QuickPairResponse'),
-    seatIndex: readSeat(body),
+    status: 'matched',
+    gameId: readGameId(raw, 'QuickPairResponse'),
+    seatIndex: readSeat(raw),
   };
 }
 
@@ -134,6 +160,8 @@ export interface LobbySocketHandlers {
   onUpdated?: (rooms: LobbyRoomSummary[]) => void;
   /** Quick Pairing assigned this player to a room. */
   onMatchFound?: (gameId: string) => void;
+  /** A quick-pair queue formed a full match for this player. */
+  onQuickPairMatched?: (gameId: string, seatIndex: number) => void;
   onActionRejected?: (code: string, message: string) => void;
   onStatusChange?: (status: SocketStatus) => void;
   onError?: (event: unknown) => void;
@@ -237,6 +265,9 @@ class ReconnectingLobbySocket implements LobbySocket {
         break;
       case 'matchFound':
         this.handlers.onMatchFound?.(message.gameId);
+        break;
+      case 'quickPairMatched':
+        this.handlers.onQuickPairMatched?.(message.gameId, message.seatIndex);
         break;
       case 'actionRejected':
         this.handlers.onActionRejected?.(message.code, message.message);

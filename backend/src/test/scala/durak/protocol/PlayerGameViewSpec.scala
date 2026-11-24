@@ -334,6 +334,7 @@ class PlayerGameViewSpec extends munit.FunSuite:
       WsServerMessage.LobbySnapshot(lobbyRooms),
       WsServerMessage.LobbyUpdated(lobbyRooms),
       WsServerMessage.MatchFound("g1"),
+      WsServerMessage.QuickPairMatched("g1", 2),
       WsServerMessage.Pong
     )
 
@@ -356,6 +357,7 @@ class PlayerGameViewSpec extends munit.FunSuite:
       WsServerMessage.LobbySnapshot(Nil) -> "lobbySnapshot",
       WsServerMessage.LobbyUpdated(Nil) -> "lobbyUpdated",
       WsServerMessage.MatchFound("g1") -> "matchFound",
+      WsServerMessage.QuickPairMatched("g1", 1) -> "quickPairMatched",
       WsServerMessage.Pong -> "pong"
     )
 

@@ -3,7 +3,7 @@ package durak.http
 import cats.effect.{IO, Ref, Resource}
 import cats.effect.std.Queue
 import cats.syntax.all.*
-import durak.lobby.{QuickPairRequest, QuickPairingService}
+import durak.lobby.{QuickPairOutcome, QuickPairRequest, QuickPairingService}
 import durak.protocol.ProtocolCodecs.given
 import durak.protocol.{LobbyRoomSummary, WsClientMessage, WsServerMessage}
 import durak.rooms.{ActionRejected, CreateRoomConfig, RoomManager, UnknownRoom}
@@ -84,7 +84,7 @@ object MultiplayerRoutes:
       quickPairing: QuickPairingService[IO]
   )(using webSockets: WebSocketBuilder2[IO]): HttpRoutes[IO] =
     restRoutes(store, roomManager, quickPairing) <+>
-      webSocketRoutes(store, roomManager)(using webSockets)
+      webSocketRoutes(store, roomManager, quickPairing)(using webSockets)
 
   // --- REST ----------------------------------------------------------------
 
@@ -177,11 +177,27 @@ object MultiplayerRoutes:
             case Right(pairRequest) =>
               withSession(req, store) { (session, _) =>
                 quickPairing.pair(session, pairRequest).flatMap {
-                  case Right((gameId, seatIndex)) =>
+                  case Right(QuickPairOutcome.Matched(gameId, seatIndex)) =>
                     Ok(
                       Json.obj(
+                        "status" -> "matched".asJson,
                         "gameId" -> gameId.asJson,
                         "seatIndex" -> seatIndex.asJson
+                      )
+                    )
+                  case Right(
+                        QuickPairOutcome.Searching(
+                          playerCount,
+                          turnTimeoutSeconds,
+                          allowRedirect
+                        )
+                      ) =>
+                    Ok(
+                      Json.obj(
+                        "status" -> "searching".asJson,
+                        "playerCount" -> playerCount.asJson,
+                        "turnTimeoutSeconds" -> turnTimeoutSeconds.asJson,
+                        "allowRedirect" -> allowRedirect.asJson
                       )
                     )
                   case Left(error) => BadRequest(errorJson(error))
@@ -200,14 +216,20 @@ object MultiplayerRoutes:
   /** The two live sockets; both are anonymous-readable, the game one personal. */
   def webSocketRoutes(
       store: SessionStore[IO],
-      roomManager: RoomManager[IO]
+      roomManager: RoomManager[IO],
+      quickPairing: QuickPairingService[IO]
   )(using webSockets: WebSocketBuilder2[IO]): HttpRoutes[IO] = HttpRoutes.of[IO] {
 
-    case GET -> Root / "ws" / "lobby" =>
-      webSockets.build(
-        lobbyMessages(roomManager).map(toFrame).merge(keepAlive),
-        (incoming: Stream[IO, WebSocketFrame]) => incoming.drain
-      )
+    // The lobby socket authenticates the guest cookie so a queued quick-pair
+    // player can receive a targeted `quickPairMatched` frame on the socket
+    // they opened (or reopened) while waiting.
+    case req @ GET -> Root / "ws" / "lobby" =>
+      sessionPlayerFor(req, store).flatMap { playerId =>
+        webSockets.build(
+          lobbyMessages(roomManager, quickPairing, playerId).map(toFrame).merge(keepAlive),
+          (incoming: Stream[IO, WebSocketFrame]) => incoming.drain
+        )
+      }
 
     case req @ GET -> Root / "ws" / "games" / gameId =>
       viewerFor(req, store).flatMap { viewerId =>
@@ -216,16 +238,20 @@ object MultiplayerRoutes:
   }
 
   /**
-   * The lobby stream: one `LobbySnapshot` with the rooms open right now, then a
-   * `LobbyUpdated` frame for every later change to the pool.
+   * The lobby stream: one `LobbySnapshot` with the rooms open right now, a
+   * `LobbyUpdated` frame for every later change to the pool, and the targeted
+   * `quickPairMatched` frames of the authenticated player (if any).
    */
   private[http] def lobbyMessages(
-      roomManager: RoomManager[IO]
+      roomManager: RoomManager[IO],
+      quickPairing: QuickPairingService[IO],
+      playerId: Option[String]
   ): Stream[IO, WsServerMessage] =
     Stream
       .eval(roomManager.listOpenPublicRooms)
       .map(WsServerMessage.LobbySnapshot.apply) ++
-      roomManager.lobbyUpdates.map(WsServerMessage.LobbyUpdated.apply)
+      roomManager.lobbyUpdates.map(WsServerMessage.LobbyUpdated.apply) ++
+      playerId.fold(Stream.empty.covaryAll[IO, WsServerMessage])(quickPairing.matchedEvents)
 
   /**
    * Streams one viewer's projected room and applies their incoming frames.
@@ -339,9 +365,16 @@ object MultiplayerRoutes:
 
   /** The viewer id behind this socket: their guest, or a fresh spectator. */
   private def viewerFor(req: Request[IO], store: SessionStore[IO]): IO[String] =
+    sessionPlayerFor(req, store).map(_.getOrElse(ephemeralSpectatorId))
+
+  /** The authenticated player behind this socket, when it carries a session. */
+  private def sessionPlayerFor(
+      req: Request[IO],
+      store: SessionStore[IO]
+  ): IO[Option[String]] =
     tokenOf(req) match
-      case None        => IO.pure(ephemeralSpectatorId)
-      case Some(token) => store.touchAndFind(token).map(_.map(_.playerId).getOrElse(ephemeralSpectatorId))
+      case None        => IO.pure(None)
+      case Some(token) => store.touchAndFind(token).map(_.map(_.playerId))
 
   /**
    * The guest token on a WebSocket upgrade: the cookie first (browsers send it

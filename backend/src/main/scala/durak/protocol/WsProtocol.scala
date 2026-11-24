@@ -41,4 +41,5 @@ enum WsServerMessage:
   case LobbySnapshot(rooms: List[LobbyRoomSummary])
   case LobbyUpdated(rooms: List[LobbyRoomSummary])
   case MatchFound(gameId: String)
+  case QuickPairMatched(gameId: String, seatIndex: Int)
   case Pong

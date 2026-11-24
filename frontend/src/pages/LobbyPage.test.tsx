@@ -94,7 +94,7 @@ describe('M2 LobbyPage', () => {
     getOrCreateSession.mockResolvedValue(GUEST);
     updateGuestName.mockResolvedValue({ ...GUEST, displayName: 'Ace' });
     fetchLobbyRooms.mockResolvedValue([]);
-    joinQuickPair.mockResolvedValue({ gameId: 'qp-1', seatIndex: 0 });
+    joinQuickPair.mockResolvedValue({ status: 'matched', gameId: 'qp-1', seatIndex: 0 });
     cancelQuickPair.mockResolvedValue(undefined);
     joinRoom.mockResolvedValue({ gameId: 'room-1', seatIndex: 1, view: {} as never });
     createRoom.mockResolvedValue({
@@ -128,7 +128,8 @@ describe('M2 LobbyPage', () => {
     ).toBe('true');
     expect(screen.getByRole('tab', { name: /Lobby Pool/ })).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'Create Invite Link' })).toBeTruthy();
-    expect(screen.getByTestId('lobby-connection').textContent).toContain('Lobby idle');
+    // The lobby socket stays open on every lobby tab, not only on the pool.
+    expect(screen.getByTestId('lobby-connection').textContent).toContain('Lobby live');
   });
 
   it('renames the guest through the editable identity badge', async () => {
@@ -172,6 +173,46 @@ describe('M2 LobbyPage', () => {
     expect(window.location.hash).toBe('');
   });
 
+  it('stays on the lobby with the searching indicator while queued', async () => {
+    joinQuickPair.mockResolvedValue({
+      status: 'searching',
+      playerCount: 2,
+      turnTimeoutSeconds: 15,
+      allowRedirect: true,
+    });
+    renderLobby();
+
+    fireEvent.click(screen.getByTestId('quick-pair-2-15'));
+
+    const searching = await screen.findByTestId('quick-pair-searching');
+    expect(searching.textContent).toContain('Searching for a 2P • 15s table');
+    expect(searching.querySelector('.quick-pair-spinner')).toBeTruthy();
+    // No room was created, so the player is never navigated off the lobby.
+    await waitFor(() => expect(joinQuickPair).toHaveBeenCalledTimes(1));
+    expect(window.location.pathname).toBe('/');
+    expect(screen.getByTestId('quick-pair-searching')).toBeTruthy();
+  });
+
+  it('opens the matched table when a quickPairMatched frame arrives while searching', async () => {
+    joinQuickPair.mockResolvedValue({
+      status: 'searching',
+      playerCount: 3,
+      turnTimeoutSeconds: 30,
+      allowRedirect: true,
+    });
+    renderLobby();
+
+    fireEvent.click(screen.getByTestId('quick-pair-3-30'));
+    await screen.findByTestId('quick-pair-searching');
+    await waitFor(() => expect(socketHandlers).not.toBeNull());
+
+    act(() => {
+      socketHandlers?.onQuickPairMatched?.('qp-ws-1', 1);
+    });
+
+    await expectGamePath('qp-ws-1');
+  });
+
   it('shows a searching state whose Cancel leaves the pairing queue', async () => {
     joinQuickPair.mockReturnValue(new Promise(() => {}));
     renderLobby();
@@ -184,6 +225,7 @@ describe('M2 LobbyPage', () => {
 
     await waitFor(() => expect(cancelQuickPair).toHaveBeenCalledTimes(1));
     expect(screen.queryByTestId('quick-pair-searching')).toBeNull();
+    expect(window.location.pathname).toBe('/');
   });
 
   it('streams the live pool snapshot and joins a room in one click', async () => {
