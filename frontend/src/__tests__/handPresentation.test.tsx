@@ -444,14 +444,18 @@ describe('T-90-feedback-5 ITEM-6a/6b/6c: smooth hover parting', () => {
     );
     // ITEM-6b: the hovered card is pinned exactly where it was.
     expect(after[4]).toBe(before[4]);
-    // T-90 Hover Parting: only the right side opens, so card 4 is the single
-    // card with the widest exposed margin; card 3 keeps its resting overlap.
-    expect(after[3]).toBe(before[3]);
-    expect(wrappers[3].getAttribute('data-part-direction')).toBe('none');
+    // T-95-audit-gap: both immediate neighbours spread away from the cursor
+    // while the hand's outer edges — and therefore its total width — stay fixed.
+    expect(after[3]).toBeLessThan(before[3]);
+    expect(wrappers[3].getAttribute('data-part-direction')).toBe('left');
     expect(after[5]).toBeGreaterThan(before[5]);
     expect(handWrappers()[5].getAttribute('data-part-direction')).toBe('right');
     expect(after[0]).toBe(before[0]);
-    expect(after[7]).toBeGreaterThanOrEqual(before[7]);
+    expect(after[7]).toBe(before[7]);
+    expect(after[7] + CARD_WIDTH - after[0]).toBeCloseTo(
+      before[7] + CARD_WIDTH - before[0],
+      5,
+    );
 
     // The contour follows the parted positions.
     expect(
@@ -507,13 +511,18 @@ describe('T-90-feedback-5 ITEM-6a/6b/6c: smooth hover parting', () => {
     expect(zone.getAttribute('data-parting-active')).toBe('false');
   });
 
-  it('ITEM-6b: visibly parts every multi-card hand size around the hovered card', () => {
+  it('ITEM-6b: parts every hand size without ever widening its outer span', () => {
     const cases: Array<{ count: number; index: number; left?: number; right?: number }> = [
-      { count: 2, index: 0, right: 1 },
-      { count: 3, index: 1, left: 0, right: 2 },
-      { count: 4, index: 2, left: 1, right: 3 },
-      { count: 5, index: 3, left: 2, right: 4 },
+      // A two-card hand has one gap per side, so it keeps both cards at rest.
+      { count: 2, index: 0 },
+      // Neither side of the middle card of three has a spare gap to share.
+      { count: 3, index: 1 },
+      { count: 3, index: 0, right: 1 },
+      { count: 4, index: 1, right: 2 },
+      { count: 5, index: 2, left: 1, right: 3 },
       { count: 6, index: 2, left: 1, right: 3 },
+      { count: 8, index: 4, left: 3, right: 5 },
+      { count: 12, index: 6, left: 5, right: 7 },
       { count: 14, index: 7, left: 6, right: 8 },
       { count: 30, index: 15, left: 14, right: 16 },
     ];
@@ -528,12 +537,18 @@ describe('T-90-feedback-5 ITEM-6a/6b/6c: smooth hover parting', () => {
       const after = handWrappers().map((wrapper) =>
         Number(wrapper.getAttribute('data-card-x')),
       );
-      // The hovered card never moves; only its right neighbour visibly parts.
+      // The hovered card never moves and the outer span is exactly invariant.
       expect(after[index], `${count}-card hovered card`).toBe(before[index]);
       expect(Number(handWrappers()[index].getAttribute('data-part-delta-x'))).toBe(0);
+      expect(after[0], `${count}-card left edge`).toBe(before[0]);
+      expect(after[count - 1], `${count}-card right edge`).toBe(before[count - 1]);
+      expect(
+        after[count - 1] + CARD_WIDTH - after[0],
+        `${count}-card total width`,
+      ).toBeCloseTo(before[count - 1] + CARD_WIDTH - before[0], 5);
       if (left !== undefined) {
-        expect(after[left], `${count}-card left neighbour`).toBe(before[left]);
-        expect(handWrappers()[left].getAttribute('data-part-direction')).toBe('none');
+        expect(after[left], `${count}-card left neighbour`).toBeLessThan(before[left]);
+        expect(handWrappers()[left].getAttribute('data-part-direction')).toBe('left');
       }
       if (right !== undefined) {
         expect(after[right], `${count}-card right neighbour`).toBeGreaterThan(
@@ -963,7 +978,7 @@ describe('T-96 item 6: contour expansion never shifts the hand row', () => {
     expect(contour).toContain('overflow: visible');
   });
 
-  it('keeps the stage width fixed while card 2 stays pinned and card 3 parts right', () => {
+  it('keeps the stage width fixed while both neighbours part away from the cursor', () => {
     mountTable(DECK.slice(0, 6), { awaitingAttack: true });
 
     const box = screen.getByTestId('hand-turn-highlight') as HTMLElement;
@@ -983,15 +998,17 @@ describe('T-96 item 6: contour expansion never shifts the hand row', () => {
       Number(wrapper.getAttribute('data-part-delta-x')),
     );
 
-    // The hovered card is pinned in the resting coordinate space ...
+    // T-95-audit-gap: the hovered card is pinned in the resting coordinate
+    // space and both immediate neighbours part away from it ...
     expect(after[2]).toBe(before[2]);
     expect(deltas[2]).toBe(0);
-    // ... its right neighbour parts outward while the left one never moves ...
-    expect(deltas[1]).toBe(0);
-    expect(deltas[3]).toBeCloseTo(28, 1);
-    // ... and the contour widens WITHOUT changing the stage's track width, so
-    // no `justify-content` re-centring can move the row (the old -17px jump).
-    expect(Number.parseFloat(contour.style.width)).toBeGreaterThan(contourWidthAtRest);
+    expect(deltas[1]).toBeLessThan(0);
+    expect(deltas[3]).toBeGreaterThan(0);
+    // ... while the outer edges never move, so the contour (and the stage it
+    // sits in) cannot widen: no `justify-content` re-centring can shift the row.
+    expect(after[0]).toBe(before[0]);
+    expect(after[5]).toBe(before[5]);
+    expect(Number.parseFloat(contour.style.width)).toBeCloseTo(contourWidthAtRest, 5);
     expect(box.style.width).toBe(stageWidthAtRest);
   });
 });
@@ -1136,18 +1153,24 @@ describe('T-96: hover-parting direction hints and mount-time parting', () => {
     // The hovered card stays pinned and reports `none`.
     expect(cardDeltas[15]).toBe(0);
     expect(cardDirections[15]).toBe('none');
-    // Its immediate right neighbour reports the direction it actually moved;
-    // the left neighbour never opens a competing margin.
-    for (let index = 0; index < 15; index += 1) {
-      expect(cardDeltas[index], `left card ${index}`).toBe(0);
-      expect(cardDirections[index], `left card ${index}`).toBe('none');
-    }
+    // T-95-audit-gap: the immediate neighbours spread away from the cursor,
+    // while the two outermost cards stay pinned to the resting hand span.
+    expect(cardDeltas[14]).toBeLessThan(0);
+    expect(cardDirections[14]).toBe('left');
     expect(cardDeltas[16]).toBeGreaterThan(0);
     expect(cardDirections[16]).toBe('right');
-    // Distant, unmoved cards keep an exact zero delta and `none`.
-    for (const index of [0, 8, 29]) {
-      expect(cardDeltas[index], `card ${index}`).toBe(0);
-      expect(cardDirections[index], `card ${index}`).toBe('none');
+    expect(cardDeltas[0]).toBe(0);
+    expect(cardDirections[0]).toBe('none');
+    expect(cardDeltas[29]).toBe(0);
+    expect(cardDirections[29]).toBe('none');
+    // The spacing between the pinned outer cards is only shifted (compressed)
+    // towards the cursor, never expanded: left cards drift left, right cards
+    // right, and neither outer edge moves.
+    for (let index = 1; index < 15; index += 1) {
+      expect(cardDeltas[index], `left card ${index}`).toBeLessThanOrEqual(0);
+    }
+    for (let index = 16; index < 29; index += 1) {
+      expect(cardDeltas[index], `right card ${index}`).toBeGreaterThanOrEqual(0);
     }
   });
 

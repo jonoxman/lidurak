@@ -32,6 +32,12 @@ export type OpponentInfo = PublicPlayerSummary;
 
 export interface PlayerGameView {
   myId: string;
+  /**
+   * T-95-audit-gap: the viewer's own seat index. The multiplayer adapter
+   * projects live-room players as `p<seatIndex>` ids, but an explicit index
+   * keeps every seat lookup correct (and `-1` marks a spectator).
+   */
+  mySeatIdx?: number;
   /** The viewed player's display name (empty for older backend payloads). */
   myName?: string;
   myHand: Card[];

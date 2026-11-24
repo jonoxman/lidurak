@@ -253,6 +253,34 @@ class PlayerGameViewSpec extends munit.FunSuite:
     assertEquals(view.hand, Nil)
   }
 
+  // --- T-95-audit-gap: M1 table fields ---
+
+  test("the M1 table fields stay viewer-scoped and spectator-safe") {
+    val alice = viewFor("alice")
+
+    assertEquals(alice.myName, "Alice")
+    assertEquals(alice.myHasPassed, false)
+    assertEquals(alice.myFinishRank, None)
+    // Only the viewer's own cards may appear in the throw-in projection.
+    assert(alice.throwInCards.forall(aliceHand.contains), alice.throwInCards.toString)
+    // legal actions are the engine's public action ids, never raw state.
+    val actionIds = Set("attack", "cover", "pass", "surrender", "redirect", "throwIn")
+    assert(alice.legalActions.forall(actionIds.contains), alice.legalActions.toString)
+    // The revealed last discard is public table information only.
+    assertEquals(alice.lastDiscardCards, baseState.lastDiscardCards)
+
+    val spectator = viewFor("anonymous-spectator")
+    assertEquals(spectator.myName, "")
+    assertEquals(spectator.legalActions, Vector.empty)
+    assertEquals(spectator.throwInCards, Vector.empty)
+    assertEquals(spectator.throwInCapacity, 0)
+    assertEquals(spectator.canThrowIn, false)
+    assertEquals(spectator.myHasPassed, false)
+    // Even the newly projected fields never carry a hidden hand.
+    val encoded = spectator.asJson.noSpaces
+    (aliceHand ++ bobHand ++ carolHand ++ daveHand).foreach(assertCardAbsent(encoded, _))
+  }
+
   // --- Client -> server frames ---
 
   private val clientMessages = List(
@@ -381,7 +409,9 @@ class PlayerGameViewSpec extends munit.FunSuite:
     assertEquals(topLevelKeys, Set("type", "view"))
     assert(!viewKeys.contains("talon"), viewKeys.toString)
     assert(!viewKeys.contains("discardPile"), viewKeys.toString)
-    assert(!viewKeys.contains("lastDiscardCards"), viewKeys.toString)
+    // T-95-audit-gap: the M1 table draws the revealed last discard, so the
+    // field is projected — but only public cards ever land in it.
+    assert(viewKeys.contains("lastDiscardCards"), viewKeys.toString)
     assert(!viewKeys.contains("players.cardLists"), viewKeys.toString)
 
     (bobHand ++ carolHand ++ daveHand).foreach(assertCardAbsent(encoded, _))

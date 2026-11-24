@@ -337,11 +337,13 @@ describe('lobby.css visual invariants', () => {
     expect(lobbyCss).toContain('color: var(--m2-text-strong);');
   });
 
-  it('shares the M2 palette and button styling with the multiplayer shell', () => {
-    // T-96 ITEM-2: the tokens live on both M2 shells, not the lobby alone.
-    expect(lobbyCss).toMatch(/\.m2-lobby,\s*\n\.multiplayer-page \{/);
+  it('keeps the M2 palette on the lobby after the placeholder shell was removed', () => {
+    // T-95-audit-gap: the lightweight `MultiplayerGamePage` is deleted, so the
+    // palette lives on the lobby alone and no placeholder rules survive.
+    expect(lobbyCss).toMatch(/\.m2-lobby \{/);
     expect(lobbyCss).toContain('--m2-text-strong: #f1f1f1;');
-    expect(lobbyCss).toContain('.multiplayer-page .m2-button.secondary');
+    expect(lobbyCss).not.toContain('.multiplayer-page');
+    expect(lobbyCss).not.toContain('.mp-');
   });
 
   it('adapts below 640px and caps the desktop shell', () => {

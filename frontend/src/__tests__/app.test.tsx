@@ -124,14 +124,18 @@ describe('App', () => {
     checkServerHealth.mockResolvedValue(true);
   });
 
-  it('routes /g/:gameId to the live multiplayer room', async () => {
+  it('routes /g/:gameId to the M1 game shell for the live room', async () => {
     window.history.replaceState({}, '', '/g/room-42');
 
     render(<App />);
 
-    expect(await screen.findByTestId('multiplayer-game')).toBeTruthy();
+    // T-95-audit-gap: the live route no longer has a placeholder page — it
+    // renders the Milestone 1 three-column table shell.
     expect(await screen.findByTestId('waiting-room')).toBeTruthy();
     expect(screen.getByText('Room room-42')).toBeTruthy();
+    expect(document.querySelector('[data-zone="sidebar-left"]')).not.toBeNull();
+    expect(document.querySelector('[data-zone="table-arena"]')).not.toBeNull();
+    expect(document.querySelector('[data-zone="sidebar-right"]')).not.toBeNull();
     expect(fetchGameView).toHaveBeenCalledWith('room-42');
   });
 
@@ -139,7 +143,7 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByRole('button', { name: 'Create Game' })).toBeTruthy();
-    expect(screen.queryByTestId('multiplayer-game')).toBeNull();
+    expect(screen.queryByTestId('waiting-room')).toBeNull();
     expect(fetchGameView).not.toHaveBeenCalled();
   });
 
@@ -151,7 +155,7 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByText(/Loading game local-1/)).toBeTruthy();
-    expect(screen.queryByTestId('multiplayer-game')).toBeNull();
+    expect(screen.queryByTestId('waiting-room')).toBeNull();
     expect(fetchGameView).not.toHaveBeenCalled();
   });
 

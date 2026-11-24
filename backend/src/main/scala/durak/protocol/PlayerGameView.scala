@@ -88,7 +88,29 @@ final case class PlayerGameView(
     finishOrder: Vector[String],
     isDraw: Boolean,
     durakId: Option[String],
-    turnDeadlineEpochMs: Option[Long]
+    turnDeadlineEpochMs: Option[Long],
+    // --- T-95-audit-gap: M1 table fields (public, or the viewer's own) ---
+    // The Milestone 1 table needs these to draw itself. Every field below is
+    // either public information (ids, counts, the revealed discard) or the
+    // viewer's own projection (`legalActions`, `throwInCards`); an opponent's
+    // hand and the undealt talon are never reachable from here.
+    myName: String = "",
+    myHasPassed: Boolean = false,
+    myFinishRank: Option[Int] = None,
+    winners: Vector[String] = Vector.empty,
+    legalActions: Vector[String] = Vector.empty,
+    throwInCards: Vector[Card] = Vector.empty,
+    throwInCapacity: Int = 0,
+    canThrowIn: Boolean = false,
+    defenderDefenseless: Boolean = false,
+    promptedPlayerIds: Vector[String] = Vector.empty,
+    eligibleTargetIds: Vector[String] = Vector.empty,
+    redirectTargetId: Option[String] = None,
+    turnPlayerId: Option[String] = None,
+    turnSecondsRemaining: Int = 0,
+    lastDiscardCards: Vector[Card] = Vector.empty,
+    gameStartedAtMs: Option[Long] = None,
+    gameEndedAtMs: Option[Long] = None
 )
 
 object PlayerGameView:
@@ -164,19 +186,24 @@ object PlayerGameView:
       viewerId: String,
       connectedPlayerIds: Set[String] = Set.empty,
       turnDeadlineEpochMs: Option[Long] = None,
-      ratings: Map[String, Int] = Map.empty
+      ratings: Map[String, Int] = Map.empty,
+      nowMs: Long = System.currentTimeMillis()
   ): PlayerGameView =
     val gameOver = state.isGameOver
     val viewerSeat = viewerSeatOf(seats, viewerId)
 
-    // Strictly the viewer's own hand. The extra id check means a mis-stamped
+    // Strictly the viewer's own seat. The extra id check means a mis-stamped
     // seat can only downgrade the viewer to a spectator, never reveal a hand.
-    val hand =
+    val viewerPlayer =
       viewerSeat
         .flatMap(state.players.lift)
         .filter(_.id == viewerId)
-        .map(_.hand.toList)
-        .getOrElse(Nil)
+    val hand = viewerPlayer.map(_.hand.toList).getOrElse(Nil)
+    // The engine projection of the viewer's own seat is the single source of
+    // truth for the action surface (legal actions, throw-in cards, redirect
+    // target). It is only ever computed for a seated viewer, and only its
+    // own-seat fields are copied below, so it cannot widen what leaks.
+    val engineView = viewerPlayer.map(_ => durak.engine.PlayerGameView.forViewer(state, viewerId))
 
     val publicPlayers = state.players.zipWithIndex.map { case (player, seatIndex) =>
       PublicPlayerSummary(
@@ -215,7 +242,30 @@ object PlayerGameView:
       isDraw = state.isDraw,
       durakId = state.durak,
       turnDeadlineEpochMs =
-        if gameOver then None else turnDeadlineEpochMs.filter(_ > 0L)
+        if gameOver then None else turnDeadlineEpochMs.filter(_ > 0L),
+      myName = viewerPlayer.map(_.name).getOrElse(""),
+      myHasPassed = viewerPlayer.exists(_.hasPassed),
+      myFinishRank = viewerPlayer.flatMap(finishRankOf(state, _)),
+      winners = state.winners.toVector,
+      legalActions = engineView.map(_.legalActions.toVector).getOrElse(Vector.empty),
+      throwInCards = engineView.map(_.throwInCards.toVector).getOrElse(Vector.empty),
+      throwInCapacity = engineView.map(_.throwInCapacity).getOrElse(0),
+      canThrowIn = engineView.exists(_.canThrowIn),
+      defenderDefenseless = engineView.exists(_.defenderDefenseless),
+      promptedPlayerIds = state.promptedPlayerSeats.map(idx => state.players(idx).id),
+      eligibleTargetIds = engineView.map(_.eligibleTargetIds).getOrElse(Vector.empty),
+      redirectTargetId = engineView.flatMap(_.redirectTargetId),
+      turnPlayerId = if gameOver then None else state.turnPlayerId,
+      turnSecondsRemaining =
+        if gameOver then 0
+        else
+          turnDeadlineEpochMs
+            .filter(_ > 0L)
+            .map(deadline => Math.max(0L, (deadline - nowMs + 999L) / 1000L).toInt)
+            .getOrElse(0),
+      lastDiscardCards = state.lastDiscardCards,
+      gameStartedAtMs = state.gameStartedAtMs,
+      gameEndedAtMs = state.gameEndedAtMs
     )
 
   /** Resolves a viewer's seat from the lobby seats, never from game state. */

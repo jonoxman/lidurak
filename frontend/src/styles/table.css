@@ -2923,3 +2923,65 @@ body[data-dragging='true'] * {
     --card-h: 68px;
   }
 }
+
+/* --- T-95-audit-gap: live-room waiting shell ------------------------------
+   The `WaitingForPlayers` room keeps the same three-column shell as the felt
+   table. Everything below is CSS Grid / Flexbox with explicit gaps and
+   `min-width: 0`, so seats, invite link and actions can never overlap. */
+
+.multiplayer-waiting {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 20px;
+  background: var(--durak-felt, #1e2923);
+  color: var(--clock-idle-text, #f8fafc);
+  border: 1px solid var(--durak-border, #3d3a35);
+  border-radius: var(--app-roundness, 8px);
+}
+
+.multiplayer-waiting h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.multiplayer-waiting-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.multiplayer-invite {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.multiplayer-invite code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.28);
+  border-radius: 6px;
+  font-size: 0.82rem;
+}
+
+.multiplayer-waiting-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .multiplayer-invite {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
