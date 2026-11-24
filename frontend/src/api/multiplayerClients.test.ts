@@ -251,11 +251,13 @@ describe('lobbyClient REST', () => {
   });
 
   it('joins and cancels Quick Pairing', async () => {
-    mockFetch.mockResolvedValue(jsonResponse({ gameId: 'pair-1', seatIndex: 0 }));
+    mockFetch.mockResolvedValue(
+      jsonResponse({ status: 'matched', gameId: 'pair-1', seatIndex: 0 }),
+    );
 
     await expect(
       joinQuickPair({ playerCount: 3, turnTimeoutSeconds: 30, allowRedirect: false }),
-    ).resolves.toEqual({ gameId: 'pair-1', seatIndex: 0 });
+    ).resolves.toEqual({ status: 'matched', gameId: 'pair-1', seatIndex: 0 });
     expect(mockFetch).toHaveBeenCalledWith(
       '/api/quick-pair',
       expect.objectContaining({
@@ -275,6 +277,28 @@ describe('lobbyClient REST', () => {
       '/api/quick-pair',
       expect.objectContaining({ method: 'DELETE', credentials: 'include' }),
     );
+  });
+
+  it('parses a queued Quick Pairing response without inventing a game id', async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({
+        status: 'queued',
+        playerCount: 2,
+        turnTimeoutSeconds: 15,
+        allowRedirect: true,
+        queuedCount: 1,
+      }),
+    );
+
+    await expect(
+      joinQuickPair({ playerCount: 2, turnTimeoutSeconds: 15, allowRedirect: true }),
+    ).resolves.toEqual({
+      status: 'queued',
+      playerCount: 2,
+      turnTimeoutSeconds: 15,
+      allowRedirect: true,
+      queuedCount: 1,
+    });
   });
 
   it('covers every QA preset endpoint', async () => {
@@ -377,10 +401,12 @@ describe('connectLobbySocket', () => {
     const snapshots: LobbyRoomSummary[][] = [];
     const updates: LobbyRoomSummary[][] = [];
     const matched: string[] = [];
+    const quickPaired: { gameId: string; seatIndex: number }[] = [];
     const socket = connectLobbySocket({
       onSnapshot: (rooms) => snapshots.push(rooms),
       onUpdated: (rooms) => updates.push(rooms),
       onMatchFound: (gameId) => matched.push(gameId),
+      onQuickPairMatched: (gameId, seatIndex) => quickPaired.push({ gameId, seatIndex }),
     });
 
     const ws = latest();
@@ -392,10 +418,12 @@ describe('connectLobbySocket', () => {
     ws.emitMessage({ type: 'lobbySnapshot', rooms: [room] });
     ws.emitMessage({ type: 'lobbyUpdated', rooms: [] });
     ws.emitMessage({ type: 'matchFound', gameId: 'assigned-1' });
+    ws.emitMessage({ type: 'quickPairMatched', gameId: 'queued-1', seatIndex: 1 });
 
     expect(snapshots).toEqual([[room]]);
     expect(updates).toEqual([[]]);
     expect(matched).toEqual(['assigned-1']);
+    expect(quickPaired).toEqual([{ gameId: 'queued-1', seatIndex: 1 }]);
 
     socket.close();
   });

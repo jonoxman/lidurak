@@ -323,6 +323,12 @@ object ProtocolCodecs:
         "type" -> Json.fromString("matchFound"),
         "gameId" -> gameId.asJson
       )
+    case WsServerMessage.QuickPairMatched(gameId, seatIndex) =>
+      Json.obj(
+        "type" -> Json.fromString("quickPairMatched"),
+        "gameId" -> gameId.asJson,
+        "seatIndex" -> seatIndex.asJson
+      )
     case WsServerMessage.Pong =>
       Json.obj("type" -> Json.fromString("pong"))
   }
@@ -355,6 +361,11 @@ object ProtocolCodecs:
             .downField("gameId")
             .as[String]
             .map(WsServerMessage.MatchFound.apply)
+        case "quickpairmatched" =>
+          for
+            gameId <- cursor.downField("gameId").as[String]
+            seatIndex <- cursor.downField("seatIndex").as[Int]
+          yield WsServerMessage.QuickPairMatched(gameId, seatIndex)
         case "pong" =>
           Right(WsServerMessage.Pong)
         case _ =>

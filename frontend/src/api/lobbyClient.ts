@@ -1,6 +1,7 @@
 import {
   parseLobbyRoomList,
   parsePlayerGameView,
+  parseQuickPairResponse,
   parseWsServerMessage,
   type ActiveMatchPresetResponse,
   type CreateRoomRequest,
@@ -83,13 +84,16 @@ export async function leaveRoom(gameId: string): Promise<void> {
   await apiRequest(`/api/games/${encodeURIComponent(gameId)}/leave`, { method: 'POST' });
 }
 
-/** Joins the Quick Pairing pool, matching an existing room when possible. */
+/**
+ * Enqueues the caller for Quick Pairing.
+ *
+ * The server answers `queued` while the bucket is still filling and `matched`
+ * when this request completed a full table; a queued player stays on the lobby
+ * until the `quickPairMatched` frame arrives on `/ws/lobby`.
+ */
 export async function joinQuickPair(req: QuickPairRequest): Promise<QuickPairResponse> {
   const body = await apiRequest('/api/quick-pair', { method: 'POST', body: req });
-  return {
-    gameId: readGameId(body, 'QuickPairResponse'),
-    seatIndex: readSeat(body),
-  };
+  return parseQuickPairResponse(body);
 }
 
 /** Leaves the Quick Pairing pool. */
@@ -134,6 +138,8 @@ export interface LobbySocketHandlers {
   onUpdated?: (rooms: LobbyRoomSummary[]) => void;
   /** Quick Pairing assigned this player to a room. */
   onMatchFound?: (gameId: string) => void;
+  /** A queued Quick Pairing request was matched and seated by the server. */
+  onQuickPairMatched?: (gameId: string, seatIndex: number) => void;
   onActionRejected?: (code: string, message: string) => void;
   onStatusChange?: (status: SocketStatus) => void;
   onError?: (event: unknown) => void;
@@ -237,6 +243,9 @@ class ReconnectingLobbySocket implements LobbySocket {
         break;
       case 'matchFound':
         this.handlers.onMatchFound?.(message.gameId);
+        break;
+      case 'quickPairMatched':
+        this.handlers.onQuickPairMatched?.(message.gameId, message.seatIndex);
         break;
       case 'actionRejected':
         this.handlers.onActionRejected?.(message.code, message.message);

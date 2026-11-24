@@ -132,11 +132,24 @@ export interface QuickPairRequest {
   allowRedirect?: boolean;
 }
 
-/** Response of `POST /api/quick-pair`. */
-export interface QuickPairResponse {
+/** `POST /api/quick-pair` accepted the request; the player is still waiting. */
+export interface QuickPairQueuedResponse {
+  status: 'queued';
+  playerCount: number;
+  turnTimeoutSeconds: number;
+  allowRedirect: boolean;
+  queuedCount: number;
+}
+
+/** `POST /api/quick-pair` completed a match and seated the caller. */
+export interface QuickPairMatchedResponse {
+  status: 'matched';
   gameId: string;
   seatIndex: number;
 }
+
+/** Response of `POST /api/quick-pair`: waiting, or actually seated. */
+export type QuickPairResponse = QuickPairQueuedResponse | QuickPairMatchedResponse;
 
 /** Response of `POST /api/qa/presets/seed-lobby`. */
 export interface SeedLobbyPresetResponse {
@@ -171,6 +184,7 @@ export type WsServerMessage =
   | { type: 'lobbySnapshot'; rooms: LobbyRoomSummary[] }
   | { type: 'lobbyUpdated'; rooms: LobbyRoomSummary[] }
   | { type: 'matchFound'; gameId: string }
+  | { type: 'quickPairMatched'; gameId: string; seatIndex: number }
   | { type: 'pong' };
 
 // --- Parsing helpers -------------------------------------------------------
@@ -347,6 +361,36 @@ export function parseLobbyRoomList(value: unknown): LobbyRoomSummary[] {
   return arrayOf(value, 'rooms').map(parseLobbyRoomSummary);
 }
 
+/**
+ * Validates a Quick Pairing response.
+ *
+ * A payload with no explicit `status` is treated as `matched` when it carries a
+ * `gameId`, which keeps older servers that seated immediately working.
+ */
+export function parseQuickPairResponse(value: unknown): QuickPairResponse {
+  const raw = asObject(value, 'QuickPairResponse');
+  const status =
+    typeof raw.status === 'string' ? raw.status.trim().toLowerCase() : 'matched';
+
+  if (status === 'queued') {
+    return {
+      status: 'queued',
+      playerCount: numberOr(raw.playerCount, 2),
+      turnTimeoutSeconds: numberOr(raw.turnTimeoutSeconds, 15),
+      allowRedirect: booleanOr(raw.allowRedirect, true),
+      queuedCount: numberOr(raw.queuedCount, 0),
+    };
+  }
+  if (status === 'matched') {
+    return {
+      status: 'matched',
+      gameId: requireString(raw, 'gameId'),
+      seatIndex: numberOr(raw.seatIndex, 0),
+    };
+  }
+  return fail(`status must be queued or matched, got ${status}`);
+}
+
 /** Parses and discriminates one server WebSocket frame. */
 export function parseWsServerMessage(value: unknown): WsServerMessage {
   const raw = asObject(value, 'WsServerMessage');
@@ -366,6 +410,12 @@ export function parseWsServerMessage(value: unknown): WsServerMessage {
       return { type: 'lobbyUpdated', rooms: parseLobbyRoomList(raw.rooms) };
     case 'matchfound':
       return { type: 'matchFound', gameId: requireString(raw, 'gameId') };
+    case 'quickpairmatched':
+      return {
+        type: 'quickPairMatched',
+        gameId: requireString(raw, 'gameId'),
+        seatIndex: numberOr(raw.seatIndex, 0),
+      };
     case 'pong':
       return { type: 'pong' };
     default:

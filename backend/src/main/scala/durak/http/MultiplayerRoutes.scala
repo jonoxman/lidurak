@@ -3,7 +3,12 @@ package durak.http
 import cats.effect.{IO, Ref, Resource}
 import cats.effect.std.Queue
 import cats.syntax.all.*
-import durak.lobby.{QuickPairRequest, QuickPairingService}
+import durak.lobby.{
+  QuickPairMatch,
+  QuickPairOutcome,
+  QuickPairRequest,
+  QuickPairingService
+}
 import durak.protocol.ProtocolCodecs.given
 import durak.protocol.{LobbyRoomSummary, WsClientMessage, WsServerMessage}
 import durak.rooms.{ActionRejected, CreateRoomConfig, RoomManager, UnknownRoom}
@@ -84,7 +89,7 @@ object MultiplayerRoutes:
       quickPairing: QuickPairingService[IO]
   )(using webSockets: WebSocketBuilder2[IO]): HttpRoutes[IO] =
     restRoutes(store, roomManager, quickPairing) <+>
-      webSocketRoutes(store, roomManager)(using webSockets)
+      webSocketRoutes(store, roomManager, quickPairing)(using webSockets)
 
   // --- REST ----------------------------------------------------------------
 
@@ -115,13 +120,15 @@ object MultiplayerRoutes:
                 roomManager.createRoom(session, body.toConfig).flatMap {
                   case Left(error) => BadRequest(errorJson(error))
                   case Right((room, seatIndex)) =>
-                    Created(
-                      Json.obj(
-                        "gameId" -> room.gameId.asJson,
-                        "seatIndex" -> seatIndex.asJson,
-                        "inviteUrl" -> s"/g/${room.gameId}".asJson
+                    // Creating a room abandons any pending quick-pair request.
+                    quickPairing.withdraw(session.playerId) *>
+                      Created(
+                        Json.obj(
+                          "gameId" -> room.gameId.asJson,
+                          "seatIndex" -> seatIndex.asJson,
+                          "inviteUrl" -> s"/g/${room.gameId}".asJson
+                        )
                       )
-                    )
                 }
               }
       }
@@ -143,13 +150,15 @@ object MultiplayerRoutes:
           case Some(_) =>
             roomManager.joinSeat(gameId, session).flatMap {
               case Right((view, seatIndex)) =>
-                Ok(
-                  Json.obj(
-                    "gameId" -> gameId.asJson,
-                    "seatIndex" -> seatIndex.asJson,
-                    "view" -> view.asJson
+                // Joining a specific room abandons any pending quick-pair request.
+                quickPairing.withdraw(session.playerId) *>
+                  Ok(
+                    Json.obj(
+                      "gameId" -> gameId.asJson,
+                      "seatIndex" -> seatIndex.asJson,
+                      "view" -> view.asJson
+                    )
                   )
-                )
               case Left(error) => Conflict(errorJson(error))
             }
         }
@@ -177,11 +186,22 @@ object MultiplayerRoutes:
             case Right(pairRequest) =>
               withSession(req, store) { (session, _) =>
                 quickPairing.pair(session, pairRequest).flatMap {
-                  case Right((gameId, seatIndex)) =>
+                  case Right(QuickPairOutcome.Matched(gameId, seatIndex)) =>
                     Ok(
                       Json.obj(
+                        "status" -> "matched".asJson,
                         "gameId" -> gameId.asJson,
                         "seatIndex" -> seatIndex.asJson
+                      )
+                    )
+                  case Right(QuickPairOutcome.Queued(bucket, queuedCount)) =>
+                    Ok(
+                      Json.obj(
+                        "status" -> "queued".asJson,
+                        "playerCount" -> bucket.playerCount.asJson,
+                        "turnTimeoutSeconds" -> bucket.turnTimeoutSeconds.asJson,
+                        "allowRedirect" -> bucket.allowRedirect.asJson,
+                        "queuedCount" -> queuedCount.asJson
                       )
                     )
                   case Left(error) => BadRequest(errorJson(error))
@@ -200,13 +220,13 @@ object MultiplayerRoutes:
   /** The two live sockets; both are anonymous-readable, the game one personal. */
   def webSocketRoutes(
       store: SessionStore[IO],
-      roomManager: RoomManager[IO]
+      roomManager: RoomManager[IO],
+      quickPairing: QuickPairingService[IO]
   )(using webSockets: WebSocketBuilder2[IO]): HttpRoutes[IO] = HttpRoutes.of[IO] {
 
-    case GET -> Root / "ws" / "lobby" =>
-      webSockets.build(
-        lobbyMessages(roomManager).map(toFrame).merge(keepAlive),
-        (incoming: Stream[IO, WebSocketFrame]) => incoming.drain
+    case req @ GET -> Root / "ws" / "lobby" =>
+      lobbyPlayerId(req, store).flatMap(playerId =>
+        openLobbySocket(roomManager, quickPairing, playerId)(using webSockets)
       )
 
     case req @ GET -> Root / "ws" / "games" / gameId =>
@@ -218,14 +238,61 @@ object MultiplayerRoutes:
   /**
    * The lobby stream: one `LobbySnapshot` with the rooms open right now, then a
    * `LobbyUpdated` frame for every later change to the pool.
+   *
+   * A player's own private quick-pair matches are merged in after the snapshot,
+   * so a queued player learns about their table on this same socket.
    */
   private[http] def lobbyMessages(
-      roomManager: RoomManager[IO]
+      roomManager: RoomManager[IO],
+      quickPairMatches: Stream[IO, QuickPairMatch] = Stream.empty
   ): Stream[IO, WsServerMessage] =
     Stream
       .eval(roomManager.listOpenPublicRooms)
       .map(WsServerMessage.LobbySnapshot.apply) ++
-      roomManager.lobbyUpdates.map(WsServerMessage.LobbyUpdated.apply)
+      (roomManager.lobbyUpdates.map(WsServerMessage.LobbyUpdated.apply) merge
+        quickPairMatches.map(matchFound =>
+          WsServerMessage.QuickPairMatched(matchFound.gameId, matchFound.seatIndex)
+        ))
+
+  /**
+   * One live lobby socket: the pool stream plus this player's private
+   * `quickPairMatched` notifications.
+   *
+   * The queue listener is acquired before the upgrade and released with the
+   * socket; disconnecting also withdraws the player from the quick-pair queue so
+   * a stale entry can never be dealt into a ghost match.
+   */
+  private def openLobbySocket(
+      roomManager: RoomManager[IO],
+      quickPairing: QuickPairingService[IO],
+      playerId: Option[String]
+  )(using webSockets: WebSocketBuilder2[IO]): IO[Response[IO]] =
+    val matches: Resource[IO, Stream[IO, QuickPairMatch]] = playerId match
+      case Some(id) => quickPairing.listen(id)
+      case None     => Resource.eval(IO.pure(Stream.empty[IO]: Stream[IO, QuickPairMatch]))
+    matches.allocated.flatMap { case (stream, releaseListener) =>
+      Ref.of[IO, Boolean](false).flatMap { released =>
+        val releaseOnce =
+          released.getAndSet(true).flatMap(already => if already then IO.unit else releaseListener)
+        val withdraw = playerId.fold(IO.unit)(quickPairing.withdraw)
+        webSockets.build(
+          lobbyMessages(roomManager, stream)
+            .map(toFrame)
+            .merge(keepAlive)
+            .onFinalize(releaseOnce <* withdraw),
+          (incoming: Stream[IO, WebSocketFrame]) => incoming.drain
+        )
+      }
+    }
+
+  /** The guest behind a WS upgrade, if the handshake carried a valid token. */
+  private def lobbyPlayerId(
+      req: Request[IO],
+      store: SessionStore[IO]
+  ): IO[Option[String]] =
+    tokenOf(req) match
+      case None        => IO.pure(None)
+      case Some(token) => store.touchAndFind(token).map(_.map(_.playerId))
 
   /**
    * Streams one viewer's projected room and applies their incoming frames.

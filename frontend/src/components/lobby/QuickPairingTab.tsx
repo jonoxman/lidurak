@@ -15,6 +15,11 @@ export const QUICK_PAIR_PRESETS: ReadonlyArray<QuickPairRequest & { playerCount:
 export interface QuickPairingTabProps {
   /** Opens `/g/:gameId` once the player has a seat. */
   onMatched: (gameId: string) => void;
+  /**
+   * Registers a callback for `quickPairMatched` frames from `/ws/lobby`.
+   * Returns an unsubscribe function.
+   */
+  subscribeMatchFound?: (handler: (gameId: string) => void) => () => void;
 }
 
 const DECK_FOR_PLAYERS: Record<PlayerCount, string> = {
@@ -24,43 +29,65 @@ const DECK_FOR_PLAYERS: Record<PlayerCount, string> = {
 };
 
 /**
- * Quick Pairing: pick a table size and turn clock, and the server either seats
- * the player in a matching waiting room or opens one for them.
+ * Quick Pairing: pick a table size and turn clock, and the server queues the
+ * player until enough others asked for the same preset.
  *
- * While the request is in flight the tab shows a searching indicator with a
- * Cancel action, so a queued player is never stuck without a way out.
+ * A queued player stays on the lobby with the searching indicator visible; the
+ * match arrives either as the `matched` answer to the request that completed
+ * the table, or as a `quickPairMatched` frame on `/ws/lobby` for everyone else.
  */
-export function QuickPairingTab({ onMatched }: QuickPairingTabProps) {
+export function QuickPairingTab({ onMatched, subscribeMatchFound }: QuickPairingTabProps) {
   const [pending, setPending] = useState<QuickPairRequest | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Bumped by Cancel, so a late match response cannot navigate after cancel.
+  // Bumped by Cancel, so a late match response can never navigate after cancel.
   const attempt = useRef(0);
+  // True from the moment a preset is clicked until that search is over.
+  const searching = useRef(false);
+
+  useEffect(() => {
+    if (!subscribeMatchFound) return undefined;
+    return subscribeMatchFound((gameId) => {
+      if (!searching.current) return;
+      searching.current = false;
+      attempt.current += 1;
+      setPending(null);
+      onMatched(gameId);
+    });
+  }, [subscribeMatchFound, onMatched]);
 
   const start = async (preset: QuickPairRequest) => {
     if (pending) return;
     const current = ++attempt.current;
+    searching.current = true;
     setPending(preset);
     setError(null);
     try {
-      const matched = await joinQuickPair(preset);
-      if (attempt.current === current) onMatched(matched.gameId);
-    } catch (reason) {
-      if (attempt.current === current) {
-        setError(reason instanceof Error ? reason.message : String(reason));
+      const result = await joinQuickPair(preset);
+      if (attempt.current !== current) return;
+      // `queued` deliberately keeps the searching state: the player is not in a
+      // room yet and must stay on the lobby until the match is real.
+      if (result.status === 'matched') {
+        searching.current = false;
+        setPending(null);
+        onMatched(result.gameId);
       }
-    } finally {
-      if (attempt.current === current) setPending(null);
+    } catch (reason) {
+      if (attempt.current !== current) return;
+      searching.current = false;
+      setPending(null);
+      setError(reason instanceof Error ? reason.message : String(reason));
     }
   };
 
   const cancel = async () => {
     // Invalidate the in-flight request before telling the server to drop it.
     attempt.current += 1;
+    searching.current = false;
     setPending(null);
     try {
       await cancelQuickPair();
     } catch {
-      // A cancel that fails only means the room was already gone.
+      // A cancel that fails only means the queue entry was already gone.
     }
   };
 

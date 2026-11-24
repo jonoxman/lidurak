@@ -94,7 +94,7 @@ describe('M2 LobbyPage', () => {
     getOrCreateSession.mockResolvedValue(GUEST);
     updateGuestName.mockResolvedValue({ ...GUEST, displayName: 'Ace' });
     fetchLobbyRooms.mockResolvedValue([]);
-    joinQuickPair.mockResolvedValue({ gameId: 'qp-1', seatIndex: 0 });
+    joinQuickPair.mockResolvedValue({ status: 'matched', gameId: 'qp-1', seatIndex: 0 });
     cancelQuickPair.mockResolvedValue(undefined);
     joinRoom.mockResolvedValue({ gameId: 'room-1', seatIndex: 1, view: {} as never });
     createRoom.mockResolvedValue({
@@ -128,7 +128,9 @@ describe('M2 LobbyPage', () => {
     ).toBe('true');
     expect(screen.getByRole('tab', { name: /Lobby Pool/ })).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'Create Invite Link' })).toBeTruthy();
-    expect(screen.getByTestId('lobby-connection').textContent).toContain('Lobby idle');
+    await waitFor(() =>
+      expect(screen.getByTestId('lobby-connection').textContent).toContain('Lobby live'),
+    );
   });
 
   it('renames the guest through the editable identity badge', async () => {
@@ -183,6 +185,74 @@ describe('M2 LobbyPage', () => {
     fireEvent.click(within(searching).getByRole('button', { name: 'Cancel' }));
 
     await waitFor(() => expect(cancelQuickPair).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId('quick-pair-searching')).toBeNull();
+  });
+
+  it('stays on the lobby while the quick-pair request is queued', async () => {
+    joinQuickPair.mockResolvedValue({
+      status: 'queued',
+      playerCount: 2,
+      turnTimeoutSeconds: 15,
+      allowRedirect: true,
+      queuedCount: 1,
+    });
+    renderLobby();
+
+    fireEvent.click(screen.getByTestId('quick-pair-2-15'));
+
+    await waitFor(() =>
+      expect(joinQuickPair).toHaveBeenCalledWith({
+        playerCount: 2,
+        turnTimeoutSeconds: 15,
+        allowRedirect: true,
+      }),
+    );
+    const searching = await screen.findByTestId('quick-pair-searching');
+    expect(searching.textContent).toContain('2P • 15s');
+    // Queued is not matched: the player must not leave the lobby.
+    expect(window.location.pathname).toBe('/');
+    expect((screen.getByTestId('quick-pair-2-15') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('cancels a queued quick pairing without leaving the lobby', async () => {
+    joinQuickPair.mockResolvedValue({
+      status: 'queued',
+      playerCount: 3,
+      turnTimeoutSeconds: 30,
+      allowRedirect: true,
+      queuedCount: 1,
+    });
+    renderLobby();
+
+    fireEvent.click(screen.getByTestId('quick-pair-3-30'));
+    const searching = await screen.findByTestId('quick-pair-searching');
+    fireEvent.click(within(searching).getByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() => expect(cancelQuickPair).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId('quick-pair-searching')).toBeNull();
+    expect(window.location.pathname).toBe('/');
+    expect((screen.getByTestId('quick-pair-3-30') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('navigates to the matched table when quickPairMatched arrives on /ws/lobby', async () => {
+    joinQuickPair.mockResolvedValue({
+      status: 'queued',
+      playerCount: 2,
+      turnTimeoutSeconds: 15,
+      allowRedirect: true,
+      queuedCount: 1,
+    });
+    renderLobby();
+
+    fireEvent.click(screen.getByTestId('quick-pair-2-15'));
+    await screen.findByTestId('quick-pair-searching');
+    await waitFor(() => expect(socketHandlers).not.toBeNull());
+
+    act(() => {
+      socketHandlers?.onQuickPairMatched?.('qp-ws-1', 0);
+    });
+
+    await expectGamePath('qp-ws-1');
     expect(screen.queryByTestId('quick-pair-searching')).toBeNull();
   });
 

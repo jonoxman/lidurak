@@ -171,6 +171,10 @@ final class RoomManager[F[_]](
   def getRoom(gameId: String): F[Option[GameRoom]] =
     rooms.get.flatMap(_.get(gameId).traverse(_.state.get))
 
+  /** How many rooms the pool currently holds, for diagnostics and tests. */
+  def roomCount: F[Int] =
+    rooms.get.map(_.size)
+
   /**
    * Seats `session.playerId` in the lowest open seat.
    *

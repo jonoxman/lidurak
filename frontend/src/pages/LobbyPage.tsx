@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 import {
   checkServerHealth,
   createGame,
@@ -6,7 +6,11 @@ import {
   QA_SCENARIOS,
   type CreatedGame,
 } from '../api/client';
-import { fetchLobbyRooms } from '../api/lobbyClient';
+import {
+  connectLobbySocket,
+  fetchLobbyRooms,
+  type LobbySocket,
+} from '../api/lobbyClient';
 import { getOrCreateSession, updateGuestName } from '../api/sessionClient';
 import { CreateInviteTab } from '../components/lobby/CreateInviteTab';
 import { LobbyPoolTab } from '../components/lobby/LobbyPoolTab';
@@ -91,6 +95,18 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
   const [rooms, setRooms] = useState<LobbyRoomSummary[]>([]);
   const [poolStatus, setPoolStatus] = useState<SocketStatus | 'idle'>('idle');
   const [notice, setNotice] = useState<string | null>(null);
+  // `/ws/lobby` delivers quick-pair matches, so the Quick Pairing tab
+  // subscribes to this registry instead of owning its own socket.
+  const matchListeners = useRef(new Set<(gameId: string) => void>());
+  const subscribeMatchFound = useCallback(
+    (handler: (gameId: string) => void) => {
+      matchListeners.current.add(handler);
+      return () => {
+        matchListeners.current.delete(handler);
+      };
+    },
+    [],
+  );
 
   // Probe `GET /api/health` until the backend answers, then unlock the page so
   // a click can never land on a proxy 500 while the server is still booting.
@@ -150,6 +166,39 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
     };
   }, []);
 
+  // The lobby socket is the transport for quick-pair matches, so it opens as
+  // soon as the guest session exists — not only when the Lobby Pool tab is
+  // opened. The handshake has to carry the session cookie to be targeted.
+  useEffect(() => {
+    if (session === null) return undefined;
+    let cancelled = false;
+    let socket: LobbySocket | null = null;
+
+    try {
+      socket = connectLobbySocket({
+        onSnapshot: (next) => {
+          if (!cancelled) setRooms(next);
+        },
+        onUpdated: (next) => {
+          if (!cancelled) setRooms(next);
+        },
+        onQuickPairMatched: (gameId) => {
+          matchListeners.current.forEach((handler) => handler(gameId));
+        },
+        onStatusChange: (status) => {
+          if (!cancelled) setPoolStatus(status);
+        },
+      });
+    } catch {
+      // Without WebSocket support the REST flows still work.
+    }
+
+    return () => {
+      cancelled = true;
+      socket?.close();
+    };
+  }, [session?.playerId]);
+
   const saveGuestName = (event: Event) => {
     event.preventDefault();
     const nextName = nameDraft.trim();
@@ -173,7 +222,7 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
 
   const selectTab = (next: LobbyTabId) => {
     setTab(next);
-    // The pool socket starts on first open and then keeps the tab live.
+    // The pool panel mounts lazily; the lobby socket is already live.
     if (next === 'pool') setPoolOpened(true);
   };
 
@@ -276,7 +325,9 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
               </p>
             ) : null}
 
-            {tab === 'quick' ? <QuickPairingTab onMatched={openGame} /> : null}
+            {tab === 'quick' ? (
+              <QuickPairingTab onMatched={openGame} subscribeMatchFound={subscribeMatchFound} />
+            ) : null}
             {tab === 'invite' ? <CreateInviteTab onCreated={openGame} /> : null}
             {poolOpened ? (
               <div class="m2-tab-panel" hidden={tab !== 'pool'}>
