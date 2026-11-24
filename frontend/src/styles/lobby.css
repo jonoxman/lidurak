@@ -1,30 +1,37 @@
 /*
- * M2 homepage lobby — dark Lichess-inspired palette.
+ * M2 homepage lobby — built on the Milestone 1 design system.
  *
- * Page background #161512, surfaces #262421, primary text #bababa, live/CTA
- * green #629924 and the trump/accent red #c33. Layout is CSS Grid and Flexbox
- * only: no absolutely or fixed-positioned panels, and every grid child keeps
- * `min-width: 0` so long names and preset labels wrap instead of overflowing.
+ * Every surface, border, text, muted label, accent and error colour aliases an
+ * M1 token (`--bg-*`, `--app-*`, `--ui-select-*`), so the Theme choice in the
+ * profile menu repaints the whole lobby and the live room. Layout is CSS Grid
+ * and Flexbox only: no absolutely or fixed-positioned panels, and every grid
+ * child keeps `min-width: 0` so long names and preset labels wrap instead of
+ * overflowing.
  */
 
 /* T-96 ITEM-2: the M2 palette is shared by both M2 shells. `MultiplayerGamePage`
    renders `.m2-button` and `.m2-status-text` too, so declaring the tokens on
    `.m2-lobby` alone left every table action button with undefined custom
-   properties (dark `#14130f` text on a transparent background over the dark
-   `#262421` shell, and borderless secondary buttons). */
+   properties (dark `--app-on-accent` text on a transparent background over the
+   dark shell, and borderless secondary buttons). */
+/* T-95: the M2 tokens are M1 aliases rather than a second hardcoded palette.
+   `html[data-theme='light']` in `app.css` redefines every M1 token, so one
+   profile-menu switch updates backgrounds, panels, tiles, borders, badges,
+   inputs, text and buttons together. */
 .m2-lobby,
 .multiplayer-page {
-  --m2-bg: #161512;
-  --m2-surface: #262421;
-  --m2-surface-raised: #2f2c28;
-  --m2-border: #3d3a35;
-  --m2-text: #bababa;
-  --m2-text-strong: #f1f1f1;
-  --m2-muted: #8f8b84;
-  --m2-green: #629924;
-  --m2-green-soft: rgba(98, 153, 36, 0.16);
-  --m2-red: #c33;
-  --m2-red-soft: rgba(204, 51, 51, 0.16);
+  --m2-bg: var(--bg-base, #161512);
+  --m2-surface: var(--bg-surface, #262421);
+  --m2-surface-raised: var(--bg-elevated, #2b2925);
+  --m2-border: var(--app-border, #3a3733);
+  --m2-text: var(--app-text, #bababa);
+  --m2-text-strong: var(--app-text-strong, #f5f1e6);
+  --m2-muted: var(--app-muted, #8f8b84);
+  --m2-green: var(--app-accent, #629924);
+  --m2-green-soft: var(--app-accent-soft, rgba(98, 153, 36, 0.18));
+  --m2-red: var(--app-danger, #cc3333);
+  --m2-red-soft: var(--app-danger-soft, rgba(204, 51, 51, 0.16));
+  --m2-on-accent: var(--app-on-accent, #14130f);
 }
 
 .m2-lobby {
@@ -210,7 +217,7 @@
   padding: 0.05rem 0.4rem;
   border-radius: 999px;
   background: var(--m2-green);
-  color: #14130f;
+  color: var(--m2-on-accent);
   font-size: 0.75rem;
   font-weight: 700;
 }
@@ -258,7 +265,7 @@
   border: 1px solid var(--m2-green);
   border-radius: 7px;
   background: var(--m2-green);
-  color: #14130f;
+  color: var(--m2-on-accent);
   font: inherit;
   font-weight: 700;
   cursor: pointer;
@@ -323,18 +330,25 @@
   min-width: 0;
 }
 
+/* T-95 ITEM-1: the six preset tiles are roughly twice their old height. The
+   grid columns, gaps and responsive breakpoints are untouched; the extra
+   height comes from `min-height` plus doubled vertical padding, with the twice
+   centered as a flex column. */
 .quick-pair-tile {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 0.3rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
   min-width: 0;
-  padding: 0.85rem 0.75rem;
+  min-height: 8.5rem;
+  padding: 1.7rem 0.75rem;
   border: 1px solid var(--m2-border);
   border-radius: 9px;
   background: var(--m2-surface-raised);
   color: var(--m2-text);
   font: inherit;
-  text-align: left;
+  text-align: center;
   cursor: pointer;
 }
 
@@ -497,16 +511,16 @@
   min-width: 0;
 }
 
-/* --- Create Invite Link ------------------------------------------------- */
+/* --- Create a Game ------------------------------------------------------ */
 
-.create-invite-form {
+.create-game-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 0.8rem;
   min-width: 0;
 }
 
-.create-invite-group {
+.create-game-group {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 0.35rem;
@@ -516,7 +530,19 @@
   border: none;
 }
 
-.create-invite-group legend {
+/* T-95 ITEM-2: privacy is the first decision, so its segmented control sits at
+   the top of the form and each option gets an even half of the row. */
+.create-game-visibility .segmented {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.create-game-visibility .segmented-option {
+  padding-block: 0.6rem;
+}
+
+.create-game-group legend {
   padding: 0;
   color: var(--m2-muted);
   font-size: 0.78rem;
@@ -556,13 +582,13 @@
   outline: none;
 }
 
-.create-invite-note {
+.create-game-note {
   margin: 0;
   color: var(--m2-muted);
   font-size: 0.78rem;
 }
 
-.create-invite-toggle {
+.create-game-toggle {
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -570,11 +596,11 @@
   font-size: 0.85rem;
 }
 
-.create-invite-toggle input {
+.create-game-toggle input {
   accent-color: var(--m2-green);
 }
 
-.create-invite-form > .m2-button {
+.create-game-form > .m2-button {
   justify-self: start;
 }
 

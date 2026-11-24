@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/preact';
+import { fireEvent, render, screen, waitFor } from '@testing-library/preact';
+import { resetSettings } from '../state/settings';
 
 vi.mock('../api/client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/client')>();
@@ -116,6 +117,7 @@ const WAITING_VIEW: PlayerGameView = {
 
 describe('App', () => {
   beforeEach(() => {
+    resetSettings();
     window.history.replaceState({}, '', '/');
     window.location.hash = '';
     getGameView.mockReset();
@@ -177,6 +179,30 @@ describe('App', () => {
     expect(screen.getByRole('link', { name: 'LIDURAK' }).getAttribute('href')).toBe('#/');
     expect(screen.getByRole('button', { name: 'Account menu' })).toBeTruthy();
     await screen.findByRole('button', { name: 'Create Game' });
+  });
+
+  it('repaints the lobby when the profile menu theme changes', async () => {
+    render(<App />);
+
+    await screen.findByTestId('m2-lobby');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Account menu' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Theme' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Light' }));
+
+    await waitFor(() =>
+      expect(document.documentElement.getAttribute('data-theme')).toBe('light'),
+    );
+    // Still on the lobby, now rendered from the M1 Light tokens.
+    expect(screen.getByTestId('m2-lobby')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Dark' }));
+    await waitFor(() =>
+      expect(document.documentElement.getAttribute('data-theme')).toBe('dark'),
+    );
+    expect(screen.getByTestId('m2-lobby')).toBeTruthy();
+
+    resetSettings();
   });
 
   it('waits on the loading view instead of the lobby until the backend is ready', async () => {

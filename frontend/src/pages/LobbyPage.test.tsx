@@ -71,6 +71,15 @@ let socketHandlers: import('../api/lobbyClient').LobbySocketHandlers | null = nu
 
 const renderLobby = () => render(<LobbyPage initialServerReady />);
 
+/** Declarations of the first rule whose selector text contains `selector`. */
+function cssRule(css: string, selector: string): string {
+  const start = css.indexOf(selector);
+  if (start === -1) return '';
+  const open = css.indexOf('{', start);
+  const close = css.indexOf('}', open);
+  return open === -1 || close === -1 ? '' : css.slice(open + 1, close);
+}
+
 /** The SPA opens M2 rooms with the History API, never a hash route. */
 const expectGamePath = (gameId: string) =>
   waitFor(() => {
@@ -127,7 +136,9 @@ describe('M2 LobbyPage', () => {
       screen.getByRole('tab', { name: 'Quick Pairing' }).getAttribute('aria-selected'),
     ).toBe('true');
     expect(screen.getByRole('tab', { name: /Lobby Pool/ })).toBeTruthy();
-    expect(screen.getByRole('tab', { name: 'Create Invite Link' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Create a Game' })).toBeTruthy();
+    // The old M2 label is gone from the rendered lobby.
+    expect(screen.queryByText(/Create Invite Link/)).toBeNull();
     expect(screen.getByTestId('lobby-connection').textContent).toContain('Lobby idle');
   });
 
@@ -148,12 +159,49 @@ describe('M2 LobbyPage', () => {
   it('opens Quick Pairing on the Quick Pairing tab by default', () => {
     renderLobby();
 
+    for (const testId of [
+      'quick-pair-2-15',
+      'quick-pair-2-30',
+      'quick-pair-3-15',
+      'quick-pair-3-30',
+      'quick-pair-4-15',
+      'quick-pair-4-30',
+    ]) {
+      expect(screen.getByTestId(testId)).toBeTruthy();
+    }
     expect(screen.getByRole('button', { name: /2P • 15s/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: /2P • 30s/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: /3P • 15s/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: /3P • 30s/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: /4P • 15s/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: /4P • 30s/ })).toBeTruthy();
+  });
+
+  it('orders the Create a Game form visibility first, then rules and the CTA', () => {
+    renderLobby();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Create a Game' }));
+
+    const titled = screen.getByRole('region', { name: 'Create a Game' });
+    expect(
+      within(titled).getByRole('heading', { name: 'Create a Game' }),
+    ).toBeTruthy();
+
+    // DOM order, not just presence: privacy is the first decision.
+    const order = [
+      'create-game-visibility',
+      'create-game-players',
+      'create-game-redirect',
+      'create-game-clock',
+      'create-game-submit',
+    ].map((testId) => screen.getByTestId(testId));
+
+    for (let index = 1; index < order.length; index += 1) {
+      expect(
+        order[index - 1].compareDocumentPosition(order[index]) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    }
   });
 
   it('joins a Quick Pairing preset and navigates to its game table', async () => {
@@ -239,7 +287,7 @@ describe('M2 LobbyPage', () => {
   it('creates a configured invite room and opens it', async () => {
     renderLobby();
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Create Invite Link' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Create a Game' }));
     fireEvent.click(screen.getByRole('button', { name: '4 players' }));
     fireEvent.click(screen.getByLabelText(/Redirect \/ reflect/));
     fireEvent.click(screen.getByRole('button', { name: '30s' }));
@@ -340,8 +388,33 @@ describe('lobby.css visual invariants', () => {
   it('shares the M2 palette and button styling with the multiplayer shell', () => {
     // T-96 ITEM-2: the tokens live on both M2 shells, not the lobby alone.
     expect(lobbyCss).toMatch(/\.m2-lobby,\s*\n\.multiplayer-page \{/);
-    expect(lobbyCss).toContain('--m2-text-strong: #f1f1f1;');
     expect(lobbyCss).toContain('.multiplayer-page .m2-button.secondary');
+  });
+
+  it('aliases the M1 theme tokens so the profile-menu theme repaints the lobby', () => {
+    // T-95: no second hardcoded palette — every M2 surface is an M1 variable.
+    expect(lobbyCss).toMatch(/--m2-bg: var\(--bg-base/);
+    expect(lobbyCss).toMatch(/--m2-surface: var\(--bg-surface/);
+    expect(lobbyCss).toMatch(/--m2-surface-raised: var\(--bg-elevated/);
+    expect(lobbyCss).toMatch(/--m2-border: var\(--app-border/);
+    expect(lobbyCss).toMatch(/--m2-text-strong: var\(--app-text-strong/);
+    expect(lobbyCss).toMatch(/--m2-muted: var\(--app-muted/);
+    expect(lobbyCss).toMatch(/--m2-green: var\(--app-accent/);
+  });
+
+  it('doubles the quick-pairing tile height without changing the grid', () => {
+    const tile = cssRule(lobbyCss, '.quick-pair-tile');
+    expect(tile).toContain('min-height: 8.5rem;');
+    expect(tile).toContain('padding: 1.7rem 0.75rem;');
+    expect(tile).toContain('flex-direction: column;');
+    expect(tile).toContain('justify-content: center;');
+    // The responsive columns are untouched.
+    expect(cssRule(lobbyCss, '.quick-pair-grid')).toContain(
+      'grid-template-columns: repeat(3, minmax(0, 1fr));',
+    );
+    expect(lobbyCss).toMatch(
+      /@media \(max-width: 640px\)[\s\S]*?\.quick-pair-grid\s*{[^}]*repeat\(2, minmax\(0, 1fr\)\)/,
+    );
   });
 
   it('adapts below 640px and caps the desktop shell', () => {

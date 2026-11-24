@@ -11,6 +11,13 @@
   --app-profile-hover: #6cb2e8;
   --app-input-bg: #161512;
   --app-shadow: 0 18px 36px rgba(0, 0, 0, 0.42);
+  /* T-95: neutral semantic aliases the M2 lobby shares with the M1 chrome.
+     Muted labels, error surfaces and the label colour on an accent fill all
+     resolve per theme, so no lobby rule needs a hardcoded hex. */
+  --app-muted: #8f8b84;
+  --app-danger: #cc3333;
+  --app-danger-soft: rgba(204, 51, 51, 0.16);
+  --app-on-accent: #14130f;
   --app-roundness: 8px;
   /* T-90-feedback-4: neutral page/surface aliases plus the header-gradient
      tokens. Dark mode is the "darkening" direction: the header starts lighter
@@ -66,6 +73,10 @@ html[data-theme='light'] {
   --app-profile-hover: #1f6fa8;
   --app-input-bg: #f2f5f9;
   --app-shadow: 0 18px 36px rgba(31, 41, 55, 0.16);
+  --app-muted: #52616f;
+  --app-danger: #b3261e;
+  --app-danger-soft: rgba(179, 38, 30, 0.12);
+  --app-on-accent: #ffffff;
   /* T-90-feedback-4 ITEM-NEW-1b: the inverse header gradient. It starts at the
      darker header shade, passes through the bar and reaches --bg-base ~100px
      below the header (160px from the top of the viewport). */
@@ -116,6 +127,10 @@ html[data-theme='light'] {
     --app-profile-hover: #1f6fa8;
     --app-input-bg: #f2f5f9;
     --app-shadow: 0 18px 36px rgba(31, 41, 55, 0.16);
+    --app-muted: #52616f;
+    --app-danger: #b3261e;
+    --app-danger-soft: rgba(179, 38, 30, 0.12);
+    --app-on-accent: #ffffff;
     --header-bg-top: #b8c0cc;
     --header-gradient-mid: #c8cfd9;
     --header-gradient-extent: 160px;

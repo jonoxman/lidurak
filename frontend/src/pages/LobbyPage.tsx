@@ -8,7 +8,7 @@ import {
 } from '../api/client';
 import { fetchLobbyRooms } from '../api/lobbyClient';
 import { getOrCreateSession, updateGuestName } from '../api/sessionClient';
-import { CreateInviteTab } from '../components/lobby/CreateInviteTab';
+import { CreateGameTab } from '../components/lobby/CreateGameTab';
 import { LobbyPoolTab } from '../components/lobby/LobbyPoolTab';
 import { QaLobbyPresets } from '../components/lobby/QaLobbyPresets';
 import { QuickPairingTab } from '../components/lobby/QuickPairingTab';
@@ -33,12 +33,12 @@ const HEALTH_POLL_MS = 1000;
 /** Gateway/proxy statuses that mean "the backend is still warming up". */
 const WARMUP_STATUS = /50[0234]/;
 
-type LobbyTabId = 'quick' | 'pool' | 'invite';
+type LobbyTabId = 'quick' | 'pool' | 'create';
 
 const LOBBY_TABS: ReadonlyArray<{ id: LobbyTabId; label: string }> = [
   { id: 'quick', label: 'Quick Pairing' },
   { id: 'pool', label: 'Lobby Pool' },
-  { id: 'invite', label: 'Create Invite Link' },
+  { id: 'create', label: 'Create a Game' },
 ];
 
 interface CreatedRoom {
@@ -277,7 +277,7 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
             ) : null}
 
             {tab === 'quick' ? <QuickPairingTab onMatched={openGame} /> : null}
-            {tab === 'invite' ? <CreateInviteTab onCreated={openGame} /> : null}
+            {tab === 'create' ? <CreateGameTab onCreated={openGame} /> : null}
             {poolOpened ? (
               <div class="m2-tab-panel" hidden={tab !== 'pool'}>
                 <LobbyPoolTab
@@ -285,7 +285,7 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
                   onRoomsChange={setRooms}
                   onStatusChange={setPoolStatus}
                   onJoin={openGame}
-                  onCreateRoom={() => setTab('invite')}
+                  onCreateRoom={() => setTab('create')}
                 />
               </div>
             ) : null}
