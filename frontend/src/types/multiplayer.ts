@@ -89,6 +89,22 @@ export interface PlayerGameView {
   isDraw: boolean;
   durakId: string | null;
   turnDeadlineEpochMs: number | null;
+  /**
+   * T-95-2: non-secret interaction fields the shared M1 table reads. They are
+   * derived from the same strictly per-viewer engine projection, so they never
+   * reveal an opponent's hand or an undealt talon card.
+   */
+  legalActions?: string[];
+  throwInCards?: Card[];
+  throwInCapacity?: number;
+  canThrowIn?: boolean;
+  defenderDefenseless?: boolean;
+  promptedPlayerIds?: string[];
+  eligibleTargetIds?: string[];
+  redirectTargetId?: string | null;
+  lastDiscardCards?: Card[];
+  turnPlayerId?: string | null;
+  turnSecondsRemaining?: number;
 }
 
 /** One open public room in the lobby pool. */
@@ -324,6 +340,21 @@ export function parsePlayerGameView(value: unknown): PlayerGameView {
     isDraw: booleanOr(raw.isDraw, false),
     durakId: optionalString(raw.durakId),
     turnDeadlineEpochMs: optionalNumber(raw.turnDeadlineEpochMs),
+    legalActions: arrayOf(raw.legalActions, 'legalActions').map((action) => String(action)),
+    throwInCards: arrayOf(raw.throwInCards, 'throwInCards').map(parseCard),
+    throwInCapacity: numberOr(raw.throwInCapacity, 0),
+    canThrowIn: booleanOr(raw.canThrowIn, false),
+    defenderDefenseless: booleanOr(raw.defenderDefenseless, false),
+    promptedPlayerIds: arrayOf(raw.promptedPlayerIds, 'promptedPlayerIds').map((id) =>
+      String(id),
+    ),
+    eligibleTargetIds: arrayOf(raw.eligibleTargetIds, 'eligibleTargetIds').map((id) =>
+      String(id),
+    ),
+    redirectTargetId: optionalString(raw.redirectTargetId),
+    lastDiscardCards: arrayOf(raw.lastDiscardCards, 'lastDiscardCards').map(parseCard),
+    turnPlayerId: optionalString(raw.turnPlayerId),
+    turnSecondsRemaining: numberOr(raw.turnSecondsRemaining, 0),
   };
 }
 

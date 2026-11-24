@@ -591,19 +591,25 @@ function zeroDeltas(count: number): number[] {
  *   overlap. Nothing behind the cursor competes for the reveal, so the
  *   hovered card's exposed margin `x(h + 1) - x(h)` is strictly the widest in
  *   the hand (lane-bounded only at the right end of the row).
- * - Only `hoveredIndex + 1 .. hoveredIndex + radius` may move, each rightward
- *   (`partDeltaX > 0`). Every card outside that window gets an exact `0`
- *   delta, so a 30-card hovered hand keeps 26 cards overlapping exactly as the
- *   hand size demands.
+ * - Only `hoveredIndex + 1 .. hoveredIndex + radius` may move. The immediate
+ *   neighbour opens rightward (`partDeltaX > 0`); the rest of the window may
+ *   also compress toward the fixed right edge. Every card outside that window
+ *   gets an exact `0` delta, so a 30-card hovered hand keeps 26 cards
+ *   overlapping exactly as the hand size demands.
  * - Inside that window the resting span from the hovered card to the first
- *   untouched card (or to the lane edge at the end of the hand) is fixed, and
- *   the gaps inside it are re-weighted by [[hoverPartingWeight]]: full opening
- *   on the immediate neighbour, a fifth on the next, a twentieth on the third.
+ *   untouched card (or to the LAST card's resting right edge) is fixed, and the
+ *   gaps inside it are re-weighted by [[hoverPartingWeight]]: full opening on
+ *   the immediate neighbour, a fifth on the next, a twentieth on the third.
  *   The fit scale shrinks every gap in that window by the same factor when the
  *   span cannot hold the flare, which keeps the coordinates strictly ordered
  *   (`delta(j) - delta(j + 1)` never exceeds the resting step), keeps every
  *   card inside the hand lane, and pins every card beyond the window to its
  *   resting slot.
+ * - T-95-2: the hand's outer edges never move. The right boundary is the last
+ *   card's resting left edge, never the wider lane runway, so hovering only
+ *   redistributes space inside the resting span (near neighbours spread, the
+ *   remaining cards in the window are pushed closer together) and the total
+ *   rendered width is strictly constant.
  * - The hovered card itself never moves and a single-card hand never parts.
  * - Hovering the rightmost card moves nothing at all: it already paints fully
  *   on top of the stack, and opening `h - 1` behind it would re-create the
@@ -643,7 +649,14 @@ export function computeLocalizedPartingDeltas(
     Math.floor(finiteOr(radius, HAND_HOVER_PARTING_RADIUS)),
   );
   const pivot = basePositions[hovered];
-  const rightBound = Math.max(pivot, boxWidth - width);
+  // T-95-2: never part past the last card's resting right edge. The lane may
+  // offer extra runway to its right, but growing into it would widen the hand
+  // on mouseover; the span between the hovered card and the rightmost card is
+  // the constant box the local flare redistributes space inside.
+  const rightBound = Math.max(
+    pivot,
+    Math.min(boxWidth - width, basePositions[count - 1]),
+  );
 
   // Single-card reveal: only the right side opens. A left neighbour at its
   // resting overlap keeps `x(h) - x(h - 1) === restingStep`, so the hovered

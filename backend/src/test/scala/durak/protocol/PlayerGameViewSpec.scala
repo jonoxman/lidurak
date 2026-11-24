@@ -120,6 +120,36 @@ class PlayerGameViewSpec extends munit.FunSuite:
     assertEquals(view.players.map(_.cardCount), Vector(2, 3, 2, 1))
   }
 
+  test("interaction fields mirror the seated engine projection and stay empty for spectators") {
+    val engine = durak.engine.PlayerGameView.forViewer(baseState, "alice")
+    val view = viewFor("alice")
+
+    assertEquals(view.legalActions, engine.legalActions.toVector)
+    assertEquals(view.throwInCards, engine.throwInCards.toVector)
+    assertEquals(view.throwInCapacity, engine.throwInCapacity)
+    assertEquals(view.canThrowIn, engine.canThrowIn)
+    assertEquals(view.defenderDefenseless, engine.defenderDefenseless)
+    assertEquals(view.promptedPlayerIds, engine.promptedPlayerIds)
+    assertEquals(view.eligibleTargetIds, engine.eligibleTargetIds)
+    assertEquals(view.redirectTargetId, engine.redirectTargetId)
+    assertEquals(view.lastDiscardCards, engine.lastDiscardCards)
+    assertEquals(view.turnPlayerId, engine.turnPlayerId)
+
+    // A spectator never receives a hand-derived interaction field.
+    val spectator = viewFor("anonymous-spectator")
+    assertEquals(spectator.legalActions, Vector.empty)
+    assertEquals(spectator.throwInCards, Vector.empty)
+    assertEquals(spectator.throwInCapacity, 0)
+    assertEquals(spectator.canThrowIn, false)
+    assertEquals(spectator.promptedPlayerIds, Vector.empty)
+    assertEquals(spectator.eligibleTargetIds, Vector.empty)
+  }
+
+  test("the interaction fields round-trip through the wire codec") {
+    val view = viewFor("alice")
+    assertEquals(parser.decode[PlayerGameView](view.asJson.noSpaces), Right(view))
+  }
+
   test("seats and players carry public status only") {
     val view = viewFor("alice")
 
@@ -381,7 +411,10 @@ class PlayerGameViewSpec extends munit.FunSuite:
     assertEquals(topLevelKeys, Set("type", "view"))
     assert(!viewKeys.contains("talon"), viewKeys.toString)
     assert(!viewKeys.contains("discardPile"), viewKeys.toString)
-    assert(!viewKeys.contains("lastDiscardCards"), viewKeys.toString)
+    // T-95-2: the most recent discard is face-up public table information,
+    // which the shared M1 table renders. The pile itself and every opponent
+    // hand stay absent.
+    assert(viewKeys.contains("lastDiscardCards"), viewKeys.toString)
     assert(!viewKeys.contains("players.cardLists"), viewKeys.toString)
 
     (bobHand ++ carolHand ++ daveHand).foreach(assertCardAbsent(encoded, _))

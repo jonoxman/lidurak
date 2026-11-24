@@ -129,8 +129,12 @@ describe('App', () => {
 
     render(<App />);
 
-    expect(await screen.findByTestId('multiplayer-game')).toBeTruthy();
-    expect(await screen.findByTestId('waiting-room')).toBeTruthy();
+    // T-95-2: the room opens into the full Milestone 1 gameplay shell.
+    expect(await screen.findByTestId('multiplayer-room-panel')).toBeTruthy();
+    expect(await screen.findByTestId('waiting-seat-count')).toBeTruthy();
+    expect(document.querySelector('[data-zone="sidebar-left"]')).toBeTruthy();
+    expect(document.querySelector('[data-zone="table-arena"]')).toBeTruthy();
+    expect(document.querySelector('[data-zone="sidebar-right"]')).toBeTruthy();
     expect(screen.getByText('Room room-42')).toBeTruthy();
     expect(fetchGameView).toHaveBeenCalledWith('room-42');
   });

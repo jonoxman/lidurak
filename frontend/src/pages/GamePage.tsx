@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
+import type { ComponentChildren } from 'preact';
 import { ActionBar } from '../components/ActionBar';
 import { GameTable, TableDeck, cardKey, defenderDoubleClickAction } from '../components/GameTable';
 import { SortBar, type SortMode } from '../components/SortBar';
@@ -381,6 +382,20 @@ export interface GamePageProps {
   onNavigateGame?: (gameId: string, playerId?: string) => void;
   /** Leaves the table; defaults to the root URL when the router owns it. */
   onLeaveGame?: () => void;
+  /**
+   * T-95-2: multiplayer mode. The adapter owns the room socket and hands this
+   * shared M1 page a pre-built per-viewer projection; the M1 hash route keeps
+   * its own socket/REST/replay path untouched.
+   */
+  externalMode?: boolean;
+  /** The multiplayer viewer's M1-shaped projection. */
+  externalView?: PlayerGameView | null;
+  /** Multiplayer socket connection state, shown in the page header. */
+  externalLive?: boolean;
+  /** One engine action becomes one multiplayer WebSocket frame. */
+  onExternalAction?: (action: GameAction) => void;
+  /** Room info / invite / join-left panel at the top of the left sidebar. */
+  headerPanel?: ComponentChildren;
 }
 
 export function GamePage({
@@ -389,8 +404,14 @@ export function GamePage({
   onSwitchPlayer,
   onNavigateGame,
   onLeaveGame,
+  externalMode = false,
+  externalView = null,
+  externalLive = false,
+  onExternalAction,
+  headerPanel,
 }: GamePageProps) {
-  const [view, setView] = useState<PlayerGameView | null>(null);
+  const isMultiplayer = externalMode === true;
+  const [internalView, setView] = useState<PlayerGameView | null>(null);
   // Hand indices are kept together with the view they were picked against, so
   // a new authoritative view invalidates the selection without an effect that
   // could race a click.
@@ -398,7 +419,11 @@ export function GamePage({
     view: PlayerGameView;
     indices: Set<number>;
   } | null>(null);
-  const [live, setLive] = useState(false);
+  const [internalLive, setLive] = useState(false);
+  // The multiplayer adapter supplies the view and the socket; the local M1 hash
+  // route keeps using the state above. Everything below reads one `view`.
+  const view = isMultiplayer ? (externalView ?? null) : internalView;
+  const live = isMultiplayer ? externalLive : internalLive;
   const [now, setNow] = useState(() => Date.now());
   const socketRef = useRef<GameWebSocket | null>(null);
   const previousViewRef = useRef<PlayerGameView | null>(null);
@@ -468,6 +493,8 @@ export function GamePage({
   };
 
   useEffect(() => {
+    // The multiplayer adapter owns the room socket and the initial projection.
+    if (isMultiplayer) return undefined;
     let active = true;
     // ITEM-PB-12a: only a new match resets the table and the review position —
     // switching the inspected seat keeps the frame the reviewer is on.
@@ -521,12 +548,14 @@ export function GamePage({
       socket.disconnect();
       if (socketRef.current === socket) socketRef.current = null;
     };
-  }, [gameId, playerId]);
+  }, [gameId, playerId, isMultiplayer]);
 
   // ITEM-PB-12a: the recorded match belongs to the game, never to the inspected
   // seat, so it is fetched once per match. Opening a finished game's URL (or a
   // live room that is gone) still hydrates the table and the review controls.
   useEffect(() => {
+    // Multiplayer rooms have no M1 replay endpoint; the socket view is the truth.
+    if (isMultiplayer) return undefined;
     let active = true;
     const loadReplay = async () => {
       try {
@@ -551,7 +580,7 @@ export function GamePage({
     return () => {
       active = false;
     };
-  }, [gameId]);
+  }, [gameId, isMultiplayer]);
 
   // Browsers only unlock audio from a user gesture; do it once per page.
   useEffect(() => {
@@ -644,6 +673,7 @@ export function GamePage({
   // can step through it. A missing or failing endpoint leaves the live view in
   // place instead of breaking the page.
   useEffect(() => {
+    if (isMultiplayer) return undefined;
     if (!gameOverPhase) {
       setLoadedReplay(null);
       setReplayFrameIdx(0);
@@ -673,7 +703,7 @@ export function GamePage({
     return () => {
       active = false;
     };
-  }, [gameId, gameOverPhase]);
+  }, [gameId, gameOverPhase, isMultiplayer]);
 
   // Item 13: remember every real name seen in a live view or a replay frame so
   // the POV menu can label each seat even when the current frame omits it.
@@ -1059,6 +1089,11 @@ export function GamePage({
     // ITEM-ADD-9: never play a card, surrender or pass on a bot's behalf.
     if (isBotViewer) {
       console.warn('Ignored action: the inspected seat is a bot');
+      return;
+    }
+    if (onExternalAction) {
+      onExternalAction(action);
+      clearSelection();
       return;
     }
     const socket = socketRef.current;
@@ -1488,7 +1523,8 @@ export function GamePage({
   // server-side config flag that defaults to active) keeps it open during live
   // play; without it the rows unlock once the match is over in review mode.
   const canSwitchPov =
-    displayedView.devMode !== false || isGameOverPhase(displayedView.boutPhase);
+    !isMultiplayer &&
+    (displayedView.devMode !== false || isGameOverPhase(displayedView.boutPhase));
   const playersPanel = (
     <section class="panel players-panel" data-testid="players-panel" aria-label="Player status">
       <h2>Players</h2>
@@ -1744,16 +1780,19 @@ export function GamePage({
               {durakId === view.myId ? 'Durak: you' : `Durak: ${nameFor(durakId)}`}
             </span>
           ) : null}
-          {/* Item 9 / ITEM-PB-9: play again with the same seats, or leave. */}
-          <button
-            type="button"
-            class="action-button green banner-rematch-button"
-            data-testid="banner-rematch-button"
-            disabled={rematchPending}
-            onClick={rematch}
-          >
-            {rematchPending ? 'Starting…' : 'Rematch'}
-          </button>
+          {/* Item 9 / ITEM-PB-9: play again with the same seats, or leave.
+              Multiplayer rooms have no local rematch: the room adapter owns it. */}
+          {!isMultiplayer ? (
+            <button
+              type="button"
+              class="action-button green banner-rematch-button"
+              data-testid="banner-rematch-button"
+              disabled={rematchPending}
+              onClick={rematch}
+            >
+              {rematchPending ? 'Starting…' : 'Rematch'}
+            </button>
+          ) : null}
           <button
             type="button"
             class="action-button banner-lobby-button"
@@ -1767,11 +1806,18 @@ export function GamePage({
 
       <div class="game-shell">
         <aside class="game-sidebar sidebar-left" data-zone="sidebar-left">
+          {/* T-95-2: the multiplayer room panel (invite link, seats, join/leave)
+              lives at the top of the same left column. */}
+          {headerPanel}
+
           {/* ITEM-14a: PLAYERS is the top element of the left column and the
               only POV switcher in the UI. */}
           {playersPanel}
 
-          {/* QA presets: jump straight into a scripted position in one click. */}
+          {/* QA presets: jump straight into a scripted position in one click.
+              Multiplayer rooms own their lifecycle, so the local presets are
+              hidden there. */}
+          {!isMultiplayer ? (
           <section
             class="panel qa-scenarios-panel"
             data-testid="qa-scenarios"
@@ -1799,6 +1845,7 @@ export function GamePage({
               </p>
             ) : null}
           </section>
+          ) : null}
 
           <section class="panel" aria-label="How to Play">
             <h2>How to Play</h2>

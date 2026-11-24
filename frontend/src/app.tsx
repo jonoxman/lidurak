@@ -3,7 +3,7 @@ import { HeaderBar } from './components/HeaderBar';
 import { initSettings } from './state/settings';
 import { GamePage } from './pages/GamePage';
 import { LobbyPage } from './pages/LobbyPage';
-import { MultiplayerGamePage } from './pages/MultiplayerGamePage';
+import { MultiplayerGameRoute } from './pages/MultiplayerGameRoute';
 import { navigateToLobby, useRoute } from './router/useRoute';
 
 interface LobbyRoute {
@@ -95,7 +95,7 @@ export function App() {
       ) : showLobby || route.kind === 'lobby' ? (
         <LobbyPage />
       ) : (
-        <MultiplayerGamePage gameId={route.gameId} onNavigateLobby={navigateToLobby} />
+        <MultiplayerGameRoute gameId={route.gameId} onNavigateLobby={navigateToLobby} />
       )}
     </div>
   );

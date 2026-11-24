@@ -2923,3 +2923,73 @@ body[data-dragging='true'] * {
     --card-h: 68px;
   }
 }
+
+/* --- T-95-2: multiplayer room panel (left sidebar) ------------------------- */
+
+.multiplayer-room-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.5rem;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.multiplayer-room-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.multiplayer-room-label {
+  margin: 0;
+  min-width: 0;
+  color: var(--sidebar-muted, #8f8b84);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.multiplayer-invite-url {
+  display: block;
+  min-width: 0;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--panel-border, rgba(186, 186, 186, 0.3));
+  border-radius: var(--app-roundness, 8px);
+  background: var(--panel-inset, rgba(0, 0, 0, 0.18));
+  color: inherit;
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+.multiplayer-seat-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 0;
+}
+
+.multiplayer-seat-list > li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.multiplayer-presence {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: var(--sidebar-muted, #8f8b84);
+}
+
+.multiplayer-presence[data-present='true'] {
+  background: var(--role-attacker-border, #629924);
+}
+
+.multiplayer-connection[data-status='connected'] {
+  color: var(--role-attacker-border, #629924);
+}

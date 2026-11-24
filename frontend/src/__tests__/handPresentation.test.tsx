@@ -507,12 +507,11 @@ describe('T-90-feedback-5 ITEM-6a/6b/6c: smooth hover parting', () => {
     expect(zone.getAttribute('data-parting-active')).toBe('false');
   });
 
-  it('ITEM-6b: visibly parts every multi-card hand size around the hovered card', () => {
+  it('ITEM-6b / T-95-2: visibly parts multi-card hands while the outer span stays constant', () => {
     const cases: Array<{ count: number; index: number; left?: number; right?: number }> = [
-      { count: 2, index: 0, right: 1 },
-      { count: 3, index: 1, left: 0, right: 2 },
-      { count: 4, index: 2, left: 1, right: 3 },
-      { count: 5, index: 3, left: 2, right: 4 },
+      { count: 3, index: 0, right: 1 },
+      { count: 4, index: 1, right: 2 },
+      { count: 5, index: 2, right: 3 },
       { count: 6, index: 2, left: 1, right: 3 },
       { count: 14, index: 7, left: 6, right: 8 },
       { count: 30, index: 15, left: 14, right: 16 },
@@ -531,6 +530,13 @@ describe('T-90-feedback-5 ITEM-6a/6b/6c: smooth hover parting', () => {
       // The hovered card never moves; only its right neighbour visibly parts.
       expect(after[index], `${count}-card hovered card`).toBe(before[index]);
       expect(Number(handWrappers()[index].getAttribute('data-part-delta-x'))).toBe(0);
+      // T-95-2: the hand's total rendered span is identical on mouseover.
+      expect(after[count - 1] - after[0], `${count}-card span`).toBeCloseTo(
+        before[count - 1] - before[0],
+        2,
+      );
+      expect(after[0], `${count}-card left edge`).toBe(before[0]);
+      expect(after[count - 1], `${count}-card right edge`).toBe(before[count - 1]);
       if (left !== undefined) {
         expect(after[left], `${count}-card left neighbour`).toBe(before[left]);
         expect(handWrappers()[left].getAttribute('data-part-direction')).toBe('none');
@@ -547,6 +553,28 @@ describe('T-90-feedback-5 ITEM-6a/6b/6c: smooth hover parting', () => {
         if (Number(wrapper.getAttribute('data-part-delta-x')) === 0) continue;
         expect(wrapper.style.transform).toContain('translate3d(');
       }
+      view.unmount();
+    }
+
+    // T-95-2: near the right end only the final gap remains. Growing it would
+    // widen the hand, so those hovers keep the row exactly where it rests.
+    const fixedHovers: Array<{ count: number; index: number }> = [
+      { count: 2, index: 0 },
+      { count: 3, index: 1 },
+      { count: 4, index: 2 },
+      { count: 5, index: 3 },
+      { count: 6, index: 4 },
+    ];
+    for (const { count, index } of fixedHovers) {
+      const view = mountTable(DECK.slice(0, count), { awaitingAttack: true });
+      const before = handWrappers().map((wrapper) =>
+        Number(wrapper.getAttribute('data-card-x')),
+      );
+      fireEvent.pointerMove(handWrappers()[index], { bubbles: true });
+      const after = handWrappers().map((wrapper) =>
+        Number(wrapper.getAttribute('data-card-x')),
+      );
+      expect(after, `${count}-card final-gap hover`).toEqual(before);
       view.unmount();
     }
   });
@@ -988,10 +1016,11 @@ describe('T-96 item 6: contour expansion never shifts the hand row', () => {
     expect(deltas[2]).toBe(0);
     // ... its right neighbour parts outward while the left one never moves ...
     expect(deltas[1]).toBe(0);
-    expect(deltas[3]).toBeCloseTo(28, 1);
-    // ... and the contour widens WITHOUT changing the stage's track width, so
-    // no `justify-content` re-centring can move the row (the old -17px jump).
-    expect(Number.parseFloat(contour.style.width)).toBeGreaterThan(contourWidthAtRest);
+    expect(deltas[3]).toBeGreaterThan(0);
+    // ... and T-95-2 keeps the outer span (and therefore the contour width and
+    // the stage's track width) strictly constant on mouseover.
+    expect(after[5]).toBe(before[5]);
+    expect(Number.parseFloat(contour.style.width)).toBeCloseTo(contourWidthAtRest, 2);
     expect(box.style.width).toBe(stageWidthAtRest);
   });
 });

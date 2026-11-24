@@ -139,7 +139,18 @@ object ProtocolCodecs:
       "finishOrder" -> view.finishOrder.asJson,
       "isDraw" -> view.isDraw.asJson,
       "durakId" -> view.durakId.asJson,
-      "turnDeadlineEpochMs" -> view.turnDeadlineEpochMs.asJson
+      "turnDeadlineEpochMs" -> view.turnDeadlineEpochMs.asJson,
+      "legalActions" -> view.legalActions.asJson,
+      "throwInCards" -> view.throwInCards.asJson,
+      "throwInCapacity" -> view.throwInCapacity.asJson,
+      "canThrowIn" -> view.canThrowIn.asJson,
+      "defenderDefenseless" -> view.defenderDefenseless.asJson,
+      "promptedPlayerIds" -> view.promptedPlayerIds.asJson,
+      "eligibleTargetIds" -> view.eligibleTargetIds.asJson,
+      "redirectTargetId" -> view.redirectTargetId.asJson,
+      "lastDiscardCards" -> view.lastDiscardCards.asJson,
+      "turnPlayerId" -> view.turnPlayerId.asJson,
+      "turnSecondsRemaining" -> view.turnSecondsRemaining.asJson
     )
   }
 
@@ -166,6 +177,44 @@ object ProtocolCodecs:
       isDraw <- cursor.downField("isDraw").as[Boolean]
       durakId <- cursor.downField("durakId").as[Option[String]]
       turnDeadlineEpochMs <- cursor.downField("turnDeadlineEpochMs").as[Option[Long]]
+      legalActions <- cursor
+        .downField("legalActions")
+        .as[Option[Vector[String]]]
+        .map(_.getOrElse(Vector.empty))
+      throwInCards <- cursor
+        .downField("throwInCards")
+        .as[Option[Vector[Card]]]
+        .map(_.getOrElse(Vector.empty))
+      throwInCapacity <- cursor
+        .downField("throwInCapacity")
+        .as[Option[Int]]
+        .map(_.getOrElse(0))
+      canThrowIn <- cursor
+        .downField("canThrowIn")
+        .as[Option[Boolean]]
+        .map(_.getOrElse(false))
+      defenderDefenseless <- cursor
+        .downField("defenderDefenseless")
+        .as[Option[Boolean]]
+        .map(_.getOrElse(false))
+      promptedPlayerIds <- cursor
+        .downField("promptedPlayerIds")
+        .as[Option[Vector[String]]]
+        .map(_.getOrElse(Vector.empty))
+      eligibleTargetIds <- cursor
+        .downField("eligibleTargetIds")
+        .as[Option[Vector[String]]]
+        .map(_.getOrElse(Vector.empty))
+      redirectTargetId <- cursor.downField("redirectTargetId").as[Option[String]]
+      lastDiscardCards <- cursor
+        .downField("lastDiscardCards")
+        .as[Option[Vector[Card]]]
+        .map(_.getOrElse(Vector.empty))
+      turnPlayerId <- cursor.downField("turnPlayerId").as[Option[String]]
+      turnSecondsRemaining <- cursor
+        .downField("turnSecondsRemaining")
+        .as[Option[Int]]
+        .map(_.getOrElse(0))
     yield PlayerGameView(
       gameId = gameId,
       status = status,
@@ -187,7 +236,18 @@ object ProtocolCodecs:
       finishOrder = finishOrder,
       isDraw = isDraw,
       durakId = durakId,
-      turnDeadlineEpochMs = turnDeadlineEpochMs
+      turnDeadlineEpochMs = turnDeadlineEpochMs,
+      legalActions = legalActions,
+      throwInCards = throwInCards,
+      throwInCapacity = throwInCapacity,
+      canThrowIn = canThrowIn,
+      defenderDefenseless = defenderDefenseless,
+      promptedPlayerIds = promptedPlayerIds,
+      eligibleTargetIds = eligibleTargetIds,
+      redirectTargetId = redirectTargetId,
+      lastDiscardCards = lastDiscardCards,
+      turnPlayerId = turnPlayerId,
+      turnSecondsRemaining = turnSecondsRemaining
     )
   }
 

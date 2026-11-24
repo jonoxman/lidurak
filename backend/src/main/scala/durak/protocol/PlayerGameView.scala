@@ -88,7 +88,27 @@ final case class PlayerGameView(
     finishOrder: Vector[String],
     isDraw: Boolean,
     durakId: Option[String],
-    turnDeadlineEpochMs: Option[Long]
+    turnDeadlineEpochMs: Option[Long],
+    /** Action ids the engine accepts for this viewer right now. */
+    legalActions: Vector[String] = Vector.empty,
+    /** Cards this viewer may throw in right now (public to its own seat). */
+    throwInCards: Vector[Card] = Vector.empty,
+    throwInCapacity: Int = 0,
+    canThrowIn: Boolean = false,
+    /** True while the seating defender has no legal cover and no redirect. */
+    defenderDefenseless: Boolean = false,
+    /** Seats the game is waiting on (several during a throw-in). */
+    promptedPlayerIds: Vector[String] = Vector.empty,
+    /** Seats the current attacker may aim at during the opening attack. */
+    eligibleTargetIds: Vector[String] = Vector.empty,
+    /** The seat a reflection would reach, so the table can point its arrow. */
+    redirectTargetId: Option[String] = None,
+    /** Face-up cards of the most recently settled bout. */
+    lastDiscardCards: Vector[Card] = Vector.empty,
+    /** Id of the player whose turn clock is running. */
+    turnPlayerId: Option[String] = None,
+    /** Whole seconds left on the running turn clock. */
+    turnSecondsRemaining: Int = 0
 )
 
 object PlayerGameView:
@@ -178,6 +198,15 @@ object PlayerGameView:
         .map(_.hand.toList)
         .getOrElse(Nil)
 
+    // The M1 per-viewer projection already owns every non-secret interaction
+    // field (legal moves, throw-in eligibility, prompts, clock). It is reused
+    // here for exactly one seated viewer; a spectator never builds one, so no
+    // hand-derived value can reach a read-only projection.
+    val engineView =
+      if viewerSeat.exists(idx => state.players.lift(idx).exists(_.id == viewerId)) then
+        Some(durak.engine.PlayerGameView.forViewer(state, viewerId))
+      else None
+
     val publicPlayers = state.players.zipWithIndex.map { case (player, seatIndex) =>
       PublicPlayerSummary(
         id = player.id,
@@ -215,7 +244,19 @@ object PlayerGameView:
       isDraw = state.isDraw,
       durakId = state.durak,
       turnDeadlineEpochMs =
-        if gameOver then None else turnDeadlineEpochMs.filter(_ > 0L)
+        if gameOver then None else turnDeadlineEpochMs.filter(_ > 0L),
+      legalActions = engineView.map(_.legalActions.toVector).getOrElse(Vector.empty),
+      throwInCards = engineView.map(_.throwInCards.toVector).getOrElse(Vector.empty),
+      throwInCapacity = engineView.map(_.throwInCapacity).getOrElse(0),
+      canThrowIn = engineView.exists(_.canThrowIn),
+      defenderDefenseless = engineView.exists(_.defenderDefenseless),
+      promptedPlayerIds = engineView.map(_.promptedPlayerIds).getOrElse(Vector.empty),
+      eligibleTargetIds = engineView.map(_.eligibleTargetIds).getOrElse(Vector.empty),
+      redirectTargetId = engineView.flatMap(_.redirectTargetId),
+      lastDiscardCards = engineView.map(_.lastDiscardCards).getOrElse(Vector.empty),
+      turnPlayerId = if gameOver then None else engineView.flatMap(_.turnPlayerId),
+      turnSecondsRemaining =
+        if gameOver then 0 else engineView.map(_.turnSecondsRemaining).getOrElse(0)
     )
 
   /** Resolves a viewer's seat from the lobby seats, never from game state. */
