@@ -2711,6 +2711,17 @@ body[data-dragging='true'] * {
   pointer-events: none;
 }
 
+/* T-90-feedback-20261124_002056-2 ITEM-5: the hover parting keeps the outer
+   edges of the hand exactly where they rest — `handLayout.ts` re-allocates the
+   interior gaps and every live move is a pure `translate3d` delta. No rule may
+   add a hover margin, width, padding or extra transform that could widen the
+   `.hand-cards` box. A one- or two-card hand has no interior gap at all, so its
+   hovered card is elevated in paint order instead (the outer width still never
+   changes). */
+.hand-card-wrapper[data-hover-elevated='true'] {
+  z-index: 5;
+}
+
 /* T-90-feedback-20261123_020207-4 ITEM-NEW2: the parting itself is an exact
    per-card `translate3d(...)` written inline from `handLayout.ts` (a full-card
    insertion gap at the live slot, exact `0` for every distant card).
