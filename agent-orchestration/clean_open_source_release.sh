@@ -49,7 +49,7 @@ case "$MODE" in
         SPEC.md \
         AGENTS.md \
         FEEDBACK.md \
-        FEEDBACK.backup.md \
+        BACKUP_FEEDBACK.md \
         .codebuffignore 2>/dev/null || true
 
       rm -rf \
@@ -59,7 +59,7 @@ case "$MODE" in
         SPEC.md \
         AGENTS.md \
         FEEDBACK.md \
-        FEEDBACK.backup.md \
+        BACKUP_FEEDBACK.md \
         .codebuffignore
 
       cat << 'GITIGNORE_EOF' > .gitignore

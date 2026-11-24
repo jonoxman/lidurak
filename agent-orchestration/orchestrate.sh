@@ -780,7 +780,7 @@ ${NOTES_BODY}" >/dev/null 2>&1 || true
         ':(exclude).reviews/*' \
         ':(exclude).tickets/*' \
         ':(exclude)agent-orchestration/*' \
-        ':(exclude)FEEDBACK*.md' > .reviews/changed_files.txt
+        ':(exclude)FEEDBACK*.md' ':(exclude)BACKUP_FEEDBACK.md' > .reviews/changed_files.txt
       git diff main...HEAD -- . \
         ':(exclude)*package-lock.json' \
         ':(exclude)*yarn.lock' \
@@ -790,7 +790,7 @@ ${NOTES_BODY}" >/dev/null 2>&1 || true
         ':(exclude).reviews/*' \
         ':(exclude).tickets/*' \
         ':(exclude)agent-orchestration/*' \
-        ':(exclude)FEEDBACK*.md' | head -c 40000 > .reviews/current.diff
+        ':(exclude)FEEDBACK*.md' ':(exclude)BACKUP_FEEDBACK.md' | head -c 40000 > .reviews/current.diff
     )
 
     local NOTES_CONTENT="No implementer notes provided."
@@ -1081,7 +1081,7 @@ check_and_compile_human_feedback() {
     echo "ℹ️  Placeholder note detected in FEEDBACK.md; skipping agent spawn and proceeding to human review."
     cat << 'RESET_EOF' > FEEDBACK.md
 <!-- Write your plain-English UI/UX feedback, bugs, or usability requests below this line. -->
-<!-- Note: Your previous feedback is always backed up in FEEDBACK.backup.md and .reviews/feedback_archive/ -->
+<!-- Note: Your previous feedback is always backed up in BACKUP_FEEDBACK.md and .reviews/feedback_archive/ -->
 
 RESET_EOF
     return 0
@@ -1104,9 +1104,9 @@ RESET_EOF
   echo "0" > .reviews/feedback_audit_passes
   echo "0" > .reviews/visual_qa_passes
 
-  # Preserve the PREVIOUS round's feedback before overwriting FEEDBACK.backup.md!
-  if [ -f FEEDBACK.backup.md ]; then
-    cp FEEDBACK.backup.md .reviews/previous_round_feedback.md
+  # Preserve the PREVIOUS round's feedback before overwriting BACKUP_FEEDBACK.md!
+  if [ -f BACKUP_FEEDBACK.md ]; then
+    cp BACKUP_FEEDBACK.md .reviews/previous_round_feedback.md
   else
     echo "No previous feedback round recorded." > .reviews/previous_round_feedback.md
   fi
@@ -1118,7 +1118,7 @@ RESET_EOF
     echo "No previous QA playbook recorded." > .reviews/previous_round_qa_playbook.md
   fi
 
-  cp FEEDBACK.md FEEDBACK.backup.md
+  cp FEEDBACK.md BACKUP_FEEDBACK.md
   cp FEEDBACK.md ".reviews/feedback_archive/FEEDBACK_${TIMESTAMP}.md"
   cp FEEDBACK.md FEEDBACK.in_progress.md
   rm -f .reviews/deferred_feedback_items.md .reviews/ambiguity_questions_raw.txt .reviews/stage_holistic.done .reviews/stage_visual_qa.done .reviews/stage_docs.done .reviews/stage_tech_qa.done
@@ -1238,7 +1238,7 @@ PROMPT_EOF
   else
     cat << 'RESET_EOF' > FEEDBACK.md
 <!-- Write your plain-English UI/UX feedback, bugs, or usability requests below this line. -->
-<!-- Note: Your previous feedback is always backed up in FEEDBACK.backup.md and .reviews/feedback_archive/ -->
+<!-- Note: Your previous feedback is always backed up in BACKUP_FEEDBACK.md and .reviews/feedback_archive/ -->
 
 RESET_EOF
   fi
@@ -1247,7 +1247,7 @@ RESET_EOF
   rm -f FEEDBACK.in_progress.md
 
   git checkout main 2>/dev/null || true
-  git add .tickets/ FEEDBACK.md FEEDBACK.backup.md 2>/dev/null || true
+  git add .tickets/ FEEDBACK.md BACKUP_FEEDBACK.md 2>/dev/null || true
   agent_git commit -m "chore(tickets): add feedback wave tickets ${TIMESTAMP}" >/dev/null 2>&1 || true
   [ "$USE_GITHUB_PRS" -eq 1 ] && (retry_git_push origin main >/dev/null 2>&1 || true)
 }
@@ -1283,7 +1283,7 @@ run_holistic_feedback_audit() {
         ':(exclude).reviews/*' \
         ':(exclude).tickets/*' \
         ':(exclude)agent-orchestration/*' \
-        ':(exclude)FEEDBACK*.md' | head -c 35000 > .reviews/holistic_cumulative.diff
+        ':(exclude)FEEDBACK*.md' ':(exclude)BACKUP_FEEDBACK.md' | head -c 35000 > .reviews/holistic_cumulative.diff
 
       cat << PROMPT_EOF > .reviews/holistic_audit_prompt.txt
 You are a Principal QA & Systems Auditor conducting a final pre-release audit on the integrated 'main' branch.
@@ -1371,7 +1371,7 @@ PROMPT_EOF
 # === STAGE 3.5: AUTOMATED HEADLESS BROWSER VISUAL & INTERACTIVE QA GATE ===
 run_visual_ui_qa_gate() {
   local SOURCE_SPEC=".reviews/active_feedback_resolved.md"
-  [ ! -f "$SOURCE_SPEC" ] && SOURCE_SPEC="FEEDBACK.backup.md"
+  [ ! -f "$SOURCE_SPEC" ] && SOURCE_SPEC="BACKUP_FEEDBACK.md"
   [ ! -f "$SOURCE_SPEC" ] && return 0
 
   local V_PASS
@@ -1558,7 +1558,7 @@ PROMPT_EOF
 }
 generate_technical_qa_playbook() {
   local SOURCE_SPEC=".reviews/active_feedback_resolved.md"
-  [ ! -f "$SOURCE_SPEC" ] && SOURCE_SPEC="FEEDBACK.backup.md"
+  [ ! -f "$SOURCE_SPEC" ] && SOURCE_SPEC="BACKUP_FEEDBACK.md"
   [ ! -f "$SOURCE_SPEC" ] && return 0
 
   echo "=================================================================="

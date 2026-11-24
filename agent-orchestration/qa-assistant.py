@@ -167,7 +167,7 @@ def run_interactive_triage():
 
         deferred_md = (
             "<!-- Write your plain-English UI/UX feedback, bugs, or usability requests below this line. -->\n"
-            "<!-- Note: Your previous feedback is always backed up in FEEDBACK.backup.md and .reviews/feedback_archive/ -->\n\n"
+            "<!-- Note: Your previous feedback is always backed up in BACKUP_FEEDBACK.md and .reviews/feedback_archive/ -->\n\n"
             "# Deferred Items from Previous Round (Amend or Answer Below When Ready)\n\n"
         )
         for idx, q in enumerate(deferred, 1):
