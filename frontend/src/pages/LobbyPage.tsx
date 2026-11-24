@@ -8,7 +8,7 @@ import {
 } from '../api/client';
 import { fetchLobbyRooms } from '../api/lobbyClient';
 import { getOrCreateSession, updateGuestName } from '../api/sessionClient';
-import { CreateInviteTab } from '../components/lobby/CreateInviteTab';
+import { CreateGameTab } from '../components/lobby/CreateGameTab';
 import { LobbyPoolTab } from '../components/lobby/LobbyPoolTab';
 import { QaLobbyPresets } from '../components/lobby/QaLobbyPresets';
 import { QuickPairingTab } from '../components/lobby/QuickPairingTab';
@@ -38,7 +38,7 @@ type LobbyTabId = 'quick' | 'pool' | 'invite';
 const LOBBY_TABS: ReadonlyArray<{ id: LobbyTabId; label: string }> = [
   { id: 'quick', label: 'Quick Pairing' },
   { id: 'pool', label: 'Lobby Pool' },
-  { id: 'invite', label: 'Create Invite Link' },
+  { id: 'invite', label: 'Create a Game' },
 ];
 
 interface CreatedRoom {
@@ -277,7 +277,7 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
             ) : null}
 
             {tab === 'quick' ? <QuickPairingTab onMatched={openGame} /> : null}
-            {tab === 'invite' ? <CreateInviteTab onCreated={openGame} /> : null}
+            {tab === 'invite' ? <CreateGameTab onCreated={openGame} /> : null}
             {poolOpened ? (
               <div class="m2-tab-panel" hidden={tab !== 'pool'}>
                 <LobbyPoolTab

@@ -1,30 +1,59 @@
 /*
- * M2 homepage lobby — dark Lichess-inspired palette.
+ * M2 homepage lobby — inherits the Milestone 1 design system.
  *
- * Page background #161512, surfaces #262421, primary text #bababa, live/CTA
- * green #629924 and the trump/accent red #c33. Layout is CSS Grid and Flexbox
- * only: no absolutely or fixed-positioned panels, and every grid child keeps
- * `min-width: 0` so long names and preset labels wrap instead of overflowing.
+ * T-95-3: every surface, border, text tone and action colour below reads an M1
+ * token (`--app-*`, `--bg-*`, `--ui-select-*`) instead of hardcoding a dark-only
+ * hex, so the profile menu's theme selector repaints the whole lobby at once.
+ * Layout is CSS Grid and Flexbox only: no absolutely or fixed-positioned
+ * panels, and every grid child keeps `min-width: 0` so long names and preset
+ * labels wrap instead of overflowing.
  */
 
-/* T-96 ITEM-2: the M2 palette is shared by both M2 shells. `MultiplayerGamePage`
-   renders `.m2-button` and `.m2-status-text` too, so declaring the tokens on
-   `.m2-lobby` alone left every table action button with undefined custom
-   properties (dark `#14130f` text on a transparent background over the dark
-   `#262421` shell, and borderless secondary buttons). */
-.m2-lobby,
+/* T-95-3: the M2 palette is now an alias layer over the M1 tokens. The dark
+   fallbacks only apply before any theme stylesheet has loaded; the profile-menu
+   theme selector writes `data-theme` on `<html>`, which redefines every token
+   consumed here (background, panel, elevated surface, text, muted text, border,
+   accent, danger, on-accent label and the blue selection chrome). */
+.m2-lobby {
+  --m2-bg: var(--app-bg, #161512);
+  --m2-surface: var(--app-panel, #262421);
+  --m2-surface-raised: var(--bg-elevated, #2b2925);
+  --m2-border: var(--app-border, #3a3733);
+  --m2-text: var(--app-text, #bababa);
+  --m2-text-strong: var(--app-text-strong, #f5f1e6);
+  --m2-muted: var(--app-muted, #8f8b84);
+  --m2-green: var(--app-accent, #629924);
+  --m2-green-soft: var(--app-accent-soft, rgba(98, 153, 36, 0.18));
+  --m2-red: var(--app-danger, #e0574f);
+  --m2-red-soft: var(--app-danger-soft, rgba(224, 87, 79, 0.16));
+  --m2-on-accent: var(--app-on-accent, #14130f);
+  --m2-select: var(--ui-select-accent, #3b82f6);
+  --m2-select-border: var(--ui-select-border, rgba(59, 130, 246, 0.85));
+  --m2-select-bg: var(--ui-select-bg, rgba(59, 130, 246, 0.16));
+  --m2-select-text: var(--ui-select-text, #93c5fd);
+}
+
+/* T-96 ITEM-2: `MultiplayerGamePage` renders `.m2-button` and `.m2-status-text`
+   too, so the shared M2 tokens must also resolve inside the projected table
+   shell. It keeps its own dark table palette (`--mp-*`) rather than inheriting
+   the light lobby surfaces, so the felt never half-inverts. */
 .multiplayer-page {
-  --m2-bg: #161512;
-  --m2-surface: #262421;
-  --m2-surface-raised: #2f2c28;
-  --m2-border: #3d3a35;
-  --m2-text: #bababa;
-  --m2-text-strong: #f1f1f1;
-  --m2-muted: #8f8b84;
-  --m2-green: #629924;
-  --m2-green-soft: rgba(98, 153, 36, 0.16);
-  --m2-red: #c33;
-  --m2-red-soft: rgba(204, 51, 51, 0.16);
+  --m2-bg: var(--mp-bg, #161512);
+  --m2-surface: var(--mp-surface, #262421);
+  --m2-surface-raised: var(--mp-surface-raised, #2f2c28);
+  --m2-border: var(--mp-border, #3d3a35);
+  --m2-text: var(--mp-text, #bababa);
+  --m2-text-strong: var(--mp-text-strong, #f1f1f1);
+  --m2-muted: var(--mp-muted, #8f8b84);
+  --m2-green: var(--mp-green, #629924);
+  --m2-green-soft: var(--mp-green-soft, rgba(98, 153, 36, 0.16));
+  --m2-red: var(--mp-red, #c33);
+  --m2-red-soft: var(--mp-red-soft, rgba(204, 51, 51, 0.16));
+  --m2-on-accent: #14130f;
+  --m2-select: var(--mp-green, #629924);
+  --m2-select-border: var(--mp-green, #629924);
+  --m2-select-bg: var(--mp-green-soft, rgba(98, 153, 36, 0.16));
+  --m2-select-text: var(--mp-text-strong, #f1f1f1);
 }
 
 .m2-lobby {
@@ -37,8 +66,9 @@
   background: var(--m2-bg);
   color: var(--m2-text);
   border: 1px solid var(--m2-border);
-  border-radius: 12px;
+  border-radius: var(--app-roundness, 8px);
   font-size: 0.95rem;
+  overflow-wrap: anywhere;
 }
 
 .m2-lobby *,
@@ -147,8 +177,8 @@
 
 .m2-guest-badge:hover,
 .m2-guest-badge:focus-visible {
-  border-color: var(--m2-green);
-  color: var(--m2-green);
+  border-color: var(--m2-select-border);
+  color: var(--m2-select-text);
   outline: none;
 }
 
@@ -170,6 +200,12 @@
   color: var(--m2-text-strong);
   font: inherit;
   font-size: 0.85rem;
+}
+
+.m2-guest-input:focus-visible {
+  border-color: var(--m2-select-border);
+  outline: 2px solid var(--m2-select-bg);
+  outline-offset: 1px;
 }
 
 .m2-lobby-tabs {
@@ -196,21 +232,22 @@
 .m2-lobby-tab:hover,
 .m2-lobby-tab:focus-visible {
   background: var(--m2-surface);
+  border-color: var(--m2-select-border);
   outline: none;
 }
 
 .m2-lobby-tab.active {
-  background: var(--m2-surface);
-  border-color: var(--m2-border);
+  background: var(--m2-select-bg);
+  border-color: var(--m2-select-border);
   color: var(--m2-text-strong);
-  box-shadow: inset 0 -2px 0 var(--m2-green);
+  box-shadow: inset 0 -2px 0 var(--m2-select);
 }
 
 .m2-tab-count {
   padding: 0.05rem 0.4rem;
   border-radius: 999px;
   background: var(--m2-green);
-  color: #14130f;
+  color: var(--m2-on-accent);
   font-size: 0.75rem;
   font-weight: 700;
 }
@@ -227,7 +264,7 @@
   padding: 1rem;
   background: var(--m2-surface);
   border: 1px solid var(--m2-border);
-  border-radius: 10px;
+  border-radius: var(--app-roundness, 8px);
 }
 
 /* T-96 ITEM-3: `.lobby-page h2` in `app.css` is `(0,1,1)` and paints
@@ -256,9 +293,9 @@
   min-width: 0;
   padding: 0.5rem 0.9rem;
   border: 1px solid var(--m2-green);
-  border-radius: 7px;
+  border-radius: calc(var(--app-roundness, 8px) * 0.85);
   background: var(--m2-green);
-  color: #14130f;
+  color: var(--m2-on-accent);
   font: inherit;
   font-weight: 700;
   cursor: pointer;
@@ -278,8 +315,8 @@
 
 .m2-button.secondary:hover:not(:disabled),
 .m2-button.secondary:focus-visible:not(:disabled) {
-  border-color: var(--m2-green);
-  color: var(--m2-green);
+  border-color: var(--m2-select-border);
+  color: var(--m2-select-text);
   filter: none;
 }
 
@@ -326,11 +363,16 @@
 .quick-pair-tile {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 0.3rem;
+  /* T-95-3: the six presets are ~2× taller than the first M2 pass (~4.2rem).
+     The extra room is vertical only: same one-column text hierarchy, centered
+     content and the same 3×2 / 2×3 grid. */
+  align-content: center;
+  gap: 0.35rem;
   min-width: 0;
-  padding: 0.85rem 0.75rem;
+  min-height: 8.5rem;
+  padding: 1.25rem 0.9rem;
   border: 1px solid var(--m2-border);
-  border-radius: 9px;
+  border-radius: calc(var(--app-roundness, 8px) * 1.15);
   background: var(--m2-surface-raised);
   color: var(--m2-text);
   font: inherit;
@@ -340,7 +382,8 @@
 
 .quick-pair-tile:hover:not(:disabled),
 .quick-pair-tile:focus-visible:not(:disabled) {
-  border-color: var(--m2-green);
+  border-color: var(--m2-select-border);
+  background: var(--m2-select-bg);
   outline: none;
 }
 
@@ -411,7 +454,7 @@
   padding: 0.6rem 0.7rem;
   background: var(--m2-surface-raised);
   border: 1px solid var(--m2-border);
-  border-radius: 8px;
+  border-radius: calc(var(--app-roundness, 8px) * 0.85);
 }
 
 .lobby-pool-host {
@@ -497,16 +540,18 @@
   min-width: 0;
 }
 
-/* --- Create Invite Link ------------------------------------------------- */
+/* --- Create a Game ------------------------------------------------------ */
 
-.create-invite-form {
+.create-game-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 0.8rem;
   min-width: 0;
 }
 
-.create-invite-group {
+/* The visibility choice (private invite link vs public lobby pool) is the first
+   fieldset in the DOM, then player count, redirect and turn clock. */
+.create-game-group {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 0.35rem;
@@ -516,7 +561,7 @@
   border: none;
 }
 
-.create-invite-group legend {
+.create-game-group legend {
   padding: 0;
   color: var(--m2-muted);
   font-size: 0.78rem;
@@ -535,7 +580,7 @@
   min-width: 0;
   padding: 0.4rem 0.75rem;
   border: 1px solid var(--m2-border);
-  border-radius: 7px;
+  border-radius: calc(var(--app-roundness, 8px) * 0.85);
   background: var(--m2-surface-raised);
   color: var(--m2-text);
   font: inherit;
@@ -544,37 +589,38 @@
 }
 
 .segmented-option[aria-pressed='true'] {
-  border-color: var(--m2-green);
-  background: var(--m2-green-soft);
-  color: var(--m2-green);
+  border-color: var(--m2-select-border);
+  background: var(--m2-select-bg);
+  color: var(--m2-select-text);
   font-weight: 700;
 }
 
 .segmented-option:hover,
 .segmented-option:focus-visible {
-  border-color: var(--m2-green);
+  border-color: var(--m2-select-border);
   outline: none;
 }
 
-.create-invite-note {
+.create-game-note {
   margin: 0;
   color: var(--m2-muted);
   font-size: 0.78rem;
 }
 
-.create-invite-toggle {
+.create-game-toggle {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  min-width: 0;
   color: var(--m2-text);
   font-size: 0.85rem;
 }
 
-.create-invite-toggle input {
-  accent-color: var(--m2-green);
+.create-game-toggle input {
+  accent-color: var(--m2-select);
 }
 
-.create-invite-form > .m2-button {
+.create-game-form > .m2-button {
   justify-self: start;
 }
 

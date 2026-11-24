@@ -30,8 +30,18 @@ import * as client from '../api/client';
 import * as lobbyApi from '../api/lobbyClient';
 import * as sessionApi from '../api/sessionClient';
 import type { LobbyRoomSummary } from '../types/multiplayer';
+import appCss from '../app.css?raw';
 import lobbyCss from '../styles/lobby.css?raw';
 import { LobbyPage } from './LobbyPage';
+
+/** Declarations of the first rule whose selector text contains `selector`. */
+function cssRule(css: string, selector: string): string {
+  const start = css.indexOf(selector);
+  if (start === -1) return '';
+  const open = css.indexOf('{', start);
+  const close = css.indexOf('}', open);
+  return open === -1 || close === -1 ? '' : css.slice(open + 1, close);
+}
 
 const checkServerHealth = client.checkServerHealth as unknown as ReturnType<typeof vi.fn>;
 const getOrCreateSession =
@@ -127,7 +137,7 @@ describe('M2 LobbyPage', () => {
       screen.getByRole('tab', { name: 'Quick Pairing' }).getAttribute('aria-selected'),
     ).toBe('true');
     expect(screen.getByRole('tab', { name: /Lobby Pool/ })).toBeTruthy();
-    expect(screen.getByRole('tab', { name: 'Create Invite Link' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Create a Game' })).toBeTruthy();
     expect(screen.getByTestId('lobby-connection').textContent).toContain('Lobby idle');
   });
 
@@ -154,6 +164,18 @@ describe('M2 LobbyPage', () => {
     expect(screen.getByRole('button', { name: /3P • 30s/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: /4P • 15s/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: /4P • 30s/ })).toBeTruthy();
+
+    // T-95-3: all six presets keep their own testable tile in the 3×2 grid.
+    for (const id of [
+      'quick-pair-2-15',
+      'quick-pair-2-30',
+      'quick-pair-3-15',
+      'quick-pair-3-30',
+      'quick-pair-4-15',
+      'quick-pair-4-30',
+    ]) {
+      expect(screen.getByTestId(id)).toBeTruthy();
+    }
   });
 
   it('joins a Quick Pairing preset and navigates to its game table', async () => {
@@ -239,7 +261,7 @@ describe('M2 LobbyPage', () => {
   it('creates a configured invite room and opens it', async () => {
     renderLobby();
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Create Invite Link' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Create a Game' }));
     fireEvent.click(screen.getByRole('button', { name: '4 players' }));
     fireEvent.click(screen.getByLabelText(/Redirect \/ reflect/));
     fireEvent.click(screen.getByRole('button', { name: '30s' }));
@@ -252,6 +274,69 @@ describe('M2 LobbyPage', () => {
         allowRedirect: false,
         turnTimeoutSeconds: 30,
         isPublic: true,
+      }),
+    );
+    await expectGamePath('inv-1');
+  });
+
+  it('names the third tab "Create a Game" and puts visibility first', () => {
+    renderLobby();
+
+    const thirdTab = screen.getByRole('tab', { name: 'Create a Game' });
+    expect(thirdTab.getAttribute('aria-selected')).toBe('false');
+    fireEvent.click(thirdTab);
+    expect(thirdTab.getAttribute('aria-selected')).toBe('true');
+
+    const panel = document.querySelector('section.create-game') as HTMLElement;
+    expect(panel.getAttribute('aria-label')).toBe('Create a Game');
+    expect(within(panel).getByRole('heading', { name: 'Create a Game' })).toBeTruthy();
+
+    // DOM order: visibility → players → redirect toggle → turn clock → submit.
+    const form = panel.querySelector('form.create-game-form') as HTMLFormElement;
+    const steps = Array.from(form.children).map((child) => {
+      const group = child.querySelector('[role="group"]')?.getAttribute('aria-label');
+      if (group) return group;
+      if (child.querySelector('input[type="checkbox"]')) return 'Redirect / reflect';
+      return (child.textContent ?? '').trim();
+    });
+    expect(steps).toEqual([
+      'Visibility',
+      'Player count',
+      'Redirect / reflect',
+      'Turn clock',
+      'Create room',
+    ]);
+
+    // The private/public choice is exposed as a real segmented control (the
+    // fieldset is also named by its legend, hence the inner `role="group"`).
+    const visibility = panel.querySelector(
+      '.segmented[aria-label="Visibility"]',
+    ) as HTMLElement;
+    expect(visibility.getAttribute('role')).toBe('group');
+    expect(
+      within(visibility).getByRole('button', { name: 'Private invite link' }).getAttribute(
+        'aria-pressed',
+      ),
+    ).toBe('true');
+    expect(
+      within(visibility).getByRole('button', { name: 'Public lobby pool' }).getAttribute(
+        'aria-pressed',
+      ),
+    ).toBe('false');
+  });
+
+  it('creates a private game from the default visibility', async () => {
+    renderLobby();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Create a Game' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
+
+    await waitFor(() =>
+      expect(createRoom).toHaveBeenCalledWith({
+        playerCount: 2,
+        allowRedirect: true,
+        turnTimeoutSeconds: 15,
+        isPublic: false,
       }),
     );
     await expectGamePath('inv-1');
@@ -314,12 +399,68 @@ describe('M2 LobbyPage', () => {
 });
 
 describe('lobby.css visual invariants', () => {
-  it('uses the dark Lichess palette', () => {
-    expect(lobbyCss).toContain('#161512');
-    expect(lobbyCss).toContain('#262421');
-    expect(lobbyCss).toContain('#bababa');
-    expect(lobbyCss).toContain('#629924');
-    expect(lobbyCss).toContain('#c33');
+  it('inherits every lobby surface and tone from the M1 theme tokens', () => {
+    // T-95-3: the old dark-only M2 hex values survive as fallbacks only.
+    expect(lobbyCss).toContain('--m2-bg: var(--app-bg, #161512);');
+    expect(lobbyCss).toContain('--m2-surface: var(--app-panel, #262421);');
+    expect(lobbyCss).toContain('--m2-surface-raised: var(--bg-elevated, #2b2925);');
+    expect(lobbyCss).toContain('--m2-border: var(--app-border, #3a3733);');
+    expect(lobbyCss).toContain('--m2-text: var(--app-text, #bababa);');
+    expect(lobbyCss).toContain('--m2-text-strong: var(--app-text-strong, #f5f1e6);');
+    expect(lobbyCss).toContain('--m2-muted: var(--app-muted, #8f8b84);');
+    expect(lobbyCss).toContain('--m2-green: var(--app-accent, #629924);');
+    expect(lobbyCss).toContain('--m2-red: var(--app-danger, #e0574f);');
+    expect(lobbyCss).toContain('--m2-on-accent: var(--app-on-accent, #14130f);');
+    // Menu/tab/segmented chrome uses the M1 Royal Blue selection family.
+    expect(lobbyCss).toContain('--m2-select: var(--ui-select-accent, #3b82f6);');
+  });
+
+  it('paints no lobby surface with a fixed fill', () => {
+    expect(lobbyCss).toContain('background: var(--m2-bg)');
+    expect(cssRule(lobbyCss, '.m2-panel')).toContain('background: var(--m2-surface)');
+    expect(cssRule(lobbyCss, '.quick-pair-tile')).toContain(
+      'background: var(--m2-surface-raised)',
+    );
+    expect(cssRule(lobbyCss, '.lobby-pool-row')).toContain(
+      'background: var(--m2-surface-raised)',
+    );
+    expect(cssRule(lobbyCss, '.m2-lobby-tab.active')).toContain('var(--m2-select)');
+    expect(cssRule(lobbyCss, ".segmented-option[aria-pressed='true']")).toContain(
+      'var(--m2-select-bg)',
+    );
+    // The lobby layer declares no literal surface fill of its own.
+    expect(lobbyCss).not.toMatch(/\bbackground(?:-color)?:\s*#[0-9a-fA-F]{3,8}/);
+  });
+
+  it('doubles the Quick Pairing tile height without changing the grid', () => {
+    const tile = cssRule(lobbyCss, '.quick-pair-tile');
+    expect(tile).toContain('min-height: 8.5rem');
+    expect(tile).toContain('align-content: center');
+    expect(tile).toContain('padding: 1.25rem 0.9rem');
+
+    const grid = cssRule(lobbyCss, '.quick-pair-grid');
+    expect(grid).toContain('grid-template-columns: repeat(3, minmax(0, 1fr))');
+  });
+
+  it('repaints the lobby when the profile menu switches the theme', () => {
+    const dark = cssRule(appCss, ':root');
+    expect(dark).toContain('--app-muted: #8f8b84');
+    expect(dark).toContain('--app-danger: #e0574f');
+    expect(dark).toContain('--app-on-accent: #14130f');
+
+    const light = cssRule(appCss, "html[data-theme='light']");
+    expect(light).toContain('--app-panel: var(--bg-panel)');
+    expect(light).toContain('--app-text: #334155');
+    expect(light).toContain('--app-border: #b9c2ce');
+    expect(light).toContain('--app-muted: #52606f');
+    expect(light).toContain('--app-danger: #b3261e');
+    expect(light).toContain('--app-on-accent: #f8fafc');
+
+    // The selector writes `data-theme` on <html>; every lobby token alias reads
+    // a property that block redefines, so the switch repaints the whole lobby.
+    document.documentElement.setAttribute('data-theme', 'light');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
+    document.documentElement.removeAttribute('data-theme');
   });
 
   it('lays out with Grid/Flexbox gaps only and never freeform positioning', () => {
@@ -331,16 +472,17 @@ describe('lobby.css visual invariants', () => {
     expect(lobbyCss).not.toMatch(/position:\s*(absolute|fixed)/);
   });
 
-  it('keeps the M2 panel headings light on the dark panel', () => {
+  it('keeps the M2 panel headings on the themed strong text tone', () => {
     // T-96 ITEM-3: `.lobby-page h2` (0,1,1) must lose to the scoped panel title.
     expect(lobbyCss).toContain('.m2-lobby .m2-panel-title');
-    expect(lobbyCss).toContain('color: var(--m2-text-strong);');
+    expect(cssRule(lobbyCss, '.m2-lobby .m2-panel-title')).toContain(
+      'color: var(--m2-text-strong)',
+    );
   });
 
-  it('shares the M2 palette and button styling with the multiplayer shell', () => {
-    // T-96 ITEM-2: the tokens live on both M2 shells, not the lobby alone.
-    expect(lobbyCss).toMatch(/\.m2-lobby,\s*\n\.multiplayer-page \{/);
-    expect(lobbyCss).toContain('--m2-text-strong: #f1f1f1;');
+  it('shares the M2 button styling with the multiplayer shell', () => {
+    // T-96 ITEM-2: the tokens resolve inside the projected table shell too.
+    expect(lobbyCss).toMatch(/\.multiplayer-page \{[^}]*--m2-text-strong: var\(--mp-text-strong/);
     expect(lobbyCss).toContain('.multiplayer-page .m2-button.secondary');
   });
 
