@@ -11,6 +11,22 @@ vi.mock('../api/client', async (importOriginal) => {
   };
 });
 
+// T-90-feedback-6: the lobby owns `/ws/lobby` from its first paint, so these
+// tests stub the network instead of opening a real socket.
+vi.mock('../api/lobbyClient', () => ({
+  fetchLobbyRooms: vi.fn(async () => []),
+  connectLobbySocket: vi.fn(() => ({ status: 'connected', close: vi.fn() })),
+  joinQuickPair: vi.fn(),
+  cancelQuickPair: vi.fn(),
+  joinRoom: vi.fn(),
+  createRoom: vi.fn(),
+  seedLobbyPreset: vi.fn(),
+  createActiveMatchPreset: vi.fn(),
+  createSpectatorMatchPreset: vi.fn(),
+  triggerQaQuickPairOpponent: vi.fn(),
+  launchQaSmallHandMatch: vi.fn(),
+}));
+
 import * as client from '../api/client';
 import { LobbyPage } from '../pages/LobbyPage';
 import appCss from '../app.css?raw';

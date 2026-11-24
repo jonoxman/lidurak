@@ -26,13 +26,15 @@ vi.mock('../api/lobbyClient', () => ({
   fetchGameView: vi.fn(),
   joinRoom: vi.fn(),
   leaveRoom: vi.fn(),
-  connectLobbySocket: vi.fn(),
+  connectLobbySocket: vi.fn(() => ({ status: 'connected', close: vi.fn() })),
   joinQuickPair: vi.fn(),
   cancelQuickPair: vi.fn(),
   createRoom: vi.fn(),
   seedLobbyPreset: vi.fn(),
   createActiveMatchPreset: vi.fn(),
   createSpectatorMatchPreset: vi.fn(),
+  triggerQaQuickPairOpponent: vi.fn(),
+  launchQaSmallHandMatch: vi.fn(),
 }));
 
 vi.mock('../api/gameSocket', () => ({

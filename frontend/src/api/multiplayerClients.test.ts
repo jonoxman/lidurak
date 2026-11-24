@@ -9,8 +9,10 @@ import {
   fetchLobbyRooms,
   joinQuickPair,
   joinRoom,
+  launchQaSmallHandMatch,
   leaveRoom,
   seedLobbyPreset,
+  triggerQaQuickPairOpponent,
 } from './lobbyClient';
 import { createGameSocket } from './gameSocket';
 import { getOrCreateSession, MultiplayerApiError, updateGuestName } from './sessionClient';
@@ -251,11 +253,13 @@ describe('lobbyClient REST', () => {
   });
 
   it('joins and cancels Quick Pairing', async () => {
-    mockFetch.mockResolvedValue(jsonResponse({ gameId: 'pair-1', seatIndex: 0 }));
+    mockFetch.mockResolvedValue(
+      jsonResponse({ status: 'matched', gameId: 'pair-1', seatIndex: 0 }),
+    );
 
     await expect(
       joinQuickPair({ playerCount: 3, turnTimeoutSeconds: 30, allowRedirect: false }),
-    ).resolves.toEqual({ gameId: 'pair-1', seatIndex: 0 });
+    ).resolves.toEqual({ status: 'matched', gameId: 'pair-1', seatIndex: 0 });
     expect(mockFetch).toHaveBeenCalledWith(
       '/api/quick-pair',
       expect.objectContaining({
@@ -275,6 +279,28 @@ describe('lobbyClient REST', () => {
       '/api/quick-pair',
       expect.objectContaining({ method: 'DELETE', credentials: 'include' }),
     );
+  });
+
+  it('parses the searching queue response without a gameId', async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({
+        status: 'searching',
+        playerCount: 2,
+        turnTimeoutSeconds: 15,
+        allowRedirect: true,
+        queuedCount: 1,
+        requiredCount: 2,
+      }),
+    );
+
+    await expect(joinQuickPair({ playerCount: 2 })).resolves.toEqual({
+      status: 'searching',
+      playerCount: 2,
+      turnTimeoutSeconds: 15,
+      allowRedirect: true,
+      queuedCount: 1,
+      requiredCount: 2,
+    });
   });
 
   it('covers every QA preset endpoint', async () => {
@@ -304,6 +330,29 @@ describe('lobbyClient REST', () => {
     expect(mockFetch).toHaveBeenCalledWith(
       '/api/qa/presets/spectator-match',
       expect.objectContaining({ method: 'POST', credentials: 'include' }),
+    );
+
+    // T-90-feedback-6: the deferred quick-pair room gets a bot opponent.
+    mockFetch.mockResolvedValue({ ok: true, status: 204, json: async () => null });
+    await expect(triggerQaQuickPairOpponent()).resolves.toBeUndefined();
+    expect(mockFetch).toHaveBeenLastCalledWith(
+      '/api/qa/presets/quick-pair-opponent',
+      expect.objectContaining({ method: 'POST', credentials: 'include' }),
+    );
+
+    // ...and the small-hand match asks for a 4-card 2P deal.
+    mockFetch.mockResolvedValue(jsonResponse({ gameId: 'small-1', seatIndex: 0 }));
+    await expect(launchQaSmallHandMatch()).resolves.toEqual({
+      gameId: 'small-1',
+      seatIndex: 0,
+    });
+    expect(mockFetch).toHaveBeenLastCalledWith(
+      '/api/qa/presets/active-match',
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'include',
+        body: JSON.stringify({ playerCount: 2, handSize: 4 }),
+      }),
     );
   });
 });
@@ -377,10 +426,13 @@ describe('connectLobbySocket', () => {
     const snapshots: LobbyRoomSummary[][] = [];
     const updates: LobbyRoomSummary[][] = [];
     const matched: string[] = [];
+    const quickPairMatched: { gameId: string; seatIndex: number }[] = [];
     const socket = connectLobbySocket({
       onSnapshot: (rooms) => snapshots.push(rooms),
       onUpdated: (rooms) => updates.push(rooms),
       onMatchFound: (gameId) => matched.push(gameId),
+      onQuickPairMatched: (gameId, seatIndex) =>
+        quickPairMatched.push({ gameId, seatIndex }),
     });
 
     const ws = latest();
@@ -392,10 +444,12 @@ describe('connectLobbySocket', () => {
     ws.emitMessage({ type: 'lobbySnapshot', rooms: [room] });
     ws.emitMessage({ type: 'lobbyUpdated', rooms: [] });
     ws.emitMessage({ type: 'matchFound', gameId: 'assigned-1' });
+    ws.emitMessage({ type: 'quickPairMatched', gameId: 'assigned-2', seatIndex: 1 });
 
     expect(snapshots).toEqual([[room]]);
     expect(updates).toEqual([[]]);
     expect(matched).toEqual(['assigned-1']);
+    expect(quickPairMatched).toEqual([{ gameId: 'assigned-2', seatIndex: 1 }]);
 
     socket.close();
   });

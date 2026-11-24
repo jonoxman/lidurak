@@ -3,7 +3,9 @@ import {
   createActiveMatchPreset,
   createRoom,
   createSpectatorMatchPreset,
+  launchQaSmallHandMatch,
   seedLobbyPreset,
+  triggerQaQuickPairOpponent,
 } from '../../api/lobbyClient';
 import type { LobbyRoomSummary } from '../../types/multiplayer';
 
@@ -14,7 +16,13 @@ export interface QaLobbyPresetsProps {
   onOpenGame: (gameId: string) => void;
 }
 
-type PresetId = 'seed-lobby' | 'invite-room' | 'active-match' | 'spectator-match';
+type PresetId =
+  | 'seed-lobby'
+  | 'invite-room'
+  | 'active-match'
+  | 'spectator-match'
+  | 'quick-pair-opponent'
+  | 'small-hand-match';
 
 /**
  * One-click QA scenarios for the M2 lobby.
@@ -69,6 +77,20 @@ export function QaLobbyPresets({ onSeeded, onOpenGame }: QaLobbyPresetsProps) {
       onOpenGame(match.gameId);
     });
 
+  // Fills the caller's own deferred quick-pair room, so the pending
+  // `quickPairMatched` frame on `/ws/lobby` opens the live table immediately.
+  const quickPairOpponent = () =>
+    run('quick-pair-opponent', async () => {
+      await triggerQaQuickPairOpponent();
+    });
+
+  // Active 2P table dealt with four cards, for the small-hand hover check.
+  const smallHandMatch = () =>
+    run('small-hand-match', async () => {
+      const match = await launchQaSmallHandMatch();
+      onOpenGame(match.gameId);
+    });
+
   return (
     <section
       class="m2-panel qa-lobby-presets"
@@ -115,6 +137,24 @@ export function QaLobbyPresets({ onSeeded, onOpenGame }: QaLobbyPresetsProps) {
           onClick={() => void spectatorMatch()}
         >
           Launch spectator zero-leak view
+        </button>
+        <button
+          type="button"
+          class="m2-button secondary"
+          data-testid="qa-quick-pair-opponent"
+          disabled={pending !== null}
+          onClick={() => void quickPairOpponent()}
+        >
+          Match queued quick-pair opponent
+        </button>
+        <button
+          type="button"
+          class="m2-button secondary"
+          data-testid="qa-small-hand-match"
+          disabled={pending !== null}
+          onClick={() => void smallHandMatch()}
+        >
+          Launch small-hand match (4 cards)
         </button>
       </div>
       {error ? (

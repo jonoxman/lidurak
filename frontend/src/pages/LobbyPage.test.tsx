@@ -24,6 +24,8 @@ vi.mock('../api/lobbyClient', () => ({
   seedLobbyPreset: vi.fn(),
   createActiveMatchPreset: vi.fn(),
   createSpectatorMatchPreset: vi.fn(),
+  triggerQaQuickPairOpponent: vi.fn(),
+  launchQaSmallHandMatch: vi.fn(),
 }));
 
 import * as client from '../api/client';
@@ -49,6 +51,10 @@ const createActiveMatchPreset =
   lobbyApi.createActiveMatchPreset as unknown as ReturnType<typeof vi.fn>;
 const createSpectatorMatchPreset =
   lobbyApi.createSpectatorMatchPreset as unknown as ReturnType<typeof vi.fn>;
+const triggerQaQuickPairOpponent =
+  lobbyApi.triggerQaQuickPairOpponent as unknown as ReturnType<typeof vi.fn>;
+const launchQaSmallHandMatch =
+  lobbyApi.launchQaSmallHandMatch as unknown as ReturnType<typeof vi.fn>;
 
 const GUEST = {
   playerId: 'guest-abcd1234',
@@ -94,7 +100,7 @@ describe('M2 LobbyPage', () => {
     getOrCreateSession.mockResolvedValue(GUEST);
     updateGuestName.mockResolvedValue({ ...GUEST, displayName: 'Ace' });
     fetchLobbyRooms.mockResolvedValue([]);
-    joinQuickPair.mockResolvedValue({ gameId: 'qp-1', seatIndex: 0 });
+    joinQuickPair.mockResolvedValue({ status: 'matched', gameId: 'qp-1', seatIndex: 0 });
     cancelQuickPair.mockResolvedValue(undefined);
     joinRoom.mockResolvedValue({ gameId: 'room-1', seatIndex: 1, view: {} as never });
     createRoom.mockResolvedValue({
@@ -105,6 +111,8 @@ describe('M2 LobbyPage', () => {
     seedLobbyPreset.mockResolvedValue({ rooms: [ROOM] });
     createActiveMatchPreset.mockResolvedValue({ gameId: 'active-1', seatIndex: 0 });
     createSpectatorMatchPreset.mockResolvedValue({ gameId: 'spec-1' });
+    triggerQaQuickPairOpponent.mockResolvedValue(undefined);
+    launchQaSmallHandMatch.mockResolvedValue({ gameId: 'small-1', seatIndex: 0 });
     connectLobbySocket.mockImplementation(
       (handlers: import('../api/lobbyClient').LobbySocketHandlers) => {
         socketHandlers = handlers;
@@ -128,7 +136,9 @@ describe('M2 LobbyPage', () => {
     ).toBe('true');
     expect(screen.getByRole('tab', { name: /Lobby Pool/ })).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'Create Invite Link' })).toBeTruthy();
-    expect(screen.getByTestId('lobby-connection').textContent).toContain('Lobby idle');
+    // T-90-feedback-6: `/ws/lobby` connects from the first paint, not on pool open.
+    await waitFor(() => expect(connectLobbySocket).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId('lobby-connection').textContent).toContain('Lobby live');
   });
 
   it('renames the guest through the editable identity badge', async () => {
@@ -172,17 +182,67 @@ describe('M2 LobbyPage', () => {
     expect(window.location.hash).toBe('');
   });
 
-  it('shows a searching state whose Cancel leaves the pairing queue', async () => {
-    joinQuickPair.mockReturnValue(new Promise(() => {}));
+  it('keeps the searching banner on the lobby and leaves the queue on Cancel', async () => {
+    joinQuickPair.mockResolvedValue({
+      status: 'searching',
+      playerCount: 3,
+      turnTimeoutSeconds: 30,
+      allowRedirect: true,
+      queuedCount: 1,
+      requiredCount: 3,
+    });
     renderLobby();
 
     fireEvent.click(screen.getByRole('button', { name: /3P • 30s/ }));
 
     const searching = await screen.findByTestId('quick-pair-searching');
+    expect(searching.getAttribute('role')).toBe('status');
     expect(searching.textContent).toContain('3P • 30s');
+    await waitFor(() => expect(searching.textContent).toContain('(1/3)'));
+    // A queued player is not in a room yet, so the lobby stays visible.
+    expect(window.location.pathname).toBe('/');
+
     fireEvent.click(within(searching).getByRole('button', { name: 'Cancel' }));
 
     await waitFor(() => expect(cancelQuickPair).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId('quick-pair-searching')).toBeNull();
+    expect(window.location.pathname).toBe('/');
+  });
+
+  it('opens the room when POST /api/quick-pair matches immediately', async () => {
+    joinQuickPair.mockResolvedValue({
+      status: 'matched',
+      gameId: 'xyz98765',
+      seatIndex: 1,
+    });
+    renderLobby();
+
+    fireEvent.click(screen.getByRole('button', { name: /2P • 15s/ }));
+
+    await expectGamePath('xyz98765');
+    expect(screen.queryByTestId('quick-pair-searching')).toBeNull();
+  });
+
+  it('navigates when a quickPairMatched frame arrives for a waiting player', async () => {
+    joinQuickPair.mockResolvedValue({
+      status: 'searching',
+      playerCount: 2,
+      turnTimeoutSeconds: 15,
+      allowRedirect: true,
+      queuedCount: 1,
+      requiredCount: 2,
+    });
+    renderLobby();
+
+    fireEvent.click(screen.getByRole('button', { name: /2P • 15s/ }));
+    expect(await screen.findByTestId('quick-pair-searching')).toBeTruthy();
+    expect(window.location.pathname).toBe('/');
+
+    act(() => {
+      socketHandlers?.onQuickPairMatched?.('abc12345', 0);
+    });
+
+    await expectGamePath('abc12345');
     expect(screen.queryByTestId('quick-pair-searching')).toBeNull();
   });
 
@@ -269,6 +329,26 @@ describe('M2 LobbyPage', () => {
       ).toBe('true'),
     );
     expect(await screen.findByTestId('pool-room-room-1')).toBeTruthy();
+  });
+
+  it('triggers the quick-pair opponent and small-hand QA presets in one click', async () => {
+    renderLobby();
+
+    const quickPairButton = screen.getByTestId('qa-quick-pair-opponent');
+    expect(quickPairButton.textContent).toBe('Match queued quick-pair opponent');
+    fireEvent.click(quickPairButton);
+
+    await waitFor(() => expect(triggerQaQuickPairOpponent).toHaveBeenCalledTimes(1));
+    // The trigger only queues the opponent; the lobby stays put.
+    expect(window.location.pathname).toBe('/');
+    await waitFor(() => expect((quickPairButton as HTMLButtonElement).disabled).toBe(false));
+
+    const smallHandButton = screen.getByTestId('qa-small-hand-match');
+    expect(smallHandButton.textContent).toBe('Launch small-hand match (4 cards)');
+    fireEvent.click(smallHandButton);
+
+    await waitFor(() => expect(launchQaSmallHandMatch).toHaveBeenCalledTimes(1));
+    await expectGamePath('small-1');
   });
 
   it('launches the invite, active and spectator QA presets', async () => {

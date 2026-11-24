@@ -132,11 +132,30 @@ export interface QuickPairRequest {
   allowRedirect?: boolean;
 }
 
-/** Response of `POST /api/quick-pair`. */
-export interface QuickPairResponse {
+/**
+ * Response of `POST /api/quick-pair`.
+ *
+ * A queued player is NOT seated in a room yet: the server answers `searching`
+ * and only pushes `quickPairMatched` over `/ws/lobby` once a table is full.
+ */
+export interface QuickPairSearching {
+  status: 'searching';
+  playerCount: number;
+  turnTimeoutSeconds: number;
+  allowRedirect: boolean;
+  queuedCount: number;
+  requiredCount: number;
+}
+
+/** The completing player at match time: the room already has a seat for them. */
+export interface QuickPairMatched {
+  status: 'matched';
   gameId: string;
   seatIndex: number;
 }
+
+/** Discriminated result of `POST /api/quick-pair`. */
+export type QuickPairResponse = QuickPairSearching | QuickPairMatched;
 
 /** Response of `POST /api/qa/presets/seed-lobby`. */
 export interface SeedLobbyPresetResponse {
@@ -171,6 +190,20 @@ export type WsServerMessage =
   | { type: 'lobbySnapshot'; rooms: LobbyRoomSummary[] }
   | { type: 'lobbyUpdated'; rooms: LobbyRoomSummary[] }
   | { type: 'matchFound'; gameId: string }
+  | { type: 'quickPairMatched'; gameId: string; seatIndex: number }
+  | { type: 'pong' };
+
+/**
+ * The subset of server frames carried by `/ws/lobby`. `quickPairMatched` is a
+ * session-scoped push: the server assigned this client to a full room, even if
+ * the original `POST /api/quick-pair` only answered `searching`.
+ */
+export type LobbyWsMessage =
+  | { type: 'lobbySnapshot'; rooms: LobbyRoomSummary[] }
+  | { type: 'lobbyUpdated'; rooms: LobbyRoomSummary[] }
+  | { type: 'matchFound'; gameId: string }
+  | { type: 'quickPairMatched'; gameId: string; seatIndex: number }
+  | { type: 'actionRejected'; code: string; message: string }
   | { type: 'pong' };
 
 // --- Parsing helpers -------------------------------------------------------
@@ -347,6 +380,34 @@ export function parseLobbyRoomList(value: unknown): LobbyRoomSummary[] {
   return arrayOf(value, 'rooms').map(parseLobbyRoomSummary);
 }
 
+/**
+ * Parses the discriminated `POST /api/quick-pair` response.
+ *
+ * `searching` keeps the player on the lobby with the queue banner; `matched`
+ * opens the room immediately. A legacy bare `{ gameId, seatIndex }` body is
+ * treated as `matched`, so an older server cannot strand the client.
+ */
+export function parseQuickPairResponse(value: unknown): QuickPairResponse {
+  const raw = asObject(value, 'QuickPairResponse');
+  const status = typeof raw.status === 'string' ? raw.status.trim().toLowerCase() : '';
+  if (status === 'searching') {
+    const playerCount = numberOr(raw.playerCount, 2);
+    return {
+      status: 'searching',
+      playerCount,
+      turnTimeoutSeconds: numberOr(raw.turnTimeoutSeconds, 15),
+      allowRedirect: booleanOr(raw.allowRedirect, true),
+      queuedCount: numberOr(raw.queuedCount, 1),
+      requiredCount: numberOr(raw.requiredCount, playerCount),
+    };
+  }
+  return {
+    status: 'matched',
+    gameId: requireString(raw, 'gameId'),
+    seatIndex: numberOr(raw.seatIndex, 0),
+  };
+}
+
 /** Parses and discriminates one server WebSocket frame. */
 export function parseWsServerMessage(value: unknown): WsServerMessage {
   const raw = asObject(value, 'WsServerMessage');
@@ -366,6 +427,12 @@ export function parseWsServerMessage(value: unknown): WsServerMessage {
       return { type: 'lobbyUpdated', rooms: parseLobbyRoomList(raw.rooms) };
     case 'matchfound':
       return { type: 'matchFound', gameId: requireString(raw, 'gameId') };
+    case 'quickpairmatched':
+      return {
+        type: 'quickPairMatched',
+        gameId: requireString(raw, 'gameId'),
+        seatIndex: numberOr(raw.seatIndex, 0),
+      };
     case 'pong':
       return { type: 'pong' };
     default:

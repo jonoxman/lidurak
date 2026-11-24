@@ -349,6 +349,11 @@
   cursor: default;
 }
 
+.quick-pair-tile.searching {
+  border-color: var(--m2-green);
+  background: var(--m2-green-soft);
+}
+
 .quick-pair-tile-title {
   color: var(--m2-text-strong);
   font-size: 1.05rem;

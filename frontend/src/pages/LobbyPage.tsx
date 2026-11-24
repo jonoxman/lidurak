@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import {
   checkServerHealth,
   createGame,
@@ -6,7 +6,13 @@ import {
   QA_SCENARIOS,
   type CreatedGame,
 } from '../api/client';
-import { fetchLobbyRooms } from '../api/lobbyClient';
+import {
+  cancelQuickPair,
+  connectLobbySocket,
+  fetchLobbyRooms,
+  joinQuickPair,
+  type LobbySocket,
+} from '../api/lobbyClient';
 import { getOrCreateSession, updateGuestName } from '../api/sessionClient';
 import { CreateInviteTab } from '../components/lobby/CreateInviteTab';
 import { LobbyPoolTab } from '../components/lobby/LobbyPoolTab';
@@ -14,7 +20,13 @@ import { QaLobbyPresets } from '../components/lobby/QaLobbyPresets';
 import { QuickPairingTab } from '../components/lobby/QuickPairingTab';
 import { navigateToGame } from '../router/useRoute';
 import type { PlayerType } from '../types';
-import type { GuestSession, LobbyRoomSummary, SocketStatus } from '../types/multiplayer';
+import type {
+  GuestSession,
+  LobbyRoomSummary,
+  QuickPairRequest,
+  QuickPairSearching,
+  SocketStatus,
+} from '../types/multiplayer';
 import '../styles/table.css';
 import '../styles/lobby.css';
 
@@ -63,14 +75,6 @@ function isServerWarmupFailure(reason: unknown): boolean {
 }
 
 /**
- * Opens a live M2 room at `/g/:gameId` through the History-API router, so the
- * URL matches the backend's `inviteUrl` and survives a direct reload.
- */
-function openGame(gameId: string): void {
-  navigateToGame(gameId);
-}
-
-/**
  * The homepage lobby.
  *
  * The M2 shell provides Quick Pairing, the live Lobby Pool and the invite
@@ -91,6 +95,66 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
   const [rooms, setRooms] = useState<LobbyRoomSummary[]>([]);
   const [poolStatus, setPoolStatus] = useState<SocketStatus | 'idle'>('idle');
   const [notice, setNotice] = useState<string | null>(null);
+
+  // --- Persistent Quick Pairing queue -------------------------------------
+  // A queued player is not in a room yet: the search state lives here so it
+  // survives tab switches and only the match push (or Cancel) clears it.
+  const [searching, setSearching] = useState<QuickPairSearching | null>(null);
+  const [pairError, setPairError] = useState<string | null>(null);
+  // Invalidates late responses/cancels, so a stale POST cannot navigate.
+  const quickAttempt = useRef(0);
+  const openedGame = useRef<string | null>(null);
+  const mounted = useRef(true);
+  const onMatchedGame = useRef<(gameId: string) => void>(() => {});
+
+  /**
+   * Opens a live M2 room at `/g/:gameId` through the History-API router, so the
+   * URL matches the backend's `inviteUrl` and survives a direct reload. The
+   * first id wins: a `matched` response racing its `quickPairMatched` frame
+   * never pushes the same room twice.
+   */
+  const openGame = (gameId: string): void => {
+    if (openedGame.current === gameId) return;
+    openedGame.current = gameId;
+    navigateToGame(gameId);
+  };
+
+  onMatchedGame.current = (gameId: string) => {
+    quickAttempt.current += 1;
+    setSearching(null);
+    setPairError(null);
+    openGame(gameId);
+  };
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  // One `/ws/lobby` socket for the whole page, connected from the first paint:
+  // the pool stays live and a session-scoped `quickPairMatched` arrives even
+  // while the Quick Pairing tab is the visible one.
+  useEffect(() => {
+    let socket: LobbySocket | null = null;
+    try {
+      socket = connectLobbySocket({
+        onSnapshot: (live) => setRooms(live),
+        onUpdated: (live) => setRooms(live),
+        onMatchFound: (gameId) => onMatchedGame.current(gameId),
+        onQuickPairMatched: (gameId) => onMatchedGame.current(gameId),
+        onStatusChange: (status) => setPoolStatus(status),
+      });
+    } catch {
+      // A browser without a WebSocket still gets the REST hydration.
+      setPoolStatus('disconnected');
+    }
+
+    return () => {
+      socket?.close();
+    };
+  }, []);
 
   // Probe `GET /api/health` until the backend answers, then unlock the page so
   // a click can never land on a proxy 500 while the server is still booting.
@@ -173,8 +237,52 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
 
   const selectTab = (next: LobbyTabId) => {
     setTab(next);
-    // The pool socket starts on first open and then keeps the tab live.
+    // Mount the pool panel on first open; its rooms come from the page socket.
     if (next === 'pool') setPoolOpened(true);
+  };
+
+  /**
+   * Queues the player for one quick-pair preset. Clicking another tile while
+   * searching replaces the queue entry; only the newest attempt may render its
+   * response or navigate.
+   */
+  const startQuickPair = async (preset: QuickPairRequest) => {
+    const attempt = ++quickAttempt.current;
+    setPairError(null);
+    setSearching({
+      status: 'searching',
+      playerCount: preset.playerCount,
+      turnTimeoutSeconds: preset.turnTimeoutSeconds ?? 15,
+      allowRedirect: preset.allowRedirect ?? true,
+      queuedCount: 1,
+      requiredCount: preset.playerCount,
+    });
+
+    try {
+      const response = await joinQuickPair(preset);
+      if (!mounted.current || quickAttempt.current !== attempt) return;
+      if (response.status === 'matched') {
+        onMatchedGame.current(response.gameId);
+      } else {
+        setSearching(response);
+      }
+    } catch (reason) {
+      if (!mounted.current || quickAttempt.current !== attempt) return;
+      setSearching(null);
+      setPairError(reason instanceof Error ? reason.message : String(reason));
+    }
+  };
+
+  /** Leaves the queue, keeping the player on the lobby screen. */
+  const cancelPairing = async () => {
+    quickAttempt.current += 1;
+    setSearching(null);
+    setPairError(null);
+    try {
+      await cancelQuickPair();
+    } catch {
+      // A failed cancel only means the queue entry was already gone.
+    }
   };
 
   const handleSeeded = (seededRooms: LobbyRoomSummary[]) => {
@@ -276,14 +384,20 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
               </p>
             ) : null}
 
-            {tab === 'quick' ? <QuickPairingTab onMatched={openGame} /> : null}
+            {tab === 'quick' ? (
+              <QuickPairingTab
+                searching={searching}
+                onSearch={(preset) => void startQuickPair(preset)}
+                onCancel={() => void cancelPairing()}
+                error={pairError}
+              />
+            ) : null}
             {tab === 'invite' ? <CreateInviteTab onCreated={openGame} /> : null}
             {poolOpened ? (
               <div class="m2-tab-panel" hidden={tab !== 'pool'}>
                 <LobbyPoolTab
-                  initialRooms={rooms}
+                  rooms={rooms}
                   onRoomsChange={setRooms}
-                  onStatusChange={setPoolStatus}
                   onJoin={openGame}
                   onCreateRoom={() => setTab('invite')}
                 />
