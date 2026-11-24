@@ -9,51 +9,51 @@ Lidurak is a fast, minimalist, browser-based implementation of the classic Russi
 ## 1. Quick Start & Installation
 
 ### Prerequisites
-- **Java (JDK 17+)** and **sbt** (for the Scala 3 backend)
-- **Node.js (18+)** and **npm** (for the Preact + Vite frontend)
+
+- **Java (JDK)** and **sbt** (Scala Build Tool) for the backend
+- **Node.js** and **npm** for the frontend
 
 ### Launching Locally
-Start both the backend server and the frontend development server with a single command from the repository root:
+
+Run the launcher script from the repository root to start both the backend and frontend servers together:
 
 ```bash
 ./play-local.sh
 ```
 
-Once both services are running, open the local frontend URL printed by Vite in your browser.
+- **Backend API & WebSocket:** `http://localhost:8080`
+- **Frontend UI:** `http://localhost:5173`
 
----
+Press `Ctrl+C` in the terminal to stop both servers cleanly.
 
 ## 2. Running Tests
 
-Run the backend and frontend test suites independently:
+Run the backend and frontend test suites independently from their respective directories:
 
-- **Backend (Scala 3 / sbt):**
-  ```bash
-  sbt -batch test
-  ```
-- **Frontend (Vitest / npm):**
-  ```bash
-  cd frontend && npm test -- --run
-  ```
+```bash
+# Backend (Scala)
+cd backend && sbt -batch test
 
----
+# Frontend
+cd frontend && npm test -- --run
+```
 
-## 3. UI & Gameplay Overview
+## 3. Gameplay Overview
 
-Lidurak supports both **online multiplayer** rooms and **local hotseat / bot matches** for 2 to 4 players (using a 36-card deck for 2–3 players and a 52-card deck for 4 players).
+Lidurak is a web implementation of the classic card game Durak for **2 to 4 players**.
 
-### Lobby
-- **Guest Identity:** Visitors are automatically assigned a guest session and can customize their display name directly from the lobby.
-- **Quick Pairing:** One-click matchmaking presets for 2, 3, or 4 players with configurable turn clocks and redirects enabled.
-- **Lobby Pool:** Live list of open public rooms showing host name, seat occupancy, deck size, redirect rule, and turn clock, with one-click joining.
-- **Create Invite Link:** Configure a custom table (player count, redirect/reflect toggle, turn clock, and public or private visibility) and share the generated `/g/:gameId` invite URL.
-- **Local & Bot Tables:** Create offline-style hotseat or bot-filled games mixing Human, RandomBot, and BasicBot seats.
+- **Deck & Deal:** Matches with 2–3 players use a standard 36-card deck (Six through Ace); 4-player matches use a 52-card deck. Each player is dealt 6 cards, and the bottom card of the talon is placed face-up to establish the trump suit.
+- **Game Modes:** Supports local hotseat games, online multiplayer rooms and quick pairing, and AI opponents (`randomBot` and `basicBot`). Optional rules include attack redirection, chaos targeting, and transparent mode.
+- **Bout Flow:**
+  1. **Initial Attack:** The active attacker plays one or more cards of the same rank against a defender (up to the defender's starting hand size for the bout, capped at 6).
+  2. **Defense or Redirect:** The defender covers each attacking card with a higher-ranked card of the same suit or any trump card, redirects the attack (when enabled and holding a matching-rank card), or surrenders to pick up the cards on the table.
+  3. **Throw-Ins & Passing:** Other active players may throw in additional cards matching any rank currently on the table, or pass to finish the bout.
+  4. **Endgame:** Once the talon is empty, players who play out their last card finish in order. The final player remaining with cards is the **Durak**.
 
-### Game Table
-The table uses a three-column desktop layout:
-- **Left Sidebar:** How to Play reference, game presets, and (in local hotseat mode) player-switcher tabs.
-- **Center Felt Table:**
-  - **Top Row:** Opponent seats displaying remaining card counts and status.
-  - **Middle Row:** Active attack and defense card pairs (bouts), target slots for defending, and a redirect outline when reflection is enabled.
-  - **Bottom Row:** Talon deck and face-up trump card, the active player's hand, and hand sorting controls alongside contextual **Pass** / **Surrender** actions.
-- **Right Sidebar:** Turn countdown clock and end-of-match winner/Durak results.
+## 4. User Interface Overview
+
+The game table uses a three-column desktop layout:
+
+- **Left Sidebar:** Contains the How to Play reference, scenario preset controls, and hotseat player-switcher tabs.
+- **Center Felt Table:** Displays opponent seats along the top, the active attack/defense pairs and target indicators in the center, and the talon deck, trump card, your hand, card sorting controls, and contextual **Pass** / **Surrender** actions along the bottom.
+- **Right Sidebar:** Displays the turn countdown clock and final winner / Durak results when a match concludes.
