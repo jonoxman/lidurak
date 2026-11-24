@@ -337,11 +337,10 @@ describe('lobby.css visual invariants', () => {
     expect(lobbyCss).toContain('color: var(--m2-text-strong);');
   });
 
-  it('shares the M2 palette and button styling with the multiplayer shell', () => {
-    // T-96 ITEM-2: the tokens live on both M2 shells, not the lobby alone.
-    expect(lobbyCss).toMatch(/\.m2-lobby,\s*\n\.multiplayer-page \{/);
+  it('keeps the M2 palette on the lobby shell after the placeholder removal', () => {
+    // ITEM-4b: the lightweight placeholder shell and its styles are gone.
     expect(lobbyCss).toContain('--m2-text-strong: #f1f1f1;');
-    expect(lobbyCss).toContain('.multiplayer-page .m2-button.secondary');
+    expect(lobbyCss).not.toContain('.multiplayer-page');
   });
 
   it('adapts below 640px and caps the desktop shell', () => {

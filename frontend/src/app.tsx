@@ -3,7 +3,6 @@ import { HeaderBar } from './components/HeaderBar';
 import { initSettings } from './state/settings';
 import { GamePage } from './pages/GamePage';
 import { LobbyPage } from './pages/LobbyPage';
-import { MultiplayerGamePage } from './pages/MultiplayerGamePage';
 import { navigateToLobby, useRoute } from './router/useRoute';
 
 interface LobbyRoute {
@@ -95,7 +94,14 @@ export function App() {
       ) : showLobby || route.kind === 'lobby' ? (
         <LobbyPage />
       ) : (
-        <MultiplayerGamePage gameId={route.gameId} onNavigateLobby={navigateToLobby} />
+        /* ITEM-4b: the History-API `/g/:gameId` route renders the original
+           Milestone 1 gameplay interface in live multiplayer mode, never a
+           lightweight placeholder. */
+        <GamePage
+          mode="multiplayer"
+          gameId={route.gameId}
+          onLeaveGame={navigateToLobby}
+        />
       )}
     </div>
   );

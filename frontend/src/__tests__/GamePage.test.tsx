@@ -54,8 +54,39 @@ vi.mock('../api/websocket', () => ({
   },
 }));
 
+const roomSocket = vi.hoisted(() => ({
+  onView: null as ((view: unknown) => void) | null,
+  sent: [] as unknown[],
+  dispose: vi.fn(),
+}));
+
+vi.mock('../api/lobbyClient', () => ({
+  fetchGameView: vi.fn(),
+  joinRoom: vi.fn(),
+  leaveRoom: vi.fn(),
+}));
+
+vi.mock('../api/gameSocket', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api/gameSocket')>();
+  return {
+    ...actual,
+    createGameSocket: vi.fn(
+      (_gameId: string, handlers: { onView?: (view: unknown) => void }) => {
+        roomSocket.onView = handlers.onView ?? null;
+        return {
+          status: 'connected' as const,
+          sendAction: (message: unknown) => roomSocket.sent.push(message),
+          dispose: roomSocket.dispose,
+        };
+      },
+    ),
+  };
+});
+
 import * as client from '../api/client';
+import * as lobbyApi from '../api/lobbyClient';
 import { GamePage } from '../pages/GamePage';
+import type { PlayerGameView as RoomView } from '../types/multiplayer';
 import {
   getSettings,
   resetSettings,
@@ -4118,5 +4149,221 @@ describe('T-90-feedback-20261123_020207-5: Table Collapse consecutive throw-ins'
       playerId: 'p0',
       cards: [{ suit: 'clubs', rank: 'seven' }],
     });
+  });
+});
+
+// --- ITEM-4b: the live room renders the original M1 gameplay interface ------
+
+const ROOM_CARD = (suit: string, rank: string) => ({ suit, rank });
+
+const roomPlayer = (
+  id: string,
+  name: string,
+  seatIndex: number,
+  cardCount: number,
+  extra: Record<string, unknown> = {},
+) => ({
+  id,
+  name,
+  rating: null,
+  cardCount,
+  isConnected: true,
+  hasPassed: false,
+  finishRank: null,
+  seatIndex,
+  ...extra,
+});
+
+const makeRoomView = (overrides: Partial<RoomView> = {}): RoomView => ({
+  gameId: 'room-1',
+  status: 'InProgress',
+  config: { playerCount: 2, allowRedirect: true, turnTimeoutSeconds: 15, isPublic: true },
+  viewerId: 'guest-1',
+  viewerSeat: 0,
+  hand: [ROOM_CARD('spades', 'six')],
+  players: [
+    roomPlayer('guest-1', 'Guest', 0, 1),
+    roomPlayer('session-2', 'Opponent', 1, 2),
+  ],
+  seats: [
+    { seatIndex: 0, playerId: 'guest-1', displayName: 'Guest', isConnected: true },
+    { seatIndex: 1, playerId: 'session-2', displayName: 'Opponent', isConnected: true },
+  ],
+  tablePairs: [],
+  talonCount: 10,
+  bottomTrumpCard: ROOM_CARD('hearts', 'ace'),
+  trumpSuit: 'hearts',
+  discardCount: 0,
+  phase: 'initialAttack',
+  attackerIdx: 0,
+  defenderIdx: 1,
+  maxBoutAttacks: 6,
+  finishOrder: [],
+  isDraw: false,
+  durakId: null,
+  turnDeadlineEpochMs: null,
+  ...overrides,
+});
+
+const waitingRoomView = (overrides: Partial<RoomView> = {}): RoomView =>
+  makeRoomView({
+    status: 'WaitingForPlayers',
+    hand: [],
+    players: [roomPlayer('guest-1', 'Guest', 0, 0)],
+    seats: [
+      { seatIndex: 0, playerId: 'guest-1', displayName: 'Guest', isConnected: true },
+      { seatIndex: 1, playerId: null, displayName: null, isConnected: false },
+    ],
+    tablePairs: [],
+    talonCount: 0,
+    bottomTrumpCard: null,
+    trumpSuit: null,
+    phase: null,
+    attackerIdx: null,
+    defenderIdx: null,
+    turnDeadlineEpochMs: null,
+    ...overrides,
+  });
+
+const fetchRoomView = lobbyApi.fetchGameView as unknown as ReturnType<typeof vi.fn>;
+const joinRoomMock = lobbyApi.joinRoom as unknown as ReturnType<typeof vi.fn>;
+const leaveRoomMock = lobbyApi.leaveRoom as unknown as ReturnType<typeof vi.fn>;
+
+describe('GamePage multiplayer mode (ITEM-4b)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    roomSocket.onView = null;
+    roomSocket.sent = [];
+    fetchRoomView.mockReset();
+    joinRoomMock.mockReset();
+    leaveRoomMock.mockReset();
+    getGameView.mockReset();
+    getGameReplay.mockReset();
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn(async () => {}) },
+    });
+  });
+
+  it('renders the M1 staging panel with invite copy, config badges and Leave room', async () => {
+    fetchRoomView.mockResolvedValue(waitingRoomView());
+    const onLeave = vi.fn();
+    render(<GamePage mode="multiplayer" gameId="room-1" onLeaveGame={onLeave} />);
+
+    await screen.findByTestId('waiting-room');
+    expect(screen.getByText('Room room-1')).toBeTruthy();
+    expect(screen.getByText('2 players')).toBeTruthy();
+    expect(screen.getByText('36-card deck')).toBeTruthy();
+    expect(screen.getByText('Redirect ON')).toBeTruthy();
+    expect(screen.getByText('15s turn clock')).toBeTruthy();
+    expect(screen.getByText('Public room')).toBeTruthy();
+    expect(screen.getByTestId('waiting-seat-1').textContent).toContain('Open seat');
+    expect(screen.getByTestId('invite-url').textContent).toBe(
+      `${window.location.origin}/g/room-1`,
+    );
+
+    fireEvent.click(screen.getByTestId('copy-invite'));
+    await waitFor(() =>
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+        `${window.location.origin}/g/room-1`,
+      ),
+    );
+    expect(screen.getByTestId('copy-invite').textContent).toBe('Copied!');
+
+    fireEvent.click(screen.getByTestId('leave-room'));
+    await waitFor(() => expect(leaveRoomMock).toHaveBeenCalledWith('room-1'));
+    expect(onLeave).toHaveBeenCalled();
+  });
+
+  it('joins an open seat and swaps to the live M1 table', async () => {
+    fetchRoomView.mockResolvedValue(waitingRoomView({ viewerSeat: null }));
+    joinRoomMock.mockResolvedValue({
+      gameId: 'room-1',
+      seatIndex: 1,
+      view: makeRoomView({ viewerSeat: 1, viewerId: 'guest-1' }),
+    });
+    render(<GamePage mode="multiplayer" gameId="room-1" onLeaveGame={vi.fn()} />);
+
+    await screen.findByTestId('waiting-room');
+    fireEvent.click(screen.getByTestId('join-room'));
+
+    await waitFor(() => expect(joinRoomMock).toHaveBeenCalledWith('room-1'));
+    expect(await screen.findByTestId('hand-row')).toBeTruthy();
+  });
+
+  it('renders the M1 table for InProgress rooms, updates from the socket and sends WS actions', async () => {
+    fetchRoomView.mockResolvedValue(makeRoomView());
+    render(<GamePage mode="multiplayer" gameId="room-1" onLeaveGame={vi.fn()} />);
+
+    await screen.findByTestId('hand-row');
+    expect(screen.getByTestId('sort-bar')).toBeTruthy();
+    expect(screen.getByTestId('hand-sort-box')).toBeTruthy();
+    expect(screen.getByTestId('turn-clock').textContent).toBe('00:15');
+    expect(screen.getByTestId('talon-count').textContent).toBe('10');
+    expect(document.querySelectorAll('.hand-card-wrapper')).toHaveLength(1);
+    expect(screen.queryByTestId('waiting-room')).toBeNull();
+    // No hotseat / POV switching in a live room.
+    expect(screen.getByTestId('player-row-p0').getAttribute('data-pov-clickable')).toBe('false');
+
+    fireEvent.click(screen.getByLabelText('six of spades'));
+    fireEvent.click(screen.getByRole('button', { name: 'Attack' }));
+    expect(roomSocket.sent).toEqual([
+      { type: 'playAttack', cards: [{ suit: 'spades', rank: 'six' }] },
+    ]);
+
+    // A live `gameViewUpdate` re-renders onto the new projection: the viewer is
+    // now a thrower whose table is fully covered, so Pass appears.
+    act(() => {
+      roomSocket.onView?.(
+        makeRoomView({
+          phase: 'defense',
+          tablePairs: [
+            { attack: ROOM_CARD('clubs', 'seven'), defense: ROOM_CARD('clubs', 'eight') },
+          ],
+        }),
+      );
+    });
+    fireEvent.click(await screen.findByTestId('pass-button'));
+    expect(roomSocket.sent[1]).toEqual({ type: 'passTurn' });
+  });
+
+  it('renders winner and Durak results for a Finished room', async () => {
+    fetchRoomView.mockResolvedValue(
+      makeRoomView({
+        status: 'Finished',
+        phase: 'gameOver',
+        hand: [],
+        players: [
+          roomPlayer('guest-1', 'Guest', 0, 0, { finishRank: 2 }),
+          roomPlayer('session-2', 'Opponent', 1, 0, { finishRank: 1 }),
+        ],
+        finishOrder: ['session-2', 'guest-1'],
+        durakId: 'guest-1',
+      }),
+    );
+    render(<GamePage mode="multiplayer" gameId="room-1" onLeaveGame={vi.fn()} />);
+
+    const banner = await screen.findByTestId('game-over-banner');
+    expect(banner.textContent).toContain('Opponent wins');
+    expect(banner.textContent).toContain('Durak: you');
+    expect(screen.queryByTestId('banner-rematch-button')).toBeNull();
+    expect(screen.queryByTestId('surrender-button')).toBeNull();
+  });
+
+  it('renders a zero-leak read-only spectator table', async () => {
+    fetchRoomView.mockResolvedValue(
+      makeRoomView({ viewerSeat: null, hand: [], phase: 'defense', defenderIdx: 1 }),
+    );
+    render(<GamePage mode="multiplayer" gameId="room-1" onLeaveGame={vi.fn()} />);
+
+    expect(await screen.findByTestId('spectator-badge')).toBeTruthy();
+    await screen.findByTestId('hand-row');
+    expect(document.querySelectorAll('.hand-card-wrapper')).toHaveLength(0);
+    expect(screen.queryByRole('button', { name: 'Attack' })).toBeNull();
+    expect(screen.queryByTestId('pass-button')).toBeNull();
+    expect(screen.queryByTestId('surrender-button')).toBeNull();
+    // Both seats' card counts stay public.
+    expect(screen.getByTestId('opponent-card-count-p0').textContent).toContain('1');
+    expect(screen.getByTestId('opponent-card-count-p1').textContent).toContain('2');
   });
 });

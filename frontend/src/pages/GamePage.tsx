@@ -11,6 +11,17 @@ import {
   sendAction as sendActionRest,
 } from '../api/client';
 import { GameWebSocket } from '../api/websocket';
+import { createGameSocket, sendGameAction, type GameSocket } from '../api/gameSocket';
+import {
+  fetchGameView as fetchRoomView,
+  joinRoom,
+  leaveRoom,
+} from '../api/lobbyClient';
+import {
+  multiplayerViewToM1,
+  type PlayerGameView as MultiplayerPlayerGameView,
+  type SocketStatus,
+} from '../types/multiplayer';
 import { soundEngine } from '../audio/SoundEngine';
 import { getStoredSortMode } from '../state/settings';
 import {
@@ -86,6 +97,20 @@ export function viewerSeatIndex(view: PlayerGameView): number {
 
 export function formatClock(seconds: number): string {
   return `00:${String(seconds).padStart(2, '0')}`;
+}
+
+/** Label of the live-room WebSocket in the header and the staging panel. */
+export function roomStatusLabel(status: SocketStatus): string {
+  switch (status) {
+    case 'connected':
+      return 'Connected';
+    case 'reconnecting':
+      return 'Reconnecting';
+    case 'connecting':
+      return 'Connecting…';
+    default:
+      return 'Offline';
+  }
 }
 
 /**
@@ -375,8 +400,13 @@ const isSurrenderPhase = (phase: string): boolean =>
 
 export interface GamePageProps {
   gameId: string;
-  playerId: string;
-  onSwitchPlayer: (playerId: string) => void;
+  playerId?: string;
+  /**
+   * `local` is the Milestone 1 hash-route table (hotseat / bot POV switching);
+   * `multiplayer` is the live `/g/:gameId` room backed by the M2 REST + WS.
+   */
+  mode?: 'local' | 'multiplayer';
+  onSwitchPlayer?: (playerId: string) => void;
   /** Opens another match (rematch or QA preset); the router owns the URL. */
   onNavigateGame?: (gameId: string, playerId?: string) => void;
   /** Leaves the table; defaults to the root URL when the router owns it. */
@@ -385,8 +415,9 @@ export interface GamePageProps {
 
 export function GamePage({
   gameId,
-  playerId,
-  onSwitchPlayer,
+  playerId = 'p0',
+  mode = 'local',
+  onSwitchPlayer = () => {},
   onNavigateGame,
   onLeaveGame,
 }: GamePageProps) {
@@ -400,6 +431,15 @@ export function GamePage({
   } | null>(null);
   const [live, setLive] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+  // ITEM-4b: the raw live-room projection (staging needs `status`/`seats`,
+  // which the M1 view does not carry) and its room lifecycle state.
+  const [roomView, setRoomView] = useState<MultiplayerPlayerGameView | null>(null);
+  const [roomStatus, setRoomStatus] = useState<SocketStatus>('connecting');
+  const [copiedInvite, setCopiedInvite] = useState(false);
+  const [joiningRoom, setJoiningRoom] = useState(false);
+  const [joinRoomError, setJoinRoomError] = useState<string | null>(null);
+  const copiedInviteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const roomSocketRef = useRef<GameSocket | null>(null);
   const socketRef = useRef<GameWebSocket | null>(null);
   const previousViewRef = useRef<PlayerGameView | null>(null);
   // ITEM-5 (review round 1): the hand selection from just before the most
@@ -468,6 +508,60 @@ export function GamePage({
   };
 
   useEffect(() => {
+    // ITEM-4b: a live room is hydrated from `GET /api/games/:gameId` and then
+    // kept current by `/ws/games/:gameId`. Every projected room view is adapted
+    // onto the M1 `PlayerGameView`, so the exact same table renders it.
+    if (mode === 'multiplayer') {
+      let active = true;
+      viewGameRef.current = gameId;
+      setView(null);
+      setRoomView(null);
+      setRoomStatus('connecting');
+      setSelection(null);
+      setLive(false);
+      setLoadedReplay(null);
+      setReplayFrameIdx(0);
+      setCustomHandOrder([]);
+      replayLoadedGameRef.current = gameId;
+      previousViewRef.current = null;
+
+      fetchRoomView(gameId)
+        .then((initial) => {
+          if (!active) return;
+          // A socket frame that already landed is newer than this REST read, so
+          // it is never overwritten by the (possibly stale) initial projection.
+          setRoomView((current) => current ?? initial);
+          setView((current) => current ?? multiplayerViewToM1(initial));
+          setLive(true);
+        })
+        .catch((reason: unknown) => {
+          console.warn('Could not load the room view', reason);
+        });
+
+      const socket = createGameSocket(gameId, {
+        onView: (next) => {
+          if (!active) return;
+          setRoomView(next);
+          setView(multiplayerViewToM1(next));
+          setLive(true);
+        },
+        onActionRejected: (code, message) => {
+          // Invalid actions are rejected silently; no banner ever covers the table.
+          console.warn(`Action rejected (${code}): ${message}`);
+        },
+        onStatusChange: (status) => {
+          if (active) setRoomStatus(status);
+        },
+      });
+      roomSocketRef.current = socket;
+
+      return () => {
+        active = false;
+        socket.dispose();
+        if (roomSocketRef.current === socket) roomSocketRef.current = null;
+      };
+    }
+
     let active = true;
     // ITEM-PB-12a: only a new match resets the table and the review position —
     // switching the inspected seat keeps the frame the reviewer is on.
@@ -521,12 +615,13 @@ export function GamePage({
       socket.disconnect();
       if (socketRef.current === socket) socketRef.current = null;
     };
-  }, [gameId, playerId]);
+  }, [gameId, playerId, mode]);
 
   // ITEM-PB-12a: the recorded match belongs to the game, never to the inspected
   // seat, so it is fetched once per match. Opening a finished game's URL (or a
   // live room that is gone) still hydrates the table and the review controls.
   useEffect(() => {
+    if (mode === 'multiplayer') return;
     let active = true;
     const loadReplay = async () => {
       try {
@@ -551,7 +646,7 @@ export function GamePage({
     return () => {
       active = false;
     };
-  }, [gameId]);
+  }, [gameId, mode]);
 
   // Browsers only unlock audio from a user gesture; do it once per page.
   useEffect(() => {
@@ -644,6 +739,7 @@ export function GamePage({
   // can step through it. A missing or failing endpoint leaves the live view in
   // place instead of breaking the page.
   useEffect(() => {
+    if (mode === 'multiplayer') return;
     if (!gameOverPhase) {
       setLoadedReplay(null);
       setReplayFrameIdx(0);
@@ -673,7 +769,7 @@ export function GamePage({
     return () => {
       active = false;
     };
-  }, [gameId, gameOverPhase]);
+  }, [gameId, gameOverPhase, mode]);
 
   // Item 13: remember every real name seen in a live view or a replay frame so
   // the POV menu can label each seat even when the current frame omits it.
@@ -907,9 +1003,196 @@ export function GamePage({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [reviewMode, replay, replayFrameIdx]);
 
+  // ITEM-4b: the room staging panel is rendered inside the M1 shell and obeys
+  // the same theme, CSS-Grid and zero-clutter rules as the felt table.
+  const roomInviteUrl = roomView ? `${window.location.origin}/g/${roomView.gameId}` : '';
+  const backToLobby = () =>
+    onLeaveGame ? onLeaveGame() : window.location.assign('/');
+
+  const copyRoomInvite = async () => {
+    try {
+      await navigator.clipboard?.writeText(roomInviteUrl);
+      setCopiedInvite(true);
+      if (copiedInviteTimerRef.current !== null) clearTimeout(copiedInviteTimerRef.current);
+      copiedInviteTimerRef.current = setTimeout(() => setCopiedInvite(false), 1500);
+    } catch {
+      setCopiedInvite(false);
+    }
+  };
+
+  const joinRoomSeat = async () => {
+    if (joiningRoom) return;
+    setJoiningRoom(true);
+    setJoinRoomError(null);
+    try {
+      const joined = await joinRoom(gameId);
+      setRoomView(joined.view);
+      setView(multiplayerViewToM1(joined.view));
+    } catch (reason) {
+      setJoinRoomError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setJoiningRoom(false);
+    }
+  };
+
+  const leaveCurrentRoom = async () => {
+    try {
+      await leaveRoom(gameId);
+    } catch {
+      // A room that already vanished still sends the user home.
+    }
+    backToLobby();
+  };
+
+  if (
+    mode === 'multiplayer' &&
+    (roomView == null || roomView.status === 'WaitingForPlayers')
+  ) {
+    const seats = [...(roomView?.seats ?? [])].sort(
+      (left, right) => left.seatIndex - right.seatIndex,
+    );
+    const filledSeats = seats.filter((seat) => seat.playerId !== null).length;
+    return (
+      <div class="page game-page" data-testid="game-page">
+        <header class="game-header">
+          <div class="game-meta">
+            <span class="game-id">Room {gameId}</span>
+            <span class={`connection ${roomStatus === 'connected' ? 'live' : 'pending'}`}>
+              {roomStatusLabel(roomStatus)}
+            </span>
+          </div>
+          <button type="button" class="action-button back-to-lobby" onClick={backToLobby}>
+            Back to lobby
+          </button>
+        </header>
+
+        {roomView == null ? (
+          <p class="loading">Loading room {gameId}…</p>
+        ) : (
+          <div class="game-shell" data-testid="waiting-room">
+            <aside class="game-sidebar sidebar-left" data-zone="sidebar-left">
+              <section class="panel" aria-label="Room seats">
+                <h2>Seats</h2>
+                <ul class="status-badges players-list">
+                  {seats.map((seat) => (
+                    <li
+                      class="status-badge"
+                      key={seat.seatIndex}
+                      data-testid={`waiting-seat-${seat.seatIndex}`}
+                    >
+                      <span class="status-player">
+                        <span class="status-name">Seat {seat.seatIndex + 1}</span>
+                      </span>
+                      <span class="status-cards">{seat.displayName ?? 'Open seat'}</span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+
+              <section class="panel" aria-label="How to Play">
+                <h2>How to Play</h2>
+                <ul class="how-to-play">
+                  {HOW_TO_PLAY.map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
+              </section>
+            </aside>
+
+            <div class="table-column">
+              <section class="panel" data-testid="invite-panel" aria-label="Invite players">
+                <h2>Invite players</h2>
+                <code class="game-id" data-testid="invite-url">
+                  {roomInviteUrl}
+                </code>
+                <div class="game-buttons">
+                  <button
+                    type="button"
+                    class="action-button"
+                    data-testid="copy-invite"
+                    onClick={() => void copyRoomInvite()}
+                  >
+                    {copiedInvite ? 'Copied!' : 'Copy link'}
+                  </button>
+                  {roomView.viewerSeat === null &&
+                  filledSeats < roomView.config.playerCount ? (
+                    <button
+                      type="button"
+                      class="action-button green"
+                      data-testid="join-room"
+                      disabled={joiningRoom}
+                      onClick={() => void joinRoomSeat()}
+                    >
+                      {joiningRoom ? 'Joining…' : 'Join room'}
+                    </button>
+                  ) : null}
+                  {roomView.viewerSeat !== null ? (
+                    <button
+                      type="button"
+                      class="action-button"
+                      data-testid="leave-room"
+                      onClick={() => void leaveCurrentRoom()}
+                    >
+                      Leave room
+                    </button>
+                  ) : null}
+                </div>
+                {joinRoomError ? (
+                  <p class="game-id" role="status">
+                    {joinRoomError}
+                  </p>
+                ) : null}
+              </section>
+
+              <section class="panel" data-testid="room-config" aria-label="Room configuration">
+                <h2>Room config</h2>
+                <ul class="status-badges players-list">
+                  <li class="status-badge">
+                    <span class="status-cards">{roomView.config.playerCount} players</span>
+                  </li>
+                  <li class="status-badge">
+                    <span class="status-cards">
+                      {roomView.config.playerCount === 4 ? '52-card' : '36-card'} deck
+                    </span>
+                  </li>
+                  <li class="status-badge">
+                    <span class="status-cards">
+                      Redirect {roomView.config.allowRedirect ? 'ON' : 'OFF'}
+                    </span>
+                  </li>
+                  <li class="status-badge">
+                    <span class="status-cards">
+                      {roomView.config.turnTimeoutSeconds}s turn clock
+                    </span>
+                  </li>
+                  <li class="status-badge">
+                    <span class="status-cards">
+                      {roomView.config.isPublic ? 'Public' : 'Private'} room
+                    </span>
+                  </li>
+                </ul>
+              </section>
+            </div>
+
+            <aside class="game-sidebar sidebar-right" data-zone="sidebar-right">
+              <section class="panel clock-split-panel" aria-label="Turn clock">
+                <div class="clock-half split-clock-half turn-clock-half">
+                  <h2>Turn</h2>
+                  <span class="turn-clock split-clock-value" data-testid="turn-clock">
+                    {formatClock(roomView.config.turnTimeoutSeconds)}
+                  </span>
+                </div>
+              </section>
+            </aside>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   if (!view) {
     return (
-      <div class="page game-page">
+      <div class="page game-page" data-testid="game-page">
         <header class="game-header">
           <span class="game-id">Game {gameId}</span>
           <button
@@ -1059,6 +1342,17 @@ export function GamePage({
     // ITEM-ADD-9: never play a card, surrender or pass on a bot's behalf.
     if (isBotViewer) {
       console.warn('Ignored action: the inspected seat is a bot');
+      return;
+    }
+    // ITEM-4b: a live room has no REST action endpoint — the authenticated
+    // seat dispatches M1 actions as typed frames on its own game socket.
+    if (mode === 'multiplayer') {
+      const roomSocket = roomSocketRef.current;
+      if (roomSocket != null && sendGameAction(roomSocket, action)) {
+        clearSelection();
+      } else {
+        console.warn('Ignored action: the live room socket is not connected');
+      }
       return;
     }
     const socket = socketRef.current;
@@ -1420,7 +1714,10 @@ export function GamePage({
 
   // Fixed seat order: neither the POV switcher nor the players list reorders
   // the active player.
-  const playerOptions = seatOrderedPlayerIds(displayedView);
+  const playerOptions = seatOrderedPlayerIds(displayedView).filter(
+    (id) =>
+      !(mode === 'multiplayer' && roomView?.viewerSeat === null && id === displayedView.myId),
+  );
   const playersInSeatOrder = playerOptions.map((id) => {
     const opponent = displayedView.opponents.find((candidate) => candidate.id === id);
     const mine = id === displayedView.myId;
@@ -1487,8 +1784,11 @@ export function GamePage({
   // ITEM-14b: POV switching lives only in the PLAYERS rows now. Dev Mode (a
   // server-side config flag that defaults to active) keeps it open during live
   // play; without it the rows unlock once the match is over in review mode.
+  // ITEM-4b: only the local M1 table exposes POV switching; a live room always
+  // inspects the authenticated viewer's own seat.
   const canSwitchPov =
-    displayedView.devMode !== false || isGameOverPhase(displayedView.boutPhase);
+    mode !== 'multiplayer' &&
+    (displayedView.devMode !== false || isGameOverPhase(displayedView.boutPhase));
   const playersPanel = (
     <section class="panel players-panel" data-testid="players-panel" aria-label="Player status">
       <h2>Players</h2>
@@ -1716,7 +2016,7 @@ export function GamePage({
   const passCountdownSeconds = autoPassPending ? 1 : serverPassCountdown;
 
   return (
-    <div class="page game-page">
+    <div class="page game-page" data-testid="game-page">
       <header class="game-header">
         <div class="game-meta">
           <span class="game-id">Game {gameId}</span>
@@ -1745,15 +2045,19 @@ export function GamePage({
             </span>
           ) : null}
           {/* Item 9 / ITEM-PB-9: play again with the same seats, or leave. */}
-          <button
-            type="button"
-            class="action-button green banner-rematch-button"
-            data-testid="banner-rematch-button"
-            disabled={rematchPending}
-            onClick={rematch}
-          >
-            {rematchPending ? 'Starting…' : 'Rematch'}
-          </button>
+          {/* A live room has no local rematch; multiplayer finishes with the
+              results and the back-to-lobby control. */}
+          {mode === 'multiplayer' ? null : (
+            <button
+              type="button"
+              class="action-button green banner-rematch-button"
+              data-testid="banner-rematch-button"
+              disabled={rematchPending}
+              onClick={rematch}
+            >
+              {rematchPending ? 'Starting…' : 'Rematch'}
+            </button>
+          )}
           <button
             type="button"
             class="action-button banner-lobby-button"
@@ -1767,11 +2071,20 @@ export function GamePage({
 
       <div class="game-shell">
         <aside class="game-sidebar sidebar-left" data-zone="sidebar-left">
+          {/* ITEM-4b: a live spectator is read-only; the badge sits in the
+              sidebar, never on the felt table. */}
+          {mode === 'multiplayer' && roomView?.viewerSeat === null ? (
+            <p class="game-id" data-testid="spectator-badge">
+              Spectator Mode (Read-Only)
+            </p>
+          ) : null}
+
           {/* ITEM-14a: PLAYERS is the top element of the left column and the
               only POV switcher in the UI. */}
           {playersPanel}
 
-          {/* QA presets: jump straight into a scripted position in one click. */}
+          {/* QA presets: local M1 only — a live room is never re-seeded. */}
+          {mode === 'multiplayer' ? null : (
           <section
             class="panel qa-scenarios-panel"
             data-testid="qa-scenarios"
@@ -1799,6 +2112,7 @@ export function GamePage({
               </p>
             ) : null}
           </section>
+          )}
 
           <section class="panel" aria-label="How to Play">
             <h2>How to Play</h2>

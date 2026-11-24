@@ -8,7 +8,15 @@
  * The card and table-pair types are the existing frontend ones (`suit`/`rank`
  * travel as lowercase strings, see `durak.engine.JsonCodecs`).
  */
-import { isCard, type Card, type TablePair } from '../types';
+import {
+  isCard,
+  isInitialAttackPhase,
+  normalizeToken,
+  type Card,
+  type GameAction,
+  type PlayerGameView as M1PlayerGameView,
+  type TablePair,
+} from '../types';
 
 export type { Card, TablePair };
 
@@ -89,6 +97,36 @@ export interface PlayerGameView {
   isDraw: boolean;
   durakId: string | null;
   turnDeadlineEpochMs: number | null;
+  // --- Wave-1 enrichment (all optional, so older servers still parse) -----
+  /** The viewer's own legal engine actions (`attack`, `cover`, `pass`, …). */
+  legalActions?: string[];
+  /** Cards this seat may legally throw in right now. */
+  throwInCards?: Card[];
+  /** Remaining attacker slots this seat may fill in the current bout. */
+  throwInCapacity?: number | null;
+  /** Backend-owned throw-in gate for this seat. */
+  canThrowIn?: boolean;
+  /** Seconds left on the active turn clock (`0` when the clock is idle). */
+  turnSecondsRemaining?: number;
+  /** This seat already passed on the current bout. */
+  myHasPassed?: boolean;
+  /** This seat's finishing place (`1` = first out), once its hand is empty. */
+  myFinishRank?: number | null;
+  /** Every winner, in finishing order. */
+  winners?: string[];
+  /** The Durak (last place) named by the backend. */
+  durak?: string | null;
+  /** This seat's defender has no legal cover and no legal redirect. */
+  defenderDefenseless?: boolean;
+  /** Epoch-ms timestamps behind the M1 game clock. */
+  gameStartedAtMs?: number | null;
+  gameEndedAtMs?: number | null;
+  /** Most recent finished bout, revealed face-up in the deck box. */
+  lastDiscardCards?: Card[];
+  /** Seats the current attacker may aim at during the opening attack. */
+  eligibleTargetIds?: string[];
+  /** The seat a reflection would reach. */
+  redirectTargetId?: string | null;
 }
 
 /** One open public room in the lobby pool. */
@@ -324,6 +362,39 @@ export function parsePlayerGameView(value: unknown): PlayerGameView {
     isDraw: booleanOr(raw.isDraw, false),
     durakId: optionalString(raw.durakId),
     turnDeadlineEpochMs: optionalNumber(raw.turnDeadlineEpochMs),
+    ...(Array.isArray(raw.legalActions)
+      ? { legalActions: raw.legalActions.filter((entry): entry is string => typeof entry === 'string') }
+      : {}),
+    ...(Array.isArray(raw.throwInCards) ? { throwInCards: arrayOf(raw.throwInCards, 'throwInCards').map(parseCard) } : {}),
+    ...(typeof raw.throwInCapacity === 'number' ? { throwInCapacity: raw.throwInCapacity } : {}),
+    ...(typeof raw.canThrowIn === 'boolean' ? { canThrowIn: raw.canThrowIn } : {}),
+    ...(typeof raw.turnSecondsRemaining === 'number'
+      ? { turnSecondsRemaining: raw.turnSecondsRemaining }
+      : {}),
+    ...(typeof raw.myHasPassed === 'boolean' ? { myHasPassed: raw.myHasPassed } : {}),
+    ...(typeof raw.myFinishRank === 'number' ? { myFinishRank: raw.myFinishRank } : {}),
+    ...(Array.isArray(raw.winners)
+      ? { winners: raw.winners.filter((entry): entry is string => typeof entry === 'string') }
+      : {}),
+    ...(typeof raw.durak === 'string' ? { durak: raw.durak } : {}),
+    ...(typeof raw.defenderDefenseless === 'boolean'
+      ? { defenderDefenseless: raw.defenderDefenseless }
+      : {}),
+    ...(typeof raw.gameStartedAtMs === 'number' ? { gameStartedAtMs: raw.gameStartedAtMs } : {}),
+    ...(typeof raw.gameEndedAtMs === 'number' ? { gameEndedAtMs: raw.gameEndedAtMs } : {}),
+    ...(Array.isArray(raw.lastDiscardCards)
+      ? { lastDiscardCards: arrayOf(raw.lastDiscardCards, 'lastDiscardCards').map(parseCard) }
+      : {}),
+    ...(Array.isArray(raw.eligibleTargetIds)
+      ? {
+          eligibleTargetIds: raw.eligibleTargetIds.filter(
+            (entry): entry is string => typeof entry === 'string',
+          ),
+        }
+      : {}),
+    ...(typeof raw.redirectTargetId === 'string'
+      ? { redirectTargetId: raw.redirectTargetId }
+      : {}),
   };
 }
 
@@ -345,6 +416,219 @@ export function parseLobbyRoomSummary(value: unknown): LobbyRoomSummary {
 /** Parses a JSON array of lobby rooms. */
 export function parseLobbyRoomList(value: unknown): LobbyRoomSummary[] {
   return arrayOf(value, 'rooms').map(parseLobbyRoomSummary);
+}
+
+// --- M1 adapter ------------------------------------------------------------
+
+/** Stable M1 seat id (`p<seatIndex>`) of one multiplayer seat. */
+export function multiplayerSeatId(seatIndex: number): string {
+  return `p${seatIndex}`;
+}
+
+/**
+ * The viewer's legal engine actions, derived from the projected phase and seats
+ * when the server payload does not carry an `legalActions` list yet.
+ *
+ * Only the seat that may actually move receives actions, so a spectator
+ * (`viewerSeat: null`) and a finished match always get an empty list.
+ */
+export function deriveLegalActions(view: PlayerGameView): string[] {
+  if (view.status !== 'InProgress') return [];
+  const seat = view.viewerSeat;
+  if (seat == null) return [];
+  const phase = normalizeToken(view.phase ?? '');
+  if (phase.length === 0 || phase === 'gameover') return [];
+
+  const actions: string[] = [];
+  const isAttacker = view.attackerIdx === seat;
+  const isDefender = view.defenderIdx === seat;
+  const tableRanks = new Set<string>();
+  view.tablePairs.forEach((pair) => {
+    tableRanks.add(pair.attack.rank.toLowerCase());
+    if (pair.defense) tableRanks.add(pair.defense.rank.toLowerCase());
+  });
+  const hasThrowInCard = view.hand.some((card) => tableRanks.has(card.rank.toLowerCase()));
+  const hasRoom = view.tablePairs.length < view.maxBoutAttacks;
+  const canThrowIn = hasThrowInCard && hasRoom;
+
+  if (phase === 'initialattack') {
+    if (isAttacker) actions.push('attack');
+    return actions;
+  }
+
+  if (isDefender) {
+    if (phase === 'defense') {
+      actions.push('cover');
+      if (view.config.allowRedirect) actions.push('redirect');
+      actions.push('surrender');
+    }
+    return actions;
+  }
+
+  const covered =
+    view.tablePairs.length > 0 && view.tablePairs.every((pair) => pair.defense != null);
+  if (phase === 'surrenderthrowin') {
+    if (canThrowIn) actions.push('throwIn');
+    actions.push('pass');
+  } else if (phase === 'defense' && covered) {
+    if (canThrowIn) actions.push('throwIn');
+    actions.push('pass');
+  }
+  return actions;
+}
+
+/** The seat whose turn clock is running, as an M1 `p<seat>` id. */
+export function multiplayerTurnSeatId(view: PlayerGameView): string | undefined {
+  const seat = isInitialAttackPhase(view.phase ?? '')
+    ? view.attackerIdx
+    : (view.defenderIdx ?? view.attackerIdx);
+  return seat == null ? undefined : multiplayerSeatId(seat);
+}
+
+/**
+ * Maps one multiplayer projection onto the Milestone 1 `PlayerGameView` that
+ * `GameTable`, `ActionBar`, `SortBar` and `GamePage` consume.
+ *
+ * Every seat is rewritten to a stable `p<seatIndex>` id, so the M1 seat order,
+ * attacker/defender lookups and hand highlighting keep working unchanged. A
+ * spectator keeps a private `spectator` id, an empty hand and `isBot: true`, so
+ * no hand card and no move control can ever be rendered for them.
+ */
+export function multiplayerViewToM1(view: PlayerGameView): M1PlayerGameView {
+  const mySeat = view.viewerSeat;
+  const spectator = mySeat == null;
+  const viewerSummary = spectator
+    ? null
+    : (view.players.find((player) => player.seatIndex === mySeat) ?? null);
+
+  const opponents = view.players
+    .filter((player) => player.seatIndex !== mySeat)
+    .sort((left, right) => left.seatIndex - right.seatIndex)
+    .map((player) => ({
+      id: multiplayerSeatId(player.seatIndex),
+      name: player.name,
+      cardCount: player.cardCount,
+      hasPassed: player.hasPassed,
+      finishRank: player.finishRank ?? null,
+      isPresent: player.isConnected,
+    }));
+
+  const legalActions = Array.isArray(view.legalActions)
+    ? view.legalActions
+    : deriveLegalActions(view);
+
+  const tableRanks = new Set<string>();
+  view.tablePairs.forEach((pair) => {
+    tableRanks.add(pair.attack.rank.toLowerCase());
+    if (pair.defense) tableRanks.add(pair.defense.rank.toLowerCase());
+  });
+  const remaining = Math.max(0, view.maxBoutAttacks - view.tablePairs.length);
+  const projectedThrowIn = Array.isArray(view.throwInCards)
+    ? view.throwInCards
+    : view.hand.filter((card) => tableRanks.has(card.rank.toLowerCase())).slice(0, remaining);
+  const throwInCapacity = Math.max(
+    0,
+    Math.min(remaining, view.throwInCapacity ?? projectedThrowIn.length),
+  );
+
+  const seatIdOf = (playerId: string | null | undefined): string | null => {
+    if (playerId == null) return null;
+    const player = view.players.find((entry) => entry.id === playerId);
+    return player ? multiplayerSeatId(player.seatIndex) : null;
+  };
+
+  const finishOrder = (view.finishOrder.length > 0
+    ? view.finishOrder.map(seatIdOf).filter((id): id is string => id != null)
+    : [...view.players]
+        .filter((player) => player.finishRank != null)
+        .sort((left, right) => (left.finishRank ?? 0) - (right.finishRank ?? 0))
+        .map((player) => multiplayerSeatId(player.seatIndex)));
+
+  const phase =
+    view.phase ??
+    (view.status === 'WaitingForPlayers'
+      ? 'waitingForPlayers'
+      : view.status === 'Finished'
+        ? 'gameOver'
+        : 'initialAttack');
+  const turnSeconds =
+    view.turnSecondsRemaining ??
+    (view.status === 'Finished' ? 0 : view.config.turnTimeoutSeconds);
+
+  return {
+    myId: spectator ? 'spectator' : multiplayerSeatId(mySeat),
+    myName: spectator ? 'Spectator' : (viewerSummary?.name ?? view.viewerId),
+    myHand: spectator ? [] : view.hand,
+    opponents,
+    tablePairs: view.tablePairs,
+    talonCount: view.talonCount,
+    bottomTrumpCard: view.bottomTrumpCard,
+    trumpSuit: view.trumpSuit ?? '',
+    attackerIdx: view.attackerIdx ?? -1,
+    defenderIdx: view.defenderIdx ?? -1,
+    boutPhase: phase,
+    legalActions: spectator ? [] : legalActions,
+    finishOrder,
+    isDraw: view.isDraw,
+    maxBoutAttacks: view.maxBoutAttacks,
+    defenderDefenseless: view.defenderDefenseless ?? false,
+    throwInCards: projectedThrowIn,
+    throwInCapacity,
+    canThrowIn:
+      view.canThrowIn ??
+      (legalActions.includes('throwIn') && projectedThrowIn.length > 0 && throwInCapacity > 0),
+    chaosMode: false,
+    isBot: spectator,
+    playerTypes: view.players.map(() => 'human'),
+    allowRedirect: view.config.allowRedirect,
+    eligibleTargetIds: view.eligibleTargetIds ?? [],
+    redirectTargetId: view.redirectTargetId ?? null,
+    turnDeadlineMs: view.turnDeadlineEpochMs ?? 0,
+    turnSecondsRemaining: turnSeconds,
+    turnPlayerId: multiplayerTurnSeatId(view),
+    presentPlayers: view.players
+      .filter((player) => player.isConnected)
+      .map((player) => multiplayerSeatId(player.seatIndex)),
+    discardCount: view.discardCount,
+    lastDiscardCards: view.lastDiscardCards ?? [],
+    gameStartedAtMs: view.gameStartedAtMs ?? null,
+    gameEndedAtMs: view.gameEndedAtMs ?? null,
+    myHasPassed: viewerSummary?.hasPassed ?? view.myHasPassed ?? false,
+    myFinishRank: viewerSummary?.finishRank ?? view.myFinishRank ?? null,
+    winners: finishOrder,
+    durak: seatIdOf(view.durakId),
+    promptedPlayerIds: [],
+    transparentMode: false,
+    devMode: false,
+  };
+}
+
+/**
+ * Maps one M1 `GameAction` onto the multiplayer WebSocket frame, so the M1
+ * table's click/drag/double-click handlers drive the live room unchanged.
+ * Returns `null` for an action the room protocol does not support.
+ */
+export function toWsClientMessage(action: GameAction): WsClientMessage | null {
+  switch (action.type) {
+    case 'initialAttack':
+      return { type: 'playAttack', cards: (action.cards ?? []) as Card[] };
+    case 'coverCard':
+      return {
+        type: 'coverCard',
+        attackIndex: Number(action.attackIndex ?? 0),
+        defenseCard: action.defenseCard as Card,
+      };
+    case 'redirectAttack':
+      return { type: 'redirectAttack', cards: (action.cards ?? []) as Card[] };
+    case 'throwInCards':
+      return { type: 'throwInCards', cards: (action.cards ?? []) as Card[] };
+    case 'declareSurrender':
+      return { type: 'declareSurrender' };
+    case 'passTurn':
+      return { type: 'passTurn' };
+    default:
+      return null;
+  }
 }
 
 /** Parses and discriminates one server WebSocket frame. */

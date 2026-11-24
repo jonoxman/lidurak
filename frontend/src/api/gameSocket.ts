@@ -1,9 +1,11 @@
 import {
   parseWsServerMessage,
+  toWsClientMessage,
   type PlayerGameView,
   type SocketStatus,
   type WsClientMessage,
 } from '../types/multiplayer';
+import type { GameAction } from '../types';
 
 /** First retry delay; each further failure doubles it. */
 const RECONNECT_BASE_DELAY_MS = 500;
@@ -180,6 +182,18 @@ class ReconnectingGameSocket implements GameSocket {
     this.status = status;
     this.handlers.onStatusChange?.(status);
   }
+}
+
+/**
+ * Sends one Milestone 1 `GameAction` over the live room socket, translating it
+ * into the multiplayer wire frame the server expects. Returns `false` for an
+ * action the room protocol does not support.
+ */
+export function sendGameAction(socket: GameSocket, action: GameAction): boolean {
+  const message = toWsClientMessage(action);
+  if (message == null) return false;
+  socket.sendAction(message);
+  return true;
 }
 
 /**

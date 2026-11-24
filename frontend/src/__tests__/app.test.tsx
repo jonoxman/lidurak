@@ -41,6 +41,7 @@ vi.mock('../api/gameSocket', () => ({
     sendAction: vi.fn(),
     dispose: vi.fn(),
   })),
+  sendGameAction: vi.fn(() => true),
 }));
 
 vi.mock('../api/websocket', () => ({
@@ -124,12 +125,14 @@ describe('App', () => {
     checkServerHealth.mockResolvedValue(true);
   });
 
-  it('routes /g/:gameId to the live multiplayer room', async () => {
+  it('routes /g/:gameId to the original M1 GamePage in multiplayer mode', async () => {
     window.history.replaceState({}, '', '/g/room-42');
 
     render(<App />);
 
-    expect(await screen.findByTestId('multiplayer-game')).toBeTruthy();
+    // ITEM-4b: the M1 game page owns the route; only its staging panel is
+    // rendered until the room is dealt.
+    expect(await screen.findByTestId('game-page')).toBeTruthy();
     expect(await screen.findByTestId('waiting-room')).toBeTruthy();
     expect(screen.getByText('Room room-42')).toBeTruthy();
     expect(fetchGameView).toHaveBeenCalledWith('room-42');
@@ -139,7 +142,7 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByRole('button', { name: 'Create Game' })).toBeTruthy();
-    expect(screen.queryByTestId('multiplayer-game')).toBeNull();
+    expect(screen.queryByTestId('waiting-room')).toBeNull();
     expect(fetchGameView).not.toHaveBeenCalled();
   });
 
@@ -151,7 +154,7 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByText(/Loading game local-1/)).toBeTruthy();
-    expect(screen.queryByTestId('multiplayer-game')).toBeNull();
+    expect(screen.queryByTestId('waiting-room')).toBeNull();
     expect(fetchGameView).not.toHaveBeenCalled();
   });
 
