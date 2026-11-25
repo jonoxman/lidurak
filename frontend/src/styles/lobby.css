@@ -1,18 +1,51 @@
 /*
- * M2 homepage lobby — dark Lichess-inspired palette.
+ * M2 homepage lobby — Milestone 1 theme design system.
  *
- * Page background #161512, surfaces #262421, primary text #bababa, live/CTA
- * green #629924 and the trump/accent red #c33. Layout is CSS Grid and Flexbox
+ * Every surface, border, text, accent and status colour resolves from the M1
+ * custom properties that the HeaderBar profile Theme menu writes to
+ * `<html data-theme>` through `state/settings.ts` (`--app-*`, `--bg-*`,
+ * `--app-accent`, `--app-roundness`), so the lobby follows Light and Dark live
+ * instead of pinning dark-only hex colours. Layout is CSS Grid and Flexbox
  * only: no absolutely or fixed-positioned panels, and every grid child keeps
  * `min-width: 0` so long names and preset labels wrap instead of overflowing.
  */
 
-/* T-96 ITEM-2: the M2 palette is shared by both M2 shells. `MultiplayerGamePage`
-   renders `.m2-button` and `.m2-status-text` too, so declaring the tokens on
-   `.m2-lobby` alone left every table action button with undefined custom
-   properties (dark `#14130f` text on a transparent background over the dark
-   `#262421` shell, and borderless secondary buttons). */
-.m2-lobby,
+.m2-lobby {
+  --m2-bg: var(--app-bg);
+  --m2-surface: var(--app-panel);
+  --m2-surface-raised: var(--bg-elevated);
+  --m2-border: var(--app-border);
+  --m2-text: var(--app-text);
+  --m2-text-strong: var(--app-text-strong);
+  --m2-muted: color-mix(in srgb, var(--app-text) 70%, var(--app-bg));
+  --m2-green: var(--app-accent);
+  --m2-green-soft: var(--app-accent-soft);
+  --m2-on-accent: rgb(20, 19, 15);
+  --m2-red: var(--durak-danger, rgb(204, 51, 51));
+  --m2-red-soft: color-mix(in srgb, var(--m2-red) 16%, transparent);
+}
+
+/* Light Du Rak palette: the pale page needs a slightly deeper raised surface,
+   white ink on the darker green accent and the M1 danger red. */
+html[data-theme='light'] .m2-lobby {
+  --m2-surface-raised: #dfe5ec;
+  --m2-on-accent: rgb(255, 255, 255);
+  --m2-red: #b3261e;
+}
+
+/* Before JavaScript applies data-theme, follow a light OS preference. */
+@media (prefers-color-scheme: light) {
+  html:not([data-theme]) .m2-lobby {
+    --m2-surface-raised: #dfe5ec;
+    --m2-on-accent: rgb(255, 255, 255);
+    --m2-red: #b3261e;
+  }
+}
+
+/* The projected multiplayer shell is styled in its own M2 dark chrome (the M1
+   gameplay theme lands separately), but it renders the shared `.m2-button` and
+   `.m2-status-text` rules, so it declares the same tokens with its dark palette
+   rather than inheriting the lobby's theme-reactive ones. */
 .multiplayer-page {
   --m2-bg: #161512;
   --m2-surface: #262421;
@@ -23,6 +56,7 @@
   --m2-muted: #8f8b84;
   --m2-green: #629924;
   --m2-green-soft: rgba(98, 153, 36, 0.16);
+  --m2-on-accent: #14130f;
   --m2-red: #c33;
   --m2-red-soft: rgba(204, 51, 51, 0.16);
 }
@@ -37,7 +71,8 @@
   background: var(--m2-bg);
   color: var(--m2-text);
   border: 1px solid var(--m2-border);
-  border-radius: 12px;
+  border-radius: var(--app-roundness, 8px);
+  box-shadow: var(--app-shadow);
   font-size: 0.95rem;
 }
 
@@ -165,11 +200,17 @@
   width: 9rem;
   padding: 0.35rem 0.55rem;
   border: 1px solid var(--m2-border);
-  border-radius: 6px;
+  border-radius: var(--app-roundness, 6px);
   background: var(--m2-bg);
   color: var(--m2-text-strong);
   font: inherit;
   font-size: 0.85rem;
+}
+
+.m2-guest-input:focus-visible {
+  border-color: var(--m2-green);
+  outline: 2px solid var(--m2-green-soft);
+  outline-offset: 1px;
 }
 
 .m2-lobby-tabs {
@@ -185,7 +226,7 @@
   gap: 0.4rem;
   padding: 0.5rem 0.9rem;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--app-roundness, 8px);
   background: transparent;
   color: var(--m2-text);
   font: inherit;
@@ -210,7 +251,7 @@
   padding: 0.05rem 0.4rem;
   border-radius: 999px;
   background: var(--m2-green);
-  color: #14130f;
+  color: var(--m2-on-accent);
   font-size: 0.75rem;
   font-weight: 700;
 }
@@ -224,10 +265,11 @@
   grid-template-columns: minmax(0, 1fr);
   gap: 0.75rem;
   min-width: 0;
+  box-sizing: border-box;
   padding: 1rem;
   background: var(--m2-surface);
   border: 1px solid var(--m2-border);
-  border-radius: 10px;
+  border-radius: var(--app-roundness, 8px);
 }
 
 /* T-96 ITEM-3: `.lobby-page h2` in `app.css` is `(0,1,1)` and paints
@@ -254,19 +296,21 @@
   justify-content: center;
   gap: 0.35rem;
   min-width: 0;
-  padding: 0.5rem 0.9rem;
+  padding: 0.55rem 1rem;
   border: 1px solid var(--m2-green);
-  border-radius: 7px;
+  border-radius: var(--app-roundness, 8px);
   background: var(--m2-green);
-  color: #14130f;
+  color: var(--m2-on-accent);
   font: inherit;
-  font-weight: 700;
+  font-weight: 600;
   cursor: pointer;
+  transition: transform 100ms ease, filter 150ms ease, border-color 120ms ease;
 }
 
 .m2-button:hover:not(:disabled),
 .m2-button:focus-visible:not(:disabled) {
   filter: brightness(1.12);
+  transform: translateY(-1px);
   outline: none;
 }
 
@@ -323,25 +367,37 @@
   min-width: 0;
 }
 
+/* T-90 ITEM-2a: the tiles keep the same 3x2 grid and centered title/subtitle,
+   but stand about twice as tall as the previous compact ~60px buttons. */
 .quick-pair-tile {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 0.3rem;
+  align-content: center;
+  gap: 0.35rem;
   min-width: 0;
-  padding: 0.85rem 0.75rem;
+  min-height: 7.5rem;
+  padding: 1rem 0.9rem;
   border: 1px solid var(--m2-border);
-  border-radius: 9px;
+  border-radius: var(--app-roundness, 8px);
   background: var(--m2-surface-raised);
   color: var(--m2-text);
   font: inherit;
   text-align: left;
   cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
 }
 
 .quick-pair-tile:hover:not(:disabled),
 .quick-pair-tile:focus-visible:not(:disabled) {
   border-color: var(--m2-green);
+  background: var(--m2-green-soft);
+  transform: translateY(-2px);
   outline: none;
+}
+
+.quick-pair-tile:focus-visible:not(:disabled) {
+  outline: 2px solid var(--m2-green);
+  outline-offset: 2px;
 }
 
 .quick-pair-tile:disabled {
@@ -497,7 +553,7 @@
   min-width: 0;
 }
 
-/* --- Create Invite Link ------------------------------------------------- */
+/* --- Create a Game ------------------------------------------------------ */
 
 .create-invite-form {
   display: grid;
@@ -535,7 +591,7 @@
   min-width: 0;
   padding: 0.4rem 0.75rem;
   border: 1px solid var(--m2-border);
-  border-radius: 7px;
+  border-radius: var(--app-roundness, 7px);
   background: var(--m2-surface-raised);
   color: var(--m2-text);
   font: inherit;

@@ -31,6 +31,7 @@ import * as lobbyApi from '../api/lobbyClient';
 import * as sessionApi from '../api/sessionClient';
 import type { LobbyRoomSummary } from '../types/multiplayer';
 import lobbyCss from '../styles/lobby.css?raw';
+import { resetSettings, setSettings } from '../state/settings';
 import { LobbyPage } from './LobbyPage';
 
 const checkServerHealth = client.checkServerHealth as unknown as ReturnType<typeof vi.fn>;
@@ -86,6 +87,7 @@ const openPoolTab = async () => {
 describe('M2 LobbyPage', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    resetSettings();
     window.history.replaceState({}, '', '/');
     window.location.hash = '';
     socketHandlers = null;
@@ -127,7 +129,8 @@ describe('M2 LobbyPage', () => {
       screen.getByRole('tab', { name: 'Quick Pairing' }).getAttribute('aria-selected'),
     ).toBe('true');
     expect(screen.getByRole('tab', { name: /Lobby Pool/ })).toBeTruthy();
-    expect(screen.getByRole('tab', { name: 'Create Invite Link' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Create a Game' })).toBeTruthy();
+    expect(screen.queryByRole('tab', { name: 'Create Invite Link' })).toBeNull();
     expect(screen.getByTestId('lobby-connection').textContent).toContain('Lobby idle');
   });
 
@@ -154,6 +157,82 @@ describe('M2 LobbyPage', () => {
     expect(screen.getByRole('button', { name: /3P • 30s/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: /4P • 15s/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: /4P • 30s/ })).toBeTruthy();
+  });
+
+  it('ITEM-2a: renders all six quick-pairing tiles at double height', () => {
+    renderLobby();
+
+    const ids = [
+      'quick-pair-2-15',
+      'quick-pair-2-30',
+      'quick-pair-3-15',
+      'quick-pair-3-30',
+      'quick-pair-4-15',
+      'quick-pair-4-30',
+    ];
+    for (const id of ids) {
+      const tile = screen.getByTestId(id);
+      expect(tile.classList.contains('quick-pair-tile')).toBe(true);
+      expect(tile.getAttribute('data-height')).toBe('double');
+    }
+
+    // The layout is unchanged: the tile just grows, the 3x2 grid stays put.
+    expect(lobbyCss).toMatch(/\.quick-pair-grid\s*\{[^}]*repeat\(3, minmax\(0, 1fr\)\)/);
+    expect(lobbyCss).toMatch(/\.quick-pair-tile\s*\{[^}]*min-height:\s*7\.5rem/);
+  });
+
+  it('ITEM-2b/2c: names the third tab "Create a Game" with visibility first', () => {
+    renderLobby();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Create a Game' }));
+
+    const panel = screen.getByRole('region', { name: 'Create a Game' });
+    expect(within(panel).getByRole('heading', { name: 'Create a Game' })).toBeTruthy();
+    expect(screen.queryByText('Create Invite Link')).toBeNull();
+
+    // The fieldset legend and its inner group share the "Visibility" name.
+    const visibility = within(panel).getByTestId('create-game-visibility');
+    expect(within(visibility).getByRole('button', { name: 'Private invite link' })).toBeTruthy();
+    expect(within(visibility).getByRole('button', { name: 'Public lobby pool' })).toBeTruthy();
+
+    // Visibility is the first form control, before players / redirect / clock.
+    const laterControls = [
+      within(panel).getByRole('group', { name: 'Player count' }),
+      within(panel).getByLabelText(/Redirect \/ reflect/),
+      within(panel).getByRole('group', { name: 'Turn clock' }),
+      within(panel).getByRole('button', { name: 'Create room' }),
+    ];
+    for (const control of laterControls) {
+      expect(
+        visibility.compareDocumentPosition(control) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    }
+  });
+
+  it('ITEM-3: follows the profile Theme menu on every lobby surface', () => {
+    renderLobby();
+
+    act(() => {
+      setSettings({ theme: 'light' });
+    });
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
+
+    act(() => {
+      setSettings({ theme: 'dark' });
+    });
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+
+    // The lobby shell reads the M1 tokens instead of dark-only hex colours.
+    expect(lobbyCss).toMatch(
+      /\.m2-lobby\s*\{[^}]*--m2-surface: var\(--app-panel\)[^}]*--m2-border: var\(--app-border\)/,
+    );
+    expect(lobbyCss).toMatch(/\.m2-lobby\s*\{[^}]*--m2-green: var\(--app-accent\)/);
+    expect(lobbyCss).toContain("html[data-theme='light'] .m2-lobby");
+
+    // The theme-reactive token block itself carries no hardcoded hex colour.
+    const tokenStart = lobbyCss.indexOf('.m2-lobby {');
+    const tokenBlock = lobbyCss.slice(tokenStart, lobbyCss.indexOf('}', tokenStart));
+    expect(tokenBlock).not.toMatch(/#[0-9a-fA-F]{3,6}/);
   });
 
   it('joins a Quick Pairing preset and navigates to its game table', async () => {
@@ -239,7 +318,7 @@ describe('M2 LobbyPage', () => {
   it('creates a configured invite room and opens it', async () => {
     renderLobby();
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Create Invite Link' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Create a Game' }));
     fireEvent.click(screen.getByRole('button', { name: '4 players' }));
     fireEvent.click(screen.getByLabelText(/Redirect \/ reflect/));
     fireEvent.click(screen.getByRole('button', { name: '30s' }));
@@ -314,12 +393,17 @@ describe('M2 LobbyPage', () => {
 });
 
 describe('lobby.css visual invariants', () => {
-  it('uses the dark Lichess palette', () => {
-    expect(lobbyCss).toContain('#161512');
-    expect(lobbyCss).toContain('#262421');
-    expect(lobbyCss).toContain('#bababa');
-    expect(lobbyCss).toContain('#629924');
-    expect(lobbyCss).toContain('#c33');
+  it('adopts the Milestone 1 theme tokens instead of dark-only hex colours', () => {
+    // The lobby shell resolves every surface from the M1 custom properties the
+    // profile Theme menu writes to `<html data-theme>`.
+    expect(lobbyCss).toContain('--m2-bg: var(--app-bg)');
+    expect(lobbyCss).toContain('--m2-surface: var(--app-panel)');
+    expect(lobbyCss).toContain('--m2-surface-raised: var(--bg-elevated)');
+    expect(lobbyCss).toContain('--m2-text: var(--app-text)');
+    expect(lobbyCss).toContain('--m2-text-strong: var(--app-text-strong)');
+    expect(lobbyCss).toContain('--m2-green: var(--app-accent)');
+    expect(lobbyCss).toMatch(/border-radius: var\(--app-roundness/);
+    expect(lobbyCss).toContain("html[data-theme='light'] .m2-lobby");
   });
 
   it('lays out with Grid/Flexbox gaps only and never freeform positioning', () => {
@@ -337,10 +421,9 @@ describe('lobby.css visual invariants', () => {
     expect(lobbyCss).toContain('color: var(--m2-text-strong);');
   });
 
-  it('shares the M2 palette and button styling with the multiplayer shell', () => {
-    // T-96 ITEM-2: the tokens live on both M2 shells, not the lobby alone.
-    expect(lobbyCss).toMatch(/\.m2-lobby,\s*\n\.multiplayer-page \{/);
-    expect(lobbyCss).toContain('--m2-text-strong: #f1f1f1;');
+  it('shares the M2 button styling with the multiplayer shell', () => {
+    // The projected shell keeps its own M2 dark chrome block for now.
+    expect(lobbyCss).toMatch(/\.multiplayer-page \{[^}]*--m2-text-strong: #f1f1f1/);
     expect(lobbyCss).toContain('.multiplayer-page .m2-button.secondary');
   });
 

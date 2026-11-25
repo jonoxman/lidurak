@@ -11,10 +11,11 @@ const PLAYER_COUNTS: ReadonlyArray<PlayerCount> = [2, 3, 4];
 const TURN_CLOCKS = [15, 30, 60] as const;
 
 /**
- * Create Invite Link: configure the table and open it immediately.
+ * Create a Game: configure the table and open it immediately.
  *
- * A private room is only reachable through its `/g/:gameId` URL; a public one
- * is also listed in the Lobby Pool for anyone to join.
+ * The first choice is always visibility: a private room is only reachable
+ * through its `/g/:gameId` URL, while a public one is also listed in the Lobby
+ * Pool for anyone to join. Player count, redirects and the turn clock follow.
  */
 export function CreateInviteTab({ onCreated }: CreateInviteTabProps) {
   const [playerCount, setPlayerCount] = useState<PlayerCount>(2);
@@ -44,11 +45,11 @@ export function CreateInviteTab({ onCreated }: CreateInviteTabProps) {
   };
 
   return (
-    <section class="m2-panel create-invite" aria-label="Create Invite Link">
-      <h2 class="m2-panel-title">Create Invite Link</h2>
+    <section class="m2-panel create-invite" aria-label="Create a Game">
+      <h2 class="m2-panel-title">Create a Game</h2>
       <p class="m2-panel-hint">
-        Choose the table settings, then share the generated link with your
-        opponents.
+        Choose whether this is a private invite link or a public pool table,
+        then set the rest of the table options.
       </p>
 
       <form
@@ -58,6 +59,29 @@ export function CreateInviteTab({ onCreated }: CreateInviteTabProps) {
           void submit();
         }}
       >
+        {/* ITEM-2c: visibility is the first decision of the form. */}
+        <fieldset class="create-invite-group" data-testid="create-game-visibility">
+          <legend>Visibility</legend>
+          <div class="segmented" role="group" aria-label="Visibility">
+            <button
+              type="button"
+              class="segmented-option"
+              aria-pressed={!isPublic}
+              onClick={() => setIsPublic(false)}
+            >
+              Private invite link
+            </button>
+            <button
+              type="button"
+              class="segmented-option"
+              aria-pressed={isPublic}
+              onClick={() => setIsPublic(true)}
+            >
+              Public lobby pool
+            </button>
+          </div>
+        </fieldset>
+
         <fieldset class="create-invite-group">
           <legend>Players</legend>
           <div class="segmented" role="group" aria-label="Player count">
@@ -104,28 +128,6 @@ export function CreateInviteTab({ onCreated }: CreateInviteTabProps) {
                 {seconds}s
               </button>
             ))}
-          </div>
-        </fieldset>
-
-        <fieldset class="create-invite-group">
-          <legend>Visibility</legend>
-          <div class="segmented" role="group" aria-label="Visibility">
-            <button
-              type="button"
-              class="segmented-option"
-              aria-pressed={!isPublic}
-              onClick={() => setIsPublic(false)}
-            >
-              Private invite link
-            </button>
-            <button
-              type="button"
-              class="segmented-option"
-              aria-pressed={isPublic}
-              onClick={() => setIsPublic(true)}
-            >
-              Public lobby pool
-            </button>
           </div>
         </fieldset>
 

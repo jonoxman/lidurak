@@ -90,6 +90,7 @@ export function QuickPairingTab({ onMatched }: QuickPairingTabProps) {
             key={`${preset.playerCount}-${preset.turnTimeoutSeconds}`}
             type="button"
             class="quick-pair-tile"
+            data-height="double"
             data-testid={`quick-pair-${preset.playerCount}-${preset.turnTimeoutSeconds}`}
             disabled={pending !== null}
             onClick={() => void start(preset)}
