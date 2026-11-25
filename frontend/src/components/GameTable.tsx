@@ -193,6 +193,12 @@ export interface HandCardSlotProps {
   /** GPU-composited horizontal parting delta in px. */
   deltaX: number;
   partDirection?: 'left' | 'right' | 'none';
+  /**
+   * T-90-feedback-20261124_002056-2 ITEM-5: a one- or two-card hand has no
+   * interior gap to part, so the hovered card is lifted in paint order instead
+   * (never in width or position).
+   */
+  hoverElevated?: boolean;
   collapsed: boolean;
   /** True for the card being dragged: its in-hand slot is vacated. */
   dragSource: boolean;
@@ -226,6 +232,7 @@ export const HandCardSlot = memo(function HandCardSlot({
   liftPx,
   deltaX,
   partDirection,
+  hoverElevated,
   collapsed,
   dragSource,
   dragging,
@@ -254,6 +261,7 @@ export const HandCardSlot = memo(function HandCardSlot({
       data-part-delta-x={deltaX}
       data-eligible={playable ? 'true' : 'false'}
       data-part-direction={partDirection}
+      data-hover-elevated={hoverElevated ? 'true' : undefined}
       data-collapsed={collapsed ? 'true' : 'false'}
       // T-90-feedback-20261123_020207-4 ITEM-NEW2: the dragged source slot is
       // vacated in-hand (`opacity: 0`, `pointer-events: none`) while the
@@ -1684,16 +1692,14 @@ export function GameTable({
 
   /**
    * Index of the hand card under a pointer event, or `null`.
-   *
-   * T-96: the hit test is resolved from the LIVE rendered row geometry —
-   * `partedCardLayout.positions` while hover-parting runs, `baseCardPositions`
-   * otherwise — never from `elementFromPoint` / `closest()`. The rendered row is
-   * the only geometry whose exposed strip matches what the player sees: resting
-   * slots pushed a hovered card's right neighbours past their own resting edges,
-   * so a resting lookup selected the card after the strip under the pointer.
-   * Because parting is single-sided, the live row is still monotonic and stable:
-   * once card `j` is hovered, `positions[j] <= x < positions[j + 1]` holds, so a
-   * left-to-right sweep can only select the same card or the next one.
+   *     * T-96: the hit test is resolved from the LIVE rendered row geometry —
+     * `partedCardLayout.positions` while hover-parting runs, `baseCardPositions`
+     * otherwise — never from `elementFromPoint` / `closest()`. The rendered row is
+     * the only geometry whose exposed strip matches what the player sees: a
+     * constant-width parted row re-arranges the gaps around the hovered card, so
+     * only the live row describes the strip under the pointer. The row always
+     * keeps its two outer edges pinned and its coordinates non-decreasing, so a
+     * left-to-right sweep still selects the same card or the next one.
    */
   const handPointerIndex = (event: Event): number | null => {
     const pointer = event as MouseEvent;
@@ -3484,6 +3490,7 @@ export function GameTable({
                 liftPx={lift}
                 deltaX={deltaX}
                 partDirection={partDirection}
+                hoverElevated={hoveredCardIndex === index && hand.length <= 2}
                 collapsed={dragging}
                 dragSource={dragging}
                 dragging={dragging}
