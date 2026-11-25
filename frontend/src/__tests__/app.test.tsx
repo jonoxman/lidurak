@@ -19,6 +19,15 @@ vi.mock('../api/sessionClient', () => ({
     isGuest: true,
   })),
   updateGuestName: vi.fn(),
+  // T-90-2 ITEM-3: the header reads the same shared guest session as the lobby.
+  ensureGuestSession: vi.fn(async () => ({
+    playerId: 'guest-abcd1234',
+    displayName: 'Guest-AB12',
+    isGuest: true,
+  })),
+  getCachedGuestSession: vi.fn(() => null),
+  subscribeGuestSession: vi.fn(() => () => {}),
+  resetGuestSessionCache: vi.fn(),
 }));
 
 vi.mock('../api/lobbyClient', () => ({

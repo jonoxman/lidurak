@@ -3,6 +3,7 @@ import {
   parsePlayerGameView,
   parseQuickPairResponse,
   parseWsServerMessage,
+  type GameRole,
   type ActiveMatchPresetResponse,
   type CreateRoomRequest,
   type CreateRoomResponse,
@@ -37,9 +38,21 @@ function readGameId(value: unknown, label: string): string {
   return raw.gameId;
 }
 
-function readSeat(value: unknown): number {
+function readSeatOrNull(value: unknown): number | null {
   const raw = asObject(value, 'response');
-  return typeof raw.seatIndex === 'number' ? raw.seatIndex : 0;
+  return typeof raw.seatIndex === 'number' && Number.isFinite(raw.seatIndex)
+    ? raw.seatIndex
+    : null;
+}
+
+function readSeat(value: unknown): number {
+  return readSeatOrNull(value) ?? 0;
+}
+
+/** T-90-2 ITEM-7b: the server-reported creator role, when present. */
+function readRole(value: unknown): GameRole | undefined {
+  const raw = asObject(value, 'CreateRoomResponse').role;
+  return raw === 'player' || raw === 'spectator' ? raw : undefined;
 }
 
 /** Open public rooms in the Lobby Pool. */
@@ -47,17 +60,21 @@ export async function fetchLobbyRooms(): Promise<LobbyRoomSummary[]> {
   return parseLobbyRoomList(await apiRequest('/api/lobby'));
 }
 
-/** Creates a shareable room and seats the caller in seat 0. */
+/**
+ * Creates a shareable room. The caller owns a seat unless the request asks to
+ * spectate (`creatorSeatIndex: null` / `spectateAsCreator: true`), in which
+ * case the server answers `seatIndex: null` and `role: 'spectator'`.
+ */
 export async function createRoom(req: CreateRoomRequest): Promise<CreateRoomResponse> {
   const body = await apiRequest('/api/games', { method: 'POST', body: req });
+  const raw = asObject(body, 'CreateRoomResponse');
   const gameId = readGameId(body, 'CreateRoomResponse');
+  const role = readRole(body);
   return {
     gameId,
-    seatIndex: readSeat(body),
-    inviteUrl:
-      typeof asObject(body, 'CreateRoomResponse').inviteUrl === 'string'
-        ? (asObject(body, 'CreateRoomResponse').inviteUrl as string)
-        : `/g/${gameId}`,
+    seatIndex: readSeatOrNull(body),
+    inviteUrl: typeof raw.inviteUrl === 'string' ? (raw.inviteUrl as string) : `/g/${gameId}`,
+    ...(role ? { role } : {}),
   };
 }
 

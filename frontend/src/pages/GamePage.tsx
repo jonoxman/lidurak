@@ -2701,6 +2701,9 @@ export function MultiplayerGame({ gameId, onLeaveGame }: GamePageProps) {
       data-testid="game-page"
       data-mode="multiplayer"
       data-status={room.status}
+      // T-90-2 ITEM-7b: a spectator (`viewerSeat === null`) watches a 2P, 3P or
+      // 4P all-bot match read-only; the table hides every gameplay control.
+      data-spectator={spectating ? 'true' : 'false'}
     >
       {header}
 
