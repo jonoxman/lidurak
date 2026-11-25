@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { SoundEngine, soundEngine } from '../audio/SoundEngine';
+import {
+  ensureGuestSession,
+  getCachedGuestSession,
+  subscribeGuestSession,
+} from '../api/sessionClient';
+import { BrandLogo } from './BrandLogo';
 import { ALL_CARD_BACK_PATTERNS, CARD_BACK_LABELS, CardBack } from './CardBack';
 import {
   TABLE_TEXTURES,
@@ -27,6 +33,23 @@ export interface HeaderBarProps {
   pingMs?: number;
   /** Server-side delay shown next to the ping. */
   serverDelayMs?: number;
+  /**
+   * T-90-2 ITEM-3: a pre-resolved guest name. When omitted the header reads the
+   * shared guest session cache and updates itself as soon as
+   * `ensureGuestSession()` resolves.
+   */
+  guestName?: string;
+}
+
+/** Label shown before a guest session resolves, or when no name exists. */
+export const DEFAULT_GUEST_LABEL = 'Guest';
+
+/** The guest label currently known to the shared session cache, if any. */
+function cachedGuestLabel(): string | null {
+  const cached = getCachedGuestSession();
+  return cached && typeof cached.displayName === 'string' && cached.displayName.length > 0
+    ? cached.displayName
+    : null;
 }
 
 interface NavLink {
@@ -561,11 +584,21 @@ function Submenu({ id }: { id: SubmenuId }) {
  * Universal site header: logo, hover navigation menus and a profile dropdown
  * with appearance/audio submenus and a live connection tracker.
  */
-export function HeaderBar({ pingMs = 24, serverDelayMs = 12 }: HeaderBarProps) {
+export function HeaderBar({
+  pingMs = 24,
+  serverDelayMs = 12,
+  guestName,
+}: HeaderBarProps) {
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [submenu, setSubmenu] = useState<SubmenuId | null>(null);
   const [barsUpdating, setBarsUpdating] = useState(false);
+  // T-90-2 ITEM-3: the profile button shows the backend-generated guest name.
+  // The optional prop wins (tests / a pre-fetched shell), then the shared
+  // session cache, and only then the neutral fallback label.
+  const [guestLabel, setGuestLabel] = useState(
+    () => guestName ?? cachedGuestLabel() ?? DEFAULT_GUEST_LABEL,
+  );
   const previousLevel = useRef<number | null>(null);
   // T-90-feedback-3: wraps the profile trigger *and* its dropdown panel, so a
   // press on either counts as inside and everything else closes the menu.
@@ -577,6 +610,38 @@ export function HeaderBar({ pingMs = 24, serverDelayMs = 12 }: HeaderBarProps) {
   // and tests — Light is the inverse ("lightening") of Dark ("darkening").
   const settings = useSettings();
   const resolvedTheme = resolveTableTheme(settings.theme);
+
+  // T-90-2 ITEM-3: keep the header name in sync with the shared guest session.
+  // `ensureGuestSession()` is memoized, so mounting the header next to the
+  // lobby never mints a second session; a rename in the lobby is pushed in
+  // through the subscription. Every failure path is handled, so an isolated
+  // test without a session endpoint simply keeps the fallback label.
+  useEffect(() => {
+    if (guestName) {
+      setGuestLabel(guestName);
+      return undefined;
+    }
+
+    const unsubscribe = subscribeGuestSession((session) => {
+      if (session && session.displayName) setGuestLabel(session.displayName);
+    });
+
+    let active = true;
+    ensureGuestSession()
+      .then((session) => {
+        if (active && session && session.displayName) setGuestLabel(session.displayName);
+      })
+      .catch(() => {
+        /* No session endpoint: keep the neutral guest label. */
+      });
+
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [guestName]);
+
+  const profileLabel = guestLabel.trim().length > 0 ? guestLabel : DEFAULT_GUEST_LABEL;
 
   // The tracker follows the live measured round-trip time reported by the app.
   const level = connectionLevel(pingMs);
@@ -657,38 +722,8 @@ export function HeaderBar({ pingMs = 24, serverDelayMs = 12 }: HeaderBarProps) {
       data-header-gradient={resolvedTheme === 'light' ? 'lightening' : 'darkening'}
     >
       <a class="header-brand" href="#/" onClick={() => setOpenMenu(null)}>
-        <svg
-          class="header-logo"
-          data-testid="header-logo"
-          viewBox="0 0 32 32"
-          aria-hidden="true"
-        >
-          {/* Two fanned playing cards with a trump diamond. */}
-          <rect
-            x="4"
-            y="8"
-            width="15"
-            height="20"
-            rx="2.5"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            opacity="0.55"
-            transform="rotate(-10 11.5 18)"
-          />
-          <rect
-            x="12"
-            y="4"
-            width="16"
-            height="23"
-            rx="2.5"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-          />
-          <path d="M20 9 24.5 15 20 21 15.5 15z" fill="currentColor" />
-        </svg>
-        <span class="header-brand-text">LIDURAK</span>
+        {/* T-90-2 ITEM-8a: the header mark and the large logo share one source. */}
+        <BrandLogo size="header" />
       </a>
 
       <nav class="header-nav" aria-label="Main">
@@ -739,7 +774,12 @@ export function HeaderBar({ pingMs = 24, serverDelayMs = 12 }: HeaderBarProps) {
             setSubmenu(null);
           }}
         >
-          <svg class="profile-icon" viewBox="0 0 24 24" aria-hidden="true">
+          {/* T-90-2 ITEM-4: the name comes first (left) and the user icon
+              second (right), in DOM and visual flex order. */}
+          <span class="profile-name" data-testid="profile-name">
+            {profileLabel}
+          </span>
+          <svg class="profile-icon" data-testid="profile-icon" viewBox="0 0 24 24" aria-hidden="true">
             <circle cx="12" cy="12" r="9.6" fill="none" stroke="currentColor" stroke-width="1.6" />
             <circle cx="12" cy="9.4" r="3.1" fill="currentColor" />
             <path
@@ -750,7 +790,6 @@ export function HeaderBar({ pingMs = 24, serverDelayMs = 12 }: HeaderBarProps) {
               stroke-linecap="round"
             />
           </svg>
-          <span class="profile-name">Guest</span>
         </button>
 
         {profileOpen ? (

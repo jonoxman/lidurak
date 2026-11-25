@@ -24,6 +24,33 @@ export type Suit = string;
 /** Player counts the server accepts. */
 export type PlayerCount = 2 | 3 | 4;
 
+/**
+ * T-90-2 ITEM-7b: what the server puts in each seat when a room starts.
+ * `human` waits for a real join, the two bot kinds play immediately.
+ */
+export type SeatType = 'human' | 'randomBot' | 'basicBot';
+
+/** The deck the server deals (36-card or 52-card). */
+export type DeckSize = 36 | 52;
+
+/** Whether `POST /api/games` seated the caller or made them a spectator. */
+export type GameRole = 'player' | 'spectator';
+
+/** The deal size for a player count (`52` only for a four-seat table). */
+export function defaultDeckSize(playerCount: number): DeckSize {
+  return playerCount === 4 ? 52 : 36;
+}
+
+/** True for a supported `SeatType`. */
+export function isSeatType(value: unknown): value is SeatType {
+  return value === 'human' || value === 'randomBot' || value === 'basicBot';
+}
+
+/** True for a supported `DeckSize`. */
+export function isDeckSize(value: unknown): value is DeckSize {
+  return value === 36 || value === 52;
+}
+
 /** Room lifecycle, in the casing the frontend uses. */
 export type RoomStatus = 'WaitingForPlayers' | 'InProgress' | 'Finished';
 
@@ -142,6 +169,8 @@ export interface LobbyRoomSummary {
   turnTimeoutSeconds: number;
   createdAtEpochMs: number;
   isQuickPair: boolean;
+  /** T-90-2 ITEM-7b: the room's dealt deck size, when the server reports it. */
+  deckSize?: number;
 }
 
 /** Body of `POST /api/games`. */
@@ -150,13 +179,27 @@ export interface CreateRoomRequest {
   allowRedirect: boolean;
   turnTimeoutSeconds: number;
   isPublic: boolean;
+  /** T-90-2 ITEM-7b: explicit deal size; the server defaults by player count. */
+  deckSize?: DeckSize;
+  /** T-90-2 ITEM-7b: per-seat occupant kinds, indexed by seat. */
+  seatTypes?: SeatType[];
+  /**
+   * T-90-2 ITEM-7b: the seat the creator takes, or `null` to take none. A dev
+   * all-bot match passes `null` and the creator becomes a spectator.
+   */
+  creatorSeatIndex?: number | null;
+  /** T-90-2 ITEM-7b: `true` sends the creator straight to spectator mode. */
+  spectateAsCreator?: boolean;
 }
 
 /** Response of `POST /api/games`. */
 export interface CreateRoomResponse {
   gameId: string;
-  seatIndex: number;
+  /** T-90-2 ITEM-7b: `null` when the creator did not take a seat. */
+  seatIndex: number | null;
   inviteUrl: string;
+  /** T-90-2 ITEM-7b: the role the server gave the creator. */
+  role?: GameRole;
 }
 
 /** Response of `POST /api/games/:gameId/join`. */
@@ -171,6 +214,10 @@ export interface QuickPairRequest {
   playerCount: PlayerCount;
   turnTimeoutSeconds?: number;
   allowRedirect?: boolean;
+  /** T-90-2 ITEM-7b: explicit deal size for the paired room. */
+  deckSize?: DeckSize;
+  /** T-90-2 ITEM-7b: which bot fills the opponent seats. */
+  botOpponent?: 'randomBot' | 'basicBot';
 }
 
 /**
@@ -432,6 +479,10 @@ export function parseLobbyRoomSummary(value: unknown): LobbyRoomSummary {
     turnTimeoutSeconds: numberOr(raw.turnTimeoutSeconds, 15),
     createdAtEpochMs: numberOr(raw.createdAtEpochMs, 0),
     isQuickPair: booleanOr(raw.isQuickPair, false),
+    // T-90-2 ITEM-7b: optional on the wire, absent for rooms that omit it.
+    ...(typeof raw.deckSize === 'number' && Number.isFinite(raw.deckSize)
+      ? { deckSize: raw.deckSize }
+      : {}),
   };
 }
 

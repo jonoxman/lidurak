@@ -15,7 +15,14 @@ import {
   triggerQaQuickPairOpponent,
 } from './lobbyClient';
 import { createGameSocket } from './gameSocket';
-import { getOrCreateSession, MultiplayerApiError, updateGuestName } from './sessionClient';
+import {
+  ensureGuestSession,
+  getCachedGuestSession,
+  getOrCreateSession,
+  MultiplayerApiError,
+  resetGuestSessionCache,
+  updateGuestName,
+} from './sessionClient';
 import {
   parsePlayerGameView,
   toM1GameView,
@@ -98,10 +105,13 @@ describe('sessionClient', () => {
 
   beforeEach(() => {
     mockFetch.mockReset();
+    // The shared guest loader memoizes; every test starts from a clean cache.
+    resetGuestSessionCache();
     vi.stubGlobal('fetch', mockFetch);
   });
 
   afterEach(() => {
+    resetGuestSessionCache();
     vi.unstubAllGlobals();
   });
 
@@ -166,6 +176,33 @@ describe('sessionClient', () => {
       message: 'Request failed (HTTP 500)',
     });
   });
+
+  it('T-90-2 ITEM-3: deduplicates concurrent guest-session loads', async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({ playerId: 'guest-1', displayName: 'Guest-AB12', isGuest: true }),
+    );
+
+    const [first, second] = await Promise.all([
+      ensureGuestSession(),
+      ensureGuestSession(),
+    ]);
+
+    expect(first).toEqual(second);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(getCachedGuestSession()?.displayName).toBe('Guest-AB12');
+
+    // Every later caller reuses the cached session — the header and the lobby
+    // never mint competing sessions.
+    await expect(ensureGuestSession()).resolves.toEqual(first);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('T-90-2 ITEM-3: degrades to null when fetch is unavailable', async () => {
+    vi.stubGlobal('fetch', undefined);
+
+    await expect(ensureGuestSession()).resolves.toBeNull();
+    expect(getCachedGuestSession()).toBeNull();
+  });
 });
 
 describe('lobbyClient REST', () => {
@@ -173,17 +210,20 @@ describe('lobbyClient REST', () => {
 
   beforeEach(() => {
     mockFetch.mockReset();
+    // The shared guest loader memoizes; every test starts from a clean cache.
+    resetGuestSessionCache();
     vi.stubGlobal('fetch', mockFetch);
   });
 
   afterEach(() => {
+    resetGuestSessionCache();
     vi.unstubAllGlobals();
   });
 
-  it('loads the open lobby rooms', async () => {
-    mockFetch.mockResolvedValue(jsonResponse([room]));
+  it('loads the open lobby rooms, keeping an optional deck size', async () => {
+    mockFetch.mockResolvedValue(jsonResponse([{ ...room, deckSize: 52 }]));
 
-    await expect(fetchLobbyRooms()).resolves.toEqual([room]);
+    await expect(fetchLobbyRooms()).resolves.toEqual([{ ...room, deckSize: 52 }]);
     expect(mockFetch).toHaveBeenCalledWith(
       '/api/lobby',
       expect.objectContaining({ credentials: 'include' }),
@@ -208,6 +248,36 @@ describe('lobbyClient REST', () => {
         body: JSON.stringify(createRoomRequest),
       }),
     );
+  });
+
+  it('T-90-2 ITEM-7b: forwards the dev all-bot room contract and a null seat', async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({ gameId: 'g2', seatIndex: null, inviteUrl: '/g/g2', role: 'spectator' }),
+    );
+    const allBot = {
+      ...createRoomRequest,
+      playerCount: 4 as const,
+      deckSize: 52 as const,
+      seatTypes: ['randomBot', 'randomBot', 'basicBot', 'randomBot'] as const,
+      creatorSeatIndex: null,
+      spectateAsCreator: true,
+    };
+
+    await expect(createRoom({ ...allBot, seatTypes: [...allBot.seatTypes] })).resolves.toEqual({
+      gameId: 'g2',
+      seatIndex: null,
+      inviteUrl: '/g/g2',
+      role: 'spectator',
+    });
+
+    const sent = JSON.parse(jsonInit(mockFetch).body as string);
+    expect(sent).toMatchObject({
+      playerCount: 4,
+      deckSize: 52,
+      seatTypes: ['randomBot', 'randomBot', 'basicBot', 'randomBot'],
+      creatorSeatIndex: null,
+      spectateAsCreator: true,
+    });
   });
 
   it('fetches a strictly filtered game view', async () => {
@@ -302,6 +372,11 @@ describe('lobbyClient REST', () => {
       gameId: 'pair-1',
       seatIndex: 1,
     });
+    // T-90-2 ITEM-7b: the request may pin the deck size and the bot kind.
+    await joinQuickPair({ playerCount: 4, deckSize: 52, botOpponent: 'basicBot' });
+    expect(
+      JSON.parse(jsonInit(mockFetch, mockFetch.mock.calls.length - 1).body as string),
+    ).toMatchObject({ playerCount: 4, deckSize: 52, botOpponent: 'basicBot' });
 
     mockFetch.mockResolvedValue({ ok: true, status: 204, json: async () => null });
     await expect(cancelQuickPair()).resolves.toBeUndefined();

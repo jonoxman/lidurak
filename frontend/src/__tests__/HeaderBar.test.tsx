@@ -21,6 +21,11 @@ import {
   subscribeSettings,
   type HighlightSlot,
 } from '../state/settings';
+import {
+  BrandLogo,
+  getBrandLogoMosaicDataUri,
+} from '../components/BrandLogo';
+import { ensureGuestSession, resetGuestSessionCache } from '../api/sessionClient';
 import appCss from '../app.css?raw';
 
 /** Declarations of the first rule whose selector text contains `selector`. */
@@ -1266,5 +1271,102 @@ describe('T-90-2 Glow slider label and live scale', () => {
 
     fireEvent.input(slider, { target: { value: '100' } });
     expect(document.documentElement.style.getPropertyValue('--highlight-intensity-scale')).toBe('1');
+  });
+});
+
+/**
+ * T-90-2 ITEM-3 / ITEM-4: the top-right profile menu shows the generated guest
+ * name and orders the icon to the right of that name.
+ */
+describe('T-90-2 header guest name and icon order', () => {
+  afterEach(() => {
+    resetGuestSessionCache();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('ITEM-3: renders the guest displayName passed to the header', async () => {
+    render(<HeaderBar guestName="Guest-AB12" />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('profile-name').textContent?.trim()).toBe('Guest-AB12'),
+    );
+  });
+
+  it('ITEM-3: renders the backend guest name resolved by the shared session loader', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ playerId: 'guest-1', displayName: 'Guest-ZX9', isGuest: true }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const session = await ensureGuestSession();
+    expect(session?.displayName).toBe('Guest-ZX9');
+
+    render(<HeaderBar />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('profile-name').textContent?.trim()).toBe('Guest-ZX9'),
+    );
+    // The header reuses the cached session instead of minting another one.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('ITEM-3: falls back to the neutral guest label without a session endpoint', () => {
+    vi.stubGlobal('fetch', undefined);
+    render(<HeaderBar />);
+
+    expect(screen.getByTestId('profile-name').textContent?.trim()).toBe('Guest');
+  });
+
+  it('ITEM-4: puts the user name first and the user icon on its right', () => {
+    render(<HeaderBar guestName="Guest-AB12" />);
+
+    const button = screen.getByTestId('profile-button');
+    const name = screen.getByTestId('profile-name');
+    const icon = screen.getByTestId('profile-icon');
+
+    // DOM order: name, then icon.
+    expect(button.firstElementChild).toBe(name);
+    expect(name.nextElementSibling).toBe(icon);
+    expect(button.lastElementChild).toBe(icon);
+
+    // Visual order: a row flexbox with the explicit orders 1 (name), 2 (icon).
+    expect(cssRule(appCss, '.profile-button {')).toContain('flex-direction: row');
+    expect(cssRule(appCss, '.profile-name {')).toContain('order: 1');
+    expect(cssRule(appCss, '.profile-icon {')).toContain('order: 2');
+  });
+});
+
+/** T-90-2 ITEM-8a: one scalable brand logo for the header, the large mark and
+ * the Wave-2 lobby mosaic. */
+describe('T-90-2 BrandLogo', () => {
+  it('ITEM-8a: renders the header mark and wordmark from one vector source', () => {
+    const { container, rerender } = render(<BrandLogo size="header" />);
+
+    const svg = container.querySelector('svg')!;
+    expect(svg.getAttribute('viewBox')).toBe('0 0 32 32');
+    expect(svg.getAttribute('preserveAspectRatio')).toBe('xMidYMid meet');
+    expect(container.querySelector('.header-brand-text')?.textContent).toBe('LIDURAK');
+    expect(container.querySelector('.brand-logo--header')).not.toBeNull();
+
+    rerender(<BrandLogo size="large" className="lobby-mark" />);
+    expect(container.querySelector('.brand-logo--large.lobby-mark')).not.toBeNull();
+    expect(cssRule(appCss, '.brand-logo--large .header-logo {')).toContain('width: clamp(');
+  });
+
+  it('ITEM-8a: exposes a theme-aware mosaic background data URI', () => {
+    const dark = getBrandLogoMosaicDataUri('dark');
+    const light = getBrandLogoMosaicDataUri('light');
+
+    expect(dark.startsWith('url("data:image/svg+xml,')).toBe(true);
+    expect(light).not.toBe(dark);
+
+    const svg = decodeURIComponent(
+      dark.slice('url("data:image/svg+xml,'.length, -2),
+    );
+    expect(svg).toContain('preserveAspectRatio="xMidYMid meet"');
+    expect(svg).toContain('LIDURAK');
   });
 });

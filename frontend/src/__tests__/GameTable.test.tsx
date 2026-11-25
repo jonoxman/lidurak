@@ -151,6 +151,24 @@ describe('clockwise seating', () => {
     expect(seatNames(fourPlayers)).toEqual(['top-left', 'top-center', 'top-right']);
   });
 
+  it('T-90-2 ITEM-7b: sends the 4th bot to bottom-center in a spectator match', () => {
+    const fourBots: OpponentSummary[] = [
+      player('p0', 'Bot One'),
+      player('p1', 'Bot Two'),
+      player('p2', 'Bot Three'),
+      player('p3', 'Bot Four'),
+    ];
+
+    // Five seats: three top seats plus the Row 3 Col 2 bottom-centre seat.
+    expect(seatPositions('spectator', fourBots)).toEqual({
+      p0: 'top-left',
+      p1: 'top-center',
+      p2: 'top-right',
+      p3: 'bottom-center',
+    });
+    expect(seatForOffset(4, 5)).toBe('bottom-center');
+  });
+
   it('ITEM-ADD-1a: keeps the 3-player row clockwise from every point of view', () => {
     const alice = player('p0', 'Alice');
     const bob = player('p1', 'Bob');
@@ -6817,5 +6835,73 @@ describe('T-96 visual QA: seat columns, opponent names and deck badge clearance'
     expect(assemblyPaddingTopPx).toBeGreaterThanOrEqual(16);
     // The badge's upward lift never eats the title gap or the assembly padding.
     expect(deckGapPx + assemblyPaddingTopPx).toBeGreaterThan(badgeLiftPx);
+  });
+});
+
+/**
+ * T-90-2 ITEM-7b: a spectator watching an all-bot 4-player match sees every bot
+ * seat — the 4th in Row 3 Col 2 — and can interact with nothing.
+ */
+describe('T-90-2 four-bot spectator table', () => {
+  const fourBots: OpponentSummary[] = [
+    { id: 'p0', name: 'Bot One', cardCount: 5, hasPassed: false, finishRank: null },
+    { id: 'p1', name: 'Bot Two', cardCount: 6, hasPassed: false, finishRank: null },
+    { id: 'p2', name: 'Bot Three', cardCount: 4, hasPassed: false, finishRank: null },
+    { id: 'p3', name: 'Bot Four', cardCount: 3, hasPassed: false, finishRank: null },
+  ];
+
+  it('renders all four seats without overlap and keeps the 4th in the hand lane', () => {
+    const { container } = render(
+      <GameTable
+        myId="spectator"
+        myHand={[]}
+        opponents={fourBots}
+        tablePairs={[]}
+        trumpSuit="spades"
+        attackerId="p3"
+        defenderId="p0"
+        turnPlayerId="p3"
+        isBot
+        eligibleTargetIds={['p1']}
+      />,
+    );
+
+    const seats = screen.getAllByTestId('opponent');
+    expect(seats).toHaveLength(4);
+    expect(seats.map((seat) => seat.getAttribute('data-seat'))).toEqual([
+      'top-left',
+      'top-center',
+      'top-right',
+      'bottom-center',
+    ]);
+    // No seat is duplicated or dropped.
+    expect(container.querySelectorAll('[data-seat="top-right"]')).toHaveLength(1);
+
+    const handZone = container.querySelector('[data-zone="player-hand"]') as HTMLElement;
+    expect(handZone.getAttribute('data-spectator-seat')).toBe('true');
+
+    const bottomSeat = handZone.querySelector(
+      '[data-seat="bottom-center"]',
+    ) as HTMLElement;
+    expect(bottomSeat).not.toBeNull();
+    expect(bottomSeat.querySelector('.opponent-name')?.textContent).toBe('Bot Four');
+    // Face-down card backs match the 4th bot's hand.
+    expect(bottomSeat.querySelectorAll('.opponent-card')).toHaveLength(3);
+    // Turn highlight and bout role follow the live table state.
+    expect(bottomSeat.getAttribute('data-role')).toBe('attacker');
+    expect(bottomSeat.classList.contains('active-attacker')).toBe(true);
+    expect(
+      bottomSeat.querySelector('.seat-clock')?.getAttribute('data-active'),
+    ).toBe('true');
+
+    // Spectators get zero gameplay interaction and zero table text banners.
+    expect(container.querySelector('[data-zone="player-controls"]')).toBeNull();
+    expect(screen.queryByTestId('pass-button')).toBeNull();
+    expect(screen.queryByTestId('surrender-button')).toBeNull();
+    expect(container.querySelector('[data-testid^="target-outline-"]')).toBeNull();
+    expect(screen.queryByTestId('redirect-outline')).toBeNull();
+    expect(handZone.querySelectorAll('.card-slot')).toHaveLength(0);
+    expect(container.textContent ?? '').not.toMatch(/waiting for first attack/i);
+    expect(tableCss).toContain("[data-zone='player-hand'][data-spectator-seat='true']");
   });
 });

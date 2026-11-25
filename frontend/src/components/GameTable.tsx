@@ -51,7 +51,12 @@ export interface TablePairData {
   defense?: CardData | null;
 }
 
-export type SeatPosition = 'top-left' | 'top-center' | 'top-right';
+/**
+ * Felt seats. The three top positions are Row 1; `bottom-center` is the 4th
+ * bot of an all-bot 4-player match a spectator watches, rendered in Row 3
+ * column 2 (`[data-zone="player-hand"]`).
+ */
+export type SeatPosition = 'top-left' | 'top-center' | 'top-right' | 'bottom-center';
 
 /** Where the active bout is anchored: a seat, or the viewer's own edge. */
 export type BoutAnchor = SeatPosition | 'bottom';
@@ -1279,8 +1284,15 @@ export function clockwiseOffset(
 export function seatForOffset(offset: number, playerCount: number): SeatPosition {
   if (playerCount <= 2) return 'top-center';
   if (playerCount === 3) return offset === 1 ? 'top-left' : 'top-right';
-  const seats: SeatPosition[] = ['top-left', 'top-center', 'top-right'];
-  return seats[offset - 1] ?? 'top-right';
+  if (playerCount === 4) {
+    const seats: SeatPosition[] = ['top-left', 'top-center', 'top-right'];
+    return seats[offset - 1] ?? 'top-right';
+  }
+  // T-90-2 ITEM-7b: five seats only happen when a spectator watches an all-bot
+  // 4-player match. The 4th bot takes the bottom-centre seat in Row 3 Col 2, so
+  // no seat is ever dropped or stacked on top of another.
+  const seats: SeatPosition[] = ['top-left', 'top-center', 'top-right', 'bottom-center'];
+  return seats[offset - 1] ?? 'bottom-center';
 }
 
 /** Numeric seat of a `p<index>` id, or `null` for an unrecognised id. */
@@ -1405,7 +1417,19 @@ export function assignSeats(
 ): SeatAssignment[] {
   const playerCount = opponents.length + 1;
   const order = canonicalSeatOrder(opponents, myId);
-  const myIndex = Math.max(0, order.indexOf(myId));
+  const ownIndex = order.indexOf(myId);
+  // T-90-2 ITEM-7b: a spectator (`myId` is `spectator`, never a seat id) owns
+  // no seat, so every opponent is simply one clockwise step further away in
+  // seat order. 2P -> top-center, 3P -> top-left/top-right, 4P -> the three top
+  // seats plus the bottom-centre seat.
+  if (ownIndex < 0) {
+    return opponents.map((opponent, index) => ({
+      opponent,
+      offset: index + 1,
+      position: seatForOffset(index + 1, playerCount),
+    }));
+  }
+  const myIndex = ownIndex;
   return opponents.map((opponent, index) => {
     const opponentIndex = order.indexOf(opponent.id);
     const clockwise =
@@ -1427,6 +1451,161 @@ const initials = (name: string): string =>
     .slice(0, 2)
     .map((part) => part[0].toUpperCase())
     .join('');
+
+export interface OpponentSeatProps {
+  opponent: OpponentSummary;
+  offset: number;
+  position: SeatPosition;
+  role: 'attacker' | 'defender' | 'none';
+  /** The seat's turn clock is running. */
+  onClock: boolean;
+  /** Already formatted clock label (`00:15`). */
+  clockLabel: string;
+  trumpSuit: string;
+}
+
+/**
+ * One opponent seat box: turn clock, avatar, name, card-count oval and the
+ * face-down hand. Shared by the Row 1 top seats and the Row 3 Col 2
+ * `bottom-center` seat of a 4-bot spectator match.
+ */
+function OpponentSeat({
+  opponent,
+  offset,
+  position,
+  role,
+  onClock,
+  clockLabel,
+  trumpSuit,
+}: OpponentSeatProps) {
+  const classes = ['seat', 'opponent-seat', `seat-${position}`];
+  if (role === 'attacker') classes.push('active-attacker');
+  if (role === 'defender') classes.push('active-defender');
+  if (opponent.finishRank != null) classes.push('finished');
+  return (
+    <div
+      class={classes.join(' ')}
+      data-seat={position}
+      data-offset={offset}
+      data-role={role}
+      data-testid="opponent"
+      style={{
+        '--seat-width': `${SEAT_BOX.width}px`,
+        '--seat-height': `${SEAT_BOX.height}px`,
+      }}
+    >
+      <span
+        class={`seat-clock${onClock ? ' active' : ''}`}
+        data-testid={`seat-clock-${opponent.id}`}
+        data-active={onClock ? 'true' : 'false'}
+      >
+        {clockLabel}
+      </span>
+      <div class="seat-box">
+        <div class="seat-head">
+          <span class="opponent-avatar" aria-hidden="true">
+            {initials(opponent.name)}
+          </span>
+          <span class="opponent-name">{opponent.name}</span>
+        </div>
+        {/* The counter oval sits on the top-left corner of the hand and
+            the whole hand is centred inside the player box. */}
+        <div class="opponent-hand">
+          <span
+            class="opponent-card-count deck-count-badge"
+            data-testid={`opponent-card-count-${opponent.id}`}
+            data-position="top-left"
+          >
+            {opponent.cardCount}
+          </span>
+          <div
+            class="opponent-cards"
+            aria-label={`${opponent.name}'s cards`}
+            data-card-width={
+              opponent.cards && opponent.cards.length > 0
+                ? LOW_DETAIL_CARD_WIDTH
+                : OPPONENT_CARD_WIDTH
+            }
+            data-min-overlap-ratio="0.10"
+            // ITEM-2c: the same widened index strip drives the overlap.
+            data-index-strip-px={opponentIndexStripWidth(
+              opponent.cards && opponent.cards.length > 0
+                ? LOW_DETAIL_CARD_WIDTH
+                : OPPONENT_CARD_WIDTH,
+            )}
+            data-overlap={opponentOverlap(
+              opponent.cards && opponent.cards.length > 0
+                ? opponent.cards.length
+                : opponent.cardCount,
+              OPPONENT_CARDS_WIDTH,
+              opponent.cards && opponent.cards.length > 0
+                ? LOW_DETAIL_CARD_WIDTH
+                : OPPONENT_CARD_WIDTH,
+            )}
+          >
+            {opponent.cards && opponent.cards.length > 0
+              ? opponent.cards.map((card, index) => (
+                  <span
+                    key={`${card.suit}-${card.rank}-${index}`}
+                    class={`opponent-low-detail-card${
+                      isTrumpCard(card, trumpSuit) ? ' trump-card low-detail-trump' : ''
+                    }`}
+                    data-testid="opponent-low-detail-card"
+                    data-suit={card.suit.toLowerCase()}
+                    data-rank={card.rank.toLowerCase()}
+                    data-trump={isTrumpCard(card, trumpSuit) ? 'true' : 'false'}
+                    style={{
+                      marginLeft:
+                        index === 0
+                          ? '0px'
+                          : `-${opponentOverlap(
+                              opponent.cards?.length ?? 0,
+                              OPPONENT_CARDS_WIDTH,
+                              LOW_DETAIL_CARD_WIDTH,
+                            )}px`,
+                    }}
+                  >
+                    <span class="low-detail-index">
+                      <span class="low-detail-rank" data-testid="low-detail-rank">
+                        {lowDetailRank(card.rank)}
+                      </span>
+                      <span
+                        class={`low-detail-suit${isRedSuit(card.suit) ? ' red' : ' black'}`}
+                        data-testid="low-detail-suit"
+                      >
+                        {suitSymbol(card.suit)}
+                      </span>
+                    </span>
+                  </span>
+                ))
+              : Array.from({ length: opponent.cardCount }, (_, index) => (
+                  <span
+                    key={index}
+                    class="opponent-card"
+                    style={{
+                      marginLeft:
+                        index === 0 ? '0px' : `-${opponentOverlap(opponent.cardCount)}px`,
+                    }}
+                  >
+                    <CardBack />
+                  </span>
+                ))}
+          </div>
+        </div>
+        {opponent.finishRank != null || opponent.hasPassed ? (
+          <div class="seat-meta">
+            {opponent.finishRank != null ? (
+              <span class="opponent-rank">
+                {opponent.finishRank === 1 ? 'WINNER' : 'OUT'}
+              </span>
+            ) : null}
+            {opponent.hasPassed ? <span class="opponent-passed">Passed</span> : null}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
 
 /** Card-shaped reflection icon: arrows toward the receiving seat, or a shuffle. */
 function RedirectIcon({
@@ -1818,6 +1997,10 @@ export function GameTable({
   // ITEM-ADD-1: seats are resolved from the viewer's own canonical index, so
   // the opponent row stays realistic from any player's point of view.
   const seats = assignSeats(opponents, myId);
+  // T-90-2 ITEM-7b: a 4-seat spectator match renders its 4th bot in Row 3
+  // Col 2, so it is split out of the Row 1 seat row here.
+  const topSeats = seats.filter((seat) => seat.position !== 'bottom-center');
+  const bottomSeats = seats.filter((seat) => seat.position === 'bottom-center');
   // ITEM-ADD-9: a bot seat accepts no user input at all, exactly like review
   // mode. `legalActions` is already empty for a bot on the server; this also
   // locks the local drag/double-click/drop surfaces.
@@ -2265,10 +2448,15 @@ export function GameTable({
           .filter((opponent): opponent is OpponentSummary => opponent !== undefined)
       : [];
 
+  const defenderSeatPosition = seats.find((seat) => seat.opponent.id === defenderId)?.position;
+  // A `bottom-center` defender plays from the bottom row, so the bout is
+  // anchored to the viewer's bottom edge there (never to a missing grid area).
   const boutAnchor: BoutAnchor =
     defenderId === myId
       ? 'bottom'
-      : seats.find((seat) => seat.opponent.id === defenderId)?.position ?? 'top-center';
+      : defenderSeatPosition === 'bottom-center'
+        ? 'bottom'
+        : defenderSeatPosition ?? 'top-center';
 
   // Item 11: once the defender surrenders, the cards in play slide toward the
   // surrendering player's box (their seat, or the viewer's own bottom edge).
@@ -2292,7 +2480,9 @@ export function GameTable({
   const seatPositionOf = (playerId: string | null | undefined): BoutAnchor | null => {
     if (playerId == null) return null;
     if (playerId === myId) return 'bottom';
-    return seats.find((seat) => seat.opponent.id === playerId)?.position ?? null;
+    const position = seats.find((seat) => seat.opponent.id === playerId)?.position;
+    if (position === 'bottom-center') return 'bottom';
+    return position ?? null;
   };
   const redirectSeat = seatPositionOf(redirectTargetPlayerId);
   // In Chaos mode the receiving seat is picked deterministically server-side;
@@ -2960,145 +3150,28 @@ export function GameTable({
       onDragOver={draggable ? magnetize : undefined}
       onDragEnd={draggable ? clearSnap : undefined}
     >
-      {seats.map(({ opponent, offset, position }) => {
-        const classes = ['seat', 'opponent-seat', `seat-${position}`];
-        if (opponent.id === attackerId) classes.push('active-attacker');
-        if (opponent.id === defenderId) classes.push('active-defender');
-        if (opponent.finishRank != null) classes.push('finished');
-        const onClock = turnPlayerId === opponent.id;
-        return (
-          <div
+      {seats
+        // T-90-2 ITEM-7b: the bottom-centre seat of a 4-bot spectator match
+        // lives inside Row 3 Col 2 (`[data-zone="player-hand"]`), never here.
+        .filter((seat) => seat.position !== 'bottom-center')
+        .map(({ opponent, offset, position }) => (
+          <OpponentSeat
             key={opponent.id}
-            class={classes.join(' ')}
-            data-seat={position}
-            data-offset={offset}
-            data-role={
+            opponent={opponent}
+            offset={offset}
+            position={position}
+            role={
               opponent.id === attackerId
                 ? 'attacker'
                 : opponent.id === defenderId
                   ? 'defender'
                   : 'none'
             }
-            data-testid="opponent"
-            style={{
-              '--seat-width': `${SEAT_BOX.width}px`,
-              '--seat-height': `${SEAT_BOX.height}px`,
-            }}
-          >
-            <span
-              class={`seat-clock${onClock ? ' active' : ''}`}
-              data-testid={`seat-clock-${opponent.id}`}
-              data-active={onClock ? 'true' : 'false'}
-            >
-              {formatSeatClock(onClock ? activeSeconds : 15)}
-            </span>
-            <div class="seat-box">
-              <div class="seat-head">
-                <span class="opponent-avatar" aria-hidden="true">
-                  {initials(opponent.name)}
-                </span>
-                <span class="opponent-name">{opponent.name}</span>
-              </div>
-              {/* The counter oval sits on the top-left corner of the hand and
-                  the whole hand is centred inside the player box. */}
-              <div class="opponent-hand">
-                <span
-                  class="opponent-card-count deck-count-badge"
-                  data-testid={`opponent-card-count-${opponent.id}`}
-                  data-position="top-left"
-                >
-                  {opponent.cardCount}
-                </span>
-                <div
-                  class="opponent-cards"
-                  aria-label={`${opponent.name}'s cards`}
-                  data-card-width={
-                    opponent.cards && opponent.cards.length > 0
-                      ? LOW_DETAIL_CARD_WIDTH
-                      : OPPONENT_CARD_WIDTH
-                  }
-                  data-min-overlap-ratio="0.10"
-                  // ITEM-2c: the same widened index strip drives the overlap.
-                  data-index-strip-px={opponentIndexStripWidth(
-                    opponent.cards && opponent.cards.length > 0
-                      ? LOW_DETAIL_CARD_WIDTH
-                      : OPPONENT_CARD_WIDTH,
-                  )}
-                  data-overlap={opponentOverlap(
-                    opponent.cards && opponent.cards.length > 0
-                      ? opponent.cards.length
-                      : opponent.cardCount,
-                    OPPONENT_CARDS_WIDTH,
-                    opponent.cards && opponent.cards.length > 0
-                      ? LOW_DETAIL_CARD_WIDTH
-                      : OPPONENT_CARD_WIDTH,
-                  )}
-                >
-                  {opponent.cards && opponent.cards.length > 0
-                    ? opponent.cards.map((card, index) => (
-                        <span
-                          key={`${card.suit}-${card.rank}-${index}`}
-                          class={`opponent-low-detail-card${
-                            isTrumpCard(card, trumpSuit) ? ' trump-card low-detail-trump' : ''
-                          }`}
-                          data-testid="opponent-low-detail-card"
-                          data-suit={card.suit.toLowerCase()}
-                          data-rank={card.rank.toLowerCase()}
-                          data-trump={
-                            isTrumpCard(card, trumpSuit) ? 'true' : 'false'
-                          }
-                          style={{
-                            marginLeft:
-                              index === 0
-                                ? '0px'
-                                : `-${opponentOverlap(
-                                    opponent.cards?.length ?? 0,
-                                    OPPONENT_CARDS_WIDTH,
-                                    LOW_DETAIL_CARD_WIDTH,
-                                  )}px`,
-                          }}
-                        >
-                          <span class="low-detail-index">
-                            <span class="low-detail-rank" data-testid="low-detail-rank">
-                              {lowDetailRank(card.rank)}
-                            </span>
-                            <span
-                              class={`low-detail-suit${isRedSuit(card.suit) ? ' red' : ' black'}`}
-                              data-testid="low-detail-suit"
-                            >
-                              {suitSymbol(card.suit)}
-                            </span>
-                          </span>
-                        </span>
-                      ))
-                    : Array.from({ length: opponent.cardCount }, (_, index) => (
-                        <span
-                          key={index}
-                          class="opponent-card"
-                          style={{
-                            marginLeft:
-                              index === 0 ? '0px' : `-${opponentOverlap(opponent.cardCount)}px`,
-                          }}
-                        >
-                          <CardBack />
-                        </span>
-                      ))}
-                </div>
-              </div>
-              {opponent.finishRank != null || opponent.hasPassed ? (
-                <div class="seat-meta">
-                  {opponent.finishRank != null ? (
-                    <span class="opponent-rank">
-                      {opponent.finishRank === 1 ? 'WINNER' : 'OUT'}
-                    </span>
-                  ) : null}
-                  {opponent.hasPassed ? <span class="opponent-passed">Passed</span> : null}
-                </div>
-              ) : null}
-            </div>
-          </div>
-        );
-      })}
+            onClock={turnPlayerId === opponent.id}
+            clockLabel={formatSeatClock(turnPlayerId === opponent.id ? activeSeconds : 15)}
+            trumpSuit={trumpSuit}
+          />
+        ))}
 
       <section
         class={boutClasses.join(' ')}
@@ -3308,6 +3381,9 @@ export function GameTable({
         // cards that hang below the Row 2 bout box; its grid row-gap keeps
         // every raised / selected hand card strictly below the clock.
         data-timer-band="true"
+        // T-90-2 ITEM-7b: true when the 4th bot of a 4-player spectator match
+        // occupies this Row 3 Col 2 cell.
+        data-spectator-seat={bottomSeats.length > 0 ? 'true' : 'false'}
         // ITEM-4: the stylesheet's timer clearance is derived from the SAME
         // Wave-1 tier constants the cards are raised by, so the clock track can
         // never be tuned to a different lift than the cards actually use.
@@ -3329,6 +3405,28 @@ export function GameTable({
         onDragOver={draggable && onReorderHand ? hoverHandZone : undefined}
         onDrop={draggable && onReorderHand ? dropOnHand : undefined}
       >
+        {/* T-90-2 ITEM-7b: the 4th bot of an all-bot 4-player match sits in
+            Row 3 Col 2 directly below the three top seats, showing its name,
+            turn clock and face-down card backs. It is a spectator-only seat:
+            it never overlaps the hand lane or the Row 4 controls. */}
+        {bottomSeats.map(({ opponent, offset, position }) => (
+          <OpponentSeat
+            key={opponent.id}
+            opponent={opponent}
+            offset={offset}
+            position={position}
+            role={
+              opponent.id === attackerId
+                ? 'attacker'
+                : opponent.id === defenderId
+                  ? 'defender'
+                  : 'none'
+            }
+            onClock={turnPlayerId === opponent.id}
+            clockLabel={formatSeatClock(turnPlayerId === opponent.id ? activeSeconds : 15)}
+            trumpSuit={trumpSuit}
+          />
+        ))}
         {/* T-90-4 ITEM-4: the timer sits in its own band above the card stage
             (see `[data-zone="player-hand"]` in table.css). The band reserves
             vertical clearance above (incoming surrender cards) and below (the

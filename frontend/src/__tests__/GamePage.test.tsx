@@ -400,6 +400,82 @@ describe('T-90 live multiplayer room (original M1 interface)', () => {
     expect(screen.getByTestId('room-info').textContent).toContain('Spectator view');
     expect(screen.getByTestId('game-page')).toBeTruthy();
   });
+
+  it('T-90-2 ITEM-7b: renders a 4-bot spectator match with all four seats, read-only', async () => {
+    const bots = [
+      mpPlayer('bot-1', 'Bot One', 0),
+      mpPlayer('bot-2', 'Bot Two', 1),
+      mpPlayer('bot-3', 'Bot Three', 2),
+      mpPlayer('bot-4', 'Bot Four', 3),
+    ];
+
+    fetchGameView.mockResolvedValue(
+      mpBase({
+        config: {
+          playerCount: 4,
+          allowRedirect: true,
+          turnTimeoutSeconds: 15,
+          isPublic: true,
+        },
+        viewerId: 'guest-1',
+        viewerSeat: null,
+        hand: [],
+        players: bots,
+        seats: bots.map((bot) => ({
+          seatIndex: bot.seatIndex,
+          playerId: bot.id,
+          displayName: bot.name,
+          isConnected: true,
+        })),
+        legalActions: [],
+        attackerIdx: 3,
+        defenderIdx: 0,
+        turnPlayerId: 'bot-4',
+        turnSecondsRemaining: 9,
+        eligibleTargetIds: ['bot-2'],
+      }),
+    );
+
+    const { container } = renderMultiplayer();
+
+    await waitFor(() => expect(screen.getByTestId('players-panel')).toBeTruthy());
+
+    const seats = screen.getAllByTestId('opponent');
+    expect(seats).toHaveLength(4);
+    expect(seats.map((seat) => seat.getAttribute('data-seat'))).toEqual([
+      'top-left',
+      'top-center',
+      'top-right',
+      'bottom-center',
+    ]);
+
+    // The 4th bot sits in Row 3 Col 2 (`[data-zone="player-hand"]`).
+    const handZone = container.querySelector('[data-zone="player-hand"]') as HTMLElement;
+    expect(handZone.getAttribute('data-spectator-seat')).toBe('true');
+    const bottomSeat = handZone.querySelector('[data-seat="bottom-center"]') as HTMLElement;
+    expect(bottomSeat).not.toBeNull();
+    expect(bottomSeat.querySelector('.opponent-name')?.textContent).toBe('Bot Four');
+    expect(bottomSeat.querySelectorAll('.opponent-card')).toHaveLength(6);
+    expect(bottomSeat.getAttribute('data-role')).toBe('attacker');
+    expect(
+      bottomSeat.querySelector('.seat-clock')?.getAttribute('data-active'),
+    ).toBe('true');
+    // Exactly one seat per felt position: nothing is dropped or stacked.
+    expect(container.querySelectorAll('[data-seat="top-left"]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-seat="bottom-center"]')).toHaveLength(1);
+
+    // Spectators have zero gameplay interaction.
+    expect(screen.getByTestId('game-page').getAttribute('data-spectator')).toBe('true');
+    expect(container.querySelector('[data-zone="player-controls"]')).toBeNull();
+    expect(screen.queryByTestId('action-bar')).toBeNull();
+    expect(screen.queryByTestId('pass-button')).toBeNull();
+    expect(screen.queryByTestId('surrender-button')).toBeNull();
+    expect(container.querySelector('[data-testid^="target-outline-"]')).toBeNull();
+    expect(screen.queryByTestId('redirect-outline')).toBeNull();
+    expect(screen.queryByTestId('hand-sort-box')).toBeNull();
+    expect(handZone.querySelectorAll('.card-slot')).toHaveLength(0);
+    expect(container.textContent ?? '').not.toMatch(/waiting for first attack/i);
+  });
 });
 
 const getGameView = client.getGameView as unknown as ReturnType<typeof vi.fn>;

@@ -318,6 +318,7 @@
   justify-self: end;
 }
 
+
 /* Item 21: amber marks the attacker, crimson marks the defender. */
 .seat.active-attacker .seat-box {
   border-color: var(--attacker-accent, #d9a326);
@@ -2983,4 +2984,31 @@ body[data-dragging='true'] * {
     --card-w: 48px;
     --card-h: 68px;
   }
+}
+
+/* --- T-90-2 ITEM-7b: 4-bot spectator seat in Row 3 Col 2 ------------------- */
+
+/* A spectator watching an all-bot 4-player match sees the 4th bot in the hand
+   lane's grid cell with its own name, turn clock and face-down card backs. The
+   spectator owns no hand, so the empty timer and card stage collapse and the
+   seat centres in the reserved lane. Explicit grid placement only: no absolute
+   or fixed positioning. Declared last so it never shadows the hand-lane rules
+   above; it always applies on top of them. */
+[data-zone='player-hand'][data-spectator-seat='true'] {
+  align-content: center;
+}
+
+[data-zone='player-hand'][data-spectator-seat='true'] > .hand-clock,
+[data-zone='player-hand'][data-spectator-seat='true'] > .hand-cards {
+  display: none;
+}
+
+[data-zone='player-hand'][data-spectator-seat='true'] > .seat-bottom-center {
+  grid-column: 1;
+  grid-row: 1 / -1;
+  justify-self: center;
+  align-self: center;
+  width: min(100%, var(--seat-width, 240px));
+  min-width: 0;
+  box-sizing: border-box;
 }

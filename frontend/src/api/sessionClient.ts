@@ -98,20 +98,102 @@ function parseGuestSession(value: unknown): GuestSession {
   };
 }
 
+// --- Shared guest session cache ---------------------------------------------
+
+/**
+ * T-90-2 ITEM-3: one backend-generated guest session for the whole page.
+ *
+ * `HeaderBar` and `LobbyPage` both need the same automatically generated guest
+ * `displayName`. Without a shared cache each of them would mint a competing
+ * `GET /api/session`, so whichever response landed last could rename the header
+ * out from under the lobby. The loader below keeps exactly one request in
+ * flight, remembers its answer and notifies every subscriber (the header, the
+ * lobby) the moment a name changes.
+ */
+let cachedGuestSession: GuestSession | null = null;
+let inFlightGuestSession: Promise<GuestSession | null> | null = null;
+const guestSessionListeners = new Set<(session: GuestSession) => void>();
+
+/** The session already resolved for this page, or `null` before the first load. */
+export function getCachedGuestSession(): GuestSession | null {
+  return cachedGuestSession;
+}
+
+/** Subscribes to later guest-session changes (a rename, a fresh session). */
+export function subscribeGuestSession(
+  listener: (session: GuestSession) => void,
+): () => void {
+  guestSessionListeners.add(listener);
+  return () => {
+    guestSessionListeners.delete(listener);
+  };
+}
+
+/** Clears the shared cache and listeners (isolated unit tests / a real sign-out). */
+export function resetGuestSessionCache(): void {
+  cachedGuestSession = null;
+  inFlightGuestSession = null;
+  guestSessionListeners.clear();
+}
+
+function publishGuestSession(session: GuestSession): GuestSession {
+  cachedGuestSession = session;
+  for (const listener of guestSessionListeners) listener(session);
+  return session;
+}
+
+/**
+ * Resolves the guest session at most once per page and deduplicates concurrent
+ * callers onto that single in-flight request.
+ *
+ * Resolves `null` instead of rejecting when `fetch` is unavailable (an isolated
+ * component unit test) or the request fails, so callers can render their
+ * fallback guest label without an unhandled rejection.
+ */
+export function ensureGuestSession(): Promise<GuestSession | null> {
+  if (cachedGuestSession !== null) return Promise.resolve(cachedGuestSession);
+  if (inFlightGuestSession !== null) return inFlightGuestSession;
+  if (typeof fetch !== 'function') return Promise.resolve(null);
+
+  inFlightGuestSession = apiRequest('/api/session')
+    .then((body) => publishGuestSession(parseGuestSession(body)))
+    .then(
+      (session) => {
+        inFlightGuestSession = null;
+        return session;
+      },
+      (error: unknown) => {
+        inFlightGuestSession = null;
+        // A real HTTP failure is still surfaced to a caller that requested the
+        // session explicitly; the header handles it and keeps its fallback.
+        throw error;
+      },
+    );
+  return inFlightGuestSession;
+}
+
 /**
  * Fetches the visitor's session. The backend mints and sets an `HttpOnly`
  * guest cookie when none exists, so this doubles as "log in as a guest".
+ * Every caller shares [[ensureGuestSession]]'s cache, so no two components
+ * issue competing session requests.
  */
 export async function getOrCreateSession(): Promise<GuestSession> {
-  return parseGuestSession(await apiRequest('/api/session'));
+  const session = await ensureGuestSession();
+  if (session === null) {
+    throw new Error('No guest session available: fetch is unsupported or the request failed');
+  }
+  return session;
 }
 
 /** Renames the current guest (2–20 printable characters server-side). */
 export async function updateGuestName(displayName: string): Promise<GuestSession> {
-  return parseGuestSession(
+  const session = parseGuestSession(
     await apiRequest('/api/session/name', {
       method: 'POST',
       body: { displayName },
     }),
   );
+  // T-90-2 ITEM-3: the header shows the same name the lobby just saved.
+  return publishGuestSession(session);
 }
