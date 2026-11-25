@@ -1,10 +1,11 @@
 <!-- Write your plain-English UI/UX feedback, bugs, or usability requests below this line. -->
-<!-- Note: Your previous feedback is always backed up in FEEDBACK.backup.md and .reviews/feedback_archive/ -->
-# Responses to QA Playbook
-1. The framerate is now good. However, this animation is too ambiguous. When hovering over a card in the large hand, two cards, usually the one being hovered over and the one to the left of it, are revealed (that is, less-overlapped) by an equally large margin. Adjust the animation so only one card in the hand is revealed with the widest margin (this should be the one the mouse is actually on), so it is clear which card is about to be selected.
-
-
-
+<!-- Note: Your previous feedback is always backed up in BACKUP_FEEDBACK.md and .reviews/feedback_archive/ -->
 # New
-1. The highlight of the hand outline should also respond to the Roundness slider in the Theme menu.
-2. Clicking anywhere on the page that is not the profile menu itself should close the profile menu dropdown.
+1. Remove all explanation texts (the small-font texts under the headers - for example, under "Lobby Pool", we have "Open public rooms, updated live. Join any table with a free seat." The UI is intuitive enough not to require these.
+2. Remove the second header bar from the lobby page (the one starting with "♠LIDURAKPlay Durak with friends").
+3. If the user is not logged in (always the case in the current phase of implementation), display the automatically generated guest name in the top-right profile menu.
+4. Rearrange the profile menu's button element so that the user icon is on the right side of the name of the user, instead of on the left as it is currently.
+5. The glow effect is overused on the lobby page. It should only appear as a highlight when an interactive element, such as a button, is moused over - never should it just be on the page by default. 
+6. Implement as a game setting the option to play with all 52 cards even if there are less than 4 players. Add tiles on the homepage to play this mode with different player counts with this new setting. Do not include all variations - only three additional tiles should be created.
+7. Implement the option to play with RandomBot and BasicBot. Three tiles should be added to the homepage tiles (for a total of 12, with Step 6 above): 2-player matches with BasicBot and RandomBot, and a 4-player match with all other players being BasicBot. Clicking these tiles should start the game immediately without waiting for additional players - the intuition is that the bot players are always counted as queued up for these types of games (but not for the normal game queue). Additionally include the option to add bot players into the Create a Game menu - the menu should have a section in which each seat at the table is selected to be either a human or a bot player. When possible, do not extend the height of the Create a Game element - instead, make use of the unused space on the right half of the element. Implement the player-seat selection in a visual and intuitive way that will be obvious to the user without explanation - do not add any text instructions. In production, the user creating the game will be locked in as one of the seats. However, for dev testing only, the user should also be able to start the game with all players being bots (i.e. deselect themselves as a player), in which case starting the game should send the user directly to the spectator mode in which they can watch the game freely but cannot interact with gameplay. 
+8. Create a large version of the logo currently used in the top-left of the page. A faded version of this logo should appear in the background tiles on the lobby in a mosaic fashion, split between the (currently six) tiles.
