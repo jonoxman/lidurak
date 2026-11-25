@@ -107,9 +107,6 @@ export function QaLobbyPresets({ onSeeded, onOpenGame }: QaLobbyPresetsProps) {
       aria-label="Lobby QA presets"
     >
       <h2 class="m2-panel-title">QA scenario presets</h2>
-      <p class="m2-panel-hint">
-        Jump straight to the M2 states a reviewer needs to verify.
-      </p>
       <div class="qa-lobby-grid">
         <button
           type="button"

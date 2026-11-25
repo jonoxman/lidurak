@@ -60,7 +60,9 @@ html[data-theme='light'] .m2-lobby {
   color: var(--m2-text);
   border: 1px solid var(--m2-border);
   border-radius: var(--app-roundness, 8px);
-  box-shadow: var(--app-shadow);
+  /* ITEM-5: the lobby shell is flat at rest; the only glow on the page is the
+     hover/focus highlight of an interactive element. */
+  box-shadow: none;
   font-size: 0.95rem;
 }
 
@@ -70,50 +72,14 @@ html[data-theme='light'] .m2-lobby {
   box-sizing: border-box;
 }
 
-.m2-lobby-header {
+/* ITEM-2: `HeaderBar` renders the app's only header, so the lobby keeps just
+   its tab row with the live-pool status pill beside it. */
+.m2-lobby-topline {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
-  min-width: 0;
-  padding-bottom: 0.75rem;
-  border-bottom: 1px solid var(--m2-border);
-}
-
-.m2-lobby-brand {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.5rem;
-  min-width: 0;
-}
-
-.m2-lobby-brand-mark {
-  color: var(--m2-green);
-  font-size: 1.35rem;
-  line-height: 1;
-}
-
-.m2-lobby-brand-name {
-  color: var(--m2-text-strong);
-  font-size: 1.25rem;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-}
-
-.m2-lobby-tagline {
-  color: var(--m2-muted);
-  font-size: 0.85rem;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.m2-lobby-identity {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
+  gap: 0.6rem;
   min-width: 0;
 }
 
@@ -157,52 +123,6 @@ html[data-theme='light'] .m2-lobby {
   background: var(--m2-red);
 }
 
-.m2-guest-badge {
-  padding: 0.35rem 0.7rem;
-  border: 1px solid var(--m2-border);
-  border-radius: 999px;
-  background: var(--m2-surface-raised);
-  color: var(--m2-text-strong);
-  font: inherit;
-  font-size: 0.82rem;
-  cursor: pointer;
-}
-
-.m2-guest-badge:hover,
-.m2-guest-badge:focus-visible {
-  border-color: var(--ui-select-accent);
-  color: var(--ui-select-text);
-  box-shadow: 0 0 8px 1px var(--ui-select-glow);
-  outline: none;
-}
-
-.m2-guest-form {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.4rem;
-  min-width: 0;
-}
-
-.m2-guest-input {
-  min-width: 0;
-  width: 9rem;
-  padding: 0.35rem 0.55rem;
-  border: 1px solid var(--m2-border);
-  border-radius: var(--app-roundness, 6px);
-  background: var(--m2-bg);
-  color: var(--m2-text-strong);
-  font: inherit;
-  font-size: 0.85rem;
-}
-
-.m2-guest-input:focus-visible {
-  border-color: var(--ui-select-accent);
-  outline: 2px solid var(--ui-select-accent);
-  outline-offset: 1px;
-  box-shadow: 0 0 10px 2px var(--ui-select-glow);
-}
-
 .m2-lobby-tabs {
   display: flex;
   flex-wrap: wrap;
@@ -222,6 +142,8 @@ html[data-theme='light'] .m2-lobby {
   font: inherit;
   font-weight: 600;
   cursor: pointer;
+  /* ITEM-5: flat at rest; the glow below is hover/focus-only. */
+  box-shadow: none;
 }
 
 .m2-lobby-tab:hover,
@@ -237,7 +159,8 @@ html[data-theme='light'] .m2-lobby {
   background: var(--ui-select-bg);
   border-color: var(--ui-select-accent);
   color: var(--ui-select-text);
-  box-shadow: inset 0 -2px 0 var(--ui-select-accent), 0 0 10px 2px var(--ui-select-glow);
+  /* ITEM-5: the selected tab is a crisp flat pill, never a resting glow. */
+  box-shadow: none;
 }
 
 .m2-tab-count {
@@ -263,6 +186,8 @@ html[data-theme='light'] .m2-lobby {
   background: var(--m2-surface);
   border: 1px solid var(--m2-border);
   border-radius: var(--app-roundness, 8px);
+  /* ITEM-5: panels never glow on their own. */
+  box-shadow: none;
 }
 
 /* T-96 ITEM-3: `.lobby-page h2` in `app.css` is `(0,1,1)` and paints
@@ -274,13 +199,6 @@ html[data-theme='light'] .m2-lobby {
   color: var(--m2-text-strong);
   font-size: 1.05rem;
   font-weight: 700;
-}
-
-.m2-panel-hint {
-  margin: 0;
-  color: var(--m2-muted);
-  font-size: 0.85rem;
-  line-height: 1.4;
 }
 
 .m2-button {
@@ -297,9 +215,16 @@ html[data-theme='light'] .m2-lobby {
   font: inherit;
   font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 0 10px 2px var(--ui-select-glow);
+  /* ITEM-5: buttons rest flat; only the hover/focus rules below add the
+     cobalt highlight. */
+  box-shadow: none;
   transition: transform 100ms ease, filter 150ms ease, border-color 120ms ease,
     box-shadow 150ms ease;
+}
+
+.m2-button.primary {
+  /* ITEM-5: the primary submit is flat at rest as well. */
+  box-shadow: none;
 }
 
 .m2-button:hover:not(:disabled),
@@ -374,7 +299,10 @@ html[data-theme='light'] .m2-lobby {
   font: inherit;
   text-align: left;
   cursor: pointer;
-  transition: border-color 120ms ease, background-color 120ms ease, transform 120ms ease;
+  /* ITEM-5: tiles are flat at rest; the glow arrives on hover/focus only. */
+  box-shadow: none;
+  transition: border-color 120ms ease, background-color 120ms ease, transform 120ms ease,
+    box-shadow 150ms ease;
 }
 
 .quick-pair-tile:hover:not(:disabled),
@@ -459,6 +387,8 @@ html[data-theme='light'] .m2-lobby {
   background: var(--m2-surface-raised);
   border: 1px solid var(--m2-border);
   border-radius: 8px;
+  /* ITEM-5: pool rows are flat at rest. */
+  box-shadow: none;
 }
 
 .lobby-pool-host {
@@ -605,18 +535,21 @@ html[data-theme='light'] .m2-lobby {
   font: inherit;
   font-size: 0.85rem;
   cursor: pointer;
+  /* ITEM-5: segmented options are flat at rest. */
+  box-shadow: none;
 }
 
 .segmented-option[aria-pressed='true'] {
   border-color: var(--ui-select-accent);
   background: var(--ui-select-bg);
   color: var(--ui-select-text);
-  box-shadow: 0 0 10px 2px var(--ui-select-glow);
+  /* ITEM-5: selected = crisp flat border + background, never a glow. */
+  box-shadow: none;
   font-weight: 700;
 }
 
-.segmented-option:hover,
-.segmented-option:focus-visible {
+.segmented-option:hover:not(:disabled),
+.segmented-option:focus-visible:not(:disabled) {
   border-color: var(--ui-select-accent);
   box-shadow: 0 0 8px 1px var(--ui-select-glow);
   outline: none;
@@ -664,6 +597,8 @@ html[data-theme='light'] .m2-lobby {
   border-radius: calc(var(--app-roundness, 8px) * 0.8);
   background: var(--m2-surface-raised);
   color: var(--m2-text);
+  /* ITEM-5: seat cards are flat at rest. */
+  box-shadow: none;
 }
 
 .create-seat-card[data-seat-index='0'] {
@@ -743,6 +678,8 @@ html[data-theme='light'] .m2-lobby {
   border-color: var(--ui-select-accent);
   background: var(--ui-select-bg);
   color: var(--ui-select-text);
+  /* ITEM-5: the chosen seat type stays flat until it is hovered. */
+  box-shadow: none;
 }
 
 .create-seat-option:hover:not(:disabled),
@@ -755,6 +692,19 @@ html[data-theme='light'] .m2-lobby {
 .create-seat-option:disabled {
   opacity: 0.45;
   cursor: default;
+}
+
+/* ITEM-5: the same hover-only highlight in the Light theme, where the
+   `--ui-select-*` family is re-tinted by `html[data-theme='light']`. Nothing
+   resting ever glows in either theme. */
+html[data-theme='light'] .m2-button:hover:not(:disabled),
+html[data-theme='light'] .m2-button:focus-visible:not(:disabled),
+html[data-theme='light'] .quick-pair-tile:hover:not(:disabled),
+html[data-theme='light'] .segmented-option:hover:not(:disabled),
+html[data-theme='light'] .segmented-option:focus-visible:not(:disabled),
+html[data-theme='light'] .create-seat-option:hover:not(:disabled),
+html[data-theme='light'] .create-seat-option:focus-visible:not(:disabled) {
+  box-shadow: 0 0 0 1px var(--ui-select-border), 0 0 12px var(--ui-select-glow);
 }
 
 /* --- QA presets --------------------------------------------------------- */

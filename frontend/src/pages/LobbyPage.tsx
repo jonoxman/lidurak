@@ -13,7 +13,7 @@ import {
   joinQuickPair,
   type LobbySocket,
 } from '../api/lobbyClient';
-import { getOrCreateSession, updateGuestName } from '../api/sessionClient';
+import { getOrCreateSession } from '../api/sessionClient';
 import { CreateInviteTab } from '../components/lobby/CreateInviteTab';
 import { LobbyPoolTab } from '../components/lobby/LobbyPoolTab';
 import { QaLobbyPresets } from '../components/lobby/QaLobbyPresets';
@@ -97,15 +97,13 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
   const [serverReady, setServerReady] = useState(initialServerReady);
 
   // --- M2 identity, tabs and live lobby state -----------------------------
+  // T-90-4 ITEM-2: the guest name is edited from the global `HeaderBar`, so the
+  // page only hydrates the session for its API calls and the creator's seat.
   const [session, setSession] = useState<GuestSession | null>(null);
-  const [editingName, setEditingName] = useState(false);
-  const [nameDraft, setNameDraft] = useState('');
-  const [savingName, setSavingName] = useState(false);
   const [tab, setTab] = useState<LobbyTabId>('quick');
   const [poolOpened, setPoolOpened] = useState(false);
   const [rooms, setRooms] = useState<LobbyRoomSummary[]>([]);
   const [poolStatus, setPoolStatus] = useState<SocketStatus | 'idle'>('idle');
-  const [notice, setNotice] = useState<string | null>(null);
 
   // --- Quick Pairing queue (owned here so it survives tab switches) --------
   const [searching, setSearching] = useState<QuickPairSearching | null>(null);
@@ -155,7 +153,6 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
       .then((hydrated) => {
         if (cancelled) return;
         setSession(hydrated);
-        setNameDraft(hydrated.displayName);
       })
       .catch(() => {
         // Keep the neutral "Guest" placeholder when the session is offline.
@@ -284,27 +281,6 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
     });
   };
 
-  const saveGuestName = (event: Event) => {
-    event.preventDefault();
-    const nextName = nameDraft.trim();
-    if (nextName.length === 0) {
-      setEditingName(false);
-      return;
-    }
-    setSavingName(true);
-    setNotice(null);
-    updateGuestName(nextName)
-      .then((renamed) => {
-        setSession(renamed);
-        setNameDraft(renamed.displayName);
-        setEditingName(false);
-      })
-      .catch((reason: unknown) => {
-        setNotice(reason instanceof Error ? reason.message : String(reason));
-      })
-      .finally(() => setSavingName(false));
-  };
-
   const selectTab = (next: LobbyTabId) => {
     setTab(next);
     // The pool panel mounts on first open; its rooms stay live through the
@@ -332,84 +308,36 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
       {serverReady ? (
         <>
           <div class="m2-lobby" data-testid="m2-lobby">
-            <header class="m2-lobby-header">
-              <div class="m2-lobby-brand">
-                <span class="m2-lobby-brand-mark" aria-hidden="true">
-                  ♠
-                </span>
-                <span class="m2-lobby-brand-name">LIDURAK</span>
-                <span class="m2-lobby-tagline">Play Durak with friends</span>
-              </div>
-              <div class="m2-lobby-identity">
-                <span
-                  class="m2-lobby-indicator"
-                  data-status={poolStatus}
-                  data-testid="lobby-connection"
-                >
-                  <span class="m2-lobby-indicator-dot" aria-hidden="true" />
-                  {liveLabel}
-                </span>
-                {editingName ? (
-                  <form class="m2-guest-form" onSubmit={saveGuestName}>
-                    <input
-                      class="m2-guest-input"
-                      aria-label="Guest name"
-                      maxLength={20}
-                      value={nameDraft}
-                      onInput={(event) =>
-                        setNameDraft((event.currentTarget as HTMLInputElement).value)
-                      }
-                    />
-                    <button type="submit" class="m2-button primary" disabled={savingName}>
-                      {savingName ? 'Saving…' : 'Save'}
-                    </button>
-                    <button
-                      type="button"
-                      class="m2-button secondary"
-                      onClick={() => setEditingName(false)}
-                    >
-                      Cancel
-                    </button>
-                  </form>
-                ) : (
+            {/* T-90-4 ITEM-2: `HeaderBar` is the app's only header. The lobby
+                keeps its tab row with the live-pool status beside it. */}
+            <div class="m2-lobby-topline">
+              <nav class="m2-lobby-tabs" role="tablist" aria-label="Lobby sections">
+                {LOBBY_TABS.map((entry) => (
                   <button
+                    key={entry.id}
                     type="button"
-                    class="m2-guest-badge"
-                    aria-label="Edit guest name"
-                    onClick={() => {
-                      setNameDraft(session?.displayName ?? '');
-                      setEditingName(true);
-                    }}
+                    role="tab"
+                    class={`m2-lobby-tab${tab === entry.id ? ' active' : ''}`}
+                    aria-selected={tab === entry.id}
+                    onClick={() => selectTab(entry.id)}
                   >
-                    {session?.displayName ?? 'Guest'}
+                    {entry.label}
+                    {entry.id === 'pool' && rooms.length > 0 ? (
+                      <span class="m2-tab-count">{rooms.length}</span>
+                    ) : null}
                   </button>
-                )}
-              </div>
-            </header>
+                ))}
+              </nav>
 
-            <nav class="m2-lobby-tabs" role="tablist" aria-label="Lobby sections">
-              {LOBBY_TABS.map((entry) => (
-                <button
-                  key={entry.id}
-                  type="button"
-                  role="tab"
-                  class={`m2-lobby-tab${tab === entry.id ? ' active' : ''}`}
-                  aria-selected={tab === entry.id}
-                  onClick={() => selectTab(entry.id)}
-                >
-                  {entry.label}
-                  {entry.id === 'pool' && rooms.length > 0 ? (
-                    <span class="m2-tab-count">{rooms.length}</span>
-                  ) : null}
-                </button>
-              ))}
-            </nav>
-
-            {notice ? (
-              <p class="m2-status-text" role="status">
-                {notice}
-              </p>
-            ) : null}
+              <span
+                class="m2-lobby-indicator"
+                data-status={poolStatus}
+                data-testid="lobby-connection"
+              >
+                <span class="m2-lobby-indicator-dot" aria-hidden="true" />
+                {liveLabel}
+              </span>
+            </div>
 
             {tab === 'quick' ? (
               <QuickPairingTab

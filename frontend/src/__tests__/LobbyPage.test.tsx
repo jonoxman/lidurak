@@ -537,6 +537,22 @@ describe('LobbyPage', () => {
     }
   });
 
+  /** T-90-4 ITEM-1/ITEM-2: no second header bar and no header explanations. */
+  it('drops the second lobby header and every header explanation text', () => {
+    render(<LobbyPage initialServerReady />);
+
+    expect(screen.queryByText('LIDURAK')).toBeNull();
+    expect(screen.queryByText('Play Durak with friends')).toBeNull();
+    expect(document.querySelector('.m2-lobby header')).toBeNull();
+    expect(document.querySelector('.m2-panel-hint')).toBeNull();
+    expect(screen.queryByText(/Open public rooms, updated live/)).toBeNull();
+    expect(screen.queryByText(/Choose whether this is a private invite link/)).toBeNull();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Create a Game' }));
+    expect(document.querySelector('.m2-panel-hint')).toBeNull();
+    expect(screen.queryByText(/Choose whether this is a private invite link/)).toBeNull();
+  });
+
   it('shows an error banner when game creation fails for a real reason', async () => {
     createGame.mockRejectedValue(new Error('backend down'));
     render(<LobbyPage initialServerReady />);

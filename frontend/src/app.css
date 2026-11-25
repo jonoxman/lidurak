@@ -208,6 +208,12 @@ body {
   box-shadow: 0 0 10px 2px var(--ui-select-glow);
 }
 
+/* T-90-4 ITEM-5: the lobby's primary action is flat at rest; its cobalt glow is
+   reserved for hover/focus. The game-over Rematch banner keeps its emphasis. */
+.lobby-form .action-button.green {
+  box-shadow: none;
+}
+
 .lobby-form .action-button.green:hover:not(:disabled),
 .game-over-banner .action-button.banner-rematch-button:hover:not(:disabled) {
   background: var(--ui-select-accent);
@@ -2042,6 +2048,11 @@ html[data-theme='light'] .game-over-banner .action-button.banner-rematch-button 
   box-shadow:
     0 0 12px 2px var(--ui-select-glow),
     inset 0 0 8px var(--ui-select-bg);
+}
+
+/* T-90-4 ITEM-5: no resting glow on the lobby's primary action in Light either. */
+html[data-theme='light'] .lobby-form .action-button.green {
+  box-shadow: none;
 }
 
 html[data-theme='light'] .lobby-form .action-button.green:hover:not(:disabled),
