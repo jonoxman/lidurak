@@ -9,56 +9,52 @@ Lidurak is a fast, minimalist, browser-based implementation of the classic Russi
 ## 1. Quick Start & Installation
 
 ### Prerequisites
+- **Java & sbt** (for building and testing the Scala 3 backend)
+- **Node.js & npm** (for building and testing the Preact/TypeScript frontend)
+- **Bash** (to run the local launcher script)
 
-- **Java Development Kit (JDK)** and **sbt** (for the Scala 3 backend)
-- **Node.js** and **npm** (for the Preact + TypeScript frontend)
-- **Bash** shell environment (Linux/macOS)
-
-### Launching Locally
-
-Start both the backend server and the frontend development server from the repository root with:
+### Launch Locally
+From the repository root, start both the backend server and the frontend development server with:
 
 ```bash
 ./play-local.sh
 ```
 
-Once running, open the local URL printed by the launcher in your browser to access the lobby and start playing.
+Once running, open the local URL printed by the launcher (defaulting to the frontend dev server proxied to `localhost:8080`).
 
-## 2. Running Tests
-
-Run the backend and frontend test suites independently from their respective directories:
-
-- **Backend (`backend/`)**
+### Running Tests
+- **Backend test suite** (Scala 3):
   ```bash
-  cd backend && sbt -batch test
+  sbt -batch test
   ```
-- **Frontend (`frontend/`)**
+- **Frontend test suite** (Preact / TypeScript):
   ```bash
   cd frontend && npm test -- --run
   ```
 
-## 3. UI & Gameplay Overview
+---
+
+## 2. UI & Gameplay Overview
+
+Lidurak is a web-based implementation of the classic card game **Durak**, featuring real-time multiplayer, bot opponents, spectator mode, and customizable visual themes.
 
 ### Lobby & Matchmaking
+- **Guest Sessions**: Visitors receive an automatic guest session and can customize their display name.
+- **Quick Pairing**: Join the matchmaking pool to be automatically seated with opponents once enough players queue for the same game configuration.
+- **Public Lobby & Invite Links**: Browse open rooms in the lobby pool or create a shareable room URL (`/g/<gameId>`) to invite friends or watch as a spectator.
 
-From the lobby, you can start or join a match in several ways:
-
-- **Create a Game:** Configure a table for **2, 3, or 4 players** (using a 36-card deck for 2–3 players or a 52-card deck for 4 players), choose **Private invite link** or **Public lobby pool** visibility, toggle **Redirect / reflect** rules, and set the per-turn clock (**15s**, **30s**, or **60s**).
-- **Lobby Pool:** Browse open public rooms updated in real time and join any table with an open seat.
-- **Quick Pair:** Enter the matchmaking queue to be paired automatically with opponents.
-- **Local / Hotseat & Spectator Modes:** Play local or bot-filled games, switch seats in hotseat mode, or open a match as a spectator.
-
-### Table Layout & Controls
-
-Matches are rendered in a three-column layout designed to keep the table readable at all times:
-
-- **Left Sidebar:** Displays the **How to Play** reference, quick scenario presets, and hotseat seat-switcher tabs when playing locally.
-- **Center Felt Arena:** A 3×3 table grid showing opponent seats across the top, active attack/defense card pairs and target outlines in the center, and the talon deck, trump card, your hand, sort controls, and contextual **Pass** / **Surrender** button along the bottom.
-- **Right Sidebar:** Displays the digital turn countdown clock and end-of-game winner / Durak results.
+### Table Layout
+The game screen uses a clean three-column layout:
+- **Top Header Bar**: Brand logo, navigation links (`PLAY`, `PUZZLES`, `LEARN`, `WATCH`), connection status indicator, and a user menu for sound, theme (`dark` / `light`), table felt texture, and card back preferences.
+- **Left Sidebar**: Rules / How to Play reference, player viewpoint controls (where applicable), and hand sorting options.
+- **Center Table Arena**:
+  - **Top Row**: Opponent seats showing remaining card counts, pass indicators, and finish rankings.
+  - **Center Row**: Active attack and defense card pairs, legal target outlines, and attack reflection (redirect) indicators.
+  - **Bottom Row**: Talon deck and revealed trump card on the left, your interactive hand in the center, and sort / `Pass` / `Surrender` controls on the right.
+- **Right Sidebar**: Turn countdown clock (`00:15` default) and end-of-match winner / Durak summary.
 
 ### Basic Gameplay
-
-- **Attacking & Throwing In:** Play one or more cards of matching rank to open a bout, or throw in additional cards matching ranks already on the table when allowed.
-- **Defending & Redirecting:** Cover each attacking card with a higher card of the same suit or a trump card. When redirect rules are enabled and legal, you may reflect the attack to the next seat by playing a card of matching rank.
-- **Passing & Surrendering:** Attackers can pass once they have no more cards to add; a defender who cannot or chooses not to cover can surrender the bout and pick up the table cards.
-- **Themes & Preferences:** Toggle between light and dark themes (or follow your device theme) and adjust visual settings from the top navigation bar.
+- **Attacking & Defending**: Attackers play cards to start a bout or throw in matching ranks; the defender must cover each attacking card with a higher card of the same suit or any card of the trump suit.
+- **Redirecting**: When permitted, the defender may reflect an uncovered attack to the next eligible player by playing a matching rank.
+- **Chaos Mode**: Optional rule variant allowing attackers to target any active opponent rather than only the immediate neighbor.
+- **Controls**: Play cards via drag-and-drop onto target outlines or by clicking/double-clicking cards in hand, and drag cards within your hand to reorder them.

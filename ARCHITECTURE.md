@@ -1,137 +1,108 @@
 # Lidurak Architecture
 
-Lidurak is a full-stack web implementation of the card game Durak, pairing a Scala 3 game engine and HTTP/WebSocket server (`backend/`) with a Preact and TypeScript single-page application (`frontend/`).
+This document describes the technical structure of the Lidurak repository, covering the directory layout, the Scala 3 game engine, the server protocol, and the Preact frontend.
 
-## 1. Repository Layout
+---
+
+## 1. Repository Structure
 
 ```text
 .
-├── backend/                  # Scala 3 engine (durak.engine) & server (durak.server), built with sbt
-├── frontend/                 # Preact + TypeScript + Vite SPA
-│   └── src/
-│       ├── api/              # REST session/lobby clients and reconnecting WebSocket clients
-│       ├── components/       # Table, card, header, sorting, and lobby UI components
-│       │   └── lobby/        # CreateInviteTab, LobbyPoolTab, and related lobby panels
-│       ├── pages/            # LobbyPage and GamePage
-│       ├── router/           # History API routing hook (useRoute)
-│       ├── state/            # Persisted UI preferences and theme management (settings)
-│       ├── styles/           # Table grid CSS and felt/surface texture utilities
-│       ├── types/            # Core game action builders and multiplayer wire-protocol parsers
-│       ├── utils/            # Hand geometry/parting math and bout layout helpers
-│       ├── app.css           # Global theme tokens (dark/light) and lobby/banner styles
-│       └── app.tsx           # Root App component and dual hash/History router
-├── play-local.sh             # Unified local launcher for backend and frontend servers
-├── README.md                 # User and developer quick start
-└── ARCHITECTURE.md           # Technical architecture reference
+├── play-local.sh                  # Official local launcher for backend + frontend
+├── backend/                       # Scala 3 backend (durak.engine, durak.server)
+└── frontend/                      # Preact + Vite + TypeScript client
+    └── src/
+        ├── app.css                # Global theme variables, CSS tokens, and lobby/banner styles
+        ├── api/
+        │   ├── lobbyClient.ts     # REST room/matchmaking client & ReconnectingLobbySocket
+        │   └── sessionClient.ts   # Cookie-backed guest session API & shared page cache
+        ├── audio/                 # SoundEngine playback utilities
+        ├── components/
+        │   ├── BrandLogo.tsx      # Shared SVG brand lockup and lobby mosaic watermark
+        │   ├── GameTable.tsx      # 3x3 CSS Grid table arena & memoized HandCardSlot
+        │   ├── HeaderBar.tsx      # Top navigation, connection tracker & settings submenus
+        │   ├── Card.tsx / CardBack.tsx / SortBar.tsx / TablePair.tsx
+        │   └── lobby/             # Lobby room creation, invite, and matchmaking views
+        ├── state/                 # Persistent user settings (theme, sound, table, highlights)
+        ├── styles/                # Felt table CSS (table.css) and texture palettes
+        ├── types/                 # Multiplayer DTO parsers and game action builders
+        └── utils/                 # Pure hand layout (handLayout) and bout layout (tableLayout)
 ```
 
 ---
 
-## 2. Scala 3 Engine (`durak.engine`)
+## 2. Scala 3 Engine State Machine (`durak.engine`)
 
-The `durak.engine` package implements the pure ruleset and state machine for Durak matches, verified via `sbt -batch test`.
+The backend game engine models Durak matches as a deterministic state machine that validates moves and projects viewer-specific game state (`PlayerGameView`):
 
-### Core Rules & Configuration
-
-- **Deck Sizes:** 36-card deck for 2- and 3-player tables; 52-card deck for 4-player tables, with a revealed trump suit drawn for the talon.
-- **Variants:**
-  - **Redirect / Reflect (`allowRedirect`):** Controls whether a defender may pass an uncovered bout onward by matching the attack rank.
-  - **Chaos Mode (`chaosMode`):** Allows attackers to target any eligible active opponent seat rather than strictly the clockwise neighbor.
-- **Turn Clocks:** Configurable per-turn timeout (`15s` default, `30s`, or `60s`).
-
-### Bout State Machine & Actions
-
-Each round progresses through attack, defense, throw-in, and resolution phases driven by validated player actions:
-
-1. **Initial Attack (`initialAttack` / `playAttack`):** Opens a bout with one or more cards against an eligible defender.
-2. **Cover (`coverCard`):** Defender covers a specific uncovered attack index (`attackIndex`) using a higher card of the same suit or a trump card.
-3. **Redirect (`redirectAttack`):** Defender forwards the bout to the next eligible seat (`redirectTargetId`) when redirect rules allow it.
-4. **Throw-In (`throwInCards`):** Attackers add cards matching ranks present on the table up to the defender's remaining capacity, including during surrender throw-in phases.
-5. **Pass (`passTurn`) & Surrender (`declareSurrender`):** Attackers signal completion of throw-ins; defenders forfeit the bout and collect table cards.
-
-### Per-Viewer Projection (`PlayerGameView`)
-
-The engine projects game state per viewer rather than broadcasting raw global state:
-
-- Active players receive their own `hand`, `viewerSeat`, legal action flags (`awaitingAttack`, `defending`, `canRedirect`, `canThrowIn`, `throwInCards`, `throwInCapacity`, `eligibleTargetIds`, `redirectTargetId`), and bout phase (`boutPhase`).
-- Spectators receive `viewerSeat: null` and an empty `hand`.
-- Opponent summaries (`OpponentSummary`) expose only `id`, `name`, `cardCount`, `hasPassed`, and `finishRank`, concealing hidden cards unless Transparent Mode or post-game review is active.
+- **Deck & Configuration**: Supports standard deck sizes (36 or 52 cards), player counts, trump suit selection, and optional **Chaos Mode** (`chaosMode`) where attackers can target any active opponent.
+- **Bout & Turn Lifecycle**: Tracks the current attacker (`attackerId`), defender (`defenderId`), active table pairs (`attack` card and optional `defense` card), bout phase (`boutPhase`, including `Defense` and surrender states), per-player `hasPassed` flags, and finish rankings (`finishRank`).
+- **Move Legality & Projections**: Computes and projects viewer-scoped legality flags directly to the client rather than duplicating rule adjudication in the UI:
+  - `playableKeys` / `awaitingAttack` / `defending`
+  - `eligibleTargetIds` for valid attack targets
+  - `canRedirect` and `redirectTargetId` for single-card rank reflections
+  - `canThrowIn`, `throwInCards`, and `throwInCapacity` for bout throw-ins
+  - `transparentMode` / review-mode hand reveals (`cards` on opponent summaries)
+- **Turn Clock**: Tracks `turnPlayerId` and `turnSecondsRemaining` (`00:15` default).
 
 ---
 
-## 3. Server Layer (`durak.server`)
+## 3. Server Actors, REST API & WebSocket Protocol (`durak.server`)
 
-The `durak.server` package hosts the HTTP REST API, WebSocket endpoints, room registry, quick-pair matchmaking, and bot-seat drivers.
+The Scala 3 server manages guest sessions, room lifecycles, matchmaking queues, and live WebSocket broadcasts. In local development, Vite proxies API and WebSocket traffic to the backend (default host fallback `localhost:8080`).
+
+### Authentication & Guest Sessions
+- Cookie-based anonymous sessions using an `HttpOnly; SameSite=Strict` cookie (`lidurak_session`), sent via `credentials: 'include'`.
+- `GET /api/session` — Returns the active `GuestSession` (`playerId`, `displayName`, `isGuest`) or mints a new guest cookie if none exists.
+- `POST /api/session/name` — Updates the session's `displayName` (validated server-side to 2–20 printable characters).
 
 ### REST Endpoints
+- **Lobby & Rooms**:
+  - `GET /api/lobby` — Returns `LobbyRoomSummary[]` for open public rooms.
+  - `POST /api/games` — Creates a room (`CreateRoomRequest`) and returns `CreateRoomResponse` (`gameId`, `seatIndex` or `null`, `inviteUrl`, and optional `role`: `'player' | 'spectator'`). Setting `creatorSeatIndex: null` / `spectateAsCreator: true` creates a room where the creator joins as a spectator.
+  - `GET /api/games/:gameId` — Returns the caller's strictly filtered `PlayerGameView`.
+  - `POST /api/games/:gameId/join` — Claims an open seat in a waiting room (`JoinRoomResponse`).
+  - `POST /api/games/:gameId/leave` — Leaves a waiting room (rejected once the match has started).
+- **Quick Pairing**:
+  - `POST /api/quick-pair` — Enters a matchmaking bucket (`QuickPairRequest`), returning either `searching` or `matched`.
+  - `DELETE /api/quick-pair` — Cancels an active quick-pair search.
+- **Scenario Preset Endpoints**:
+  - `POST /api/qa/presets/seed-lobby` — Seeds three open rooms into the Lobby Pool.
+  - `POST /api/qa/presets/active-match` — Starts an active match (supports configurable `playerCount` and `handSize`) with the caller seated at index `0`.
+  - `POST /api/qa/presets/quick-pair-opponent` — Populates the caller's quick-pair bucket with synthetic opponents to trigger `quickPairMatched`.
+  - `POST /api/qa/presets/spectator-match` — Starts a match where the caller observes as a spectator (`seatIndex` null, empty hand).
 
-| Method & Path | Purpose |
-| --- | --- |
-| `GET /api/lobby` | Fetch open public rooms (`LobbyRoomSummary[]`) |
-| `POST /api/games` | Create a room (`playerCount`, `allowRedirect`, `turnTimeoutSeconds`, `isPublic`); returns `gameId`, `seatIndex`, `inviteUrl` |
-| `GET /api/games/:gameId` | Fetch the caller's `PlayerGameView` |
-| `POST /api/games/:gameId/join` | Claim an open seat in a waiting room; returns `gameId`, `seatIndex`, `view` |
-| `POST /api/games/:gameId/leave` | Leave a waiting room before the match starts |
-| `POST /api/quick-pair` | Enter the quick-pairing queue (`searching` or `matched`) |
-| `DELETE /api/quick-pair` | Cancel an active quick-pair search |
-| `POST /api/qa/presets/seed-lobby` | Seed open rooms in the lobby pool |
-| `POST /api/qa/presets/active-match` | Create an active bot-filled match (supports custom `playerCount` and `handSize`) |
-| `POST /api/qa/presets/quick-pair-opponent` | Populate quick-pair opponents to trigger `quickPairMatched` |
-| `POST /api/qa/presets/spectator-match` | Create a live match for a spectator viewer |
-
-### WebSocket Protocol
-
-- **`/ws/lobby`:** Pushes live lobby state to connected clients:
-  - `lobbySnapshot` — initial list of open public rooms.
-  - `lobbyUpdated` — incremental updates as rooms open, fill, or start.
-  - `quickPairMatched` / `matchFound` — notifies a queued player of their assigned `gameId` and `seatIndex`.
-  - `actionRejected` — error code and message when a lobby request fails.
-- **`/ws/games/:gameId`:** Bidirectional match channel:
-  - **Client-to-server (`WsClientMessage`):** `playAttack`, `coverCard`, `redirectAttack`, `throwInCards`, `declareSurrender`, `passTurn`, and `ping`. The server resolves the acting seat from the caller's session rather than trusting client-supplied player IDs.
-  - **Server-to-client (`WsServerMessage`):** `gameViewUpdate` carrying a seat-filtered `PlayerGameView`, and `actionRejected` (`code`, `message`) on illegal moves.
+### WebSocket Channels
+- **`/ws/lobby`**: Managed on the frontend by `ReconnectingLobbySocket` with exponential backoff (`500ms` base delay, `5000ms` max delay). Delivers:
+  - Initial lobby room snapshot (`onSnapshot`)
+  - Incremental lobby pool updates (`onUpdated`)
+  - Matchmaking assignments (`onMatchFound` / `onQuickPairMatched` with `gameId` and `seatIndex`)
+  - Server-side rejection notices (`onActionRejected` with `code` and `message`)
 
 ---
 
-## 4. Frontend Architecture (`frontend/src`)
+## 4. Preact & CSS Grid Frontend Architecture (`frontend/src`)
 
-The frontend is built with Preact, TypeScript, and Vite, tested with Vitest (`npm test -- --run`).
+### Client State & API Deduplication
+- **`sessionClient.ts`**: Maintains a singleton in-flight promise and shared subscriber cache (`ensureGuestSession`, `subscribeGuestSession`, `getCachedGuestSession`) so `HeaderBar` and `LobbyPage` share a single `GET /api/session` call and update synchronously when `updateGuestName` succeeds.
+- **`settings.ts`**: Manages persisted user preferences (`ThemeMode` `'dark' | 'light'` with `prefers-color-scheme: light` fallback, `SoundEngine` settings, `TABLE_TEXTURES`, `ALL_CARD_BACK_PATTERNS`, highlight presets/intensity `--highlight-intensity`, and `--app-roundness`).
 
-### Routing & Modes (`app.tsx`, `router/useRoute.ts`)
+### Chrome & Visual System (`app.css`, `HeaderBar.tsx`, `BrandLogo.tsx`)
+- **Color Separation**: UI selection and navigation chrome uses a royal blue/cobalt palette (`--ui-select-accent`, `--ui-select-border`, `--ui-select-glow`), kept separate from gameplay legality and turn-state highlights in `styles/table.css`.
+- **Unified Brand Vector**: `BrandLogo.tsx` provides a single SVG card-and-diamond lockup (`BRAND_NAME = 'LIDURAK'`) reused across the header, hero mark, and `getBrandLogoMosaicDataUri(theme)` background watermark for Quick Pairing tiles.
 
-`App` coordinates two routing modes beneath `HeaderBar`:
+### 3-Column Desktop Shell & CSS Grid Felt Table (`GamePage`, `GameTable.tsx`)
+The game view enforces a non-overlapping CSS Grid / Flexbox layout (`min-width: 0; box-sizing: border-box;` without `position: absolute` or `position: fixed` seat placement):
+- **`[data-zone="sidebar-left"]`**: How to Play reference, scenario preset triggers (when applicable), and hotseat/POV player tabs.
+- **`[data-zone="table-arena"]`**: 3x3 CSS Grid felt surface:
+  - **Row 1**: Opponent seats (`data-seat="top-left"`, `data-seat="top-center"`, `data-seat="top-right"`), assigned clockwise from the viewer.
+  - **Row 2**: Active bout cards (`TablePair`), defender-anchored target outlines (`data-testid="target-outline-<id>"`), and the single-card reflection outline (`data-testid="redirect-outline"`).
+  - **Row 3**:
+    - Column 1 (`[data-zone="table-deck"]`): Talon deck and revealed trump card.
+    - Column 2 (`[data-zone="player-hand"]`): Active player's hand (or the `bottom-center` 4th bot seat in all-bot spectator matches).
+    - Column 3: `SortBar` and contextual `Pass` / `Surrender` action button.
+- **`[data-zone="sidebar-right"]`**: Digital turn clock (`00:XX`, `00:15` default) and match winner / Durak result display.
 
-- **History API (`/`, `/g/:gameId`):** Live multiplayer lobby (`LobbyPage`) and multiplayer table (`GamePage` with `mode="multiplayer"`).
-- **Hash Routes (`#/`, `#/g/:gameId?player=:seat`, `#/g/:gameId/replay`):** Local/bot hotseat gameplay and post-game replay inspection.
-
-### Lobby Modules (`pages/LobbyPage.tsx`, `components/lobby/`)
-
-- `LobbyPage` owns a single persistent `LobbySocket` connection to `/ws/lobby` and distributes live room updates to child tabs.
-- `CreateInviteTab` manages room creation (`Private invite link` vs `Public lobby pool`, 2–4 players, `allowRedirect`, and 15s/30s/60s turn clock).
-- `LobbyPoolTab` renders the live room list with seat counts, rule badges, one-click `Join`, and empty-state room creation/seeding triggers.
-
-### Socket & API Clients (`api/`)
-
-- `sessionClient.ts` wraps HTTP JSON calls via `apiRequest`.
-- `lobbyClient.ts` exposes typed REST helpers and `ReconnectingLobbySocket` for `/ws/lobby`.
-- `gameSocket.ts` implements `createGameSocket` (`ReconnectingGameSocket`) for `/ws/games/:gameId`, translating local `GameAction` objects via `toWsClientMessage`, sending periodic `ping` keepalives (`20s`), and reconnecting with capped exponential backoff (`500ms` to `5000ms`).
-
-### Zero-Overlap 3-Column Table Shell (`pages/GamePage.tsx`, `components/GameTable.tsx`)
-
-The game view uses CSS Grid and Flexbox without overlapping `position: absolute` or `position: fixed` placement for seats, hands, bouts, or sidebars:
-
-- **`[data-zone="sidebar-left"]`:** How to Play instructions, scenario preset triggers, and hotseat seat-switcher tabs.
-- **`[data-zone="table-arena"]`:** 3×3 CSS Grid felt table:
-  - **Row 1:** Opponent seats (`top-left`, `top-center`, `top-right`), mapped clockwise from the viewer.
-  - **Row 2:** Active bout pairs (`TablePair`), defender-anchored target outlines (`target-outline-<id>`), throw-in outline, and single-card reflection outline (`redirect-outline`).
-  - **Row 3:** Talon deck and trump card (`table-deck`), active player's hand (`player-hand`), and `SortBar` with contextual `Surrender` / `Pass` controls.
-- **`[data-zone="sidebar-right"]`:** Turn countdown clock (`00:XX`) and match winner / Durak summary.
-
-### Hand Layout, Drag-and-Drop & Performance (`components/GameTable.tsx`, `utils/handLayout.ts`)
-
-- Hand cards are rendered via memoized `HandCardSlot` components using GPU-composited `transform: translate3d(...)` positioning (`cardTranslate3d`) so pointer hover parting (`computePartedCardLayout`) and lift states (`ELIGIBLE_LIFT_PX`, `SELECTED_LIFT_PX`) update only affected card slots.
-- Supports both click/double-click play and drag-and-drop interactions onto attack targets, uncovered bout cards, throw-in slots, redirect outlines, and intra-hand reordering (`onReorderHand`).
-
-### Theming & Visual Tokens (`app.css`, `styles/table.css`, `state/settings.ts`)
-
-- `initSettings()` synchronizes theme selection (`dark`, `light`, or OS `prefers-color-scheme`), corner roundness, surface filters (`getTableFilterCss`), and highlight intensity (`--highlight-intensity`) onto `<html>`.
-- `app.css` separates Royal Blue/Cobalt UI selection tokens (`--ui-select-accent`, `--ui-select-border`, `--ui-select-glow`) for navigation, lobby controls, and sorting chrome from gameplay action families defined in `styles/table.css`.
+### Memoized Hand Layout & Interactions (`GameTable.tsx`, `handLayout.ts`)
+- `HandCardSlot` is wrapped in `preact/compat` `memo` and positioned exclusively via `transform: translate3d(...)` (`cardX`, `liftPx`, `deltaX`), reading live event handlers from a mutable `api` ref. Pointer sweeps across large hands only re-render slots whose local parting or lift transforms change.
+- Supports both click/double-click card play and drag-and-drop interactions (`onAttackDrop`, `onCoverDrop`, `onThrowInDrop`, `onRedirectDrop`, and in-hand card reordering via `onReorderHand`), disabled automatically when `isBot` / `isBotSeat` or `isReviewMode` is active.
