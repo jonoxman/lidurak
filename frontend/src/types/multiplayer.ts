@@ -70,6 +70,11 @@ export interface RoomConfigView {
   allowRedirect: boolean;
   turnTimeoutSeconds: number;
   isPublic: boolean;
+  /**
+   * T-96: the deck this table actually deals (`36` or `52`). Older payloads
+   * omit it and the player-count default applies (see `defaultDeckSize`).
+   */
+  deckSize?: DeckSize;
 }
 
 /**
@@ -364,7 +369,13 @@ export function roomStatusFromWire(value: unknown): RoomStatus | null {
 /** Validates and normalizes the room settings of a view. */
 export function parseRoomConfigView(value: unknown): RoomConfigView {
   if (value === undefined || value === null) {
-    return { playerCount: 2, allowRedirect: true, turnTimeoutSeconds: 15, isPublic: true };
+    return {
+      playerCount: 2,
+      allowRedirect: true,
+      turnTimeoutSeconds: 15,
+      isPublic: true,
+      deckSize: defaultDeckSize(2),
+    };
   }
   const raw = asObject(value, 'RoomConfigView');
   const playerCount = raw.playerCount;
@@ -376,6 +387,9 @@ export function parseRoomConfigView(value: unknown): RoomConfigView {
     allowRedirect: booleanOr(raw.allowRedirect, true),
     turnTimeoutSeconds: numberOr(raw.turnTimeoutSeconds, 15),
     isPublic: booleanOr(raw.isPublic, true),
+    // T-96: keep the server's deal size; an older payload falls back to the
+    // player-count default instead of being labelled `36-card` blindly.
+    deckSize: isDeckSize(raw.deckSize) ? raw.deckSize : defaultDeckSize(playerCount),
   };
 }
 
@@ -558,9 +572,13 @@ export function m1SeatId(seatIndex: number): string {
 /** The id a spectator's projection is viewed as (no hand, no legal moves). */
 export const SPECTATOR_SEAT_ID = 'spectator';
 
-/** 36-card for a two/three-player table, 52-card for four players. */
-export function deckLabel(playerCount: number): string {
-  return playerCount === 4 ? '52-card' : '36-card';
+/**
+ * Human deck label. The room's actual `deckSize` wins when reported; an older
+ * payload without it falls back to 36-card for two/three players and 52-card
+ * for four.
+ */
+export function deckLabel(playerCount: number, deckSize?: number): string {
+  return (deckSize ?? defaultDeckSize(playerCount)) === 52 ? '52-card' : '36-card';
 }
 
 /** Human label of a live socket status. */

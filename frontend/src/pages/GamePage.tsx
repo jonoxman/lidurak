@@ -2329,7 +2329,9 @@ export function MultiplayerGame({ gameId, onLeaveGame }: GamePageProps) {
                 <span class="live-room-badge" data-testid="waiting-seat-count">
                   {filledSeats}/{room.config.playerCount} players
                 </span>
-                <span class="live-room-badge">{deckLabel(room.config.playerCount)} deck</span>
+                <span class="live-room-badge">
+                  {deckLabel(room.config.playerCount, room.config.deckSize)} deck
+                </span>
                 <span class="live-room-badge">{room.config.turnTimeoutSeconds}s turn</span>
                 <span class="live-room-badge">
                   {room.config.allowRedirect ? 'Redirect on' : 'Redirect off'}
@@ -2816,7 +2818,7 @@ export function MultiplayerGame({ gameId, onLeaveGame }: GamePageProps) {
               ) : (
                 <li>Seat {(room.viewerSeat ?? 0) + 1}</li>
               )}
-              <li>{deckLabel(room.config.playerCount)} deck</li>
+              <li>{deckLabel(room.config.playerCount, room.config.deckSize)} deck</li>
               <li>{room.config.turnTimeoutSeconds}s turn clock</li>
               <li>{room.config.allowRedirect ? 'Redirect on' : 'Redirect off'}</li>
             </ul>

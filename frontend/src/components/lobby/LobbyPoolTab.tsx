@@ -1,6 +1,6 @@
 import { useState } from 'preact/hooks';
 import { joinRoom, seedLobbyPreset } from '../../api/lobbyClient';
-import type { LobbyRoomSummary } from '../../types/multiplayer';
+import { deckLabel, type LobbyRoomSummary } from '../../types/multiplayer';
 
 export interface LobbyPoolTabProps {
   /** Opens `/g/:gameId` after a successful join. */
@@ -101,7 +101,7 @@ export function LobbyPoolTab({
                   Redirect {room.allowRedirect ? 'ON' : 'OFF'}
                 </span>
                 <span class="pool-badge">
-                  {room.playerCount === 4 ? '52-card' : '36-card'} deck
+                  {deckLabel(room.playerCount, room.deckSize)} deck
                 </span>
                 <span class="pool-badge clock">{room.turnTimeoutSeconds}s</span>
               </span>
