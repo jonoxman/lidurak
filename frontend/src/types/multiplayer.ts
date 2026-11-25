@@ -173,8 +173,33 @@ export interface QuickPairRequest {
   allowRedirect?: boolean;
 }
 
-/** Response of `POST /api/quick-pair`. */
-export interface QuickPairResponse {
+/**
+ * Response of `POST /api/quick-pair` while the player waits in a queue bucket.
+ *
+ * No room exists yet: `queuedCount` of `requiredCount` players are waiting, so
+ * the lobby must keep showing the searching state instead of navigating.
+ */
+export interface QuickPairSearching {
+  status: 'searching';
+  playerCount: number;
+  turnTimeoutSeconds: number;
+  allowRedirect: boolean;
+  queuedCount: number;
+  requiredCount: number;
+}
+
+/** Response of `POST /api/quick-pair` once the player owns a real seat. */
+export interface QuickPairMatched {
+  status: 'matched';
+  gameId: string;
+  seatIndex: number;
+}
+
+/** Wire answer of `POST /api/quick-pair` (and `GET /api/quick-pair/status`). */
+export type QuickPairResponse = QuickPairSearching | QuickPairMatched;
+
+/** Response of `POST /api/qa/presets/quick-pair-opponent`. */
+export interface QuickPairOpponentPresetResponse {
   gameId: string;
   seatIndex: number;
 }
@@ -212,6 +237,7 @@ export type WsServerMessage =
   | { type: 'lobbySnapshot'; rooms: LobbyRoomSummary[] }
   | { type: 'lobbyUpdated'; rooms: LobbyRoomSummary[] }
   | { type: 'matchFound'; gameId: string }
+  | { type: 'quickPairMatched'; gameId: string; seatIndex: number }
   | { type: 'pong' };
 
 // --- Parsing helpers -------------------------------------------------------
@@ -414,6 +440,31 @@ export function parseLobbyRoomList(value: unknown): LobbyRoomSummary[] {
   return arrayOf(value, 'rooms').map(parseLobbyRoomSummary);
 }
 
+/** Validates the discriminated `POST /api/quick-pair` answer. */
+export function parseQuickPairResponse(value: unknown): QuickPairResponse {
+  const raw = asObject(value, 'QuickPairResponse');
+  const status = requireString(raw, 'status').trim().toLowerCase();
+  switch (status) {
+    case 'searching':
+      return {
+        status: 'searching',
+        playerCount: numberOr(raw.playerCount, 2),
+        turnTimeoutSeconds: numberOr(raw.turnTimeoutSeconds, 15),
+        allowRedirect: booleanOr(raw.allowRedirect, true),
+        queuedCount: numberOr(raw.queuedCount, 1),
+        requiredCount: numberOr(raw.requiredCount, 2),
+      };
+    case 'matched':
+      return {
+        status: 'matched',
+        gameId: requireString(raw, 'gameId'),
+        seatIndex: numberOr(raw.seatIndex, 0),
+      };
+    default:
+      return fail(`unknown quick-pair status: ${status}`);
+  }
+}
+
 /** Parses and discriminates one server WebSocket frame. */
 export function parseWsServerMessage(value: unknown): WsServerMessage {
   const raw = asObject(value, 'WsServerMessage');
@@ -433,6 +484,12 @@ export function parseWsServerMessage(value: unknown): WsServerMessage {
       return { type: 'lobbyUpdated', rooms: parseLobbyRoomList(raw.rooms) };
     case 'matchfound':
       return { type: 'matchFound', gameId: requireString(raw, 'gameId') };
+    case 'quickpairmatched':
+      return {
+        type: 'quickPairMatched',
+        gameId: requireString(raw, 'gameId'),
+        seatIndex: numberOr(raw.seatIndex, 0),
+      };
     case 'pong':
       return { type: 'pong' };
     default:

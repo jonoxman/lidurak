@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import {
   checkServerHealth,
   createGame,
@@ -6,7 +6,13 @@ import {
   QA_SCENARIOS,
   type CreatedGame,
 } from '../api/client';
-import { fetchLobbyRooms } from '../api/lobbyClient';
+import {
+  cancelQuickPair,
+  connectLobbySocket,
+  fetchLobbyRooms,
+  joinQuickPair,
+  type LobbySocket,
+} from '../api/lobbyClient';
 import { getOrCreateSession, updateGuestName } from '../api/sessionClient';
 import { CreateInviteTab } from '../components/lobby/CreateInviteTab';
 import { LobbyPoolTab } from '../components/lobby/LobbyPoolTab';
@@ -14,7 +20,13 @@ import { QaLobbyPresets } from '../components/lobby/QaLobbyPresets';
 import { QuickPairingTab } from '../components/lobby/QuickPairingTab';
 import { navigateToGame } from '../router/useRoute';
 import type { PlayerType } from '../types';
-import type { GuestSession, LobbyRoomSummary, SocketStatus } from '../types/multiplayer';
+import type {
+  GuestSession,
+  LobbyRoomSummary,
+  QuickPairRequest,
+  QuickPairSearching,
+  SocketStatus,
+} from '../types/multiplayer';
 import '../styles/table.css';
 import '../styles/lobby.css';
 
@@ -64,9 +76,12 @@ function isServerWarmupFailure(reason: unknown): boolean {
 
 /**
  * Opens a live M2 room at `/g/:gameId` through the History-API router, so the
- * URL matches the backend's `inviteUrl` and survives a direct reload.
+ * URL matches the backend's `inviteUrl` and survives a direct reload. A repeat
+ * call for the room already on screen never pushes a duplicate entry.
  */
 function openGame(gameId: string): void {
+  const target = `/g/${encodeURIComponent(gameId)}`;
+  if (typeof window !== 'undefined' && window.location.pathname === target) return;
   navigateToGame(gameId);
 }
 
@@ -91,6 +106,15 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
   const [rooms, setRooms] = useState<LobbyRoomSummary[]>([]);
   const [poolStatus, setPoolStatus] = useState<SocketStatus | 'idle'>('idle');
   const [notice, setNotice] = useState<string | null>(null);
+
+  // --- Quick Pairing queue (owned here so it survives tab switches) --------
+  const [searching, setSearching] = useState<QuickPairSearching | null>(null);
+  const [quickPairPending, setQuickPairPending] = useState(false);
+  const [quickPairError, setQuickPairError] = useState<string | null>(null);
+  // Bumped by Cancel, a re-tile click or a match, so stale responses are inert.
+  const quickPairAttempt = useRef(0);
+  const quickPairPendingRef = useRef(false);
+  const searchingRef = useRef<QuickPairSearching | null>(null);
 
   // Probe `GET /api/health` until the backend answers, then unlock the page so
   // a click can never land on a proxy 500 while the server is still booting.
@@ -150,6 +174,116 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
     };
   }, []);
 
+  // One `/ws/lobby` subscription for the whole lobby page: a waiting quick-pair
+  // player receives `quickPairMatched` immediately, and the Lobby Pool stays
+  // live no matter which tab is on screen.
+  useEffect(() => {
+    let cancelled = false;
+    let socket: LobbySocket | null = null;
+
+    const clearSearching = () => {
+      quickPairAttempt.current += 1;
+      quickPairPendingRef.current = false;
+      searchingRef.current = null;
+      setSearching(null);
+      setQuickPairPending(false);
+    };
+
+    const navigateMatched = (gameId: string) => {
+      // A Cancel (or an earlier navigation) already resolved this attempt.
+      if (cancelled || searchingRef.current === null) return;
+      clearSearching();
+      if (typeof window === 'undefined' || window.location.pathname === '/') {
+        openGame(gameId);
+      }
+    };
+
+    try {
+      socket = connectLobbySocket({
+        onSnapshot: (next) => {
+          if (!cancelled) setRooms(next);
+        },
+        onUpdated: (next) => {
+          if (!cancelled) setRooms(next);
+        },
+        onQuickPairMatched: (gameId) => navigateMatched(gameId),
+        // Legacy `matchFound` frame; the deferred queue uses `quickPairMatched`.
+        onMatchFound: (gameId) => navigateMatched(gameId),
+        onStatusChange: (status) => {
+          if (!cancelled) setPoolStatus(status);
+        },
+      });
+    } catch {
+      // A browser without a WebSocket still gets the REST hydration.
+    }
+
+    return () => {
+      cancelled = true;
+      // Leaving the page invalidates any in-flight pairing response.
+      quickPairAttempt.current += 1;
+      socket?.close();
+    };
+  }, []);
+
+  const beginQuickPair = async (preset: QuickPairRequest) => {
+    if (quickPairPendingRef.current) return;
+    const attemptId = ++quickPairAttempt.current;
+    quickPairPendingRef.current = true;
+    setQuickPairPending(true);
+    setQuickPairError(null);
+
+    try {
+      // Clicking another tile while queued leaves the previous bucket first.
+      if (searchingRef.current !== null) {
+        searchingRef.current = null;
+        setSearching(null);
+        try {
+          await cancelQuickPair();
+        } catch {
+          // The previous bucket may already be gone.
+        }
+        if (quickPairAttempt.current !== attemptId) return;
+      }
+
+      const result = await joinQuickPair(preset);
+      if (quickPairAttempt.current !== attemptId) {
+        // Cancelled while in flight: drop the queue entry that just landed.
+        if (result.status === 'searching') void cancelQuickPair().catch(() => {});
+        return;
+      }
+
+      if (result.status === 'matched') {
+        searchingRef.current = null;
+        setSearching(null);
+        openGame(result.gameId);
+      } else {
+        searchingRef.current = result;
+        setSearching(result);
+      }
+    } catch (reason) {
+      if (quickPairAttempt.current === attemptId) {
+        setQuickPairError(reason instanceof Error ? reason.message : String(reason));
+      }
+    } finally {
+      if (quickPairAttempt.current === attemptId) {
+        quickPairPendingRef.current = false;
+        setQuickPairPending(false);
+      }
+    }
+  };
+
+  const cancelSearch = () => {
+    quickPairAttempt.current += 1;
+    quickPairPendingRef.current = false;
+    searchingRef.current = null;
+    setSearching(null);
+    setQuickPairPending(false);
+    setQuickPairError(null);
+    void cancelQuickPair().catch(() => {
+      // A failed cancel only means the queue entry was already gone.
+    });
+  };
+
   const saveGuestName = (event: Event) => {
     event.preventDefault();
     const nextName = nameDraft.trim();
@@ -173,7 +307,8 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
 
   const selectTab = (next: LobbyTabId) => {
     setTab(next);
-    // The pool socket starts on first open and then keeps the tab live.
+    // The pool panel mounts on first open; its rooms stay live through the
+    // page-level socket even while another tab is visible.
     if (next === 'pool') setPoolOpened(true);
   };
 
@@ -276,14 +411,21 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
               </p>
             ) : null}
 
-            {tab === 'quick' ? <QuickPairingTab onMatched={openGame} /> : null}
+            {tab === 'quick' ? (
+              <QuickPairingTab
+                searching={searching}
+                pending={quickPairPending}
+                error={quickPairError}
+                onSearch={(preset) => void beginQuickPair(preset)}
+                onCancel={cancelSearch}
+              />
+            ) : null}
             {tab === 'invite' ? <CreateInviteTab onCreated={openGame} /> : null}
             {poolOpened ? (
               <div class="m2-tab-panel" hidden={tab !== 'pool'}>
                 <LobbyPoolTab
-                  initialRooms={rooms}
+                  rooms={rooms}
                   onRoomsChange={setRooms}
-                  onStatusChange={setPoolStatus}
                   onJoin={openGame}
                   onCreateRoom={() => setTab('invite')}
                 />

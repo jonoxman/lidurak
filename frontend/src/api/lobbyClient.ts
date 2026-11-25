@@ -1,6 +1,7 @@
 import {
   parseLobbyRoomList,
   parsePlayerGameView,
+  parseQuickPairResponse,
   parseWsServerMessage,
   type ActiveMatchPresetResponse,
   type CreateRoomRequest,
@@ -9,6 +10,7 @@ import {
   type LobbyRoomSummary,
   type PlayerCount,
   type PlayerGameView,
+  type QuickPairOpponentPresetResponse,
   type QuickPairRequest,
   type QuickPairResponse,
   type SeedLobbyPresetResponse,
@@ -83,13 +85,13 @@ export async function leaveRoom(gameId: string): Promise<void> {
   await apiRequest(`/api/games/${encodeURIComponent(gameId)}/leave`, { method: 'POST' });
 }
 
-/** Joins the Quick Pairing pool, matching an existing room when possible. */
+/**
+ * Joins the Quick Pairing queue. The server answers either `searching` (no room
+ * exists yet, keep the searching status) or `matched` (the player owns a seat).
+ */
 export async function joinQuickPair(req: QuickPairRequest): Promise<QuickPairResponse> {
   const body = await apiRequest('/api/quick-pair', { method: 'POST', body: req });
-  return {
-    gameId: readGameId(body, 'QuickPairResponse'),
-    seatIndex: readSeat(body),
-  };
+  return parseQuickPairResponse(body);
 }
 
 /** Leaves the Quick Pairing pool. */
@@ -119,6 +121,30 @@ export async function createActiveMatchPreset(
   return { gameId: readGameId(body, 'ActiveMatchPresetResponse'), seatIndex: readSeat(body) };
 }
 
+/**
+ * Fills the caller's own quick-pair bucket with synthetic opponents, then lets
+ * the real per-player `quickPairMatched` frame navigate the reviewer.
+ */
+export async function triggerQaQuickPairOpponent(): Promise<QuickPairOpponentPresetResponse> {
+  const body = await apiRequest('/api/qa/presets/quick-pair-opponent', { method: 'POST' });
+  return {
+    gameId: readGameId(body, 'QuickPairOpponentPresetResponse'),
+    seatIndex: readSeat(body),
+  };
+}
+
+/**
+ * Starts a real 2P active match dealt with four-card hands, so the constant
+ * width small-hand hover animation can be checked in one click.
+ */
+export async function launchQaSmallHandMatch(): Promise<ActiveMatchPresetResponse> {
+  const body = await apiRequest('/api/qa/presets/active-match', {
+    method: 'POST',
+    body: { playerCount: 2, handSize: 4 },
+  });
+  return { gameId: readGameId(body, 'ActiveMatchPresetResponse'), seatIndex: readSeat(body) };
+}
+
 /** Starts a full match the caller only watches (`viewerSeat: null`, `hand: []`). */
 export async function createSpectatorMatchPreset(): Promise<SpectatorMatchPresetResponse> {
   const body = await apiRequest('/api/qa/presets/spectator-match', { method: 'POST' });
@@ -132,8 +158,10 @@ export interface LobbySocketHandlers {
   onSnapshot?: (rooms: LobbyRoomSummary[]) => void;
   /** Every subsequent lobby change. */
   onUpdated?: (rooms: LobbyRoomSummary[]) => void;
-  /** Quick Pairing assigned this player to a room. */
+  /** Quick Pairing assigned this player to a room (legacy frame). */
   onMatchFound?: (gameId: string) => void;
+  /** The deferred quick-pair queue seated this player (`quickPairMatched`). */
+  onQuickPairMatched?: (gameId: string, seatIndex: number) => void;
   onActionRejected?: (code: string, message: string) => void;
   onStatusChange?: (status: SocketStatus) => void;
   onError?: (event: unknown) => void;
@@ -237,6 +265,9 @@ class ReconnectingLobbySocket implements LobbySocket {
         break;
       case 'matchFound':
         this.handlers.onMatchFound?.(message.gameId);
+        break;
+      case 'quickPairMatched':
+        this.handlers.onQuickPairMatched?.(message.gameId, message.seatIndex);
         break;
       case 'actionRejected':
         this.handlers.onActionRejected?.(message.code, message.message);
