@@ -342,10 +342,15 @@ html[data-theme='light'] .m2-lobby {
 
 /* --- Quick Pairing ------------------------------------------------------ */
 
+/* ITEM-8b: the 12 tiles form a 3 x 4 grid; these custom properties drive the
+   mosaic fallback maths (logo sized to the grid *including* the gaps). */
 .quick-pair-grid {
+  --mosaic-cols: 3;
+  --mosaic-rows: 4;
+  --quick-grid-gap: 0.65rem;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.65rem;
+  gap: var(--quick-grid-gap);
   min-width: 0;
 }
 
@@ -361,18 +366,21 @@ html[data-theme='light'] .m2-lobby {
   padding: 1rem 0.9rem;
   border: 1px solid var(--m2-border);
   border-radius: var(--app-roundness, 8px);
-  background: var(--m2-surface-raised);
+  /* ITEM-8b: each tile paints only its slice of the shared logo; the rounded
+     border clips that slice, so nothing bleeds into the grid gaps. */
+  background-color: var(--m2-surface-raised);
+  background-repeat: no-repeat;
   color: var(--m2-text);
   font: inherit;
   text-align: left;
   cursor: pointer;
-  transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+  transition: border-color 120ms ease, background-color 120ms ease, transform 120ms ease;
 }
 
 .quick-pair-tile:hover:not(:disabled),
 .quick-pair-tile:focus-visible:not(:disabled) {
   border-color: var(--ui-select-accent);
-  background: var(--ui-select-bg);
+  background-color: var(--ui-select-bg);
   box-shadow: 0 0 10px 2px var(--ui-select-glow);
   transform: translateY(-2px);
   outline: none;
@@ -538,10 +546,27 @@ html[data-theme='light'] .m2-lobby {
 
 /* --- Create a Game ------------------------------------------------------ */
 
+/* ITEM-7d: settings live in the left column and the visual seat map fills the
+   previously unused right half, so bot seats never grow the panel's height. */
 .create-invite-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
+  align-items: start;
   gap: 0.8rem;
+  min-width: 0;
+}
+
+.create-invite-settings {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.8rem;
+  min-width: 0;
+}
+
+.create-invite-seats {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.5rem;
   min-width: 0;
 }
 
@@ -597,12 +622,6 @@ html[data-theme='light'] .m2-lobby {
   outline: none;
 }
 
-.create-invite-note {
-  margin: 0;
-  color: var(--m2-muted);
-  font-size: 0.78rem;
-}
-
 .create-invite-toggle {
   display: flex;
   align-items: center;
@@ -615,8 +634,127 @@ html[data-theme='light'] .m2-lobby {
   accent-color: var(--ui-select-accent);
 }
 
-.create-invite-form > .m2-button {
+.create-invite-settings > .m2-button {
   justify-self: start;
+}
+
+/* --- Create a Game: visual seat map ------------------------------------- */
+
+.create-seat-map {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: auto auto;
+  align-content: center;
+  gap: 0.5rem;
+  min-width: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--m2-border);
+  border-radius: var(--app-roundness, 10px);
+  background: #1e2923;
+}
+
+/* Seat 0 is the creator's bottom seat; the others ring the felt centre. */
+.create-seat-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.35rem;
+  min-width: 0;
+  padding: 0.45rem;
+  border: 1px solid var(--m2-border);
+  border-radius: calc(var(--app-roundness, 8px) * 0.8);
+  background: var(--m2-surface-raised);
+  color: var(--m2-text);
+}
+
+.create-seat-card[data-seat-index='0'] {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.create-seat-map[data-player-count='2'] .create-seat-card[data-seat-index='1'] {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.create-seat-map[data-player-count='3'] .create-seat-card[data-seat-index='1'],
+.create-seat-map[data-player-count='4'] .create-seat-card[data-seat-index='1'] {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.create-seat-map[data-player-count='3'] .create-seat-card[data-seat-index='2'] {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.create-seat-map[data-player-count='4'] .create-seat-card[data-seat-index='2'] {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.create-seat-map[data-player-count='4'] .create-seat-card[data-seat-index='3'] {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.create-seat-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.create-seat-icon {
+  flex: none;
+  width: 1.15rem;
+  height: 1.15rem;
+  color: var(--ui-select-accent);
+}
+
+.create-seat-name {
+  min-width: 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.create-seat-options {
+  display: flex;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.create-seat-option {
+  display: inline-flex;
+  flex: 1 1 0;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  padding: 0.25rem;
+  border: 1px solid var(--m2-border);
+  border-radius: calc(var(--app-roundness, 8px) * 0.6);
+  background: transparent;
+  color: var(--m2-muted);
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.create-seat-option[aria-pressed='true'] {
+  border-color: var(--ui-select-accent);
+  background: var(--ui-select-bg);
+  color: var(--ui-select-text);
+}
+
+.create-seat-option:hover:not(:disabled),
+.create-seat-option:focus-visible:not(:disabled) {
+  border-color: var(--ui-select-accent);
+  box-shadow: 0 0 8px 1px var(--ui-select-glow);
+  outline: none;
+}
+
+.create-seat-option:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 /* --- QA presets --------------------------------------------------------- */
@@ -633,6 +771,12 @@ html[data-theme='light'] .m2-lobby {
 }
 
 /* --- Responsive 360px → 1920px ----------------------------------------- */
+
+@media (min-width: 900px) {
+  .create-invite-form {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
 
 @media (max-width: 900px) {
   .lobby-pool-row {
@@ -651,6 +795,8 @@ html[data-theme='light'] .m2-lobby {
   }
 
   .quick-pair-grid {
+    --mosaic-cols: 2;
+    --mosaic-rows: 6;
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 

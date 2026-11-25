@@ -7,6 +7,7 @@ import {
   type ActiveMatchPresetResponse,
   type CreateRoomRequest,
   type CreateRoomResponse,
+  type DeckSize,
   type JoinRoomResponse,
   type LobbyRoomSummary,
   type PlayerCount,
@@ -141,9 +142,18 @@ export async function createActiveMatchPreset(
 /**
  * Fills the caller's own quick-pair bucket with synthetic opponents, then lets
  * the real per-player `quickPairMatched` frame navigate the reviewer.
+ *
+ * `bucket` seeds the default bucket for a reviewer who is not queued yet, e.g.
+ * `{ deckSize: 52 }` to verify the 52-card Quick Pairing tiles in one click.
  */
-export async function triggerQaQuickPairOpponent(): Promise<QuickPairOpponentPresetResponse> {
-  const body = await apiRequest('/api/qa/presets/quick-pair-opponent', { method: 'POST' });
+export async function triggerQaQuickPairOpponent(bucket: {
+  playerCount?: PlayerCount;
+  deckSize?: DeckSize;
+} = {}): Promise<QuickPairOpponentPresetResponse> {
+  const body = await apiRequest('/api/qa/presets/quick-pair-opponent', {
+    method: 'POST',
+    body: bucket,
+  });
   return {
     gameId: readGameId(body, 'QuickPairOpponentPresetResponse'),
     seatIndex: readSeat(body),
