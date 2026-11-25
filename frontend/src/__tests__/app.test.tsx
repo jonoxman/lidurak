@@ -478,3 +478,53 @@ describe('T-90-feedback-4 light page and header gradient', () => {
     ).toContain('background: transparent');
   });
 });
+
+/** T-96 visual QA: PLAYERS name clipping and Light-theme neutral buttons. */
+describe('T-96 visual QA: name wrapping and neutral action buttons', () => {
+  it('wraps the PLAYERS name inside its track instead of ellipsising it', () => {
+    const name = cssRule(appCss, '.status-name');
+    expect(name).toContain('min-width: 0');
+    expect(name).toContain('flex: 1 1 auto');
+    expect(name).toContain('white-space: normal');
+    expect(name).toContain('overflow-wrap: anywhere');
+    expect(name).toContain('overflow: visible');
+    expect(name).toContain('text-overflow: clip');
+    // The equal side tracks (ITEM-ADD-8a) and the centred count survive.
+    expect(cssRule(appCss, '.status-badge {')).toContain(
+      'grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr)',
+    );
+    expect(cssRule(appCss, '.status-cards {')).toContain('justify-self: center');
+  });
+
+  it('gives neutral .action-button controls dark-on-light Light-theme contrast', () => {
+    const neutralSelector =
+      "html[data-theme='light'] .game-page .action-button:where(:not(.green, .red, .amber, .action-icon-btn))";
+    const neutral = cssRule(appCss, "html[data-theme='light'] .game-page .action-button");
+    expect(neutral).toContain('background: #e2e8f0');
+    expect(neutral).toContain('border: 1px solid #64748b');
+    expect(neutral).toContain('color: #0f172a');
+    expect(neutral).toContain('font-weight: 600');
+    expect(cssRule(appCss, `${neutralSelector}:hover`)).toContain('background: #cbd5e1');
+
+    // Same treatment before JavaScript applies data-theme on a light OS.
+    expect(appCss).toContain(
+      'html:not([data-theme]) .game-page .action-button:where(:not(.green, .red, .amber, .action-icon-btn))',
+    );
+    // Role families and the icon action bar stay untouched.
+    expect(cssRule(tableCss, '.action-button.green')).toContain('var(--role-attacker-accent)');
+    expect(cssRule(tableCss, '.action-button.red')).toContain('var(--role-defender-accent)');
+    expect(cssRule(tableCss, '.action-button.amber')).toContain('var(--durak-amber)');
+  });
+
+  it('keeps the WaitingForPlayers Copy link button a neutral action button', async () => {
+    window.history.replaceState({}, '', '/g/room-42');
+    fetchGameView.mockResolvedValue(WAITING_VIEW);
+    checkServerHealth.mockResolvedValue(true);
+
+    render(<App />);
+
+    const copy = await screen.findByTestId('copy-invite');
+    expect(copy.className).toBe('action-button');
+    expect(copy.className).not.toMatch(/\b(green|red|amber|action-icon-btn)\b/);
+  });
+});

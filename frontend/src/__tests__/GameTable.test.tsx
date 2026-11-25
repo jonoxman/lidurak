@@ -6690,3 +6690,41 @@ describe('T-90-feedback-20261123_020207-4: drag reorder slot and consecutive thr
     view.unmount();
   });
 });
+
+/** T-96 visual QA: seat columns, opponent names and the deck badge. */
+describe('T-96 visual QA: seat columns, opponent names and deck badge clearance', () => {
+  it('keeps the desktop outer seat columns at the uniform 240px seat width', () => {
+    const arena = cssRule(tableCss, "[data-zone='table-arena']");
+    expect(arena).toContain(
+      'grid-template-columns: minmax(240px, 1fr) minmax(0, 2fr) minmax(240px, 1fr)',
+    );
+    expect(cssRule(tableCss, '.seat')).toContain('max-width: var(--seat-width, 240px)');
+    // The single-column mobile arena still overrides the desktop tracks.
+    expect(tableCss).toMatch(
+      /@media \(max-width: 899px\)\s*{[^@]*?grid-template-columns:\s*minmax\(0, 1fr\)/,
+    );
+  });
+
+  it('wraps opponent names instead of clipping them horizontally', () => {
+    const name = cssRule(tableCss, '.opponent-name');
+    expect(name).toContain('min-width: 0');
+    expect(name).toContain('white-space: normal');
+    expect(name).toContain('overflow-wrap: anywhere');
+    expect(name).toContain('overflow: visible');
+    expect(name).toContain('text-overflow: clip');
+  });
+
+  it('clears the talon count badge below the DECK heading', () => {
+    const badge = cssRule(tableCss, '.talon-count {');
+    const badgeLiftPx = Number(/translate\(\s*-?[\d.]+px\s*,\s*-(\d+)px\s*\)/.exec(badge)?.[1] ?? 0);
+    const assembly = cssRule(tableCss, '.deck-assembly');
+    const deck = cssRule(tableCss, "[data-zone='table-deck']");
+    const assemblyPaddingTopPx = Number(/padding-top:\s*(\d+)px/.exec(assembly)?.[1] ?? 0);
+    const deckGapPx = Number(/gap:\s*(\d+)px/.exec(deck)?.[1] ?? 0);
+
+    expect(badgeLiftPx).toBeGreaterThan(0);
+    expect(assemblyPaddingTopPx).toBeGreaterThanOrEqual(16);
+    // The badge's upward lift never eats the title gap or the assembly padding.
+    expect(deckGapPx + assemblyPaddingTopPx).toBeGreaterThan(badgeLiftPx);
+  });
+});

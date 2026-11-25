@@ -113,7 +113,12 @@
 
 [data-zone='table-arena'] {
   display: grid;
-  grid-template-columns: 1fr 2fr 1fr;
+  /* T-96 visual QA: the outer seat tracks may never collapse below the 240px
+     seat width (`--seat-width`), otherwise the 3- and 4-player layouts shrank
+     `top-left` / `top-right` to 193px and clipped `QA Spectator One` / `Two`
+     into the same text. Only the centre bout track is free to compress, so
+     every opponent box stays uniform (Item 15). */
+  grid-template-columns: minmax(240px, 1fr) minmax(0, 2fr) minmax(240px, 1fr);
   /* T-90-3 ITEM-ADD-6: every row is a fixed or viewport-clamped track. A seat
      that runs out of cards or a hand that empties never resizes the table. */
   /* T-96: every vertical track is viewport-clamped so a 1280x800 desktop can
@@ -318,11 +323,17 @@
 }
 
 .opponent-name {
+  flex: 1 1 auto;
+  min-width: 0;
   font-weight: 600;
   color: #f5f1e6;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* T-96 visual QA: wrap long names across lines instead of ellipsising them
+     to an indistinguishable `QA Spectator...`. Wrapping keeps
+     scrollWidth == clientWidth inside the fixed 240px seat. */
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
 }
 
 /* Feedback #12: the opponent hand is centred in its box and carries its card
@@ -769,6 +780,10 @@
   flex-direction: column;
   align-items: flex-start;
   gap: 16px;
+  /* T-96 visual QA: `.talon-count` lifts itself by translate(0, -14px), which
+     used to reach 4px past the box's 10px gap and cover the bottom of `DECK`.
+     16px of top clearance keeps the badge fully below `h2.deck-title`. */
+  padding-top: 16px;
   min-width: 0;
 }
 
