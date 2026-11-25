@@ -2947,6 +2947,7 @@ export function GameTable({
     <div
       class={`table-arena${dragState ? ' dragging' : ''}`}
       data-zone="table-arena"
+      data-opponent-count={opponents.length}
       data-my-id={myId}
       data-chaos={chaosMode ? 'true' : 'false'}
       data-review-mode={isReviewMode ? 'true' : 'false'}

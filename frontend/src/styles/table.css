@@ -164,6 +164,31 @@
   overflow: visible;
 }
 
+/* T-96 visual QA: the base tracks above reserve 240px for BOTH outer columns,
+   which is right for the 2-opponent layout (top-left + top-right seats) but
+   crushes the lone centre seat of a 2-player game: 480px of empty outer tracks
+   left it ~132px wide inside a 240px seat width. When only one opponent is
+   seated, the empty outer tracks are free to shrink to nothing and the centre
+   track keeps the full 240px seat width. Scoped to desktop so it can never
+   out-specify the single-column mobile arena. */
+@media (min-width: 900px) {
+  [data-zone='table-arena'][data-opponent-count='1'] {
+    grid-template-columns: minmax(0, 1fr) minmax(240px, 2fr) minmax(0, 1fr);
+  }
+}
+
+/* T-96 visual QA: with all three top seats rendered the arena's content width
+   (~612px inside the 1280x800 shell) cannot hold 240 + 240 + 240 + gaps, so the
+   outer tracks used to keep their 240px while the centre seat was squeezed to
+   ~132px. On desktop viewports that narrow, every top seat shares an equal
+   track instead — all three boxes stay the same size. Wider desktops keep the
+   base rule (outer 240px seats, a roomy centre bout column). */
+@media (min-width: 900px) and (max-width: 1420px) {
+  [data-zone='table-arena'][data-opponent-count='3'] {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 [data-zone='table-arena'] *,
 [data-zone='table-arena'] *::before,
 [data-zone='table-arena'] *::after {
@@ -200,7 +225,8 @@
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 4px;
+  /* T-96 visual QA: a 2px gap leaves the box 2px more of the 116px seat track. */
+  gap: 2px;
   min-width: 0;
   width: 100%;
   max-width: var(--seat-width, 240px);
@@ -214,12 +240,14 @@
 .seat-box {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  /* T-96 visual QA: compact padding/gap so a 2-line opponent name plus the
+     mini-card hand fits inside the ~91px box with no top/bottom clipping. */
+  gap: 4px;
   justify-content: center;
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
-  padding: 8px 10px;
+  padding: 4px 10px;
   background: var(--durak-panel);
   border: 2px solid transparent;
   /* ITEM-NEW-1a: the opponent seat boxes follow the roundness slider too. */
@@ -329,11 +357,16 @@
   color: #f5f1e6;
   /* T-96 visual QA: wrap long names across lines instead of ellipsising them
      to an indistinguishable `QA Spectator...`. Wrapping keeps
-     scrollWidth == clientWidth inside the fixed 240px seat. */
+     scrollWidth == clientWidth inside the fixed 240px seat. `break-word` (not
+     `anywhere`) breaks only between words, so `Opponent` is never split into
+     `Oppone` / `nt`. */
   overflow: visible;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   text-overflow: clip;
   white-space: normal;
+  /* T-96 visual QA: a compact 13px/1.2 name keeps two lines inside the box. */
+  font-size: 13px;
+  line-height: 1.2;
 }
 
 /* Feedback #12: the opponent hand is centred in its box and carries its card
@@ -346,8 +379,10 @@
   align-items: center;
   gap: 0;
   min-width: 0;
-  /* ITEM-ADD-6: an empty hand keeps the exact height a full hand has. */
-  min-height: 44px;
+  /* ITEM-ADD-6: an empty hand keeps the exact height a full hand has.
+     T-96 visual QA: the mini-cards are 32px tall, so a 36px reserve is enough
+     and leaves room for the name above inside the short seat track. */
+  min-height: 36px;
 }
 
 /* Feedback #9: a fixed-size opponent row whose cards overlap more as the hand

@@ -2491,7 +2491,7 @@ describe('T-90-3: outline lift, discard stack, chaos targets, deflect arrow and 
     const arenaRule = cssRule("[data-zone='table-arena']");
     expect(arenaRule).toContain('grid-template-rows: var(--seat-row-height)');
     expect(arenaRule).toContain('--hand-row-height');
-    expect(cssRule('.opponent-hand')).toContain('min-height: 44px');
+    expect(cssRule('.opponent-hand')).toContain('min-height: 36px');
     expect(cssRule("[data-zone='player-hand']")).toContain('min-height: var(--hand-row-height');
 
     const empty = render(
@@ -6705,13 +6705,104 @@ describe('T-96 visual QA: seat columns, opponent names and deck badge clearance'
     );
   });
 
+  it('gives a lone 2P opponent the full 240px centre seat track', () => {
+    // The 2-opponent layout (top-left + top-right) keeps the base tracks.
+    const solo = cssRule(tableCss, "[data-zone='table-arena'][data-opponent-count='1']");
+    expect(solo).toContain(
+      'grid-template-columns: minmax(0, 1fr) minmax(240px, 2fr) minmax(0, 1fr)',
+    );
+    // It is desktop-only, so it can never out-specify the mobile single column.
+    const desktopStart = tableCss.indexOf('@media (min-width: 900px) {');
+    expect(desktopStart).toBeGreaterThan(-1);
+    expect(tableCss.slice(desktopStart, desktopStart + 300)).toContain(
+      "[data-zone='table-arena'][data-opponent-count='1']",
+    );
+
+    const { container } = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={[player('p1', 'QA Opponent 1')]}
+        tablePairs={[]}
+        trumpSuit="diamonds"
+      />,
+    );
+    const arena = container.querySelector('[data-zone="table-arena"]') as HTMLElement;
+    // The CSS layout switch is driven by the rendered opponent count.
+    expect(arena.getAttribute('data-opponent-count')).toBe('1');
+    // Only the centre seat exists, so no empty outer track is reserved for it.
+    expect(arena.querySelectorAll('.seat-top-left, .seat-top-right')).toHaveLength(0);
+    expect(arena.querySelector('.seat-top-center')).not.toBeNull();
+
+    const three = render(
+      <GameTable
+        myId="p0"
+        myHand={hand}
+        opponents={[player('p1', 'A'), player('p2', 'B'), player('p3', 'C')]}
+        tablePairs={[]}
+        trumpSuit="diamonds"
+      />,
+    );
+    expect(
+      (three.container.querySelector('[data-zone="table-arena"]') as HTMLElement).getAttribute(
+        'data-opponent-count',
+      ),
+    ).toBe('3');
+    three.unmount();
+  });
+
+  it('shares the top row equally when three seats must fit a narrow desktop', () => {
+    const start = tableCss.indexOf('@media (min-width: 900px) and (max-width: 1420px)');
+    expect(start).toBeGreaterThan(-1);
+    const block = tableCss.slice(start, start + 400);
+    expect(block).toContain("[data-zone='table-arena'][data-opponent-count='3']");
+    expect(block).toContain('grid-template-columns: repeat(3, minmax(0, 1fr))');
+  });
+
   it('wraps opponent names instead of clipping them horizontally', () => {
     const name = cssRule(tableCss, '.opponent-name');
     expect(name).toContain('min-width: 0');
     expect(name).toContain('white-space: normal');
-    expect(name).toContain('overflow-wrap: anywhere');
+    // Word boundaries only: `Opponent` is never split mid-word.
+    expect(name).toContain('overflow-wrap: break-word');
+    expect(name).not.toContain('overflow-wrap: anywhere');
     expect(name).toContain('overflow: visible');
     expect(name).toContain('text-overflow: clip');
+  });
+
+  it('fits a two-line opponent name and the mini-cards in the 116px seat track', () => {
+    const seat = cssRule(tableCss, '.seat');
+    const box = cssRule(tableCss, '.seat-box');
+    const name = cssRule(tableCss, '.opponent-name');
+    const opponentHand = cssRule(tableCss, '.opponent-hand');
+
+    expect(name).toContain('font-size: 13px');
+    expect(name).toContain('line-height: 1.2');
+
+    const seatRow = 116; // `--seat-row-height` at the 1280x800 minimum.
+    const seatGap = Number(/gap:\s*(\d+)px/.exec(seat)?.[1]);
+    const boxPadding = Number(/padding:\s*(\d+)px/.exec(box)?.[1]);
+    const boxGap = Number(/gap:\s*(\d+)px/.exec(box)?.[1]);
+    const handMinHeight = Number(/min-height:\s*(\d+)px/.exec(opponentHand)?.[1]);
+    const nameFontSize = Number(/font-size:\s*(\d+)px/.exec(name)?.[1]);
+    const nameLineHeight = Number(/line-height:\s*([\d.]+)/.exec(name)?.[1]);
+
+    expect({ seatGap, boxPadding, boxGap, handMinHeight }).toEqual({
+      seatGap: 2,
+      boxPadding: 4,
+      boxGap: 4,
+      handMinHeight: 36,
+    });
+
+    // A `.seat-clock` line is 12px * 1.4 plus its 1px padding/border = ~21px.
+    const seatBoxHeight = seatRow - seatGap - 21;
+    // Two 2px borders and the vertical padding are inside the fixed box.
+    const boxContent = seatBoxHeight - 2 * boxPadding - 4;
+    const twoLineName = 2 * nameFontSize * nameLineHeight;
+    const headHeight = Math.max(24, twoLineName); // 24px avatar vs the name.
+    const needed = headHeight + boxGap + handMinHeight;
+
+    expect(needed).toBeLessThanOrEqual(boxContent);
   });
 
   it('clears the talon count badge below the DECK heading', () => {
