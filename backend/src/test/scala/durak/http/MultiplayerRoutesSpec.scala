@@ -32,10 +32,16 @@ class MultiplayerRoutesSpec extends munit.FunSuite:
       routes: HttpRoutes[IO]
   )
 
-  /** Turn clocks are driven explicitly, so every test stays deterministic. */
-  private def harness(): Harness =
+  /**
+   * Turn clocks are driven explicitly, so every test stays deterministic. The
+   * bot driver pauses for ten seconds per move, so an HTTP test can inspect a
+   * freshly started bot room before the bots touch it.
+   */
+  private def harness(devMode: Boolean = true): Harness =
     val store = SessionStore.inMemory[IO].unsafeRunSync()
-    val rooms = RoomManager.create[IO](startTurnClocks = false).unsafeRunSync()
+    val rooms = RoomManager
+      .create[IO](startTurnClocks = false, botMoveDelay = 10.seconds, devMode = devMode)
+      .unsafeRunSync()
     val quickPairing = QuickPairingService.create[IO](rooms).unsafeRunSync()
     Harness(
       store,
@@ -915,4 +921,372 @@ class MultiplayerRoutesSpec extends munit.FunSuite:
     // produce, and an unknown game socket is a clean 404.
     assertEquals(sendApp(Method.GET, "/ws/lobby").status, Status.NotImplemented)
     assertEquals(sendApp(Method.GET, "/ws/games/doesNotEx").status, Status.NotFound)
+  }
+
+  // --- Configured deck size over REST (ITEM-6a) ----------------------------
+
+  test("POST /api/games accepts the 52-card deck for fewer than four players") {
+    val h = harness()
+    val response = send(
+      h,
+      Method.POST,
+      "/api/games",
+      body = Some(Json.obj("playerCount" -> 2.asJson, "deckSize" -> 52.asJson))
+    )
+    assertEquals(response.status, Status.Created)
+    val body = bodyOf(response)
+    assertEquals(stringField(body, "role"), "player")
+    assertEquals(intField(body, "seatIndex"), 0)
+
+    // The open pool advertises the deck the table plays with.
+    val summary = bodyOf(send(h, Method.GET, "/api/lobby"))
+      .asArray
+      .getOrElse(fail("lobby was not an array"))
+      .head
+    assertEquals(intField(summary, "deckSize"), 52)
+    assertEquals(intField(summary, "filledSeats"), 1)
+
+    // Joining deals the full 52-card deck: 12 dealt, 40 left in the talon.
+    val guest = h.store.createGuest().unsafeRunSync()
+    assertEquals(
+      send(h, Method.POST, s"/api/games/${stringField(body, "gameId")}/join", Some(guest.token)).status,
+      Status.Ok
+    )
+    val view = bodyOf(send(h, Method.GET, s"/api/games/${stringField(body, "gameId")}", Some(guest.token)))
+    assertEquals(intField(view, "talonCount"), 40)
+    assertEquals(view.hcursor.downField("config").get[Int]("deckSize").toOption, Some(52))
+
+    // A 3P 52-card room leaves 34 cards in the talon.
+    val threeResponse = send(
+      h,
+      Method.POST,
+      "/api/games",
+      body = Some(Json.obj("playerCount" -> 3.asJson, "deckSize" -> 52.asJson))
+    )
+    assertEquals(threeResponse.status, Status.Created)
+    val threeId = stringField(bodyOf(threeResponse), "gameId")
+    val threeToken = cookieOf(threeResponse)
+    List("j1", "j2").foreach { _ =>
+      val joiner = h.store.createGuest().unsafeRunSync()
+      assertEquals(send(h, Method.POST, s"/api/games/$threeId/join", Some(joiner.token)).status, Status.Ok)
+    }
+    val threeView = bodyOf(send(h, Method.GET, s"/api/games/$threeId", Some(threeToken)))
+    assertEquals(intField(threeView, "talonCount"), 34)
+    assertEquals(
+      threeView.hcursor.downField("config").get[Int]("deckSize").toOption,
+      Some(52)
+    )
+  }
+
+  test("POST /api/games rejects invalid deck settings without creating a room") {
+    val h = harness()
+
+    List(
+      Json.obj("playerCount" -> 2.asJson, "deckSize" -> 40.asJson),
+      Json.obj("playerCount" -> 3.asJson, "deckSize" -> 24.asJson),
+      Json.obj("playerCount" -> 4.asJson, "deckSize" -> 36.asJson)
+    ).foreach { body =>
+      assertEquals(
+        send(h, Method.POST, "/api/games", body = Some(body)).status,
+        Status.BadRequest,
+        body.noSpaces
+      )
+    }
+    assertEquals(h.rooms.roomCount.unsafeRunSync(), 0)
+    assertEquals(bodyOf(send(h, Method.GET, "/api/lobby")).asArray.map(_.size), Some(0))
+  }
+
+  // --- Bot seats & dev spectator rooms over REST (ITEM-7a) -----------------
+
+  test("POST /api/games with seatTypes starts a human-vs-bot match immediately") {
+    val h = harness()
+    val response = send(
+      h,
+      Method.POST,
+      "/api/games",
+      body = Some(
+        Json.obj(
+          "playerCount" -> 2.asJson,
+          "seatTypes" -> List("human", "basicBot").asJson
+        )
+      )
+    )
+    assertEquals(response.status, Status.Created)
+    val body = bodyOf(response)
+    assertEquals(stringField(body, "role"), "player")
+    assertEquals(intField(body, "seatIndex"), 0)
+    val gameId = stringField(body, "gameId")
+
+    val view = bodyOf(send(h, Method.GET, s"/api/games/$gameId", Some(cookieOf(response))))
+    assertEquals(stringField(view, "status"), "inProgress")
+    val names = view.hcursor
+      .downField("players")
+      .as[List[Json]]
+      .getOrElse(fail("missing players"))
+      .flatMap(_.hcursor.get[String]("name").toOption)
+    assertEquals(names.size, 2)
+    assert(names.contains("BasicBot"), names.toString)
+    assertEquals(
+      view.hcursor.downField("seats").as[List[Json]].toOption.map(_.size),
+      Some(2)
+    )
+  }
+
+  test("a dev-mode all-bot room answers with no seat and a spectator role") {
+    val h = harness(devMode = true)
+    val response = send(
+      h,
+      Method.POST,
+      "/api/games",
+      body = Some(
+        Json.obj(
+          "playerCount" -> 3.asJson,
+          "seatTypes" -> List("basicBot", "basicBot", "basicBot").asJson
+        )
+      )
+    )
+    assertEquals(response.status, Status.Created)
+    val body = bodyOf(response)
+    assertEquals(body.hcursor.downField("seatIndex").focus, Some(Json.Null))
+    assertEquals(stringField(body, "role"), "spectator")
+    val gameId = stringField(body, "gameId")
+
+    // The creator follows the all-bot match from the outside.
+    val view = bodyOf(send(h, Method.GET, s"/api/games/$gameId", Some(cookieOf(response))))
+    assertEquals(stringField(view, "status"), "inProgress")
+    assertEquals(view.hcursor.downField("viewerSeat").focus, Some(Json.Null))
+    assertEquals(view.hcursor.downField("hand").as[List[Json]].toOption, Some(Nil))
+    assertEquals(view.hcursor.downField("legalActions").as[List[String]].toOption, Some(Nil))
+    assertEquals(
+      view.hcursor.downField("players").as[List[Json]].toOption.map(_.size),
+      Some(3)
+    )
+    // A 4P all-bot room projects all four seated bots.
+    val four = send(
+      h,
+      Method.POST,
+      "/api/games",
+      body = Some(
+        Json.obj(
+          "playerCount" -> 4.asJson,
+          "seatTypes" -> List.fill(4)("basicBot").asJson,
+          "spectateAsCreator" -> true.asJson
+        )
+      )
+    )
+    assertEquals(four.status, Status.Created)
+    val fourView = bodyOf(send(h, Method.GET, s"/api/games/${stringField(bodyOf(four), "gameId")}", Some(cookieOf(four))))
+    assertEquals(
+      fourView.hcursor.downField("players").as[List[Json]].toOption.map(_.size),
+      Some(4)
+    )
+    assertEquals(fourView.hcursor.downField("viewerSeat").focus, Some(Json.Null))
+  }
+
+  test("production mode refuses an all-bot or creator-unseated room") {
+    val h = harness(devMode = false)
+
+    val allBots = send(
+      h,
+      Method.POST,
+      "/api/games",
+      body = Some(
+        Json.obj("playerCount" -> 2.asJson, "seatTypes" -> List("basicBot", "basicBot").asJson)
+      )
+    )
+    assertEquals(allBots.status, Status.BadRequest)
+
+    val spectating = send(
+      h,
+      Method.POST,
+      "/api/games",
+      body = Some(
+        Json.obj(
+          "playerCount" -> 3.asJson,
+          "seatTypes" -> List.fill(3)("randomBot").asJson,
+          "spectateAsCreator" -> true.asJson
+        )
+      )
+    )
+    assertEquals(spectating.status, Status.BadRequest)
+    assertEquals(h.rooms.roomCount.unsafeRunSync(), 0)
+
+    // The creator may still sit down with bots around them.
+    val seated = send(
+      h,
+      Method.POST,
+      "/api/games",
+      body = Some(
+        Json.obj(
+          "playerCount" -> 3.asJson,
+          "seatTypes" -> List("human", "basicBot", "basicBot").asJson
+        )
+      )
+    )
+    assertEquals(seated.status, Status.Created)
+    assertEquals(intField(bodyOf(seated), "seatIndex"), 0)
+    assertEquals(stringField(bodyOf(seated), "role"), "player")
+  }
+
+  test("POST /api/games rejects a malformed seat plan") {
+    val h = harness()
+
+    List(
+      // Wrong length.
+      Json.obj("playerCount" -> 3.asJson, "seatTypes" -> List("human", "basicBot").asJson),
+      // Unknown seat type.
+      Json.obj("playerCount" -> 2.asJson, "seatTypes" -> List("human", "grandmasterBot").asJson),
+      // The creator's seat is a bot seat.
+      Json.obj(
+        "playerCount" -> 3.asJson,
+        "seatTypes" -> List("human", "human", "basicBot").asJson,
+        "creatorSeatIndex" -> 2.asJson
+      ),
+      // The creator's seat is off the table.
+      Json.obj("playerCount" -> 2.asJson, "creatorSeatIndex" -> 5.asJson)
+    ).foreach { body =>
+      assertEquals(
+        send(h, Method.POST, "/api/games", body = Some(body)).status,
+        Status.BadRequest,
+        body.noSpaces
+      )
+    }
+    assertEquals(h.rooms.roomCount.unsafeRunSync(), 0)
+  }
+
+  // --- Instant bot quick pairing over REST (ITEM-7a) -----------------------
+
+  test("POST /api/quick-pair with a botOpponent matches immediately without queueing") {
+    val h = harness()
+    val solo = h.store.createGuest().unsafeRunSync()
+
+    val matched = matchedJson(
+      h,
+      solo.token,
+      Json.obj("playerCount" -> 2.asJson, "botOpponent" -> "randomBot".asJson)
+    )
+    val gameId = stringField(matched, "gameId")
+    assertEquals(intField(matched, "seatIndex"), 0)
+
+    val room = h.rooms.getRoom(gameId).unsafeRunSync().getOrElse(fail("no room was created"))
+    assertEquals(room.status, RoomStatus.InProgress)
+    assertEquals(room.seats.head.playerId, Some(solo.playerId))
+    assertEquals(room.seats(1).displayName, Some("RandomBot"))
+    assertEquals(room.seats(1).seatType, "randomBot")
+
+    // The bot match never enters (or leaves) the human wait queue.
+    assertEquals(stringField(pairStatus(h, solo.token), "status"), "idle")
+    assertEquals(h.rooms.listOpenPublicRooms.unsafeRunSync(), Nil)
+
+    // A 4P bot tile starts a full four-seat table in one call.
+    val four = matchedJson(
+      h,
+      solo.token,
+      Json.obj("playerCount" -> 4.asJson, "botOpponent" -> "basicBot".asJson)
+    )
+    val fourRoom = h.rooms
+      .getRoom(stringField(four, "gameId"))
+      .unsafeRunSync()
+      .getOrElse(fail("no four-player room was created"))
+    assertEquals(fourRoom.seats.size, 4)
+    assertEquals(fourRoom.seats.map(_.seatType), Vector("human", "basicBot", "basicBot", "basicBot"))
+
+    // An unknown bot name is a bad request, not a queue entry.
+    assertEquals(
+      send(
+        h,
+        Method.POST,
+        "/api/quick-pair",
+        Some(solo.token),
+        Some(Json.obj("playerCount" -> 2.asJson, "botOpponent" -> "grandmasterBot".asJson))
+      ).status,
+      Status.BadRequest
+    )
+    // As is an invalid deck size.
+    assertEquals(
+      send(
+        h,
+        Method.POST,
+        "/api/quick-pair",
+        Some(solo.token),
+        Some(Json.obj("playerCount" -> 2.asJson, "deckSize" -> 40.asJson))
+      ).status,
+      Status.BadRequest
+    )
+  }
+
+  test("quick-pair buckets are isolated by deck size and match with that deck") {
+    val h = harness()
+    val alice = h.store.createGuest().unsafeRunSync()
+    val bob = h.store.createGuest().unsafeRunSync()
+    val carol = h.store.createGuest().unsafeRunSync()
+    val shortPreset = Json.obj("playerCount" -> 2.asJson)
+    val fullPreset = Json.obj("playerCount" -> 2.asJson, "deckSize" -> 52.asJson)
+
+    assertEquals(intField(searchingJson(h, alice.token, fullPreset), "queuedCount"), 1)
+    assertEquals(intField(searchingJson(h, bob.token, shortPreset), "queuedCount"), 1)
+    assertEquals(h.rooms.roomCount.unsafeRunSync(), 0)
+
+    // Carol's 52-card seek finds Alice, never the 36-card Bob.
+    val matched = matchedJson(h, carol.token, fullPreset)
+    val gameId = stringField(matched, "gameId")
+    assertEquals(intField(matched, "seatIndex"), 1)
+    val room = h.rooms.getRoom(gameId).unsafeRunSync().getOrElse(fail("no room was created"))
+    assertEquals(room.config.effectiveDeckSize, 52)
+    assertEquals(room.gameState.map(_.talon.size), Some(40))
+    assertEquals(stringField(pairStatus(h, alice.token), "status"), "idle")
+    assertEquals(stringField(pairStatus(h, bob.token), "status"), "searching")
+
+    // Bob is still alone in his 36-card bucket and gets a 36-card table.
+    val dave = h.store.createGuest().unsafeRunSync()
+    val bobMatch = matchedJson(h, dave.token, shortPreset)
+    val bobRoom = h.rooms
+      .getRoom(stringField(bobMatch, "gameId"))
+      .unsafeRunSync()
+      .getOrElse(fail("no room was created"))
+    assertEquals(bobRoom.config.effectiveDeckSize, 36)
+    assertEquals(bobRoom.gameState.map(_.talon.size), Some(24))
+  }
+
+  test("quick-pair-opponent matches a waiting 52-card bucket with a 52-card room") {
+    val h = harness()
+    val reviewer = h.store.createGuest().unsafeRunSync()
+    val preset = Json.obj("playerCount" -> 2.asJson, "deckSize" -> 52.asJson)
+    assertEquals(intField(searchingJson(h, reviewer.token, preset), "queuedCount"), 1)
+
+    val response = send(
+      h,
+      Method.POST,
+      "/api/qa/presets/quick-pair-opponent",
+      Some(reviewer.token)
+    )
+    assertEquals(response.status, Status.Ok)
+    val body = bodyOf(response)
+    assertEquals(stringField(body, "status"), "matched")
+    assertEquals(intField(body, "seatIndex"), 0)
+    val room = h.rooms
+      .getRoom(stringField(body, "gameId"))
+      .unsafeRunSync()
+      .getOrElse(fail("no room was created"))
+    assertEquals(room.config.playerCount, 2)
+    assertEquals(room.config.effectiveDeckSize, 52)
+    assertEquals(room.seats.head.playerId, Some(reviewer.playerId))
+
+    // An unqueued reviewer can also ask for a 52-card default bucket directly.
+    val other = h.store.createGuest().unsafeRunSync()
+    val direct = send(
+      h,
+      Method.POST,
+      "/api/qa/presets/quick-pair-opponent",
+      Some(other.token),
+      Some(Json.obj("playerCount" -> 2.asJson, "deckSize" -> 52.asJson))
+    )
+    assertEquals(direct.status, Status.Ok)
+    assertEquals(
+      h.rooms
+        .getRoom(stringField(bodyOf(direct), "gameId"))
+        .unsafeRunSync()
+        .map(_.config.effectiveDeckSize),
+      Some(52)
+    )
   }

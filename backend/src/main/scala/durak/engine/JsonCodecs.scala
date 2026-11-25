@@ -390,6 +390,9 @@ object JsonCodecs:
         .as[Option[Boolean]]
         .map(_.getOrElse(false))
       devMode <- cursor.downField("devMode").as[Option[Boolean]].map(_.getOrElse(true))
+      // Optional: a config stored before the deck setting existed plays by the
+      // player-count default.
+      deckSize <- cursor.downField("deckSize").as[Option[Int]]
     yield GameConfig(
       playerCount,
       allowRedirect,
@@ -397,7 +400,8 @@ object JsonCodecs:
       playerTypes,
       chaosMode,
       transparentMode,
-      devMode
+      devMode,
+      deckSize
     )
   }
 

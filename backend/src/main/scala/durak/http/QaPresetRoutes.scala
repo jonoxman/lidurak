@@ -2,6 +2,7 @@ package durak.http
 
 import cats.effect.IO
 import cats.syntax.all.*
+import durak.engine.GameConfig
 import durak.lobby.{QuickPairBucketKey, QuickPairingService}
 import durak.protocol.ProtocolCodecs.given
 import durak.rooms.{CreateRoomConfig, RoomManager}
@@ -171,19 +172,46 @@ object QaPresetRoutes:
       req: Request[IO]
   ): IO[Response[IO]] =
     withSession(req, store) { (session, _) =>
-      quickPairing
-        .matchWithSyntheticOpponents(session, QuickPairBucketKey.Default)
-        .flatMap {
-          case Left(error) => BadRequest(errorJson(error))
-          case Right((gameId, seatIndex)) =>
-            Ok(
-              Json.obj(
-                "status" -> "matched".asJson,
-                "gameId" -> gameId.asJson,
-                "seatIndex" -> seatIndex.asJson
+      defaultBucketKey(req).flatMap { key =>
+        quickPairing
+          .matchWithSyntheticOpponents(session, key)
+          .flatMap {
+            case Left(error) => BadRequest(errorJson(error))
+            case Right((gameId, seatIndex)) =>
+              Ok(
+                Json.obj(
+                  "status" -> "matched".asJson,
+                  "gameId" -> gameId.asJson,
+                  "seatIndex" -> seatIndex.asJson
+                )
               )
-            )
-        }
+          }
+      }
+    }
+
+  /**
+   * The bucket the trigger falls back to when the caller is not queued.
+   *
+   * A caller already waiting in a bucket is always matched inside that exact
+   * bucket (including its `deckSize`, `playerCount`, `allowRedirect` and turn
+   * clock); the optional body only seeds the default `2P • 15s` bucket, so a
+   * reviewer can also verify a 52-card table without queueing first.
+   */
+  private def defaultBucketKey(req: Request[IO]): IO[QuickPairBucketKey] =
+    req.as[Json].attempt.map {
+      case Left(_) => QuickPairBucketKey.Default
+      case Right(json) =>
+        val playerCount = json.hcursor
+          .get[Int]("playerCount")
+          .toOption
+          .filter(CreateRoomConfig.SupportedPlayerCounts.contains)
+          .getOrElse(QuickPairBucketKey.Default.playerCount)
+        val deckSize = json.hcursor
+          .get[Int]("deckSize")
+          .toOption
+          .filter(GameConfig.SupportedDeckSizes.contains)
+          .getOrElse(if playerCount == 4 then GameConfig.FullDeckSize else GameConfig.ShortDeckSize)
+        QuickPairBucketKey.Default.copy(playerCount = playerCount, deckSize = deckSize)
     }
 
   /**

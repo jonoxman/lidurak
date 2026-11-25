@@ -45,7 +45,8 @@ object GameEngine:
 
     val playerCount = config.playerCount
     val random = new Random(config.seed)
-    val shuffled = random.shuffle(Deck.forPlayerCount(playerCount))
+    // The configured deck setting decides 36 or 52 cards (see `Deck.forConfig`).
+    val shuffled = random.shuffle(Deck.forConfig(config))
 
     val players = playerNames.zipWithIndex.map { case (name, idx) =>
       PlayerState(
@@ -923,6 +924,16 @@ object GameEngine:
     if !Set(2, 3, 4).contains(config.playerCount) then
       throw new IllegalArgumentException(
         s"Unsupported player count: ${config.playerCount} (expected 2, 3, or 4)"
+      )
+    config.deckSize.foreach { size =>
+      if !GameConfig.SupportedDeckSizes.contains(size) then
+        throw new IllegalArgumentException(
+          s"Unsupported deck size: $size (expected ${GameConfig.ShortDeckSize} or ${GameConfig.FullDeckSize})"
+        )
+    }
+    if config.playerCount == 4 && config.deckSize.contains(GameConfig.ShortDeckSize) then
+      throw new IllegalArgumentException(
+        s"A four-player game requires the ${GameConfig.FullDeckSize}-card deck"
       )
 
   /** Index of the player holding the lowest-rank trump card, or 0 if nobody has one. */

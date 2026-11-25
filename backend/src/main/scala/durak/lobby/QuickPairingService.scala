@@ -3,6 +3,7 @@ package durak.lobby
 import cats.effect.{Async, Ref}
 import cats.effect.std.Semaphore
 import cats.syntax.all.*
+import durak.engine.GameConfig
 import durak.protocol.QuickPairResponse
 import durak.rooms.{CreateRoomConfig, RoomManager}
 import durak.session.GuestSession
@@ -17,11 +18,17 @@ import java.util.UUID
  *
  * A player asking for Quick Pairing only ever states the match preset they
  * want; the server decides which queued players they get matched with.
+ *
+ * `deckSize` asks for the 52-card deck in a 2- or 3-player match (four players
+ * always play 52). `botOpponent` (`"randomBot"` or `"basicBot"`) starts a match
+ * against bots immediately instead of queueing for human players.
  */
 final case class QuickPairRequest(
     playerCount: Int,
     turnTimeoutSeconds: Int = QuickPairRequest.DefaultTurnTimeoutSeconds,
-    allowRedirect: Boolean = true
+    allowRedirect: Boolean = true,
+    deckSize: Option[Int] = None,
+    botOpponent: Option[String] = None
 )
 
 object QuickPairRequest:
@@ -41,17 +48,30 @@ object QuickPairRequest:
         .downField("allowRedirect")
         .as[Option[Boolean]]
         .map(_.getOrElse(true))
-    yield QuickPairRequest(playerCount, turnTimeoutSeconds, allowRedirect)
+      deckSize <- cursor.downField("deckSize").as[Option[Int]]
+      botOpponent <- cursor
+        .downField("botOpponent")
+        .as[Option[String]]
+        .map(_.map(_.trim).filter(_.nonEmpty))
+    yield QuickPairRequest(
+      playerCount,
+      turnTimeoutSeconds,
+      allowRedirect,
+      deckSize,
+      botOpponent
+    )
   }
 
 /**
  * The identity of one matching bucket: two players only share a bucket when
- * all three preset fields agree.
+ * every preset field, the deck size included, agrees. A `2P 15s 36-card` seeker
+ * can therefore never be paired into a `2P 15s 52-card` table.
  */
 final case class QuickPairBucketKey(
     playerCount: Int,
     turnTimeoutSeconds: Int,
-    allowRedirect: Boolean
+    allowRedirect: Boolean,
+    deckSize: Int = GameConfig.ShortDeckSize
 )
 
 object QuickPairBucketKey:
@@ -122,15 +142,18 @@ final class QuickPairingService[F[_]](
       session: GuestSession,
       request: QuickPairRequest
   ): F[Either[String, QuickPairResult]] =
-    configFor(
-      QuickPairBucketKey(
-        playerCount = request.playerCount,
-        turnTimeoutSeconds = request.turnTimeoutSeconds,
-        allowRedirect = request.allowRedirect
-      )
-    ).validate match
-      case Left(error)  => F.pure(Left(error))
-      case Right(valid) => mutex.permit.use(_ => enqueueLocked(session, valid))
+    keyFor(request) match
+      case Left(error) => F.pure(Left(error))
+      case Right((key, botType)) =>
+        configFor(key).validate match
+          case Left(error) => F.pure(Left(error))
+          case Right(valid) =>
+            mutex.permit.use(_ =>
+              botType match
+                // Bots are instantly available, so a bot request never queues.
+                case Some(bot) => startBotMatch(session, key, bot)
+                case None      => enqueueLocked(session, valid, key)
+            )
 
   /** Removes `playerId` from whatever bucket they are in, if any. */
   def cancel(playerId: String): F[Unit] =
@@ -189,9 +212,9 @@ final class QuickPairingService[F[_]](
 
   private def enqueueLocked(
       session: GuestSession,
-      config: CreateRoomConfig
+      config: CreateRoomConfig,
+      key: QuickPairBucketKey
   ): F[Either[String, QuickPairResult]] =
-    val key = keyOf(config)
     pool
       .modify { current =>
         val cleaned = current.remove(session.playerId)
@@ -245,15 +268,88 @@ final class QuickPairingService[F[_]](
       allowRedirect = key.allowRedirect,
       turnTimeoutSeconds = key.turnTimeoutSeconds,
       isPublic = false,
-      isQuickPair = true
+      isQuickPair = true,
+      deckSize = Some(key.deckSize)
     )
 
-  private def keyOf(config: CreateRoomConfig): QuickPairBucketKey =
-    QuickPairBucketKey(
-      playerCount = config.playerCount,
-      turnTimeoutSeconds = config.turnTimeoutSeconds,
-      allowRedirect = config.allowRedirect
-    )
+  /**
+   * Resolves the bucket a request belongs to, plus the bot to play against.
+   *
+   * The bucket key includes the effective deck size, so a `2P 15s 36-card`
+   * seeker can never be matched with a `2P 15s 52-card` one. An unsupported
+   * deck size, a four-player 36-card request, or an unknown bot name is
+   * rejected here, before any queue or room is touched.
+   */
+  private def keyFor(
+      request: QuickPairRequest
+  ): Either[String, (QuickPairBucketKey, Option[String])] =
+    val deckError: Option[String] =
+      if request.deckSize.exists(size => !GameConfig.SupportedDeckSizes.contains(size)) then
+        Some(
+          s"Unsupported deck size: ${request.deckSize.getOrElse(0)} " +
+            s"(expected ${GameConfig.ShortDeckSize} or ${GameConfig.FullDeckSize})"
+        )
+      else if request.playerCount == 4 && request.deckSize.contains(GameConfig.ShortDeckSize) then
+        Some(s"A four-player game requires the ${GameConfig.FullDeckSize}-card deck")
+      else None
+
+    val bot: Either[String, Option[String]] = request.botOpponent match
+      case None => Right(None)
+      case Some(raw) =>
+        GameConfig.parseSeatType(raw) match
+          case Some(seatType) if GameConfig.isBotType(seatType) => Right(Some(seatType))
+          case _ =>
+            Left(s"Unsupported bot opponent: $raw (expected randomBot or basicBot)")
+
+    for
+      _ <- deckError.toLeft(())
+      botType <- bot
+    yield
+      val deckSize =
+        if request.playerCount == 4 then GameConfig.FullDeckSize
+        else request.deckSize.getOrElse(GameConfig.ShortDeckSize)
+      val key = QuickPairBucketKey(
+        playerCount = request.playerCount,
+        turnTimeoutSeconds = request.turnTimeoutSeconds,
+        allowRedirect = request.allowRedirect,
+        deckSize = deckSize
+      )
+      (key, botType)
+
+  /**
+   * Starts a match against bots in one step: the caller takes seat 0 and every
+   * other seat is the requested bot. Nothing is ever enqueued, so bots can never
+   * be matched into a normal human quick-pair bucket (or vice versa).
+   */
+  private def startBotMatch(
+      session: GuestSession,
+      key: QuickPairBucketKey,
+      botType: String
+  ): F[Either[String, QuickPairResult]] =
+    val opponents = (1 until key.playerCount).toVector.map { seatIdx =>
+      QueuedPlayer(
+        playerId = s"bot-qp-${UUID.randomUUID().toString.take(8)}",
+        displayName = botDisplayName(botType, seatIdx, key.playerCount)
+      )
+    }
+    val seats = QueuedPlayer(session.playerId, session.displayName) +: opponents
+    val seatTypes = GameConfig.HumanSeat +: Vector.fill(opponents.size)(botType)
+
+    // A previous human wait entry must not survive into the bot match.
+    pool.update(_.remove(session.playerId)) *>
+      roomManager
+        .createPresetRoom(
+          configFor(key),
+          seats.map(player => player.playerId -> player.displayName),
+          autoStartIfFull = true,
+          seatTypes = seatTypes
+        )
+        .map(room => Right(QuickPairResult.Matched(room.gameId, 0)))
+
+  /** `"RandomBot"` / `"BasicBot"`, numbered when several share a table. */
+  private def botDisplayName(botType: String, seatIdx: Int, playerCount: Int): String =
+    val label = if botType == GameConfig.BasicBotSeat then "BasicBot" else "RandomBot"
+    if playerCount <= 2 then label else s"$label $seatIdx"
 
 object QuickPairingService:
 

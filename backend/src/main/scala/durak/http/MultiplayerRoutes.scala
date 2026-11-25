@@ -26,12 +26,22 @@ final case class CreateRoomRequestBody(
     playerCount: Int,
     allowRedirect: Boolean = true,
     turnTimeoutSeconds: Int = 15,
-    isPublic: Boolean = true
+    isPublic: Boolean = true,
+    deckSize: Option[Int] = None,
+    seatTypes: Option[Vector[String]] = None,
+    creatorSeatIndex: Option[Int] = None,
+    spectateAsCreator: Boolean = false
 ):
 
   /** The room configuration this request asks for. */
   def toConfig: CreateRoomConfig =
-    CreateRoomConfig(playerCount, allowRedirect, turnTimeoutSeconds, isPublic)
+    CreateRoomConfig(
+      playerCount = playerCount,
+      allowRedirect = allowRedirect,
+      turnTimeoutSeconds = turnTimeoutSeconds,
+      isPublic = isPublic,
+      deckSize = deckSize
+    )
 
 object CreateRoomRequestBody:
 
@@ -51,11 +61,25 @@ object CreateRoomRequestBody:
         .downField("isPublic")
         .as[Option[Boolean]]
         .map(_.getOrElse(true))
+      deckSize <- cursor.downField("deckSize").as[Option[Int]]
+      seatTypes <- cursor
+        .downField("seatTypes")
+        .as[Option[Vector[String]]]
+        .map(_.map(_.map(_.trim).filter(_.nonEmpty)).filter(_.nonEmpty))
+      creatorSeatIndex <- cursor.downField("creatorSeatIndex").as[Option[Int]]
+      spectateAsCreator <- cursor
+        .downField("spectateAsCreator")
+        .as[Option[Boolean]]
+        .map(_.getOrElse(false))
     yield CreateRoomRequestBody(
       playerCount,
       allowRedirect,
       turnTimeoutSeconds,
-      isPublic
+      isPublic,
+      deckSize,
+      seatTypes,
+      creatorSeatIndex,
+      spectateAsCreator
     )
   }
 
@@ -112,17 +136,28 @@ object MultiplayerRoutes:
               BadRequest(errorJson(s"Invalid create request: ${describe(error)}"))
             case Right(body) =>
               withSession(req, store) { (session, _) =>
-                roomManager.createRoom(session, body.toConfig).flatMap {
-                  case Left(error) => BadRequest(errorJson(error))
-                  case Right((room, seatIndex)) =>
-                    Created(
-                      Json.obj(
-                        "gameId" -> room.gameId.asJson,
-                        "seatIndex" -> seatIndex.asJson,
-                        "inviteUrl" -> s"/g/${room.gameId}".asJson
+                roomManager
+                  .createRoomWithSeats(
+                    session,
+                    body.toConfig,
+                    seatTypes = body.seatTypes.getOrElse(Vector.empty),
+                    creatorSeatIndex = body.creatorSeatIndex,
+                    spectateAsCreator = body.spectateAsCreator
+                  )
+                  .flatMap {
+                    case Left(error) => BadRequest(errorJson(error))
+                    case Right(creation) =>
+                      // A dev-mode all-bot room has no creator seat: the client
+                      // is sent to the table as a read-only spectator.
+                      Created(
+                        Json.obj(
+                          "gameId" -> creation.room.gameId.asJson,
+                          "seatIndex" -> creation.seatIndex.asJson,
+                          "role" -> creation.role.asJson,
+                          "inviteUrl" -> s"/g/${creation.room.gameId}".asJson
+                        )
                       )
-                    )
-                }
+                  }
               }
       }
 

@@ -16,7 +16,9 @@ final case class LobbyRoomSummary(
     allowRedirect: Boolean,
     turnTimeoutSeconds: Int,
     createdAtEpochMs: Long,
-    isQuickPair: Boolean
+    isQuickPair: Boolean,
+    // The deck this table plays with (`36` or `52`), so the pool advertises it.
+    deckSize: Int = 36
 )
 
 /** Every frame a client may send over `/ws/games/:gameId` (or `/ws/lobby`). */

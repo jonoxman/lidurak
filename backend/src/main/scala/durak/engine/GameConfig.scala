@@ -16,6 +16,10 @@ package durak.engine
  * `devMode` keeps the local POV switcher open during live play. When it is off,
  * the server rejects a point-of-view switch until the match is over and in
  * review mode, so the seat cannot be changed from the client.
+ *
+ * `deckSize` is the optional explicit deck setting (`36` or `52`). It is only
+ * meaningful for fewer than four players: a four-player game always plays the
+ * full 52-card deck, and a two- or three-player game defaults to 36 cards.
  */
 case class GameConfig(
   playerCount: Int,
@@ -24,8 +28,17 @@ case class GameConfig(
   playerTypes: Vector[String] = Vector.empty,
   chaosMode: Boolean = false,
   transparentMode: Boolean = false,
-  devMode: Boolean = true
+  devMode: Boolean = true,
+  deckSize: Option[Int] = None
 ):
+
+  /**
+   * The deck size this configuration actually plays with: 52 cards for four
+   * players (always), otherwise the explicit setting or the 36-card default.
+   */
+  def effectiveDeckSize: Int =
+    if playerCount == 4 then GameConfig.FullDeckSize
+    else deckSize.getOrElse(GameConfig.ShortDeckSize)
 
   /** The raw seat type of `seatIdx`, defaulting to a human. */
   def playerType(seatIdx: Int): String =
@@ -38,6 +51,15 @@ case class GameConfig(
   def isBotSeat(seatIdx: Int): Boolean = GameConfig.isBotType(playerType(seatIdx))
 
 object GameConfig:
+
+  /** Card count of the 36-card deck (Six through Ace). */
+  val ShortDeckSize: Int = 36
+
+  /** Card count of the full 52-card deck (Two through Ace). */
+  val FullDeckSize: Int = 52
+
+  /** Every deck size a match may be configured with. */
+  val SupportedDeckSizes: Set[Int] = Set(ShortDeckSize, FullDeckSize)
 
   /** Seat type of a human player. */
   val HumanSeat: String = "human"
@@ -66,6 +88,18 @@ object GameConfig:
       case "basicbot"          => BasicBotSeat
       case "randombot" | "bot" => RandomBotSeat
       case _                   => HumanSeat
+
+  /**
+   * Like [[canonicalSeatType]] but strict: `None` for a value that is not one of
+   * `"human"`, `"randomBot"` or `"basicBot"`, so a request can be rejected
+   * instead of silently seating a human where a bot was asked for.
+   */
+  def parseSeatType(value: String): Option[String] =
+    value.trim.toLowerCase match
+      case "human"             => Some(HumanSeat)
+      case "basicbot"          => Some(BasicBotSeat)
+      case "randombot" | "bot" => Some(RandomBotSeat)
+      case _                   => None
 
   /**
    * `playerTypes` padded or truncated to exactly `playerCount` canonical
