@@ -115,7 +115,8 @@ final class RoomManager[F[_]](
       prefilledSeats: Vector[(String, String)],
       autoStartIfFull: Boolean,
       seed: Option[Long] = None,
-      initialHandSize: Int = GameEngine.DefaultHandSize
+      initialHandSize: Int = GameEngine.DefaultHandSize,
+      firstAttackerIdx: Option[Int] = None
   ): F[GameRoom] =
     config.validate match
       case Left(error) => F.raiseError(new IllegalArgumentException(error))
@@ -150,7 +151,7 @@ final class RoomManager[F[_]](
                 for
                   stored <-
                     if autoStartIfFull && seats.forall(_.isOccupied) then
-                      startRoom(base, seed, now, initialHandSize)
+                      startRoom(base, seed, now, initialHandSize, firstAttackerIdx)
                     else F.pure(base)
                   managed <- newManaged(stored)
                   _ <- rooms.update(_.updated(gameId, managed))
@@ -464,17 +465,20 @@ final class RoomManager[F[_]](
       room: GameRoom,
       seedOverride: Option[Long],
       now: Long,
-      initialHandSize: Int = GameEngine.DefaultHandSize
+      initialHandSize: Int = GameEngine.DefaultHandSize,
+      firstAttackerIdx: Option[Int] = None
   ): F[GameRoom] =
     seedOverride match
-      case Some(seed) => F.pure(deal(room, seed, now, initialHandSize))
-      case None       => F.delay(deal(room, RoomManager.newSeed(), now, initialHandSize))
+      case Some(seed) => F.pure(deal(room, seed, now, initialHandSize, firstAttackerIdx))
+      case None =>
+        F.delay(deal(room, RoomManager.newSeed(), now, initialHandSize, firstAttackerIdx))
 
   private def deal(
       room: GameRoom,
       seed: Long,
       now: Long,
-      initialHandSize: Int = GameEngine.DefaultHandSize
+      initialHandSize: Int = GameEngine.DefaultHandSize,
+      firstAttackerIdx: Option[Int] = None
   ): GameRoom =
     val engineConfig = GameConfig(
       playerCount = room.config.playerCount,
@@ -482,7 +486,7 @@ final class RoomManager[F[_]](
       seed = seed
     )
     val names = room.seats.map(seat => seat.displayName.getOrElse("Player"))
-    val dealt = GameEngine.createGame(engineConfig, names, initialHandSize)
+    val dealt = GameEngine.createGame(engineConfig, names, initialHandSize, firstAttackerIdx)
     val seated = dealt.copy(
       players = dealt.players.zip(room.seats).map { case (player, seat) =>
         player.copy(

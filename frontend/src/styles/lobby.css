@@ -8,6 +8,13 @@
  * instead of pinning dark-only hex colours. Layout is CSS Grid and Flexbox
  * only: no absolutely or fixed-positioned panels, and every grid child keeps
  * `min-width: 0` so long names and preset labels wrap instead of overflowing.
+ *
+ * T-96b: the M2 selection chrome (tabs, quick-pair tiles, segmented controls,
+ * checkboxes, primary/secondary buttons and the guest identity controls) uses
+ * Milestone 1's Royal Blue / Cobalt `--ui-select-*` family, exactly like the
+ * `.lobby-form` controls directly below it, so both lobby generations share one
+ * palette and follow `Theme -> Palettes`. Green stays reserved for live status
+ * (connection badge, pool badges, the searching spinner).
  */
 
 .m2-lobby {
@@ -163,8 +170,9 @@ html[data-theme='light'] .m2-lobby {
 
 .m2-guest-badge:hover,
 .m2-guest-badge:focus-visible {
-  border-color: var(--m2-green);
-  color: var(--m2-green);
+  border-color: var(--ui-select-accent);
+  color: var(--ui-select-text);
+  box-shadow: 0 0 8px 1px var(--ui-select-glow);
   outline: none;
 }
 
@@ -189,9 +197,10 @@ html[data-theme='light'] .m2-lobby {
 }
 
 .m2-guest-input:focus-visible {
-  border-color: var(--m2-green);
-  outline: 2px solid var(--m2-green-soft);
+  border-color: var(--ui-select-accent);
+  outline: 2px solid var(--ui-select-accent);
   outline-offset: 1px;
+  box-shadow: 0 0 10px 2px var(--ui-select-glow);
 }
 
 .m2-lobby-tabs {
@@ -217,15 +226,18 @@ html[data-theme='light'] .m2-lobby {
 
 .m2-lobby-tab:hover,
 .m2-lobby-tab:focus-visible {
-  background: var(--m2-surface);
+  border-color: var(--ui-select-accent);
+  background: var(--ui-select-bg);
+  color: var(--ui-select-text);
+  box-shadow: 0 0 8px 1px var(--ui-select-glow);
   outline: none;
 }
 
 .m2-lobby-tab.active {
-  background: var(--m2-surface);
-  border-color: var(--m2-border);
-  color: var(--m2-text-strong);
-  box-shadow: inset 0 -2px 0 var(--m2-green);
+  background: var(--ui-select-bg);
+  border-color: var(--ui-select-accent);
+  color: var(--ui-select-text);
+  box-shadow: inset 0 -2px 0 var(--ui-select-accent), 0 0 10px 2px var(--ui-select-glow);
 }
 
 .m2-tab-count {
@@ -278,20 +290,23 @@ html[data-theme='light'] .m2-lobby {
   gap: 0.35rem;
   min-width: 0;
   padding: 0.55rem 1rem;
-  border: 1px solid var(--m2-green);
+  border: 1px solid var(--ui-select-accent);
   border-radius: var(--app-roundness, 8px);
-  background: var(--m2-green);
-  color: var(--m2-on-accent);
+  background: var(--ui-select-accent);
+  color: #f8fafc;
   font: inherit;
   font-weight: 600;
   cursor: pointer;
-  transition: transform 100ms ease, filter 150ms ease, border-color 120ms ease;
+  box-shadow: 0 0 10px 2px var(--ui-select-glow);
+  transition: transform 100ms ease, filter 150ms ease, border-color 120ms ease,
+    box-shadow 150ms ease;
 }
 
 .m2-button:hover:not(:disabled),
 .m2-button:focus-visible:not(:disabled) {
   filter: brightness(1.12);
   transform: translateY(-1px);
+  box-shadow: 0 0 14px 3px var(--ui-select-glow);
   outline: none;
 }
 
@@ -303,8 +318,9 @@ html[data-theme='light'] .m2-lobby {
 
 .m2-button.secondary:hover:not(:disabled),
 .m2-button.secondary:focus-visible:not(:disabled) {
-  border-color: var(--m2-green);
-  color: var(--m2-green);
+  border-color: var(--ui-select-accent);
+  color: var(--ui-select-text);
+  box-shadow: 0 0 10px 2px var(--ui-select-glow);
   filter: none;
 }
 
@@ -355,14 +371,15 @@ html[data-theme='light'] .m2-lobby {
 
 .quick-pair-tile:hover:not(:disabled),
 .quick-pair-tile:focus-visible:not(:disabled) {
-  border-color: var(--m2-green);
-  background: var(--m2-green-soft);
+  border-color: var(--ui-select-accent);
+  background: var(--ui-select-bg);
+  box-shadow: 0 0 10px 2px var(--ui-select-glow);
   transform: translateY(-2px);
   outline: none;
 }
 
 .quick-pair-tile:focus-visible:not(:disabled) {
-  outline: 2px solid var(--m2-green);
+  outline: 2px solid var(--ui-select-accent);
   outline-offset: 2px;
 }
 
@@ -566,15 +583,17 @@ html[data-theme='light'] .m2-lobby {
 }
 
 .segmented-option[aria-pressed='true'] {
-  border-color: var(--m2-green);
-  background: var(--m2-green-soft);
-  color: var(--m2-green);
+  border-color: var(--ui-select-accent);
+  background: var(--ui-select-bg);
+  color: var(--ui-select-text);
+  box-shadow: 0 0 10px 2px var(--ui-select-glow);
   font-weight: 700;
 }
 
 .segmented-option:hover,
 .segmented-option:focus-visible {
-  border-color: var(--m2-green);
+  border-color: var(--ui-select-accent);
+  box-shadow: 0 0 8px 1px var(--ui-select-glow);
   outline: none;
 }
 
@@ -593,7 +612,7 @@ html[data-theme='light'] .m2-lobby {
 }
 
 .create-invite-toggle input {
-  accent-color: var(--m2-green);
+  accent-color: var(--ui-select-accent);
 }
 
 .create-invite-form > .m2-button {

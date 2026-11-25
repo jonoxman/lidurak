@@ -20,17 +20,28 @@ object GameEngine:
    * Every seat is dealt `initialHandSize` cards and the deal still reveals the
    * bottom trump from what is left, so a QA small-hand preset is a real game
    * that later refills to [[DefaultHandSize]] as usual.
+   *
+   * `firstAttackerIdx` is the QA-preset escape hatch that seats the opening
+   * attacker explicitly instead of deriving it from the lowest trump; organic
+   * rooms and every other caller leave it `None` and keep the lowest-trump rule.
    */
   def createGame(
       config: GameConfig,
       playerNames: Vector[String],
-      initialHandSize: Int
+      initialHandSize: Int,
+      firstAttackerIdx: Option[Int] = None
   ): GameState =
     validate(config, playerNames)
     if initialHandSize < 1 || initialHandSize > DefaultHandSize then
       throw new IllegalArgumentException(
         s"Initial hand size must be between 1 and $DefaultHandSize"
       )
+    firstAttackerIdx.foreach { idx =>
+      if idx < 0 || idx >= config.playerCount then
+        throw new IllegalArgumentException(
+          s"First attacker seat must be between 0 and ${config.playerCount - 1}"
+        )
+    }
 
     val playerCount = config.playerCount
     val random = new Random(config.seed)
@@ -55,7 +66,7 @@ object GameEngine:
     val talon = remaining.tail :+ bottomTrumpCard
     val trumpSuit = bottomTrumpCard.suit
 
-    val attackerIdx = selectFirstAttacker(players, trumpSuit)
+    val attackerIdx = firstAttackerIdx.getOrElse(selectFirstAttacker(players, trumpSuit))
     val defenderIdx = (attackerIdx + 1) % playerCount
 
     GameState(

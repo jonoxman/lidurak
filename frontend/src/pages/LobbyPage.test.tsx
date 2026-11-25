@@ -247,7 +247,13 @@ describe('M2 LobbyPage', () => {
     expect(lobbyCss).toMatch(
       /\.m2-lobby\s*\{[^}]*--m2-surface: var\(--app-panel\)[^}]*--m2-border: var\(--app-border\)/,
     );
-    expect(lobbyCss).toMatch(/\.m2-lobby\s*\{[^}]*--m2-green: var\(--app-accent\)/);
+    // T-96b: the M2 selection chrome resolves from the M1 cobalt family, so a
+    // Theme -> Palettes swap re-colours the tabs, tiles and Create-a-Game
+    // controls together with the M1 `Local game` form below them.
+    expect(lobbyCss).toMatch(
+      /\.m2-lobby-tab\.active\s*\{[^}]*var\(--ui-select-accent\)/,
+    );
+    expect(lobbyCss).toMatch(/\.m2-button\s*\{[^}]*background: var\(--ui-select-accent\)/);
     expect(lobbyCss).toContain("html[data-theme='light'] .m2-lobby");
 
     // The theme-reactive token block itself carries no hardcoded hex colour.
@@ -508,6 +514,10 @@ describe('lobby.css visual invariants', () => {
     expect(lobbyCss).toContain('--m2-text: var(--app-text)');
     expect(lobbyCss).toContain('--m2-text-strong: var(--app-text-strong)');
     expect(lobbyCss).toContain('--m2-green: var(--app-accent)');
+    expect(lobbyCss).toContain('border-color: var(--ui-select-accent)');
+    expect(lobbyCss).toContain('background: var(--ui-select-bg)');
+    expect(lobbyCss).toContain('color: var(--ui-select-text)');
+    expect(lobbyCss).toContain('box-shadow: 0 0 10px 2px var(--ui-select-glow)');
     expect(lobbyCss).toMatch(/border-radius: var\(--app-roundness/);
     expect(lobbyCss).toContain("html[data-theme='light'] .m2-lobby");
   });
@@ -519,6 +529,70 @@ describe('lobby.css visual invariants', () => {
     expect(lobbyCss).toContain('min-width: 0');
     expect(lobbyCss).toContain('box-sizing: border-box');
     expect(lobbyCss).not.toMatch(/position:\s*(absolute|fixed)/);
+  });
+
+  it('T-96b: paints every M2 selection with the M1 cobalt --ui-select-* family', () => {
+    /** The declaration block of the first rule that starts with `selector`. */
+    const ruleFor = (selector: string) => {
+      const at = lobbyCss.indexOf(selector);
+      if (at < 0) return '';
+      const open = lobbyCss.indexOf('{', at);
+      return lobbyCss.slice(at, lobbyCss.indexOf('}', open) + 1);
+    };
+
+    // Active and hovered lobby tabs.
+    expect(ruleFor('.m2-lobby-tab.active')).toContain('var(--ui-select-accent)');
+    expect(ruleFor('.m2-lobby-tab.active')).toContain('var(--ui-select-bg)');
+    expect(ruleFor('.m2-lobby-tab.active')).toContain('var(--ui-select-text)');
+    expect(ruleFor('.m2-lobby-tab:hover')).toContain('var(--ui-select-accent)');
+
+    // Quick Pairing tiles.
+    expect(ruleFor('.quick-pair-tile:hover:not(:disabled)')).toContain(
+      'var(--ui-select-accent)',
+    );
+    expect(ruleFor('.quick-pair-tile:hover:not(:disabled)')).toContain(
+      'var(--ui-select-bg)',
+    );
+    expect(ruleFor('.quick-pair-tile:focus-visible:not(:disabled)')).toContain(
+      'var(--ui-select-accent)',
+    );
+
+    // Create a Game segmented controls, checkbox and primary submit button.
+    expect(ruleFor(".segmented-option[aria-pressed='true']")).toContain(
+      'border-color: var(--ui-select-accent)',
+    );
+    expect(ruleFor(".segmented-option[aria-pressed='true']")).toContain(
+      'background: var(--ui-select-bg)',
+    );
+    expect(ruleFor(".segmented-option[aria-pressed='true']")).toContain(
+      'color: var(--ui-select-text)',
+    );
+    expect(ruleFor('.segmented-option:hover')).toContain('var(--ui-select-accent)');
+    expect(ruleFor('.create-invite-toggle input')).toContain(
+      'accent-color: var(--ui-select-accent)',
+    );
+    expect(ruleFor('.m2-button {')).toContain('background: var(--ui-select-accent)');
+
+    // Secondary buttons and guest identity controls.
+    expect(ruleFor('.m2-button.secondary:hover:not(:disabled)')).toContain(
+      'var(--ui-select-accent)',
+    );
+    expect(ruleFor('.m2-button.secondary:hover:not(:disabled)')).toContain(
+      'var(--ui-select-text)',
+    );
+    expect(ruleFor('.m2-guest-badge:hover')).toContain('var(--ui-select-accent)');
+    expect(ruleFor('.m2-guest-input:focus-visible')).toContain('var(--ui-select-accent)');
+
+    // No selection rule may fall back to the attacker/status green.
+    for (const selector of [
+      '.m2-lobby-tab.active',
+      '.quick-pair-tile:hover:not(:disabled)',
+      ".segmented-option[aria-pressed='true']",
+      '.create-invite-toggle input',
+      '.m2-button {',
+    ]) {
+      expect(ruleFor(selector)).not.toContain('--m2-green');
+    }
   });
 
   it('keeps the M2 panel headings light on the dark panel', () => {
