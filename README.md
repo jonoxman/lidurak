@@ -10,50 +10,55 @@ Lidurak is a fast, minimalist, browser-based implementation of the classic Russi
 
 ### Prerequisites
 
-- **Java (JDK)** and **sbt** (Scala Build Tool) for the backend
-- **Node.js** and **npm** for the frontend
+- **Java Development Kit (JDK)** and **sbt** (for the Scala 3 backend)
+- **Node.js** and **npm** (for the Preact + TypeScript frontend)
+- **Bash** shell environment (Linux/macOS)
 
 ### Launching Locally
 
-Run the launcher script from the repository root to start both the backend and frontend servers together:
+Start both the backend server and the frontend development server from the repository root with:
 
 ```bash
 ./play-local.sh
 ```
 
-- **Backend API & WebSocket:** `http://localhost:8080`
-- **Frontend UI:** `http://localhost:5173`
-
-Press `Ctrl+C` in the terminal to stop both servers cleanly.
+Once running, open the local URL printed by the launcher in your browser to access the lobby and start playing.
 
 ## 2. Running Tests
 
 Run the backend and frontend test suites independently from their respective directories:
 
-```bash
-# Backend (Scala)
-cd backend && sbt -batch test
+- **Backend (`backend/`)**
+  ```bash
+  cd backend && sbt -batch test
+  ```
+- **Frontend (`frontend/`)**
+  ```bash
+  cd frontend && npm test -- --run
+  ```
 
-# Frontend
-cd frontend && npm test -- --run
-```
+## 3. UI & Gameplay Overview
 
-## 3. Gameplay Overview
+### Lobby & Matchmaking
 
-Lidurak is a web implementation of the classic card game Durak for **2 to 4 players**.
+From the lobby, you can start or join a match in several ways:
 
-- **Deck & Deal:** Matches with 2–3 players use a standard 36-card deck (Six through Ace); 4-player matches use a 52-card deck. Each player is dealt 6 cards, and the bottom card of the talon is placed face-up to establish the trump suit.
-- **Game Modes:** Supports local hotseat games, online multiplayer rooms and quick pairing, and AI opponents (`randomBot` and `basicBot`). Optional rules include attack redirection, chaos targeting, and transparent mode.
-- **Bout Flow:**
-  1. **Initial Attack:** The active attacker plays one or more cards of the same rank against a defender (up to the defender's starting hand size for the bout, capped at 6).
-  2. **Defense or Redirect:** The defender covers each attacking card with a higher-ranked card of the same suit or any trump card, redirects the attack (when enabled and holding a matching-rank card), or surrenders to pick up the cards on the table.
-  3. **Throw-Ins & Passing:** Other active players may throw in additional cards matching any rank currently on the table, or pass to finish the bout.
-  4. **Endgame:** Once the talon is empty, players who play out their last card finish in order. The final player remaining with cards is the **Durak**.
+- **Create a Game:** Configure a table for **2, 3, or 4 players** (using a 36-card deck for 2–3 players or a 52-card deck for 4 players), choose **Private invite link** or **Public lobby pool** visibility, toggle **Redirect / reflect** rules, and set the per-turn clock (**15s**, **30s**, or **60s**).
+- **Lobby Pool:** Browse open public rooms updated in real time and join any table with an open seat.
+- **Quick Pair:** Enter the matchmaking queue to be paired automatically with opponents.
+- **Local / Hotseat & Spectator Modes:** Play local or bot-filled games, switch seats in hotseat mode, or open a match as a spectator.
 
-## 4. User Interface Overview
+### Table Layout & Controls
 
-The game table uses a three-column desktop layout:
+Matches are rendered in a three-column layout designed to keep the table readable at all times:
 
-- **Left Sidebar:** Contains the How to Play reference, scenario preset controls, and hotseat player-switcher tabs.
-- **Center Felt Table:** Displays opponent seats along the top, the active attack/defense pairs and target indicators in the center, and the talon deck, trump card, your hand, card sorting controls, and contextual **Pass** / **Surrender** actions along the bottom.
-- **Right Sidebar:** Displays the turn countdown clock and final winner / Durak results when a match concludes.
+- **Left Sidebar:** Displays the **How to Play** reference, quick scenario presets, and hotseat seat-switcher tabs when playing locally.
+- **Center Felt Arena:** A 3×3 table grid showing opponent seats across the top, active attack/defense card pairs and target outlines in the center, and the talon deck, trump card, your hand, sort controls, and contextual **Pass** / **Surrender** button along the bottom.
+- **Right Sidebar:** Displays the digital turn countdown clock and end-of-game winner / Durak results.
+
+### Basic Gameplay
+
+- **Attacking & Throwing In:** Play one or more cards of matching rank to open a bout, or throw in additional cards matching ranks already on the table when allowed.
+- **Defending & Redirecting:** Cover each attacking card with a higher card of the same suit or a trump card. When redirect rules are enabled and legal, you may reflect the attack to the next seat by playing a card of matching rank.
+- **Passing & Surrendering:** Attackers can pass once they have no more cards to add; a defender who cannot or chooses not to cover can surrender the bout and pick up the table cards.
+- **Themes & Preferences:** Toggle between light and dark themes (or follow your device theme) and adjust visual settings from the top navigation bar.
