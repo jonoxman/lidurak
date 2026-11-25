@@ -5,14 +5,32 @@ import scala.util.Random
 object GameEngine:
 
   /** Cards dealt to every player at the start of the game. */
-  private val InitialHandSize = 6
+  val DefaultHandSize: Int = 6
 
   /**
    * Creates a fully initialized game: shuffled deck, hands, talon with the
    * revealed bottom trump, trump suit, and the first attacker/defender pair.
    */
   def createGame(config: GameConfig, playerNames: Vector[String]): GameState =
+    createGame(config, playerNames, DefaultHandSize)
+
+  /**
+   * Creates a game with a custom opening hand size.
+   *
+   * Every seat is dealt `initialHandSize` cards and the deal still reveals the
+   * bottom trump from what is left, so a QA small-hand preset is a real game
+   * that later refills to [[DefaultHandSize]] as usual.
+   */
+  def createGame(
+      config: GameConfig,
+      playerNames: Vector[String],
+      initialHandSize: Int
+  ): GameState =
     validate(config, playerNames)
+    if initialHandSize < 1 || initialHandSize > DefaultHandSize then
+      throw new IllegalArgumentException(
+        s"Initial hand size must be between 1 and $DefaultHandSize"
+      )
 
     val playerCount = config.playerCount
     val random = new Random(config.seed)
@@ -22,11 +40,11 @@ object GameEngine:
       PlayerState(
         id = s"p$idx",
         name = name,
-        hand = shuffled.slice(idx * InitialHandSize, (idx + 1) * InitialHandSize)
+        hand = shuffled.slice(idx * initialHandSize, (idx + 1) * initialHandSize)
       )
     }
 
-    val remaining = shuffled.drop(playerCount * InitialHandSize)
+    val remaining = shuffled.drop(playerCount * initialHandSize)
     if remaining.isEmpty then
       throw new IllegalStateException(
         s"Deck too small to reveal a bottom trump card for $playerCount players"
@@ -851,7 +869,7 @@ object GameEngine:
       else Vector.empty
 
     (attackerIdx +: (others ++ defenderOrder)).foldLeft(state) { (current, idx) =>
-      drawToHandSize(current, idx, InitialHandSize)
+      drawToHandSize(current, idx, DefaultHandSize)
     }
 
   /** Draws from the talon until the player holds `target` cards or it empties. */

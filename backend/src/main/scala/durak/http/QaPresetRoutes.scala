@@ -2,6 +2,7 @@ package durak.http
 
 import cats.effect.IO
 import cats.syntax.all.*
+import durak.lobby.{QuickPairBucketKey, QuickPairingService}
 import durak.protocol.ProtocolCodecs.given
 import durak.rooms.{CreateRoomConfig, RoomManager}
 import durak.session.{GuestSession, SessionCookie, SessionStore}
@@ -28,6 +29,15 @@ object QaPresetRoutes:
 
   /** Player count an `active-match` preset uses when the body omits one. */
   val DefaultPlayerCount: Int = 2
+
+  /** Opening hand size an `active-match` preset deals when the body omits one. */
+  val DefaultHandSize: Int = 6
+
+  /** Smallest opening hand the `active-match` preset can deal. */
+  val MinHandSize: Int = 2
+
+  /** Largest opening hand the `active-match` preset can deal. */
+  val MaxHandSize: Int = 6
 
   /** Synthetic hosts of the three seeded lobby rooms. */
   val SeedLobbyHosts: Vector[(String, String)] = Vector(
@@ -68,12 +78,11 @@ object QaPresetRoutes:
   val SpectatorSeats: Vector[(String, String)] = Vector(
     "qa-spec-p1" -> "QA Spectator One",
     "qa-spec-p2" -> "QA Spectator Two"
-  )
-
-  /** The preset endpoints, relative to the server root. */
+  )  /** The preset endpoints, relative to the server root. */
   def routes(
       store: SessionStore[IO],
-      roomManager: RoomManager[IO]
+      roomManager: RoomManager[IO],
+      quickPairing: QuickPairingService[IO]
   ): HttpRoutes[IO] = HttpRoutes.of[IO] {
 
     // Three real open rooms, so `/ws/lobby` immediately pushes joinable tables.
@@ -85,6 +94,12 @@ object QaPresetRoutes:
 
     case req @ POST -> Root / "api" / "qa" / "presets" / "spectator-match" =>
       spectatorMatch(store, roomManager, req)
+
+    // A queued reviewer waiting on the Lobby's persistent Searching state can
+    // fill their own bucket with synthetic opponents in one click; the real
+    // per-player `quickPairMatched` frame then does the navigation.
+    case req @ POST -> Root / "api" / "qa" / "presets" / "quick-pair-opponent" =>
+      quickPairOpponent(store, quickPairing, req)
   }
 
   private def seedLobby(roomManager: RoomManager[IO]): IO[Response[IO]] =
@@ -108,9 +123,9 @@ object QaPresetRoutes:
       roomManager: RoomManager[IO],
       req: Request[IO]
   ): IO[Response[IO]] =
-    playerCountOf(req).flatMap {
+    activeMatchParams(req).flatMap {
       case Left(error) => BadRequest(errorJson(error))
-      case Right(playerCount) =>
+      case Right((playerCount, handSize)) =>
         withSession(req, store) { (session, _) =>
           val opponents = (1 until playerCount).toVector.map { idx =>
             s"$SyntheticOpponentPrefix$idx" -> s"QA Opponent $idx"
@@ -125,14 +140,43 @@ object QaPresetRoutes:
               ),
               (session.playerId -> session.displayName) +: opponents,
               autoStartIfFull = true,
-              seed = Some(PresetSeed)
+              seed = Some(PresetSeed),
+              initialHandSize = handSize
             )
             .flatMap(room =>
               Ok(
                 Json.obj(
                   "gameId" -> room.gameId.asJson,
-                  "seatIndex" -> 0.asJson
+                  "seatIndex" -> 0.asJson,
+                  "handSize" -> handSize.asJson
                 )
+              )
+            )
+        }
+    }
+
+  /**
+   * Joins synthetic opponents to the caller's own quick-pair bucket, creating
+   * the room and publishing the per-player match notification exactly as a
+   * real opponent would. Without an active bucket the caller is queued into
+   * `2P • 15s • Redirect ON` and matched there.
+   */
+  private def quickPairOpponent(
+      store: SessionStore[IO],
+      quickPairing: QuickPairingService[IO],
+      req: Request[IO]
+  ): IO[Response[IO]] =
+    withSession(req, store) { (session, _) =>
+      quickPairing
+        .matchWithSyntheticOpponents(session, QuickPairBucketKey.Default)
+        .flatMap {
+          case Left(error) => BadRequest(errorJson(error))
+          case Right((gameId, seatIndex)) =>
+            Ok(
+              Json.obj(
+                "status" -> "matched".asJson,
+                "gameId" -> gameId.asJson,
+                "seatIndex" -> seatIndex.asJson
               )
             )
         }
@@ -164,21 +208,37 @@ object QaPresetRoutes:
         .flatMap(room => Ok(Json.obj("gameId" -> room.gameId.asJson)))
     }
 
-  /** `{ "playerCount": 2..4 }`, defaulting to two for an empty body. */
-  private def playerCountOf(req: Request[IO]): IO[Either[String, Int]] =
+  /**
+   * `{ "playerCount": 2..4, "handSize": 2..6 }`, defaulting to a two-player
+   * six-card match for an empty body.
+   */
+  private def activeMatchParams(req: Request[IO]): IO[Either[String, (Int, Int)]] =
     req.as[Json].attempt.map {
-      case Left(_) => Right(DefaultPlayerCount)
+      case Left(_) => Right((DefaultPlayerCount, DefaultHandSize))
       case Right(json) =>
-        json.hcursor.downField("playerCount").as[Int].toOption match
-          case None => Right(DefaultPlayerCount)
-          case Some(count)
-              if CreateRoomConfig.SupportedPlayerCounts.contains(count) =>
-            Right(count)
-          case Some(count) =>
-            Left(
-              s"Unsupported player count: $count (expected 2, 3, or 4)"
-            )
+        for
+          playerCount <- playerCountOf(json)
+          handSize <- handSizeOf(json)
+        yield (playerCount, handSize)
     }
+
+  private def playerCountOf(json: Json): Either[String, Int] =
+    json.hcursor.downField("playerCount").as[Int].toOption match
+      case None => Right(DefaultPlayerCount)
+      case Some(count) if CreateRoomConfig.SupportedPlayerCounts.contains(count) =>
+        Right(count)
+      case Some(count) =>
+        Left(s"Unsupported player count: $count (expected 2, 3, or 4)")
+
+  private def handSizeOf(json: Json): Either[String, Int] =
+    json.hcursor.downField("handSize").as[Int].toOption match
+      case None => Right(DefaultHandSize)
+      case Some(size) if size >= MinHandSize && size <= MaxHandSize =>
+        Right(size)
+      case Some(size) =>
+        Left(
+          s"Unsupported hand size: $size (expected $MinHandSize to $MaxHandSize)"
+        )
 
   /** A host that exists only for a preset room; it never holds a real token. */
   private def syntheticSession(
