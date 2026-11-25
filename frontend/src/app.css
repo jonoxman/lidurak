@@ -641,9 +641,15 @@ html[data-theme='light'] .error-banner {
 .status-name {
   min-width: 0;
   flex: 1 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* T-96 visual QA: the third (status) track always exists, so the name track
+     is only ~71px wide inside the 272px sidebar. Ellipsising it to `Guest-2...`
+     / `QA Spec...` was the source of 21 TEXT_CLIPPED_HORIZONTALLY issues, so
+     the name now wraps inside its own track instead. A wrapped line keeps
+     scrollWidth == clientWidth while `N cards` stays on the centred track. */
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
   color: var(--app-text-strong);
 }
 
@@ -1779,6 +1785,38 @@ html[data-theme='light'] .game-page .back-to-lobby:hover {
     background: #cbd5e1;
     border-color: #334155;
   }
+
+  html:not([data-theme]) .game-page .action-button:where(:not(.green, .red, .amber, .action-icon-btn)) {
+    background: #e2e8f0;
+    border: 1px solid #64748b;
+    color: #0f172a;
+    font-weight: 600;
+  }
+
+  html:not([data-theme]) .game-page .action-button:where(:not(.green, .red, .amber, .action-icon-btn)):hover {
+    background: #cbd5e1;
+    border-color: #334155;
+  }
+}
+
+/* T-96 visual QA: neutral `.action-button`s (the WaitingForPlayers "Copy link"
+   button, the game-over banner's lobby button, …) inherited
+   `.action-button { background: var(--durak-border); color: #f5f1e6; }` from
+   table.css. In Light theme `--durak-border` is #b9c2ce, i.e. off-white text on
+   pale cool grey. They now share Back to lobby's high-contrast slate surface.
+   Role buttons (green / red / amber) and the icon-only action bar keep their
+   own families via `:where()`'s zero specificity, and the rule is scoped to
+   the game page so lobby buttons are untouched. */
+html[data-theme='light'] .game-page .action-button:where(:not(.green, .red, .amber, .action-icon-btn)) {
+  background: #e2e8f0;
+  border: 1px solid #64748b;
+  color: #0f172a;
+  font-weight: 600;
+}
+
+html[data-theme='light'] .game-page .action-button:where(:not(.green, .red, .amber, .action-icon-btn)):hover {
+  background: #cbd5e1;
+  border-color: #334155;
 }
 
 /* ==========================================================================
