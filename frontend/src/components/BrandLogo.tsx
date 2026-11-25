@@ -100,7 +100,10 @@ export function getBrandLogoMosaicDataUri(theme: 'dark' | 'light'): string {
     ' font-weight="800" letter-spacing="4">' + BRAND_NAME + '</text>',
     '</svg>',
   ].join('');
-  return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+  // Parentheses stay unescaped in `encodeURIComponent`, and a CSS `url()`
+  // parser may reject them inside the data payload, so encode them explicitly.
+  const data = encodeURIComponent(svg).replace(/\(/g, '%28').replace(/\)/g, '%29');
+  return `url("data:image/svg+xml,${data}")`;
 }
 
 export default BrandLogo;

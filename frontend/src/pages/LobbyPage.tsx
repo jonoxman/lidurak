@@ -420,7 +420,9 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
                 onCancel={cancelSearch}
               />
             ) : null}
-            {tab === 'invite' ? <CreateInviteTab onCreated={openGame} /> : null}
+            {tab === 'invite' ? (
+              <CreateInviteTab guestName={session?.displayName} onCreated={openGame} />
+            ) : null}
             {poolOpened ? (
               <div class="m2-tab-panel" hidden={tab !== 'pool'}>
                 <LobbyPoolTab

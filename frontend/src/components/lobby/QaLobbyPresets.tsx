@@ -22,6 +22,7 @@ type PresetId =
   | 'active-match'
   | 'spectator-match'
   | 'quick-pair-opponent'
+  | 'quick-pair-52-opponent'
   | 'small-hand-match';
 
 /**
@@ -82,6 +83,14 @@ export function QaLobbyPresets({ onSeeded, onOpenGame }: QaLobbyPresetsProps) {
   const quickPairOpponent = () =>
     run('quick-pair-opponent', async () => {
       const match = await triggerQaQuickPairOpponent();
+      onOpenGame(match.gameId);
+    });
+
+  // T-90-3 ITEM-6b: fill the 2P 52-card bucket, so clicking "2P • 15s" with
+  // "52 cards" and then this button seats the reviewer in under 15 seconds.
+  const quickPair52Opponent = () =>
+    run('quick-pair-52-opponent', async () => {
+      const match = await triggerQaQuickPairOpponent({ deckSize: 52 });
       onOpenGame(match.gameId);
     });
 
@@ -146,6 +155,15 @@ export function QaLobbyPresets({ onSeeded, onOpenGame }: QaLobbyPresetsProps) {
           onClick={() => void quickPairOpponent()}
         >
           Match queued quick-pair opponent
+        </button>
+        <button
+          type="button"
+          class="m2-button secondary"
+          data-testid="qa-quick-pair-52-opponent"
+          disabled={pending !== null}
+          onClick={() => void quickPair52Opponent()}
+        >
+          Match queued 52-card opponent
         </button>
         <button
           type="button"

@@ -34,6 +34,7 @@ import * as sessionApi from '../api/sessionClient';
 import type { LobbyRoomSummary } from '../types/multiplayer';
 import lobbyCss from '../styles/lobby.css?raw';
 import { resetSettings, setSettings } from '../state/settings';
+import { CreateInviteTab } from '../components/lobby/CreateInviteTab';
 import { LobbyPage } from './LobbyPage';
 
 const checkServerHealth = client.checkServerHealth as unknown as ReturnType<typeof vi.fn>;
@@ -172,15 +173,19 @@ describe('M2 LobbyPage', () => {
   it('opens Quick Pairing on the Quick Pairing tab by default', () => {
     renderLobby();
 
-    expect(screen.getByRole('button', { name: /2P • 15s/ })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /2P • 30s/ })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /3P • 15s/ })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /3P • 30s/ })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /4P • 15s/ })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /4P • 30s/ })).toBeTruthy();
+    for (const id of [
+      'quick-pair-2-15',
+      'quick-pair-2-30',
+      'quick-pair-3-15',
+      'quick-pair-3-30',
+      'quick-pair-4-15',
+      'quick-pair-4-30',
+    ]) {
+      expect(screen.getByTestId(id)).toBeTruthy();
+    }
   });
 
-  it('ITEM-2a: renders all six quick-pairing tiles at double height', () => {
+  it('ITEM-2a / T-90-3 ITEM-7c: renders all twelve tiles at double height', () => {
     renderLobby();
 
     const ids = [
@@ -190,14 +195,21 @@ describe('M2 LobbyPage', () => {
       'quick-pair-3-30',
       'quick-pair-4-15',
       'quick-pair-4-30',
+      'quick-pair-52-2-15',
+      'quick-pair-52-2-30',
+      'quick-pair-52-3-30',
+      'quick-pair-bot-2-random',
+      'quick-pair-bot-2-basic',
+      'quick-pair-bot-4-basic',
     ];
     for (const id of ids) {
       const tile = screen.getByTestId(id);
       expect(tile.classList.contains('quick-pair-tile')).toBe(true);
       expect(tile.getAttribute('data-height')).toBe('double');
     }
+    expect(document.querySelectorAll('.quick-pair-tile')).toHaveLength(12);
 
-    // The layout is unchanged: the tile just grows, the 3x2 grid stays put.
+    // The layout is unchanged: the tile just grows, the 3x3 grid stays put.
     expect(lobbyCss).toMatch(/\.quick-pair-grid\s*\{[^}]*repeat\(3, minmax\(0, 1fr\)\)/);
     expect(lobbyCss).toMatch(/\.quick-pair-tile\s*\{[^}]*min-height:\s*7\.5rem/);
   });
@@ -265,7 +277,7 @@ describe('M2 LobbyPage', () => {
   it('ITEM-1b: stays on the lobby with the searching status while queued', async () => {
     renderLobby();
 
-    fireEvent.click(screen.getByRole('button', { name: /2P • 15s/ }));
+    fireEvent.click(screen.getByTestId('quick-pair-2-15'));
 
     await waitFor(() =>
       expect(joinQuickPair).toHaveBeenCalledWith({
@@ -292,7 +304,7 @@ describe('M2 LobbyPage', () => {
     });
     renderLobby();
 
-    fireEvent.click(screen.getByRole('button', { name: /2P • 15s/ }));
+    fireEvent.click(screen.getByTestId('quick-pair-2-15'));
 
     await expectGamePath('xyz98765');
     expect(screen.queryByTestId('quick-pair-searching')).toBeNull();
@@ -301,7 +313,7 @@ describe('M2 LobbyPage', () => {
   it('navigates when /ws/lobby pushes quickPairMatched to a waiting player', async () => {
     renderLobby();
 
-    fireEvent.click(screen.getByRole('button', { name: /2P • 15s/ }));
+    fireEvent.click(screen.getByTestId('quick-pair-2-15'));
     await screen.findByTestId('quick-pair-searching');
 
     act(() => {
@@ -321,7 +333,7 @@ describe('M2 LobbyPage', () => {
     });
     renderLobby();
 
-    fireEvent.click(screen.getByRole('button', { name: /3P • 30s/ }));
+    fireEvent.click(screen.getByTestId('quick-pair-3-30'));
 
     const searching = await screen.findByTestId('quick-pair-searching');
     expect(searching.textContent).toContain('3P • 30s');
@@ -421,6 +433,10 @@ describe('M2 LobbyPage', () => {
         allowRedirect: false,
         turnTimeoutSeconds: 30,
         isPublic: true,
+        deckSize: 52,
+        seatTypes: ['human', 'human', 'human', 'human'],
+        creatorSeatIndex: 0,
+        spectateAsCreator: false,
       }),
     );
     await expectGamePath('inv-1');
@@ -484,6 +500,18 @@ describe('M2 LobbyPage', () => {
     await expectGamePath('qa-pair-1');
   });
 
+  it('T-90-3 ITEM-6b: QA preset fills the 52-card quick-pair bucket', async () => {
+    triggerQaQuickPairOpponent.mockResolvedValue({ gameId: 'qa-pair-52', seatIndex: 0 });
+    renderLobby();
+
+    fireEvent.click(screen.getByTestId('qa-quick-pair-52-opponent'));
+
+    await waitFor(() =>
+      expect(triggerQaQuickPairOpponent).toHaveBeenCalledWith({ deckSize: 52 }),
+    );
+    await expectGamePath('qa-pair-52');
+  });
+
   it('T-90-6: launches a four-card small-hand match in one click', async () => {
     renderLobby();
 
@@ -493,6 +521,272 @@ describe('M2 LobbyPage', () => {
 
     await waitFor(() => expect(launchQaSmallHandMatch).toHaveBeenCalledTimes(1));
     await expectGamePath('small-1');
+  });
+
+  it('T-90-3 ITEM-6b: queues each 52-card tile with deckSize 52', async () => {
+    renderLobby();
+
+    const cases = [
+      ['quick-pair-52-2-15', 2, 15],
+      ['quick-pair-52-2-30', 2, 30],
+      ['quick-pair-52-3-30', 3, 30],
+    ] as const;
+
+    for (const [id, playerCount, turnTimeoutSeconds] of cases) {
+      joinQuickPair.mockResolvedValueOnce({
+        status: 'searching',
+        playerCount,
+        turnTimeoutSeconds,
+        allowRedirect: true,
+        queuedCount: 1,
+        requiredCount: playerCount,
+      });
+      expect(screen.getByTestId(id).textContent).toContain('52 cards');
+      fireEvent.click(screen.getByTestId(id));
+
+      await waitFor(() =>
+        expect(joinQuickPair).toHaveBeenLastCalledWith({
+          playerCount,
+          turnTimeoutSeconds,
+          allowRedirect: true,
+          deckSize: 52,
+        }),
+      );
+      await screen.findByTestId('quick-pair-searching');
+    }
+
+    expect(window.location.pathname).toBe('/');
+  });
+
+  /** ITEM-7c: bot seats are always ready, so the server answers `matched` and
+   * the lobby navigates in one click instead of showing a searching state. */
+  it('T-90-3 ITEM-7c: bot tiles start the match immediately', async () => {
+    renderLobby();
+
+    const cases = [
+      [
+        'quick-pair-bot-2-random',
+        {
+          playerCount: 2,
+          turnTimeoutSeconds: 15,
+          allowRedirect: true,
+          botOpponent: 'randomBot',
+        },
+        'bot-random',
+      ],
+      [
+        'quick-pair-bot-2-basic',
+        {
+          playerCount: 2,
+          turnTimeoutSeconds: 30,
+          allowRedirect: true,
+          botOpponent: 'basicBot',
+        },
+        'bot-basic',
+      ],
+      [
+        'quick-pair-bot-4-basic',
+        {
+          playerCount: 4,
+          turnTimeoutSeconds: 30,
+          allowRedirect: true,
+          botOpponent: 'basicBot',
+        },
+        'bot-3xbasic',
+      ],
+    ] as const;
+
+    for (const [id, request, gameId] of cases) {
+      joinQuickPair.mockResolvedValueOnce({ status: 'matched', gameId, seatIndex: 0 });
+      fireEvent.click(screen.getByTestId(id));
+
+      await expectGamePath(gameId);
+      expect(joinQuickPair).toHaveBeenLastCalledWith(request);
+      expect(screen.queryByTestId('quick-pair-searching')).toBeNull();
+      window.history.replaceState({}, '', '/');
+    }
+  });
+
+  /** ITEM-8b: one faded logo sliced across the tiles, never in the gaps. */
+  it('T-90-3 ITEM-8b: spreads one mosaic logo across all twelve tiles', () => {
+    renderLobby();
+
+    const tiles = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.quick-pair-tile'),
+    );
+    expect(tiles).toHaveLength(12);
+
+    const positions = new Set<string>();
+    tiles.forEach((tile, index) => {
+      expect(tile.getAttribute('data-mosaic-col')).toBe(String(index % 3));
+      expect(tile.getAttribute('data-mosaic-row')).toBe(String(Math.floor(index / 3)));
+      expect(tile.style.backgroundImage).toContain('data:image/svg+xml');
+      expect(tile.style.backgroundRepeat).toBe('no-repeat');
+      // JSDOM has no layout, so the pure-CSS fallback is in charge there.
+      expect(tile.style.backgroundSize).toContain('calc(var(--mosaic-cols)');
+      positions.add(tile.style.backgroundPosition);
+    });
+    // Every tile paints a different slice of the same logo.
+    expect(positions.size).toBe(12);
+
+    expect(lobbyCss).toMatch(/\.quick-pair-grid\s*\{[^}]*--mosaic-cols:\s*3/);
+    expect(lobbyCss).toMatch(/\.quick-pair-grid\s*\{[^}]*--mosaic-rows:\s*4/);
+    expect(lobbyCss).toMatch(/\.quick-pair-tile\s*\{[^}]*background-repeat:\s*no-repeat/);
+    // The slice is clipped by the rounded border, so it never leaks into a gap.
+    expect(lobbyCss).toMatch(/\.quick-pair-tile\s*\{[^}]*border-radius:/);
+  });
+
+  it('T-90-3 ITEM-8b: re-tints the mosaic when the profile theme changes', async () => {
+    renderLobby();
+
+    const tile = screen.getByTestId('quick-pair-2-15');
+    const dark = tile.style.backgroundImage;
+    expect(dark).toContain('data:image/svg+xml');
+
+    act(() => {
+      setSettings({ theme: 'light' });
+    });
+
+    await waitFor(() => expect(tile.style.backgroundImage).not.toBe(dark));
+    expect(tile.style.backgroundImage).toContain('data:image/svg+xml');
+  });
+
+  it('T-90-3 ITEM-6b: offers 36/52 cards and sends the chosen deck', async () => {
+    renderLobby();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Create a Game' }));
+    const deck = screen.getByTestId('create-game-deck-size');
+    const thirtySix = within(deck).getByRole('button', { name: '36 cards' });
+    const fiftyTwo = within(deck).getByRole('button', { name: '52 cards' });
+
+    expect(thirtySix.getAttribute('aria-pressed')).toBe('true');
+    expect((thirtySix as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(fiftyTwo);
+    expect(fiftyTwo.getAttribute('aria-pressed')).toBe('true');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
+    await waitFor(() =>
+      expect(createRoom).toHaveBeenCalledWith(
+        expect.objectContaining({ playerCount: 2, deckSize: 52 }),
+      ),
+    );
+  });
+
+  it('T-90-3 ITEM-6b: locks a four-player table to 52 cards', () => {
+    renderLobby();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Create a Game' }));
+    const deck = screen.getByTestId('create-game-deck-size');
+    const thirtySix = within(deck).getByRole('button', {
+      name: '36 cards',
+    }) as HTMLButtonElement;
+    const fiftyTwo = within(deck).getByRole('button', { name: '52 cards' });
+
+    fireEvent.click(screen.getByRole('button', { name: '4 players' }));
+    expect(thirtySix.disabled).toBe(true);
+    expect(fiftyTwo.getAttribute('aria-pressed')).toBe('true');
+
+    // A three-player table may still choose either deck.
+    fireEvent.click(screen.getByRole('button', { name: '3 players' }));
+    expect(thirtySix.disabled).toBe(false);
+    expect(within(deck).getByRole('button', { name: '52 cards' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '2 players' }));
+    expect(thirtySix.disabled).toBe(false);
+    expect(thirtySix.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('T-90-3 ITEM-7d: renders a visual seat map for the table size', () => {
+    renderLobby();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Create a Game' }));
+    const map = screen.getByTestId('create-game-seat-map');
+    expect(map.getAttribute('data-player-count')).toBe('2');
+    expect(within(map).getByTestId('seat-card-0').textContent).toContain('You');
+    expect(within(map).getByTestId('seat-card-1').textContent).toContain('Human');
+    expect(within(map).queryByTestId('seat-card-2')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '4 players' }));
+    expect(map.getAttribute('data-player-count')).toBe('4');
+    for (const index of [0, 1, 2, 3]) {
+      expect(screen.getByTestId(`seat-card-${index}`)).toBeTruthy();
+    }
+    expect(screen.queryByTestId('seat-card-4')).toBeNull();
+
+    // Desktop uses the right half of the panel; narrow screens stack.
+    expect(lobbyCss).toMatch(
+      /@media \(min-width: 900px\)\s*\{\s*\.create-invite-form\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) minmax\(0, 1fr\)/,
+    );
+    expect(lobbyCss).toMatch(/\.create-seat-map\s*\{[^}]*display:\s*grid/);
+  });
+
+  it('T-90-3 ITEM-7d: sends the per-seat bot plan with the creator in seat 0', async () => {
+    renderLobby();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Create a Game' }));
+    const seatOne = screen.getByTestId('seat-card-1');
+    fireEvent.click(within(seatOne).getByRole('button', { name: 'BasicBot' }));
+    expect(seatOne.getAttribute('data-seat-type')).toBe('basicBot');
+    expect(seatOne.textContent).toContain('BasicBot');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
+
+    await waitFor(() =>
+      expect(createRoom).toHaveBeenCalledWith(
+        expect.objectContaining({
+          playerCount: 2,
+          deckSize: 36,
+          seatTypes: ['human', 'basicBot'],
+          creatorSeatIndex: 0,
+          spectateAsCreator: false,
+        }),
+      ),
+    );
+    await expectGamePath('inv-1');
+  });
+
+  it('T-90-3 ITEM-7d: dev mode can deselect the creator for an all-bot spectate', async () => {
+    renderLobby();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Create a Game' }));
+    const seatZero = screen.getByTestId('seat-card-0');
+    fireEvent.click(within(seatZero).getByRole('button', { name: 'RandomBot' }));
+    expect(seatZero.getAttribute('data-seat-type')).toBe('randomBot');
+    fireEvent.click(
+      within(screen.getByTestId('seat-card-1')).getByRole('button', { name: 'BasicBot' }),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
+
+    await waitFor(() =>
+      expect(createRoom).toHaveBeenCalledWith(
+        expect.objectContaining({
+          seatTypes: ['randomBot', 'basicBot'],
+          creatorSeatIndex: null,
+          spectateAsCreator: true,
+        }),
+      ),
+    );
+    await expectGamePath('inv-1');
+  });
+
+  it('T-90-3 ITEM-7d: production mode locks seat 0 to the creator', () => {
+    render(
+      <CreateInviteTab allowAllBots={false} guestName="Mira" onCreated={vi.fn()} />,
+    );
+
+    const seatZero = screen.getByTestId('seat-card-0');
+    expect(seatZero.textContent).toContain('Mira');
+    for (const name of ['Human', 'RandomBot', 'BasicBot']) {
+      expect(
+        (within(seatZero).getByRole('button', { name }) as HTMLButtonElement).disabled,
+      ).toBe(true);
+    }
+
+    const seatOne = screen.getByTestId('seat-card-1');
+    expect(
+      (within(seatOne).getByRole('button', { name: 'BasicBot' }) as HTMLButtonElement).disabled,
+    ).toBe(false);
   });
 
   it('keeps the existing local game editor available below the M2 lobby', () => {
