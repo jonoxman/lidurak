@@ -121,3 +121,68 @@ class GameInitSuite extends munit.FunSuite:
       GameEngine.createGame(GameConfig(5, seed = 1L), names(5))
     }
   }
+
+  // --- Configured deck size (ITEM-6a) --------------------------------------
+
+  private def deckedGame(playerCount: Int, deckSize: Option[Int], seed: Long = 42L): GameState =
+    GameEngine.createGame(
+      GameConfig(playerCount, seed = seed, deckSize = deckSize),
+      names(playerCount)
+    )
+
+  test("a two-player 52-card game leaves a 40-card talon") {
+    val state = deckedGame(2, Some(52))
+    assertEquals(state.players.map(_.hand.size), Vector(6, 6))
+    assertEquals(state.talon.size, 40)
+
+    val allCards = state.players.flatMap(_.hand) ++ state.talon
+    assertEquals(allCards.size, 52)
+    assertEquals(allCards.distinct.size, 52)
+    assertEquals(allCards.toSet, Deck.standard52.toSet)
+  }
+
+  test("a three-player 52-card game leaves a 34-card talon") {
+    val state = deckedGame(3, Some(52))
+    assertEquals(state.players.map(_.hand.size), Vector(6, 6, 6))
+    assertEquals(state.talon.size, 34)
+    assertEquals((state.players.flatMap(_.hand) ++ state.talon).toSet, Deck.standard52.toSet)
+  }
+
+  test("two- and three-player games still default to the 36-card deck") {
+    assertEquals(deckedGame(2, None).talon.size, 24)
+    assertEquals(deckedGame(3, None).talon.size, 18)
+    assertEquals(deckedGame(2, Some(36)).talon.size, 24)
+    assertEquals(deckedGame(4, None).talon.size, 28)
+  }
+
+  test("an explicitly requested 52-card deck keeps every trump rule") {
+    val state = deckedGame(3, Some(52), seed = 7L)
+    assertEquals(state.bottomTrumpCard.map(_.suit), Some(state.trumpSuit))
+    assertEquals(state.talon.last, state.bottomTrumpCard.get)
+    assertEquals(state.defenderIdx, (state.attackerIdx + 1) % 3)
+    assertEquals(state.defenderInitialHandSize, 6)
+  }
+
+  test("createGame rejects an invalid deck setting") {
+    intercept[IllegalArgumentException] {
+      GameEngine.createGame(GameConfig(2, seed = 1L, deckSize = Some(40)), names(2))
+    }
+    val fourPlayer36 = intercept[IllegalArgumentException] {
+      GameEngine.createGame(GameConfig(4, seed = 1L, deckSize = Some(36)), names(4))
+    }
+    assert(fourPlayer36.getMessage.contains("four-player"), fourPlayer36.getMessage)
+  }
+
+  test("createGame stores the deck setting and the seat types on the config") {
+    val config = GameConfig(
+      playerCount = 2,
+      seed = 5L,
+      playerTypes = Vector(GameConfig.HumanSeat, GameConfig.BasicBotSeat),
+      deckSize = Some(52)
+    )
+    val state = GameEngine.createGame(config, names(2))
+    assertEquals(state.config.deckSize, Some(52))
+    assertEquals(state.config.seatType(1), GameConfig.BasicBotSeat)
+    assert(state.config.isBotSeat(1))
+    assert(!state.config.isBotSeat(0))
+  }

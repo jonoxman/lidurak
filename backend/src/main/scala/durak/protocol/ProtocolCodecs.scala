@@ -31,7 +31,8 @@ object ProtocolCodecs:
       "playerCount" -> config.playerCount.asJson,
       "allowRedirect" -> config.allowRedirect.asJson,
       "turnTimeoutSeconds" -> config.turnTimeoutSeconds.asJson,
-      "isPublic" -> config.isPublic.asJson
+      "isPublic" -> config.isPublic.asJson,
+      "deckSize" -> config.deckSize.asJson
     )
   }
 
@@ -50,7 +51,12 @@ object ProtocolCodecs:
         .downField("isPublic")
         .as[Option[Boolean]]
         .map(_.getOrElse(true))
-    yield RoomConfigView(playerCount, allowRedirect, turnTimeoutSeconds, isPublic)
+      // An older payload omits the deck setting; the player count then decides.
+      deckSize <- cursor
+        .downField("deckSize")
+        .as[Option[Int]]
+        .map(_.getOrElse(if playerCount == 4 then 52 else 36))
+    yield RoomConfigView(playerCount, allowRedirect, turnTimeoutSeconds, isPublic, deckSize)
   }
 
   // --- Static room views ---
@@ -326,7 +332,8 @@ object ProtocolCodecs:
       "allowRedirect" -> room.allowRedirect.asJson,
       "turnTimeoutSeconds" -> room.turnTimeoutSeconds.asJson,
       "createdAtEpochMs" -> room.createdAtEpochMs.asJson,
-      "isQuickPair" -> room.isQuickPair.asJson
+      "isQuickPair" -> room.isQuickPair.asJson,
+      "deckSize" -> room.deckSize.asJson
     )
   }
 
@@ -340,6 +347,12 @@ object ProtocolCodecs:
       turnTimeoutSeconds <- cursor.downField("turnTimeoutSeconds").as[Int]
       createdAtEpochMs <- cursor.downField("createdAtEpochMs").as[Long]
       isQuickPair <- cursor.downField("isQuickPair").as[Boolean]
+      // A payload from before the deck setting falls back to the player-count
+      // default: 52 cards for four players, 36 otherwise.
+      deckSize <- cursor
+        .downField("deckSize")
+        .as[Option[Int]]
+        .map(_.getOrElse(if playerCount == 4 then 52 else 36))
     yield LobbyRoomSummary(
       gameId = gameId,
       hostName = hostName,
@@ -348,7 +361,8 @@ object ProtocolCodecs:
       allowRedirect = allowRedirect,
       turnTimeoutSeconds = turnTimeoutSeconds,
       createdAtEpochMs = createdAtEpochMs,
-      isQuickPair = isQuickPair
+      isQuickPair = isQuickPair,
+      deckSize = deckSize
     )
   }
 

@@ -26,6 +26,14 @@ class QuickPairingServiceSpec extends munit.FunSuite:
     val service = QuickPairingService.create[IO](rooms).unsafeRunSync()
     Harness(rooms, service)
 
+  /** The same queue, but with the bot driver on for instant bot matches. */
+  private def botHarness(delay: FiniteDuration = 20.millis): Harness =
+    val rooms = RoomManager
+      .create[IO](startTurnClocks = false, botMoveDelay = delay)
+      .unsafeRunSync()
+    val service = QuickPairingService.create[IO](rooms).unsafeRunSync()
+    Harness(rooms, service)
+
   private def session(playerId: String, displayName: String = ""): GuestSession =
     GuestSession(
       token = s"token-$playerId",
@@ -225,4 +233,195 @@ class QuickPairingServiceSpec extends munit.FunSuite:
       room.seats.toString
     )
     assertEquals(h.service.statusFor("alice").unsafeRunSync(), None)
+  }
+
+  // --- Deck size buckets (ITEM-6a) -----------------------------------------
+
+  test("36-card and 52-card seekers in the same preset never cross-match") {
+    val h = harness()
+    val shortDeck = request(2, 15, true).copy(deckSize = Some(36))
+    val fullDeck = request(2, 15, true).copy(deckSize = Some(52))
+
+    assertEquals(searching(enqueue(h.service, session("short-a"), shortDeck), "short-a").queuedCount, 1)
+    assertEquals(searching(enqueue(h.service, session("full-a"), fullDeck), "full-a").queuedCount, 1)
+    assertEquals(h.rooms.roomCount.unsafeRunSync(), 0)
+
+    // Only the other 52-card seeker completes that bucket and gets the deck.
+    val (gameId, seat) = matched(enqueue(h.service, session("full-b"), fullDeck), "full-b")
+    assertEquals(seat, 1)
+    val room = h.rooms.getRoom(gameId).unsafeRunSync().getOrElse(fail("no room was created"))
+    assertEquals(room.config.effectiveDeckSize, 52)
+    assertEquals(room.config.deckSize, Some(52))
+    assertEquals(room.gameState.map(_.talon.size), Some(40))
+
+    // The 36-card seeker is untouched and still waiting.
+    assertEquals(
+      h.service.statusFor("short-a").unsafeRunSync().map(_.key.deckSize),
+      Some(36)
+    )
+
+    // A 52-card 3P bucket is separate from the 36-card one too.
+    assertEquals(
+      searching(enqueue(h.service, session("three-full"), request(3, 30).copy(deckSize = Some(52))), "three-full").queuedCount,
+      1
+    )
+    assertEquals(
+      searching(enqueue(h.service, session("three-short"), request(3, 30)), "three-short").queuedCount,
+      1
+    )
+    assertEquals(h.rooms.roomCount.unsafeRunSync(), 1)
+  }
+
+  test("a four-player bucket always records the 52-card deck") {
+    val h = harness()
+    val waiting = searching(enqueue(h.service, session("alice"), request(4)), "alice")
+    assertEquals(waiting.key.deckSize, 52)
+  }
+
+  // --- Instant bot quick pairing (ITEM-7a) ---------------------------------
+
+  test("a bot opponent starts a match immediately and never joins the human queue") {
+    val h = botHarness(delay = 10.seconds)
+    val result = h.service
+      .enqueue(session("solo", "Solo"), request(2, 30).copy(botOpponent = Some("basicBot")))
+      .unsafeRunSync()
+      .getOrElse(fail("the bot match was rejected"))
+    val (gameId, seat) = matched(result, "solo")
+    assertEquals(seat, 0)
+
+    val room = h.rooms.getRoom(gameId).unsafeRunSync().getOrElse(fail("no room was created"))
+    assertEquals(room.status, RoomStatus.InProgress)
+    assertEquals(room.config.playerCount, 2)
+    assertEquals(room.config.turnTimeoutSeconds, 30)
+    assertEquals(room.config.effectiveDeckSize, 36)
+    assertEquals(room.seats.head.playerId, Some("solo"))
+    assertEquals(room.seats(1).displayName, Some("BasicBot"))
+    assertEquals(room.seats.head.seatType, "human")
+    assertEquals(room.seats(1).seatType, "basicBot")
+    assertEquals(room.gameState.map(_.config.seatType(1)), Some("basicBot"))
+    assertEquals(room.gameState.map(_.players.map(_.hand.size)), Some(Vector(6, 6)))
+
+    // Nothing was queued and nothing was published to the open pool.
+    assertEquals(h.service.statusFor("solo").unsafeRunSync(), None)
+    assertEquals(h.rooms.listOpenPublicRooms.unsafeRunSync(), Nil)
+
+    // A human seeker still waits alone: bots are never queue members.
+    assertEquals(searching(enqueue(h.service, session("human"), request(2)), "human").queuedCount, 1)
+    assertEquals(h.rooms.roomCount.unsafeRunSync(), 1)
+  }
+
+  test("a four-player bot match seats three distinct bots") {
+    val h = botHarness(delay = 10.seconds)
+    val (gameId, seat) = matched(
+      h.service
+        .enqueue(session("solo"), request(4).copy(botOpponent = Some("randomBot")))
+        .unsafeRunSync()
+        .getOrElse(fail("the bot match was rejected")),
+      "solo"
+    )
+    assertEquals(seat, 0)
+
+    val room = h.rooms.getRoom(gameId).unsafeRunSync().getOrElse(fail("no room was created"))
+    assertEquals(room.config.playerCount, 4)
+    assertEquals(room.config.effectiveDeckSize, 52)
+    assertEquals(room.seats.map(_.seatType), Vector("human", "randomBot", "randomBot", "randomBot"))
+    assertEquals(
+      room.seats.map(_.displayName),
+      Vector(Some("Player solo"), Some("RandomBot 1"), Some("RandomBot 2"), Some("RandomBot 3"))
+    )
+    assertEquals(room.seats.map(_.playerId).distinct.size, 4)
+    assertEquals(room.gameState.map(_.talon.size), Some(52 - 24))
+  }
+
+  test("a bot opponent can be requested with the 52-card deck") {
+    val h = botHarness(delay = 10.seconds)
+    val (gameId, _) = matched(
+      h.service
+        .enqueue(session("solo"), request(2).copy(deckSize = Some(52), botOpponent = Some("randomBot")))
+        .unsafeRunSync()
+        .getOrElse(fail("the bot match was rejected")),
+      "solo"
+    )
+    val room = h.rooms.getRoom(gameId).unsafeRunSync().getOrElse(fail("no room was created"))
+    assertEquals(room.config.effectiveDeckSize, 52)
+    assertEquals(room.gameState.map(_.talon.size), Some(40))
+    assertEquals(room.gameState.map(_.config.seatType(1)), Some("randomBot"))
+  }
+
+  test("invalid deck sizes and bot opponents are rejected without creating anything") {
+    val h = harness()
+
+    val badDeck = h.service
+      .enqueue(session("a"), request(2).copy(deckSize = Some(40)))
+      .unsafeRunSync()
+    assert(badDeck.isLeft, "a 40-card deck was accepted")
+    assertEquals(
+      h.service.enqueue(session("b"), request(4).copy(deckSize = Some(36))).unsafeRunSync().isLeft,
+      true,
+      "a four-player 36-card request was accepted"
+    )
+    val badBot = h.service
+      .enqueue(session("c"), request(2).copy(botOpponent = Some("grandmasterBot")))
+      .unsafeRunSync()
+    assert(badBot.isLeft, "an unknown bot opponent was accepted")
+
+    // None of the rejects left a queue entry or a room behind.
+    List("a", "b", "c").foreach { playerId =>
+      assertEquals(h.service.statusFor(playerId).unsafeRunSync(), None, playerId)
+    }
+    assertEquals(h.rooms.roomCount.unsafeRunSync(), 0)
+  }
+
+  test("a caller already queued in a normal bucket is moved into the bot match") {
+    val h = botHarness(delay = 10.seconds)
+    assertEquals(searching(enqueue(h.service, session("alice"), request(3)), "alice").queuedCount, 1)
+
+    val (gameId, seat) = matched(
+      h.service
+        .enqueue(session("alice"), request(2).copy(botOpponent = Some("basicBot")))
+        .unsafeRunSync()
+        .getOrElse(fail("the bot match was rejected")),
+      "alice"
+    )
+    assertEquals(seat, 0)
+    assertEquals(h.service.statusFor("alice").unsafeRunSync(), None)
+    assertEquals(h.rooms.getRoom(gameId).unsafeRunSync().map(_.status), Some(RoomStatus.InProgress))
+  }
+
+  // --- QA hook with a non-default bucket -----------------------------------
+
+  test("synthetic opponents fill a waiting 52-card bucket in place") {
+    val h = harness()
+    assertEquals(
+      searching(enqueue(h.service, session("alice"), request(2).copy(deckSize = Some(52))), "alice").key.deckSize,
+      52
+    )
+
+    val (gameId, seat) = h.service
+      .matchWithSyntheticOpponents(session("alice"))
+      .unsafeRunSync()
+      .getOrElse(fail("the synthetic match was rejected"))
+    assertEquals(seat, 0)
+
+    val room = h.rooms.getRoom(gameId).unsafeRunSync().getOrElse(fail("no room was created"))
+    assertEquals(room.status, RoomStatus.InProgress)
+    assertEquals(room.config.playerCount, 2)
+    assertEquals(room.config.effectiveDeckSize, 52)
+    assertEquals(room.gameState.map(_.talon.size), Some(40))
+    assertEquals(h.service.statusFor("alice").unsafeRunSync(), None)
+  }
+
+  test("the QA fallback bucket honours an explicit 52-card deck") {
+    val h = harness()
+    val (gameId, seat) = h.service
+      .matchWithSyntheticOpponents(
+        session("alice"),
+        QuickPairBucketKey.Default.copy(deckSize = 52)
+      )
+      .unsafeRunSync()
+      .getOrElse(fail("the synthetic match was rejected"))
+    assertEquals(seat, 0)
+    val room = h.rooms.getRoom(gameId).unsafeRunSync().getOrElse(fail("no room was created"))
+    assertEquals(room.config.playerCount, 2)
+    assertEquals(room.config.effectiveDeckSize, 52)
   }

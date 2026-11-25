@@ -3,7 +3,7 @@ package durak.rooms
 import cats.effect.{Async, Deferred, Fiber, Ref, Resource}
 import cats.effect.std.{Queue, Semaphore}
 import cats.syntax.all.*
-import durak.engine.{GameAction, GameConfig, GameEngine, GameState}
+import durak.engine.{BasicBot, BoutPhase, GameAction, GameConfig, GameEngine, GameState}
 import durak.protocol.{
   LobbyRoomSummary,
   PlayerGameView,
@@ -30,7 +30,8 @@ import scala.concurrent.duration.*
 private[rooms] final case class ManagedRoom[F[_]](
     state: Ref[F, GameRoom],
     clients: Ref[F, Vector[ConnectedClient[F]]],
-    clock: Ref[F, Option[Fiber[F, Throwable, Unit]]]
+    clock: Ref[F, Option[Fiber[F, Throwable, Unit]]],
+    bots: Ref[F, Option[Fiber[F, Throwable, Unit]]]
 )
 
 /**
@@ -49,13 +50,20 @@ private[rooms] final case class ManagedRoom[F[_]](
  * @param startTurnClocks whether a started match forks its timeout monitor;
  *                        tests can turn the fork off and drive
  *                        [[enforceTurnTimeout]] deterministically instead.
+ * @param botMoveDelay    how long a bot waits before each of its moves, so a
+ *                        reviewer can follow the live table.
+ * @param devMode         whether a creator may start an all-bot room without
+ *                        occupying a seat and watch it as a spectator. In
+ *                        production (`false`) the creator must take a seat.
  */
 final class RoomManager[F[_]](
     rooms: Ref[F, Map[String, ManagedRoom[F]]],
     lobbyTopic: Topic[F, List[LobbyRoomSummary]],
     mutex: Semaphore[F],
     startTurnClocks: Boolean,
-    clockPollInterval: FiniteDuration
+    clockPollInterval: FiniteDuration,
+    botMoveDelay: FiniteDuration,
+    devMode: Boolean
 )(using F: Async[F]):
 
   import RoomManager.*
@@ -73,35 +81,77 @@ final class RoomManager[F[_]](
       host: GuestSession,
       config: CreateRoomConfig
   ): F[Either[String, (GameRoom, Int)]] =
+    createRoomWithSeats(host, config).map(
+      _.map(creation => (creation.room, creation.seatIndex.getOrElse(0)))
+    )
+
+  /**
+   * Creates a room from a per-seat plan and seats (or deliberately does not
+   * seat) the creator.
+   *
+   * `seatTypes` names who plays every seat (`"human"`, `"randomBot"` or
+   * `"basicBot"`); an empty vector means every seat is human. Bot seats are
+   * pre-populated immediately, so they never wait for a player. When the plan
+   * leaves no open human seat (for example one human plus bots, or an all-bot
+   * dev room) the match is dealt and started right away.
+   *
+   * `spectateAsCreator` (or a plan of nothing but bots) makes the creator a
+   * spectator: they occupy no seat and only watch `room`'s live projection.
+   * That is a dev-mode ability; with [[devMode]] off the request is rejected
+   * because production games require the creator to take a seat.
+   */
+  def createRoomWithSeats(
+      host: GuestSession,
+      config: CreateRoomConfig,
+      seatTypes: Vector[String] = Vector.empty,
+      creatorSeatIndex: Option[Int] = None,
+      spectateAsCreator: Boolean = false
+  ): F[Either[String, RoomCreation]] =
     config.validate match
       case Left(error) => F.pure(Left(error))
       case Right(valid) =>
-        nowMs.flatMap { now =>
-          mutex.permit.use { _ =>
-            freshGameId.flatMap { gameId =>
-              val hostSeat =
-                SeatSlot(0, Some(host.playerId), Some(host.displayName))
-              val room = GameRoom(
-                gameId = gameId,
-                config = valid,
-                status = RoomStatus.WaitingForPlayers,
-                seats = Vector.tabulate(valid.playerCount) { seatIndex =>
-                  if seatIndex == 0 then hostSeat
-                  else SeatSlot(seatIndex, None, None)
-                },
-                gameState = None,
-                turnDeadlineEpochMs = None,
-                createdAtEpochMs = now,
-                hostName = host.displayName
-              )
-              for
-                managed <- newManaged(room)
-                _ <- rooms.update(_.updated(gameId, managed))
-                _ <- publishLobby
-              yield Right((room, 0))
+        seatPlan(valid, seatTypes, creatorSeatIndex, spectateAsCreator) match
+          case Left(error) => F.pure(Left(error))
+          case Right((types, creatorSeat)) =>
+            nowMs.flatMap { now =>
+              mutex.permit.use { _ =>
+                freshGameId.flatMap { gameId =>
+                  val seats = Vector.tabulate(valid.playerCount) { seatIndex =>
+                    if creatorSeat.contains(seatIndex) then
+                      SeatSlot(
+                        seatIndex,
+                        Some(host.playerId),
+                        Some(host.displayName),
+                        GameConfig.HumanSeat
+                      )
+                    else
+                      openSeat(gameId, seatIndex, types)
+                  }
+                  val base = GameRoom(
+                    gameId = gameId,
+                    config = valid,
+                    status = RoomStatus.WaitingForPlayers,
+                    seats = seats,
+                    gameState = None,
+                    turnDeadlineEpochMs = None,
+                    createdAtEpochMs = now,
+                    hostName = host.displayName
+                  )
+                  for
+                    // Bots are always ready, so a plan with no open human seat
+                    // deals and starts in the same transition.
+                    stored <-
+                      if seats.forall(_.isOccupied) then startRoom(base, None, now)
+                      else F.pure(base)
+                    managed <- newManaged(stored)
+                    _ <- rooms.update(_.updated(gameId, managed))
+                    _ <- ensureClock(managed)
+                    _ <- ensureBots(managed)
+                    _ <- publishLobby
+                  yield Right(RoomCreation(stored, creatorSeat))
+                }
+              }
             }
-          }
-        }
 
   /**
    * Creates a room that is already partly (or fully) seated, for the 1-click QA
@@ -116,7 +166,8 @@ final class RoomManager[F[_]](
       autoStartIfFull: Boolean,
       seed: Option[Long] = None,
       initialHandSize: Int = GameEngine.DefaultHandSize,
-      firstAttackerIdx: Option[Int] = None
+      firstAttackerIdx: Option[Int] = None,
+      seatTypes: Vector[String] = Vector.empty
   ): F[GameRoom] =
     config.validate match
       case Left(error) => F.raiseError(new IllegalArgumentException(error))
@@ -131,12 +182,14 @@ final class RoomManager[F[_]](
           nowMs.flatMap { now =>
             mutex.permit.use { _ =>
               freshGameId.flatMap { gameId =>
+                val types =
+                  GameConfig.normalizePlayerTypes(valid.playerCount, seatTypes)
                 val seats = Vector.tabulate(valid.playerCount) { seatIndex =>
                   prefilledSeats.lift(seatIndex) match
                     case Some((playerId, displayName)) =>
-                      SeatSlot(seatIndex, Some(playerId), Some(displayName))
+                      SeatSlot(seatIndex, Some(playerId), Some(displayName), types(seatIndex))
                     case None =>
-                      SeatSlot(seatIndex, None, None)
+                      openSeat(gameId, seatIndex, types)
                 }
                 val base = GameRoom(
                   gameId = gameId,
@@ -156,6 +209,7 @@ final class RoomManager[F[_]](
                   managed <- newManaged(stored)
                   _ <- rooms.update(_.updated(gameId, managed))
                   _ <- ensureClock(managed)
+                  _ <- ensureBots(managed)
                   _ <- publishLobby
                 yield stored
               }
@@ -231,6 +285,7 @@ final class RoomManager[F[_]](
                         _ <- broadcastViews(managed)
                         _ <- publishLobby
                         _ <- if filled then ensureClock(managed) else F.unit
+                        _ <- ensureBots(managed)
                       yield Right((view, seatIdx))
           }
       )
@@ -255,9 +310,14 @@ final class RoomManager[F[_]](
                   F.pure(Left(s"$playerId is not seated in room $gameId"))
                 case Some(seatIdx) =>
                   val vacated = room.copy(
-                    seats = room.seats.updated(seatIdx, SeatSlot(seatIdx, None, None))
+                    seats = room.seats.updated(
+                      seatIdx,
+                      SeatSlot(seatIdx, None, None, GameConfig.HumanSeat)
+                    )
                   )
-                  val stillOccupied = vacated.seats.exists(_.isOccupied)
+                  // A room whose last human leaves is removed even when bot
+                  // seats are still occupied: nobody could ever finish it.
+                  val stillOccupied = vacated.seats.exists(seat => seat.isOccupied && !seat.isBot)
                   for
                     _ <-
                       if stillOccupied then managed.state.set(vacated)
@@ -383,6 +443,8 @@ final class RoomManager[F[_]](
                         _ <- managed.state.set(updated)
                         _ <- broadcastViews(managed)
                         _ <- publishLobby
+                        // A human move can hand the clock to a bot seat.
+                        _ <- ensureBots(managed)
                       yield Right(())
                     }
               case _ =>
@@ -428,6 +490,7 @@ final class RoomManager[F[_]](
                             _ <- managed.state.set(afterMove(room, next, nowEpochMs))
                             _ <- broadcastViews(managed)
                             _ <- publishLobby
+                            _ <- ensureBots(managed)
                           yield Right(true)
                         case Some(Left(reason)) => F.pure(Left(reason))
                         case None               => F.pure(Right(false))
@@ -453,7 +516,213 @@ final class RoomManager[F[_]](
       state <- Ref.of[F, GameRoom](room)
       clients <- Ref.of[F, Vector[ConnectedClient[F]]](Vector.empty)
       clock <- Ref.of[F, Option[Fiber[F, Throwable, Unit]]](None)
-    yield ManagedRoom(state, clients, clock)
+      bots <- Ref.of[F, Option[Fiber[F, Throwable, Unit]]](None)
+    yield ManagedRoom(state, clients, clock, bots)
+
+  // --- Seat plans ----------------------------------------------------------
+
+  /**
+   * Resolves who plays each seat and where (if anywhere) the creator sits.
+   *
+   * Every rejected plan becomes a human-readable reason, which the REST layer
+   * answers with HTTP 400. Bot seats are validated strictly, so a typo can
+   * never silently become a human seat waiting for a second player.
+   */
+  private def seatPlan(
+      config: CreateRoomConfig,
+      requestedTypes: Vector[String],
+      requestedCreatorSeat: Option[Int],
+      spectateAsCreator: Boolean
+  ): Either[String, (Vector[String], Option[Int])] =
+    val parsed: Either[String, Vector[String]] =
+      if requestedTypes.isEmpty then
+        Right(Vector.fill(config.playerCount)(GameConfig.HumanSeat))
+      else if requestedTypes.size != config.playerCount then
+        Left(
+          s"seatTypes must have exactly ${config.playerCount} entries, got ${requestedTypes.size}"
+        )
+      else
+        requestedTypes.toVector
+          .traverse(value =>
+            GameConfig
+              .parseSeatType(value)
+              .toRight(s"Unsupported seat type: $value (expected human, randomBot, or basicBot)")
+          )
+          .map(_.toVector)
+
+    parsed.flatMap { types =>
+      val allBots = types.forall(GameConfig.isBotType)
+      val creatorSpectates = spectateAsCreator || allBots
+
+      if creatorSpectates && !devMode then Left("Creator must occupy a seat")
+      else if spectateAsCreator && !allBots then
+        Left("Spectating a created room requires every seat to be a bot")
+      else if creatorSpectates then Right((types, None))
+      else
+        val seat =
+          requestedCreatorSeat.getOrElse(types.indexWhere(_ == GameConfig.HumanSeat))
+        if seat < 0 || seat >= config.playerCount then
+          Left(s"creatorSeatIndex must be between 0 and ${config.playerCount - 1}")
+        else if types(seat) != GameConfig.HumanSeat then
+          Left(s"creatorSeatIndex $seat is not a human seat")
+        else Right((types, Some(seat)))
+    }
+
+  /**
+   * The seat a player (or a bot) has to claim: bot seats are occupied at once,
+   * a human seat stays open until somebody joins it.
+   */
+  private def openSeat(gameId: String, seatIndex: Int, types: Vector[String]): SeatSlot =
+    val seatType = types.lift(seatIndex).getOrElse(GameConfig.HumanSeat)
+    if GameConfig.isBotType(seatType) then botSeat(gameId, seatIndex, seatType, types)
+    else SeatSlot(seatIndex, None, None, GameConfig.HumanSeat)
+
+  /**
+   * A pre-populated bot seat. Its id is unique per room, and its display name is
+   * the bare bot name unless several seats share one bot type, in which case a
+   * seat ordinal keeps the table readable (`BasicBot 1`, `BasicBot 2`, ...).
+   */
+  private def botSeat(
+      gameId: String,
+      seatIndex: Int,
+      seatType: String,
+      types: Vector[String]
+  ): SeatSlot =
+    val label =
+      if seatType == GameConfig.BasicBotSeat then "BasicBot" else "RandomBot"
+    val total = types.count(_ == seatType)
+    val ordinal = types.take(seatIndex).count(_ == seatType) + 1
+    val name = if total > 1 then s"$label $ordinal" else label
+    SeatSlot(seatIndex, Some(s"bot-$gameId-$seatIndex"), Some(name), seatType)
+
+  // --- Bot driver ----------------------------------------------------------
+
+  /** True when the room has at least one computer seat, i.e. a bot match. */
+  private def isBotMatch(room: GameRoom): Boolean = room.seats.exists(_.isBot)
+
+  /**
+   * True when the driver still has work: a bot seat is prompted, or a bot match
+   * needs its last settling pass.
+   */
+  private def hasPendingWork(room: GameRoom): Boolean =
+    room.status == RoomStatus.InProgress && isBotMatch(room) &&
+      room.gameState.exists(state =>
+        !state.isGameOver &&
+          (state.promptedPlayerSeats.exists(state.config.isBotSeat) || settlingPass(state).nonEmpty)
+      )
+
+  /**
+   * Starts the room's bot driver once, when a bot match still needs a move.
+   *
+   * Bots are driven from `state.promptedPlayerSeats`, not only from
+   * `turnPlayerIdx`, so they also act during throw-in / pass windows where
+   * several seats (and possibly several bots) are prompted at once. The
+   * [[settlingPass]] case covers the one position the engine leaves nobody on
+   * the clock for: a bout whose attacks are all covered while the attacker has
+   * no cards left, which needs a single `PassTurn` before it can settle.
+   */
+  private def ensureBots(managed: ManagedRoom[F]): F[Unit] =
+    managed.state.get.flatMap { room =>
+      if !hasPendingWork(room) then F.unit
+      else
+        managed.bots.get.flatMap {
+          case Some(_) => F.unit
+          case None =>
+            F.start(botLoop(managed)).flatMap(fiber => managed.bots.set(Some(fiber)))
+        }
+    }
+
+  private def stopBots(managed: ManagedRoom[F]): F[Unit] =
+    managed.bots.getAndSet(None).flatMap(_.traverse_(_.cancel))
+
+  /**
+   * The bot driver: sleep `botMoveDelay`, play the first prompted bot move, and
+   * repeat until no bot seat is prompted any more (or the match ends).
+   */
+  private def botLoop(managed: ManagedRoom[F]): F[Unit] =
+    F.defer {
+      F.sleep(botMoveDelay) *> playOneBotMove(managed)
+    }.flatMap { moved =>
+      if moved then botLoop(managed) else managed.bots.set(None)
+    }.handleErrorWith(_ => managed.bots.set(None))
+
+  /**
+   * Plays one move for the first bot seat the game is waiting on. Returns
+   * `false` when the room has nothing left for a bot to do (finished match, no
+   * prompted bot, or no legal move), which stops the driver.
+   */
+  private def playOneBotMove(managed: ManagedRoom[F]): F[Boolean] =
+    mutex.permit.use { _ =>
+      managed.state.get.flatMap { room =>
+        val live =
+          if room.status == RoomStatus.InProgress then room.gameState.filterNot(_.isGameOver)
+          else None
+
+        live.flatMap(state => botMoveFor(state).map((state, _))) match
+          case None => F.pure(false)
+          case Some((state, move)) =>
+            GameEngine.applyAction(state, move) match
+              case Left(_) => F.pure(false)
+              case Right(next) =>
+                nowMs.flatMap { now =>
+                  for
+                    _ <- managed.state.set(afterMove(room, next, now))
+                    _ <- broadcastViews(managed)
+                    _ <- publishLobby
+                  yield true
+                }
+      }
+    }
+
+  /**
+   * The move a bot match plays next: the policy or random pick of the first
+   * prompted bot seat, or — when no seat is prompted any more — the settling
+   * pass a fully covered bout still needs.
+   */
+  private def botMoveFor(state: GameState): Option[GameAction] =
+    val prompted =
+      state.promptedPlayerSeats
+        .filter(state.config.isBotSeat)
+        .iterator
+        .flatMap(seatIdx => state.players.lift(seatIdx).map(bot => (seatIdx, bot)))
+        .filter { case (_, bot) => bot.isActive }
+        .flatMap { case (seatIdx, bot) =>
+          chooseBotAction(state, bot.id, state.config.seatType(seatIdx))
+        }
+        .nextOption()
+    prompted.orElse(settlingPass(state))
+
+  /** A bot's move: [[BasicBot]]'s policy or [[GameEngine]]'s random pick. */
+  private def chooseBotAction(
+      state: GameState,
+      botId: String,
+      seatType: String
+  ): Option[GameAction] =
+    if seatType == GameConfig.BasicBotSeat then BasicBot.chooseAction(state, botId)
+    else GameEngine.randomLegalAction(state, botId)
+
+  /**
+   * The final `PassTurn` a covered bout still needs when nobody is prompted.
+   *
+   * In a two-player game the attacker can empty their hand into a covered table
+   * with the talon already gone; the engine then accepts their pass to settle
+   * the bout, but nobody is "on the clock", so a room would otherwise freeze.
+   * This mirrors `durak.server.GameActor`'s settling pass: it is only offered
+   * when every attacking card is covered and no seat at all is prompted, so it
+   * never takes a real choice away from a human seat.
+   */
+  private def settlingPass(state: GameState): Option[GameAction] =
+    if state.isGameOver ||
+      state.promptedPlayerSeats.nonEmpty ||
+      state.boutPhase != BoutPhase.Defense ||
+      state.tablePairs.isEmpty ||
+      state.tablePairs.exists(_.defense.isEmpty)
+    then None
+    else
+      state.players.zipWithIndex.iterator
+        .filter { case (player, idx) => idx != state.defenderIdx && player.isActive }
+        .map { case (player, _) => GameAction.PassTurn(player.id) }
+        .find(action => GameEngine.applyAction(state, action).isRight)
 
   /**
    * Deals the match once every seat is filled. Player ids are re-stamped from
@@ -483,7 +752,10 @@ final class RoomManager[F[_]](
     val engineConfig = GameConfig(
       playerCount = room.config.playerCount,
       allowRedirect = room.config.allowRedirect,
-      seed = seed
+      seed = seed,
+      // Every seat's type (and so every bot seat) comes from the room itself.
+      playerTypes = room.seats.map(_.seatType),
+      deckSize = room.config.deckSize
     )
     val names = room.seats.map(seat => seat.displayName.getOrElse("Player"))
     val dealt = GameEngine.createGame(engineConfig, names, initialHandSize, firstAttackerIdx)
@@ -532,13 +804,20 @@ final class RoomManager[F[_]](
         turnDeadlineEpochMs = deadlineFor(stamped, room.config.turnTimeoutSeconds, now)
       )
 
-  /** The single definition of when the current turn expires. */
+  /**
+   * The single definition of when the current turn expires.
+   *
+   * Only a human on the clock gets a deadline: a bot seat is driven by the bot
+   * loop after [[botMoveDelay]], so an idle bot can never trip the timeout
+   * auto-move ahead of its own move.
+   */
   private def deadlineFor(
       state: GameState,
       turnTimeoutSeconds: Int,
       now: Long
   ): Option[Long] =
-    if state.isGameOver || state.promptedPlayerIds.isEmpty then None
+    val humanOnTheClock = state.promptedPlayerSeats.exists(idx => !state.config.isBotSeat(idx))
+    if state.isGameOver || !humanOnTheClock then None
     else Some(now + turnTimeoutSeconds.toLong * 1000L)
 
   /** A random legal move for any seat the game is waiting on, in seat order. */
@@ -662,6 +941,7 @@ final class RoomManager[F[_]](
       clients <- managed.clients.get
       _ <- clients.traverse_(_.stop.complete(Right(())).void)
       _ <- stopClock(managed)
+      _ <- stopBots(managed)
     yield ()
 
   /**
@@ -752,9 +1032,14 @@ object RoomManager:
    * @param startTurnClocks whether started matches fork their turn monitor.
    * @param clockPollInterval how often that monitor checks the deadline.
    */
+  /** How long a bot pauses before each move, so a reviewer can follow the table. */
+  val DefaultBotMoveDelay: FiniteDuration = 500.millis
+
   def create[F[_]: Async](
       startTurnClocks: Boolean = true,
-      clockPollInterval: FiniteDuration = DefaultClockPollInterval
+      clockPollInterval: FiniteDuration = DefaultClockPollInterval,
+      botMoveDelay: FiniteDuration = DefaultBotMoveDelay,
+      devMode: Boolean = true
   ): F[RoomManager[F]] =
     for
       rooms <- Ref.of[F, Map[String, ManagedRoom[F]]](Map.empty)
@@ -765,5 +1050,7 @@ object RoomManager:
       lobbyTopic = lobbyTopic,
       mutex = mutex,
       startTurnClocks = startTurnClocks,
-      clockPollInterval = clockPollInterval
+      clockPollInterval = clockPollInterval,
+      botMoveDelay = botMoveDelay,
+      devMode = devMode
     )

@@ -3,7 +3,7 @@ package durak.rooms
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import cats.syntax.all.*
-import durak.engine.{Card, GameAction, GameEngine, GameState, JsonCodecs}
+import durak.engine.{Card, GameAction, GameConfig, GameEngine, GameState, JsonCodecs}
 import durak.engine.JsonCodecs.given
 import durak.protocol.{PlayerGameView, ProtocolCodecs, RoomStatus, WsClientMessage, WsServerMessage}
 import durak.protocol.ProtocolCodecs.given
@@ -19,6 +19,19 @@ class RoomManagerSpec extends munit.FunSuite:
   // test stays deterministic instead of waiting on a wall-clock deadline.
   private def manager: RoomManager[IO] =
     RoomManager.create[IO](startTurnClocks = false).unsafeRunSync()
+
+  /**
+   * A manager whose bot driver is on. `delay` is how long a bot pauses before
+   * each move: long when a test inspects a static position, short when the test
+   * waits for bots to play a whole match.
+   */
+  private def botManager(
+      delay: FiniteDuration = 20.millis,
+      devMode: Boolean = true
+  ): RoomManager[IO] =
+    RoomManager
+      .create[IO](startTurnClocks = false, botMoveDelay = delay, devMode = devMode)
+      .unsafeRunSync()
 
   private def session(playerId: String, displayName: String = ""): GuestSession =
     GuestSession(
@@ -739,4 +752,368 @@ class RoomManagerSpec extends munit.FunSuite:
     assertEquals(results.count(_.isLeft), joiners.size - 3)
     val state = stateOf(rm, room.gameId)
     assertEquals(state.players.map(_.hand.size), Vector(6, 6, 6, 6))
+  }
+
+  // --- Configured deck size (ITEM-6a) --------------------------------------
+
+  test("CreateRoomConfig validates the deck setting") {
+    assert(CreateRoomConfig(2, deckSize = Some(52)).validate.isRight)
+    assert(CreateRoomConfig(3, deckSize = Some(52)).validate.isRight)
+    assert(CreateRoomConfig(4, deckSize = Some(52)).validate.isRight)
+    assert(CreateRoomConfig(2).validate.isRight)
+    assert(CreateRoomConfig(2, deckSize = Some(40)).validate.isLeft)
+    assert(CreateRoomConfig(3, deckSize = Some(24)).validate.isLeft)
+    assert(CreateRoomConfig(4, deckSize = Some(36)).validate.isLeft)
+
+    assertEquals(CreateRoomConfig(2, deckSize = Some(52)).effectiveDeckSize, 52)
+    assertEquals(CreateRoomConfig(3).effectiveDeckSize, 36)
+    assertEquals(CreateRoomConfig(4).effectiveDeckSize, 52)
+    assertEquals(CreateRoomConfig(2, deckSize = Some(52)).toView.deckSize, 52)
+  }
+
+  test("a two-player room can be dealt from the full 52-card deck") {
+    val rm = manager
+    val room = created(rm, config = CreateRoomConfig(2, deckSize = Some(52)))
+    val view = rm.joinSeat(room.gameId, session("p1")).unsafeRunSync()
+      .getOrElse(fail("join was rejected"))
+      ._1
+    assertEquals(view.config.deckSize, 52)
+
+    val state = stateOf(rm, room.gameId)
+    assertEquals(state.players.map(_.hand.size), Vector(6, 6))
+    assertEquals(state.talon.size, 40)
+    assertEquals(state.config.deckSize, Some(52))
+    assertEquals(state.config.effectiveDeckSize, 52)
+  }
+
+  test("a three-player room can be dealt from the full 52-card deck") {
+    val rm = manager
+    val room = created(rm, config = CreateRoomConfig(3, deckSize = Some(52)))
+    List("p1", "p2").foreach { id =>
+      assert(rm.joinSeat(room.gameId, session(id)).unsafeRunSync().isRight, id)
+    }
+    val state = stateOf(rm, room.gameId)
+    assertEquals(state.players.map(_.hand.size), Vector(6, 6, 6))
+    assertEquals(state.talon.size, 34)
+  }
+
+  // --- Bot seats & dev spectator mode (ITEM-7a) ----------------------------
+
+  test("createRoomWithSeats starts immediately when only bots fill the other seats") {
+    val rm = botManager(delay = 10.seconds)
+    val creation = rm
+      .createRoomWithSeats(
+        session("host", "Hostess"),
+        CreateRoomConfig(playerCount = 2),
+        seatTypes = Vector("human", "basicBot")
+      )
+      .unsafeRunSync()
+      .getOrElse(fail("the human-vs-bot room was rejected"))
+
+    assertEquals(creation.seatIndex, Some(0))
+    assertEquals(creation.role, RoomCreation.PlayerRole)
+    assertEquals(creation.room.status, RoomStatus.InProgress)
+    assertEquals(creation.room.seats.map(_.seatType), Vector("human", "basicBot"))
+    assertEquals(creation.room.seats(1).displayName, Some("BasicBot"))
+    assert(creation.room.seats(1).playerId.exists(_.startsWith("bot-")))
+    assertEquals(creation.room.hostName, "Hostess")
+    assertEquals(rm.listOpenPublicRooms.unsafeRunSync(), Nil)
+
+    val state = stateOf(rm, creation.room.gameId)
+    assertEquals(state.players.size, 2)
+    assertEquals(state.players.map(_.hand.size), Vector(6, 6))
+    assertEquals(state.config.seatType(0), GameConfig.HumanSeat)
+    assertEquals(state.config.seatType(1), GameConfig.BasicBotSeat)
+    assert(state.config.isBotSeat(1))
+    assertEquals(state.players(1).name, "BasicBot")
+  }
+
+  test("a room with bots waits only for its remaining human seats") {
+    val rm = botManager(delay = 10.seconds)
+    val creation = rm
+      .createRoomWithSeats(
+        session("host", "Hostess"),
+        CreateRoomConfig(playerCount = 3),
+        seatTypes = Vector("human", "basicBot", "human")
+      )
+      .unsafeRunSync()
+      .getOrElse(fail("the room was rejected"))
+
+    // The bot seat is already ready, so only seat 2 is still open to a human.
+    assertEquals(creation.room.status, RoomStatus.WaitingForPlayers)
+    assertEquals(creation.room.openHumanSeats, Vector(2))
+    assertEquals(creation.room.filledSeats, 2)
+    assertEquals(rm.listOpenPublicRooms.unsafeRunSync().map(_.filledSeats), List(2))
+
+    // The last human starts the deal, with the bot still in its seat.
+    val (view, seat) = rm.joinSeat(creation.room.gameId, session("late"))
+      .unsafeRunSync()
+      .getOrElse(fail("the human join was rejected"))
+    assertEquals(seat, 2)
+    assertEquals(view.status, RoomStatus.InProgress)
+
+    val state = stateOf(rm, creation.room.gameId)
+    assertEquals(state.players.map(_.name), Vector("Hostess", "BasicBot", "Player late"))
+    assertEquals(state.config.seatType(1), GameConfig.BasicBotSeat)
+    assertEquals(state.players(2).id, "late")
+  }
+
+  test("an all-bot room in dev mode starts at once with no creator seat") {
+    val rm = botManager(delay = 10.seconds)
+    val creation = rm
+      .createRoomWithSeats(
+        session("dev", "Dev"),
+        CreateRoomConfig(playerCount = 4),
+        seatTypes = Vector.fill(4)("basicBot"),
+        spectateAsCreator = true
+      )
+      .unsafeRunSync()
+      .getOrElse(fail("the dev all-bot room was rejected"))
+
+    assertEquals(creation.seatIndex, None)
+    assertEquals(creation.role, RoomCreation.SpectatorRole)
+    assertEquals(creation.room.status, RoomStatus.InProgress)
+    assert(creation.room.seats.forall(_.isBot))
+    assert(creation.room.seats.forall(_.playerId.exists(_.startsWith("bot-"))))
+    assertEquals(
+      creation.room.seats.map(_.displayName),
+      Vector(
+        Some("BasicBot 1"),
+        Some("BasicBot 2"),
+        Some("BasicBot 3"),
+        Some("BasicBot 4")
+      )
+    )
+    assertEquals(creation.room.filledSeats, 4)
+    assertEquals(creation.room.seats.exists(_.playerId.contains("dev")), false)
+
+    val state = stateOf(rm, creation.room.gameId)
+    assertEquals(state.players.size, 4)
+    assert(state.players.forall(_.name.startsWith("BasicBot")))
+    assert(state.config.playerTypes.forall(GameConfig.isBotType))
+
+    // The creator only watches: no seat, no hand, no legal move.
+    val view = rm.getRoomView(creation.room.gameId, "dev").unsafeRunSync()
+      .getOrElse(fail("no view for the spectating creator"))
+    assertEquals(view.viewerSeat, None)
+    assertEquals(view.hand, Nil)
+    assertEquals(view.legalActions, Nil)
+    assertEquals(view.players.size, 4)
+  }
+
+  test("production mode rejects an all-bot room but still allows bots around the creator") {
+    val rm = botManager(delay = 10.seconds, devMode = false)
+
+    val allBots = rm
+      .createRoomWithSeats(
+        session("dev"),
+        CreateRoomConfig(playerCount = 2),
+        seatTypes = Vector.fill(2)("basicBot")
+      )
+      .unsafeRunSync()
+    assertEquals(allBots.swap.toOption, Some("Creator must occupy a seat"))
+
+    val spectating = rm
+      .createRoomWithSeats(
+        session("dev"),
+        CreateRoomConfig(playerCount = 3),
+        seatTypes = Vector.fill(3)("basicBot"),
+        spectateAsCreator = true
+      )
+      .unsafeRunSync()
+    assertEquals(spectating.swap.toOption, Some("Creator must occupy a seat"))
+    assertEquals(rm.roomCount.unsafeRunSync(), 0)
+
+    // A creator who takes a seat may still surround themselves with bots.
+    val seated = rm
+      .createRoomWithSeats(
+        session("host"),
+        CreateRoomConfig(playerCount = 3),
+        seatTypes = Vector("human", "basicBot", "basicBot")
+      )
+      .unsafeRunSync()
+      .getOrElse(fail("a seated creator with bots must be allowed in production"))
+    assertEquals(seated.seatIndex, Some(0))
+    assertEquals(seated.role, RoomCreation.PlayerRole)
+    assertEquals(seated.room.status, RoomStatus.InProgress)
+  }
+
+  test("createRoomWithSeats rejects malformed seat plans and creator seats") {
+    val rm = manager
+
+    assertEquals(
+      rm.createRoomWithSeats(
+        session("host"),
+        CreateRoomConfig(playerCount = 3),
+        seatTypes = Vector("human", "basicBot")
+      ).unsafeRunSync().swap.toOption,
+      Some("seatTypes must have exactly 3 entries, got 2")
+    )
+    assert(
+      rm.createRoomWithSeats(
+        session("host"),
+        CreateRoomConfig(playerCount = 2),
+        seatTypes = Vector("human", "grandmasterBot")
+      ).unsafeRunSync().isLeft,
+      "an unknown seat type was accepted"
+    )
+    // The creator may not be seated on a bot's seat.
+    assert(
+      rm.createRoomWithSeats(
+        session("host"),
+        CreateRoomConfig(playerCount = 3),
+        seatTypes = Vector("human", "human", "basicBot"),
+        creatorSeatIndex = Some(2)
+      ).unsafeRunSync().isLeft
+    )
+    // Nor outside the table.
+    assert(
+      rm.createRoomWithSeats(
+        session("host"),
+        CreateRoomConfig(playerCount = 3),
+        creatorSeatIndex = Some(7)
+      ).unsafeRunSync().isLeft
+    )
+    // An invalid deck setting never creates a room either.
+    assert(
+      rm.createRoomWithSeats(session("host"), CreateRoomConfig(2, deckSize = Some(40)))
+        .unsafeRunSync()
+        .isLeft
+    )
+    assertEquals(rm.roomCount.unsafeRunSync(), 0)
+  }
+
+  test("createRoomWithSeats honours an explicit creator seat") {
+    val rm = botManager(delay = 10.seconds, devMode = false)
+    val creation = rm
+      .createRoomWithSeats(
+        session("host", "Hostess"),
+        CreateRoomConfig(playerCount = 3),
+        seatTypes = Vector("human", "randomBot", "human"),
+        creatorSeatIndex = Some(2)
+      )
+      .unsafeRunSync()
+      .getOrElse(fail("an explicit creator seat was rejected"))
+
+    assertEquals(creation.seatIndex, Some(2))
+    assertEquals(creation.room.seats(2).playerId, Some("host"))
+    assertEquals(creation.room.seats(1).seatType, GameConfig.RandomBotSeat)
+    assertEquals(creation.room.openHumanSeats, Vector(0))
+    assertEquals(creation.room.status, RoomStatus.WaitingForPlayers)
+    assert(rm.joinSeat(creation.room.gameId, session("opponent")).unsafeRunSync().isRight)
+    val state = stateOf(rm, creation.room.gameId)
+    assertEquals(state.players(2).id, "host")
+    assertEquals(state.players(1).name, "RandomBot")
+  }
+
+  test("RoomManager drives a full all-bot match to completion") {
+    val rm = botManager(delay = 20.millis)
+    val creation = rm
+      .createRoomWithSeats(
+        session("dev"),
+        CreateRoomConfig(playerCount = 2),
+        seatTypes = Vector("basicBot", "randomBot"),
+        spectateAsCreator = true
+      )
+      .unsafeRunSync()
+      .getOrElse(fail("the all-bot room was rejected"))
+    val gameId = creation.room.gameId
+
+    val deadline = System.currentTimeMillis() + 30_000L
+    var room = rm.getRoom(gameId).unsafeRunSync().getOrElse(fail("room disappeared"))
+    while !room.gameState.exists(_.isGameOver) && System.currentTimeMillis() < deadline do
+      IO.sleep(50.millis).unsafeRunSync()
+      room = rm.getRoom(gameId).unsafeRunSync().getOrElse(fail("room disappeared"))
+
+    val finished = room.gameState.getOrElse(fail("the room was never dealt"))
+    assert(finished.isGameOver, s"bots stalled in ${finished.boutPhase}")
+    assertEquals(room.status, RoomStatus.Finished)
+    assertEquals(room.turnDeadlineEpochMs, None)
+    assert(finished.finishOrder.nonEmpty || finished.isDraw)
+    // The finished room still projects both bots' public summaries.
+    val view = rm.getRoomView(gameId, "dev").unsafeRunSync().getOrElse(fail("no view"))
+    assertEquals(view.status, RoomStatus.Finished)
+    assertEquals(view.players.size, 2)
+    assertEquals(view.viewerSeat, None)
+  }
+
+  test("a bot seat answers its own turn without any human input") {
+    val rm = botManager(delay = 20.millis)
+    val room = rm
+      .createPresetRoom(
+        CreateRoomConfig(playerCount = 2),
+        Vector("host" -> "Host", "bot-1" -> "BasicBot"),
+        autoStartIfFull = true,
+        firstAttackerIdx = Some(0),
+        seatTypes = Vector("human", "basicBot")
+      )
+      .unsafeRunSync()
+
+    val state = stateOf(rm, room.gameId)
+    assertEquals(state.attackerIdx, 0)
+    assertEquals(state.config.seatType(1), GameConfig.BasicBotSeat)
+
+    // The human opens the attack; the bot must then cover or surrender.
+    assertEquals(
+      rm.handleGameAction(room.gameId, "host", GameEngine.legalActions(state, "host").head)
+        .unsafeRunSync(),
+      Right(())
+    )
+    val attacked = stateOf(rm, room.gameId)
+    val deadline = System.currentTimeMillis() + 10_000L
+    var after = attacked
+    while after == attacked && System.currentTimeMillis() < deadline do
+      IO.sleep(30.millis).unsafeRunSync()
+      after = stateOf(rm, room.gameId)
+    assertNotEquals(after, attacked, "the bot never played its turn")
+  }
+
+  test("a spectator of an all-bot room receives frames but can never act") {
+    val rm = botManager(delay = 20.millis)
+    val creation = rm
+      .createRoomWithSeats(
+        session("dev"),
+        CreateRoomConfig(playerCount = 3),
+        seatTypes = Vector.fill(3)("basicBot"),
+        spectateAsCreator = true
+      )
+      .unsafeRunSync()
+      .getOrElse(fail("the all-bot room was rejected"))
+    val gameId = creation.room.gameId
+
+    val (conn, release) = rm.subscribe(gameId, "dev").allocated.unsafeRunSync()
+    assertEquals(conn._2.viewerSeat, None)
+    assertEquals(conn._2.hand, Nil)
+    assertEquals(conn._2.legalActions, Nil)
+    assertEquals(conn._2.players.size, 3)
+
+    // Every bot move reaches the unseated spectator as a projected frame.
+    val frames = conn._1.take(3).compile.toList.timeout(10.seconds).unsafeRunSync()
+    assertEquals(frames.size, 3)
+    frames.foreach {
+      case WsServerMessage.GameViewUpdate(view) =>
+        assertEquals(view.viewerSeat, None)
+        assertEquals(view.hand, Nil)
+      case other => fail(s"a spectator received a non-view frame: $other")
+    }
+
+    release.unsafeRunSync()
+
+    // A spectator can never act. The bots are paused here, so the rejected move
+    // provably leaves the position intact instead of racing a bot's own move.
+    val quiet = botManager(delay = 10.seconds)
+    val quietRoom = quiet
+      .createRoomWithSeats(
+        session("dev"),
+        CreateRoomConfig(playerCount = 2),
+        seatTypes = Vector.fill(2)("basicBot"),
+        spectateAsCreator = true
+      )
+      .unsafeRunSync()
+      .getOrElse(fail("the all-bot room was rejected"))
+    val quietId = quietRoom.room.gameId
+    val before = stateOf(quiet, quietId)
+    val rejected = quiet.handleAction(quietId, "dev", WsClientMessage.PassTurn).unsafeRunSync()
+    assertEquals(rejected.swap.toOption.map(_.code), Some(ActionRejected.UnauthorizedCode))
+    assertEquals(stateOf(quiet, quietId), before)
   }

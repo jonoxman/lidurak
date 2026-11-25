@@ -4,6 +4,7 @@ import durak.engine.{
   BoutPhase,
   Card,
   GameAction,
+  GameConfig,
   GameEngine,
   GameState,
   PlayerState,
@@ -34,12 +35,18 @@ object RoomStatus:
       status.toString.equalsIgnoreCase(normalized)
     }
 
-/** The public match settings every client is allowed to see. */
+/**
+ * The public match settings every client is allowed to see.
+ *
+ * `deckSize` is the deck the match is played with (`36` or `52`), so a client
+ * can label a table without re-deriving the player-count default.
+ */
 final case class RoomConfigView(
     playerCount: Int,
     allowRedirect: Boolean = true,
     turnTimeoutSeconds: Int = 15,
-    isPublic: Boolean = true
+    isPublic: Boolean = true,
+    deckSize: Int = GameConfig.ShortDeckSize
 )
 
 /**
