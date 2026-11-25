@@ -1,3 +1,4 @@
+import type { Card, GameAction } from '../types';
 import {
   parseWsServerMessage,
   type PlayerGameView,
@@ -27,8 +28,41 @@ export interface GameSocket {
   readonly status: SocketStatus;
   /** Sends one typed protocol frame when the socket is open. */
   sendAction(message: WsClientMessage): void;
+  /**
+   * Sends one Milestone 1 `GameAction` by translating it into its protocol
+   * frame. The server derives the acting seat from the session, so the local
+   * `playerId` of the M1 action is never forwarded.
+   */
+  sendGameAction(action: GameAction): void;
   /** Closes the socket and cancels every pending reconnect timer. */
   dispose(): void;
+}
+
+/**
+ * Translates a Milestone 1 gameplay action into the multiplayer wire frame, or
+ * `null` for an action the protocol does not carry.
+ */
+export function toWsClientMessage(action: GameAction): WsClientMessage | null {
+  switch (action.type) {
+    case 'initialAttack':
+      return { type: 'playAttack', cards: (action.cards as Card[] | undefined) ?? [] };
+    case 'coverCard':
+      return {
+        type: 'coverCard',
+        attackIndex: Number(action.attackIndex ?? 0),
+        defenseCard: action.defenseCard as Card,
+      };
+    case 'redirectAttack':
+      return { type: 'redirectAttack', cards: action.cards as Card[] };
+    case 'throwInCards':
+      return { type: 'throwInCards', cards: action.cards as Card[] };
+    case 'declareSurrender':
+      return { type: 'declareSurrender' };
+    case 'passTurn':
+      return { type: 'passTurn' };
+    default:
+      return null;
+  }
 }
 
 /** Builds a `ws:`/`wss:` URL relative to the page host, so the Vite proxy works. */
@@ -59,6 +93,12 @@ class ReconnectingGameSocket implements GameSocket {
     const socket = this.socket;
     if (socket === null || socket.readyState !== WebSocket.OPEN) return;
     socket.send(JSON.stringify(message));
+  }
+
+  sendGameAction(action: GameAction): void {
+    const message = toWsClientMessage(action);
+    if (message === null) return;
+    this.sendAction(message);
   }
 
   dispose(): void {

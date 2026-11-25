@@ -14,7 +14,11 @@ import {
 } from './lobbyClient';
 import { createGameSocket } from './gameSocket';
 import { getOrCreateSession, MultiplayerApiError, updateGuestName } from './sessionClient';
-import type { LobbyRoomSummary } from '../types/multiplayer';
+import {
+  parsePlayerGameView,
+  toM1GameView,
+  type LobbyRoomSummary,
+} from '../types/multiplayer';
 
 // --- REST fixtures ---------------------------------------------------------
 
@@ -619,5 +623,152 @@ describe('createGameSocket', () => {
     expect(statuses[statuses.length - 1]).toBe('disconnected');
     vi.advanceTimersByTime(60_000);
     expect(MockWebSocket.instances).toHaveLength(1);
+  });
+
+  it('T-90: translates every M1 action into its protocol frame', () => {
+    const socket = createGameSocket('game-1', {});
+    const ws = latest();
+    ws.emitOpen();
+
+    const card = { suit: 'spades', rank: 'six' };
+    const defenseCard = { suit: 'hearts', rank: 'ace' };
+
+    socket.sendGameAction({ type: 'initialAttack', playerId: 'p0', cards: [card] });
+    socket.sendGameAction({ type: 'coverCard', playerId: 'p0', attackIndex: 1, defenseCard });
+    socket.sendGameAction({ type: 'redirectAttack', playerId: 'p0', cards: [card] });
+    socket.sendGameAction({ type: 'throwInCards', playerId: 'p0', cards: [card] });
+    socket.sendGameAction({ type: 'declareSurrender', playerId: 'p0' });
+    socket.sendGameAction({ type: 'passTurn', playerId: 'p0' });
+
+    expect(ws.sent).toEqual([
+      JSON.stringify({ type: 'playAttack', cards: [card] }),
+      JSON.stringify({ type: 'coverCard', attackIndex: 1, defenseCard }),
+      JSON.stringify({ type: 'redirectAttack', cards: [card] }),
+      JSON.stringify({ type: 'throwInCards', cards: [card] }),
+      JSON.stringify({ type: 'declareSurrender' }),
+      JSON.stringify({ type: 'passTurn' }),
+    ]);
+
+    // An action the protocol does not carry is dropped, never mislabelled.
+    socket.sendGameAction({ type: 'unsupported', playerId: 'p0' });
+    expect(ws.sent).toHaveLength(6);
+
+    socket.dispose();
+  });
+});
+
+describe('T-90 multiplayer view adapter', () => {
+  const twoPlayerWire = {
+    ...wireView,
+    boutPhase: 'defense',
+    turnDeadlineMs: 1234,
+    durak: 'p1',
+    legalActions: ['cover', 'surrender'],
+    winners: ['p1'],
+    finishOrder: ['p1', 'p0'],
+    throwInCards: [{ suit: 'clubs', rank: 'seven' }],
+    throwInCapacity: 2,
+    canThrowIn: true,
+    myFinishRank: 2,
+    lastDiscardCards: [{ suit: 'hearts', rank: 'king' }],
+    defenderDefenseless: true,
+    eligibleTargetIds: ['p1'],
+    redirectTargetId: 'p1',
+    gameStartedAtMs: 1000,
+    gameEndedAtMs: null,
+    players: [
+      {
+        id: 'p0',
+        name: 'Alice',
+        rating: null,
+        cardCount: 1,
+        isConnected: true,
+        hasPassed: false,
+        finishRank: null,
+        seatIndex: 0,
+        status: 'active',
+        isTurn: false,
+      },
+      {
+        id: 'p1',
+        name: 'Bob',
+        rating: null,
+        cardCount: 6,
+        isConnected: true,
+        hasPassed: false,
+        finishRank: 1,
+        seatIndex: 1,
+        status: 'out',
+        isTurn: false,
+      },
+    ],
+  };
+
+  it('parses the enriched Wave-1 projection', () => {
+    const view = parsePlayerGameView(twoPlayerWire);
+
+    expect(view.phase).toBe('defense');
+    expect(view.turnDeadlineEpochMs).toBe(1234);
+    expect(view.durakId).toBe('p1');
+    expect(view.legalActions).toEqual(['cover', 'surrender']);
+    expect(view.winners).toEqual(['p1']);
+    expect(view.throwInCards).toHaveLength(1);
+    expect(view.throwInCapacity).toBe(2);
+    expect(view.canThrowIn).toBe(true);
+    expect(view.myFinishRank).toBe(2);
+    expect(view.lastDiscardCards).toHaveLength(1);
+    expect(view.defenderDefenseless).toBe(true);
+    expect(view.redirectTargetId).toBe('p1');
+    expect(view.gameStartedAtMs).toBe(1000);
+    expect(view.players[1].status).toBe('out');
+  });
+
+  it('re-keys seats to the M1 p<seat> ids and keeps opponent hands hidden', () => {
+    const m1 = toM1GameView(parsePlayerGameView(twoPlayerWire));
+
+    expect(m1.myId).toBe('p0');
+    expect(m1.myName).toBe('Alice');
+    expect(m1.myHand).toEqual([{ suit: 'spades', rank: 'six' }]);
+    expect(m1.opponents).toEqual([
+      {
+        id: 'p1',
+        name: 'Bob',
+        cardCount: 6,
+        hasPassed: false,
+        finishRank: 1,
+        isPresent: true,
+      },
+    ]);
+    // Opponent summaries never carry a `cards` field.
+    expect(m1.opponents[0]).not.toHaveProperty('cards');
+    expect(m1.finishOrder).toEqual(['p1', 'p0']);
+    expect(m1.winners).toEqual(['p1']);
+    expect(m1.durak).toBe('p1');
+    expect(m1.redirectTargetId).toBe('p1');
+    expect(m1.eligibleTargetIds).toEqual(['p1']);
+    expect(m1.turnDeadlineMs).toBe(1234);
+    expect(m1.legalActions).toEqual(['cover', 'surrender']);
+    expect(m1.presentPlayers).toEqual(['p0', 'p1']);
+  });
+
+  it('maps a spectator to the same table with an empty hand and no moves', () => {
+    const spectator = parsePlayerGameView({
+      ...twoPlayerWire,
+      viewerSeat: null,
+      hand: [],
+      legalActions: [],
+      throwInCards: [],
+      eligibleTargetIds: [],
+      redirectTargetId: null,
+    });
+
+    const m1 = toM1GameView(spectator);
+
+    expect(m1.myId).toBe('spectator');
+    expect(m1.myHand).toEqual([]);
+    expect(m1.legalActions).toEqual([]);
+    expect(m1.canThrowIn).toBe(true);
+    expect(m1.opponents.map((opponent) => opponent.id)).toEqual(['p0', 'p1']);
+    expect(m1.opponents.every((opponent) => !('cards' in opponent))).toBe(true);
   });
 });

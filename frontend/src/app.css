@@ -2052,3 +2052,121 @@ body[data-dragging='true'] *,
 .table-arena[data-dragging='true'] * {
   cursor: pointer !important;
 }
+
+/* --- T-90: live-room staging panel -------------------------------------- */
+/* The `WaitingForPlayers` room reuses the M1 theme tokens and CSS Grid only:
+   no absolutely positioned panels, every child keeps `min-width: 0`. */
+
+.live-room {
+  gap: 14px;
+}
+
+.live-room-lead {
+  margin: 0;
+  color: var(--app-text);
+  opacity: 0.85;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.live-room-badges,
+.live-room-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.live-room-badge {
+  padding: 4px 10px;
+  border: 1px solid var(--app-border);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--app-text);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.live-room-invite {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.live-room-label {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--app-text);
+  opacity: 0.8;
+}
+
+.live-room-invite-url {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-roundness);
+  background: var(--bg-elevated);
+  color: var(--app-text-strong);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  box-sizing: border-box;
+}
+
+.live-room-seats,
+.live-room-roster,
+.live-room-facts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.live-room-seat {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-roundness);
+  background: var(--bg-elevated);
+  box-sizing: border-box;
+}
+
+.live-room-seat-number {
+  font-size: 12px;
+  color: var(--app-text);
+  opacity: 0.8;
+  white-space: nowrap;
+}
+
+.live-room-seat-name {
+  min-width: 0;
+  color: var(--app-text-strong);
+  overflow-wrap: anywhere;
+}
+
+.live-room-roster li,
+.live-room-facts li {
+  min-width: 0;
+  font-size: 13px;
+  color: var(--app-text);
+  overflow-wrap: anywhere;
+}
+
+.live-room-error {
+  margin: 0;
+  color: var(--durak-danger, #c33);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}

@@ -112,6 +112,22 @@ const WAITING_VIEW: PlayerGameView = {
   isDraw: false,
   durakId: null,
   turnDeadlineEpochMs: null,
+  legalActions: [],
+  winners: [],
+  turnPlayerId: null,
+  turnSecondsRemaining: 0,
+  defenderDefenseless: false,
+  promptedPlayerIds: [],
+  lastDiscardCards: [],
+  gameStartedAtMs: null,
+  gameEndedAtMs: null,
+  eligibleTargetIds: [],
+  redirectTargetId: null,
+  throwInCards: [],
+  throwInCapacity: 0,
+  canThrowIn: false,
+  myHasPassed: false,
+  myFinishRank: null,
 };
 
 describe('App', () => {
@@ -124,14 +140,16 @@ describe('App', () => {
     checkServerHealth.mockResolvedValue(true);
   });
 
-  it('routes /g/:gameId to the live multiplayer room', async () => {
+  it('routes /g/:gameId to the original M1 gameplay page in multiplayer mode', async () => {
     window.history.replaceState({}, '', '/g/room-42');
 
     render(<App />);
 
-    expect(await screen.findByTestId('multiplayer-game')).toBeTruthy();
+    // T-90: the removed lightweight placeholder never renders again.
     expect(await screen.findByTestId('waiting-room')).toBeTruthy();
     expect(screen.getByText('Room room-42')).toBeTruthy();
+    expect(screen.getByTestId('invite-url').textContent).toContain('/g/room-42');
+    expect(screen.queryByTestId('multiplayer-game')).toBeNull();
     expect(fetchGameView).toHaveBeenCalledWith('room-42');
   });
 
@@ -139,7 +157,7 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByRole('button', { name: 'Create Game' })).toBeTruthy();
-    expect(screen.queryByTestId('multiplayer-game')).toBeNull();
+    expect(screen.queryByTestId('waiting-room')).toBeNull();
     expect(fetchGameView).not.toHaveBeenCalled();
   });
 
@@ -151,7 +169,7 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByText(/Loading game local-1/)).toBeTruthy();
-    expect(screen.queryByTestId('multiplayer-game')).toBeNull();
+    expect(screen.queryByTestId('waiting-room')).toBeNull();
     expect(fetchGameView).not.toHaveBeenCalled();
   });
 
