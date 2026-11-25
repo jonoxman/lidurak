@@ -287,6 +287,66 @@ describe('T-90 live multiplayer room (original M1 interface)', () => {
     expect(screen.queryByTestId('join-room')).toBeNull();
   });
 
+  it('T-96: labels a two-player 52-card waiting room with the actual deck size', async () => {
+    fetchGameView.mockResolvedValue(
+      mpBase({
+        status: 'WaitingForPlayers',
+        config: {
+          playerCount: 2,
+          allowRedirect: true,
+          turnTimeoutSeconds: 15,
+          isPublic: true,
+          deckSize: 52,
+        },
+        hand: [],
+        players: [mpPlayer('guest-1', 'Alice', 0, { cardCount: 0 })],
+        seats: [
+          { seatIndex: 0, playerId: 'guest-1', displayName: 'Alice', isConnected: true },
+          { seatIndex: 1, playerId: null, displayName: null, isConnected: false },
+        ],
+        legalActions: [],
+        turnPlayerId: null,
+        turnSecondsRemaining: 0,
+      }),
+    );
+
+    renderMultiplayer();
+
+    expect(await screen.findByTestId('waiting-room')).toBeTruthy();
+    expect(screen.getByTestId('room-config').textContent).toContain('52-card deck');
+    expect(screen.queryByText('36-card deck')).toBeNull();
+  });
+
+  it('T-96: shows the actual 52-card deck in the in-game ROOM panel for a three-player table', async () => {
+    fetchGameView.mockResolvedValue(
+      mpBase({
+        config: {
+          playerCount: 3,
+          allowRedirect: true,
+          turnTimeoutSeconds: 15,
+          isPublic: true,
+          deckSize: 52,
+        },
+        players: [
+          mpPlayer('guest-1', 'Alice', 0),
+          mpPlayer('guest-2', 'Bob', 1),
+          mpPlayer('guest-3', 'Cara', 2),
+        ],
+        seats: [
+          { seatIndex: 0, playerId: 'guest-1', displayName: 'Alice', isConnected: true },
+          { seatIndex: 1, playerId: 'guest-2', displayName: 'Bob', isConnected: true },
+          { seatIndex: 2, playerId: 'guest-3', displayName: 'Cara', isConnected: true },
+        ],
+      }),
+    );
+
+    renderMultiplayer();
+
+    const roomInfo = await screen.findByTestId('room-info');
+    expect(roomInfo.textContent).toContain('52-card deck');
+    expect(roomInfo.textContent).not.toContain('36-card deck');
+  });
+
   it('offers Join room to a visitor without a seat', async () => {
     fetchGameView.mockResolvedValue(
       mpBase({

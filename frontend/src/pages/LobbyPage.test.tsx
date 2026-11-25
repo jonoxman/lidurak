@@ -406,6 +406,21 @@ describe('M2 LobbyPage', () => {
     await expectGamePath('room-1');
   });
 
+  it('T-96: advertises a two-player 52-card room with its actual deck size', async () => {
+    const room52: LobbyRoomSummary = { ...ROOM, deckSize: 52 };
+    fetchLobbyRooms.mockResolvedValue([room52]);
+    renderLobby();
+
+    await openPoolTab();
+    act(() => {
+      socketHandlers?.onSnapshot?.([room52]);
+    });
+
+    const row = await screen.findByTestId('pool-room-room-1');
+    expect(within(row).getByText('52-card deck')).toBeTruthy();
+    expect(within(row).queryByText('36-card deck')).toBeNull();
+  });
+
   it('updates the pool from live LobbyUpdated frames', async () => {
     fetchLobbyRooms.mockResolvedValue([]);
     renderLobby();

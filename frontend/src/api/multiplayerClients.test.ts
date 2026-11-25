@@ -24,6 +24,7 @@ import {
   updateGuestName,
 } from './sessionClient';
 import {
+  deckLabel,
   parsePlayerGameView,
   toM1GameView,
   type LobbyRoomSummary,
@@ -867,6 +868,40 @@ describe('T-90 multiplayer view adapter', () => {
     expect(view.redirectTargetId).toBe('p1');
     expect(view.gameStartedAtMs).toBe(1000);
     expect(view.players[1].status).toBe('out');
+  });
+
+  it('T-96: keeps the room deck size and labels 2P/3P 52-card tables correctly', () => {
+    const threePlayer52 = parsePlayerGameView({
+      ...wireView,
+      config: { ...wireView.config, playerCount: 3, deckSize: 52 },
+    });
+    expect(threePlayer52.config.deckSize).toBe(52);
+    expect(deckLabel(threePlayer52.config.playerCount, threePlayer52.config.deckSize)).toBe(
+      '52-card',
+    );
+
+    const twoPlayer36 = parsePlayerGameView({
+      ...wireView,
+      config: { ...wireView.config, playerCount: 2, deckSize: 36 },
+    });
+    expect(deckLabel(twoPlayer36.config.playerCount, twoPlayer36.config.deckSize)).toBe(
+      '36-card',
+    );
+
+    // Older payloads omit the deck setting: the player count decides.
+    const threePlayerDefault = parsePlayerGameView({
+      ...wireView,
+      config: { playerCount: 3 },
+    });
+    expect(threePlayerDefault.config.deckSize).toBe(36);
+
+    const fourPlayerDefault = parsePlayerGameView({
+      ...wireView,
+      config: { playerCount: 4 },
+    });
+    expect(fourPlayerDefault.config.deckSize).toBe(52);
+    expect(deckLabel(4)).toBe('52-card');
+    expect(deckLabel(2, 52)).toBe('52-card');
   });
 
   it('re-keys seats to the M1 p<seat> ids and keeps opponent hands hidden', () => {
