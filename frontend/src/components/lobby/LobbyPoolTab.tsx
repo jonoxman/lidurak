@@ -61,9 +61,6 @@ export function LobbyPoolTab({
   return (
     <section class="m2-panel lobby-pool" aria-label="Lobby Pool">
       <h2 class="m2-panel-title">Lobby Pool</h2>
-      <p class="m2-panel-hint">
-        Open public rooms, updated live. Join any table with a free seat.
-      </p>
 
       {rooms.length === 0 ? (
         <div class="lobby-pool-empty" data-testid="lobby-pool-empty">

@@ -233,10 +233,6 @@ export function QuickPairingTab({
   return (
     <section class="m2-panel quick-pair" aria-label="Quick Pairing">
       <h2 class="m2-panel-title">Quick Pairing</h2>
-      <p class="m2-panel-hint">
-        Redirects are on for every table. Pick a size and clock to be matched with
-        players asking for the same preset.
-      </p>
 
       {searching ? (
         <div class="quick-pair-searching" data-testid="quick-pair-searching" role="status">

@@ -40,7 +40,6 @@ import { LobbyPage } from './LobbyPage';
 const checkServerHealth = client.checkServerHealth as unknown as ReturnType<typeof vi.fn>;
 const getOrCreateSession =
   sessionApi.getOrCreateSession as unknown as ReturnType<typeof vi.fn>;
-const updateGuestName = sessionApi.updateGuestName as unknown as ReturnType<typeof vi.fn>;
 const fetchLobbyRooms = lobbyApi.fetchLobbyRooms as unknown as ReturnType<typeof vi.fn>;
 const connectLobbySocket =
   lobbyApi.connectLobbySocket as unknown as ReturnType<typeof vi.fn>;
@@ -111,7 +110,6 @@ describe('M2 LobbyPage', () => {
 
     checkServerHealth.mockResolvedValue(true);
     getOrCreateSession.mockResolvedValue(GUEST);
-    updateGuestName.mockResolvedValue({ ...GUEST, displayName: 'Ace' });
     fetchLobbyRooms.mockResolvedValue([]);
     joinQuickPair.mockResolvedValue(SEARCHING_2_15);
     cancelQuickPair.mockResolvedValue(undefined);
@@ -135,15 +133,20 @@ describe('M2 LobbyPage', () => {
     );
   });
 
-  it('renders the brand, guest badge and the three lobby tabs', async () => {
+  it('ITEM-2: renders the three lobby tabs and no second header bar', async () => {
     renderLobby();
 
-    const badge = await screen.findByRole('button', { name: 'Edit guest name' });
-    expect(badge.textContent).toBe('Guest-AB12');
-    expect(getOrCreateSession).toHaveBeenCalledTimes(1);
-
+    // `HeaderBar` is the app's only header, so the lobby shell renders none and
+    // the redundant "♠ LIDURAK / Play Durak with friends" bar is gone with it.
     expect(screen.getByTestId('m2-lobby')).toBeTruthy();
-    expect(screen.getByText('LIDURAK')).toBeTruthy();
+    expect(document.querySelector('.m2-lobby header')).toBeNull();
+    expect(screen.queryByText('LIDURAK')).toBeNull();
+    expect(screen.queryByText('Play Durak with friends')).toBeNull();
+    // The guest name lives in the HeaderBar profile menu now, not in the lobby.
+    expect(screen.queryByRole('button', { name: 'Edit guest name' })).toBeNull();
+    // The shared guest session is still hydrated for API calls and the seat label.
+    await waitFor(() => expect(getOrCreateSession).toHaveBeenCalledTimes(1));
+
     expect(
       screen.getByRole('tab', { name: 'Quick Pairing' }).getAttribute('aria-selected'),
     ).toBe('true');
@@ -156,18 +159,31 @@ describe('M2 LobbyPage', () => {
     );
   });
 
-  it('renames the guest through the editable identity badge', async () => {
+  /** T-90-4 ITEM-1: no small-font explanation is left under any lobby header. */
+  it('ITEM-1: removes every explanation text under the lobby headers', () => {
     renderLobby();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit guest name' }));
-    const input = screen.getByLabelText('Guest name');
-    fireEvent.input(input, { target: { value: 'Ace' } });
-    fireEvent.submit(input.closest('form') as HTMLFormElement);
+    const removed = [
+      'Open public rooms, updated live. Join any table with a free seat.',
+      'Choose whether this is a private invite link or a public pool table',
+      'Redirects are on for every table. Pick a size and clock',
+      'Jump straight to the M2 states a reviewer needs to verify.',
+    ];
+    const expectNoHints = () => {
+      expect(document.querySelector('.m2-panel-hint')).toBeNull();
+      for (const text of removed) {
+        expect(document.body.textContent ?? '').not.toContain(text);
+      }
+    };
 
-    await waitFor(() => expect(updateGuestName).toHaveBeenCalledWith('Ace'));
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Edit guest name' }).textContent).toBe('Ace'),
-    );
+    // Quick Pairing is the default panel; then the lazily mounted tabs.
+    expectNoHints();
+    fireEvent.click(screen.queryByRole('tab', { name: /Lobby Pool/ }) as HTMLElement);
+    expectNoHints();
+    fireEvent.click(screen.getByRole('tab', { name: 'Create a Game' }));
+    expectNoHints();
+    // The helper rule itself is gone, so nothing can render one later.
+    expect(lobbyCss).not.toContain('.m2-panel-hint');
   });
 
   it('opens Quick Pairing on the Quick Pairing tab by default', () => {
@@ -813,6 +829,14 @@ describe('lobby.css visual invariants', () => {
     expect(lobbyCss).toContain('color: var(--ui-select-text)');
     expect(lobbyCss).toContain('box-shadow: 0 0 10px 2px var(--ui-select-glow)');
     expect(lobbyCss).toMatch(/border-radius: var\(--app-roundness/);
+    // ITEM-5: the glow only ever appears on a hover/focus rule.
+    const glowRules = lobbyCss
+      .split('}')
+      .filter((block) => block.includes('var(--ui-select-glow)'));
+    expect(glowRules.length).toBeGreaterThan(0);
+    for (const block of glowRules) {
+      expect(block).toMatch(/:hover|:focus-visible/);
+    }
     expect(lobbyCss).toContain("html[data-theme='light'] .m2-lobby");
   });
 
@@ -874,8 +898,10 @@ describe('lobby.css visual invariants', () => {
     expect(ruleFor('.m2-button.secondary:hover:not(:disabled)')).toContain(
       'var(--ui-select-text)',
     );
-    expect(ruleFor('.m2-guest-badge:hover')).toContain('var(--ui-select-accent)');
-    expect(ruleFor('.m2-guest-input:focus-visible')).toContain('var(--ui-select-accent)');
+    expect(ruleFor('.m2-button:hover:not(:disabled)')).toContain('var(--ui-select-glow)');
+    expect(ruleFor('.create-seat-option:hover:not(:disabled)')).toContain(
+      'var(--ui-select-glow)',
+    );
 
     // No selection rule may fall back to the attacker/status green.
     for (const selector of [
@@ -887,6 +913,75 @@ describe('lobby.css visual invariants', () => {
     ]) {
       expect(ruleFor(selector)).not.toContain('--m2-green');
     }
+  });
+
+  /** T-90-4 ITEM-5: zero resting glow, hover-only highlight in both themes. */
+  it('ITEM-5: rest states are flat and only hover/focus adds the glow', () => {
+    /** The declaration block of the first rule that starts with `selector`. */
+    const ruleFor = (selector: string) => {
+      const at = lobbyCss.indexOf(selector);
+      if (at < 0) return '';
+      const open = lobbyCss.indexOf('{', at);
+      return lobbyCss.slice(at, lobbyCss.indexOf('}', open) + 1);
+    };
+
+    // Flat resting surfaces: panels, tiles, buttons, segmented controls, tabs,
+    // pool rows and the Create-a-Game seat map.
+    for (const selector of [
+      '.m2-panel {',
+      '.quick-pair-tile {',
+      '.m2-button {',
+      '.m2-button.primary {',
+      '.segmented-option {',
+      '.m2-lobby-tab {',
+      '.lobby-pool-row {',
+      '.create-seat-card {',
+      '.create-seat-option {',
+    ]) {
+      const rule = ruleFor(selector);
+      expect(rule, selector).toContain('box-shadow: none');
+      expect(rule, selector).not.toContain('--ui-select-glow');
+    }
+
+    // Selected states are crisp flat pills, never a resting glow.
+    for (const selector of [
+      ".segmented-option[aria-pressed='true']",
+      ".create-seat-option[aria-pressed='true']",
+      '.m2-lobby-tab.active',
+    ]) {
+      const rule = ruleFor(selector);
+      expect(rule, selector).toContain('box-shadow: none');
+      expect(rule, selector).not.toContain('--ui-select-glow');
+    }
+
+    // The shell itself is flat too.
+    expect(lobbyCss).toMatch(/\.m2-lobby\s*\{[^}]*display:\s*grid[^}]*box-shadow:\s*none/);
+    expect(lobbyCss).not.toContain('box-shadow: var(--app-shadow)');
+
+    // The highlight is applied on hover/focus only, for interactive elements.
+    for (const selector of [
+      '.m2-button:hover:not(:disabled)',
+      '.quick-pair-tile:hover:not(:disabled)',
+      '.segmented-option:hover:not(:disabled)',
+      '.create-seat-option:hover:not(:disabled)',
+      '.m2-lobby-tab:hover',
+    ]) {
+      expect(ruleFor(selector), selector).toContain('var(--ui-select-glow)');
+    }
+
+    // ...and the same highlight is wired for the Light theme tokens.
+    for (const selector of [
+      "html[data-theme='light'] .quick-pair-tile:hover:not(:disabled)",
+      "html[data-theme='light'] .segmented-option:hover:not(:disabled)",
+      "html[data-theme='light'] .create-seat-option:hover:not(:disabled)",
+    ]) {
+      expect(lobbyCss, selector).toContain(selector);
+    }
+    expect(lobbyCss).toContain('0 0 0 1px var(--ui-select-border), 0 0 12px var(--ui-select-glow)');
+
+    // Never a drop-shadow or text-shadow halo anywhere in the lobby styles.
+    expect(lobbyCss).not.toContain('filter: drop-shadow');
+    expect(lobbyCss).not.toContain('text-shadow');
   });
 
   it('keeps the M2 panel headings light on the dark panel', () => {

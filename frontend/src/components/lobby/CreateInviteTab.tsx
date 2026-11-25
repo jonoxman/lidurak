@@ -160,10 +160,6 @@ export function CreateInviteTab({
   return (
     <section class="m2-panel create-invite" aria-label="Create a Game">
       <h2 class="m2-panel-title">Create a Game</h2>
-      <p class="m2-panel-hint">
-        Choose whether this is a private invite link or a public pool table,
-        then set the rest of the table options.
-      </p>
 
       <form
         class="create-invite-form"

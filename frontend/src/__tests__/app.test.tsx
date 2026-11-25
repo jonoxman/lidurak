@@ -235,9 +235,11 @@ describe('App', () => {
     expect(
       cssRule(appCss, "html[data-theme='light'] .lobby-form .field select:focus-visible"),
     ).toContain('var(--ui-select-glow)');
-    expect(
-      cssRule(appCss, "html[data-theme='light'] .lobby-form .action-button.green"),
-    ).toContain('var(--ui-select-glow)');
+    // T-90-4 ITEM-5: the lobby's primary action is flat at rest in Light mode
+    // and only picks up the cobalt glow on hover.
+    expect(appCss).toMatch(
+      /html\[data-theme='light'\] \.lobby-form \.action-button\.green\s*\{\s*box-shadow: none;/,
+    );
     expect(
       cssRule(appCss, "html[data-theme='light'] .lobby-form .action-button.green:hover"),
     ).toContain('var(--ui-select-glow)');
