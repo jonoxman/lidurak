@@ -24,6 +24,8 @@ vi.mock('../api/lobbyClient', () => ({
   seedLobbyPreset: vi.fn(),
   createActiveMatchPreset: vi.fn(),
   createSpectatorMatchPreset: vi.fn(),
+  triggerQaQuickPairOpponent: vi.fn(),
+  launchQaSmallHandMatch: vi.fn(),
 }));
 
 import * as client from '../api/client';
@@ -50,6 +52,20 @@ const createActiveMatchPreset =
   lobbyApi.createActiveMatchPreset as unknown as ReturnType<typeof vi.fn>;
 const createSpectatorMatchPreset =
   lobbyApi.createSpectatorMatchPreset as unknown as ReturnType<typeof vi.fn>;
+const triggerQaQuickPairOpponent =
+  lobbyApi.triggerQaQuickPairOpponent as unknown as ReturnType<typeof vi.fn>;
+const launchQaSmallHandMatch =
+  lobbyApi.launchQaSmallHandMatch as unknown as ReturnType<typeof vi.fn>;
+
+/** The deferred queue answer: no room exists until the bucket fills. */
+const SEARCHING_2_15 = {
+  status: 'searching' as const,
+  playerCount: 2,
+  turnTimeoutSeconds: 15,
+  allowRedirect: true,
+  queuedCount: 1,
+  requiredCount: 2,
+};
 
 const GUEST = {
   playerId: 'guest-abcd1234',
@@ -96,7 +112,7 @@ describe('M2 LobbyPage', () => {
     getOrCreateSession.mockResolvedValue(GUEST);
     updateGuestName.mockResolvedValue({ ...GUEST, displayName: 'Ace' });
     fetchLobbyRooms.mockResolvedValue([]);
-    joinQuickPair.mockResolvedValue({ gameId: 'qp-1', seatIndex: 0 });
+    joinQuickPair.mockResolvedValue(SEARCHING_2_15);
     cancelQuickPair.mockResolvedValue(undefined);
     joinRoom.mockResolvedValue({ gameId: 'room-1', seatIndex: 1, view: {} as never });
     createRoom.mockResolvedValue({
@@ -107,6 +123,8 @@ describe('M2 LobbyPage', () => {
     seedLobbyPreset.mockResolvedValue({ rooms: [ROOM] });
     createActiveMatchPreset.mockResolvedValue({ gameId: 'active-1', seatIndex: 0 });
     createSpectatorMatchPreset.mockResolvedValue({ gameId: 'spec-1' });
+    triggerQaQuickPairOpponent.mockResolvedValue({ gameId: 'qa-pair-1', seatIndex: 0 });
+    launchQaSmallHandMatch.mockResolvedValue({ gameId: 'small-1', seatIndex: 0 });
     connectLobbySocket.mockImplementation(
       (handlers: import('../api/lobbyClient').LobbySocketHandlers) => {
         socketHandlers = handlers;
@@ -131,7 +149,10 @@ describe('M2 LobbyPage', () => {
     expect(screen.getByRole('tab', { name: /Lobby Pool/ })).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'Create a Game' })).toBeTruthy();
     expect(screen.queryByRole('tab', { name: 'Create Invite Link' })).toBeNull();
-    expect(screen.getByTestId('lobby-connection').textContent).toContain('Lobby idle');
+    // The transcript persists for the whole page, so the Quick Pairing tab is live.
+    await waitFor(() =>
+      expect(screen.getByTestId('lobby-connection').textContent).toContain('Lobby live'),
+    );
   });
 
   it('renames the guest through the editable identity badge', async () => {
@@ -235,7 +256,7 @@ describe('M2 LobbyPage', () => {
     expect(tokenBlock).not.toMatch(/#[0-9a-fA-F]{3,6}/);
   });
 
-  it('joins a Quick Pairing preset and navigates to its game table', async () => {
+  it('ITEM-1b: stays on the lobby with the searching status while queued', async () => {
     renderLobby();
 
     fireEvent.click(screen.getByRole('button', { name: /2P • 15s/ }));
@@ -247,12 +268,51 @@ describe('M2 LobbyPage', () => {
         allowRedirect: true,
       }),
     );
-    await waitFor(() => expect(window.location.pathname).toBe('/g/qp-1'));
+
+    const searching = await screen.findByTestId('quick-pair-searching');
+    expect(searching.getAttribute('role')).toBe('status');
+    expect(searching.textContent).toContain('Searching for a 2P • 15s table… (1/2)');
+    // A queued player owns no room yet, so the lobby stays on screen.
+    expect(window.location.pathname).toBe('/');
     expect(window.location.hash).toBe('');
+    expect(searching.querySelector('.quick-pair-spinner')).toBeTruthy();
   });
 
-  it('shows a searching state whose Cancel leaves the pairing queue', async () => {
-    joinQuickPair.mockReturnValue(new Promise(() => {}));
+  it('navigates straight to the room when POST /api/quick-pair answers matched', async () => {
+    joinQuickPair.mockResolvedValue({
+      status: 'matched',
+      gameId: 'xyz98765',
+      seatIndex: 1,
+    });
+    renderLobby();
+
+    fireEvent.click(screen.getByRole('button', { name: /2P • 15s/ }));
+
+    await expectGamePath('xyz98765');
+    expect(screen.queryByTestId('quick-pair-searching')).toBeNull();
+  });
+
+  it('navigates when /ws/lobby pushes quickPairMatched to a waiting player', async () => {
+    renderLobby();
+
+    fireEvent.click(screen.getByRole('button', { name: /2P • 15s/ }));
+    await screen.findByTestId('quick-pair-searching');
+
+    act(() => {
+      socketHandlers?.onQuickPairMatched?.('abc12345', 0);
+    });
+
+    await expectGamePath('abc12345');
+    expect(screen.queryByTestId('quick-pair-searching')).toBeNull();
+  });
+
+  it('cancels the queue from the searching banner and stays on the lobby', async () => {
+    joinQuickPair.mockResolvedValue({
+      ...SEARCHING_2_15,
+      playerCount: 3,
+      turnTimeoutSeconds: 30,
+      requiredCount: 3,
+    });
     renderLobby();
 
     fireEvent.click(screen.getByRole('button', { name: /3P • 30s/ }));
@@ -263,6 +323,30 @@ describe('M2 LobbyPage', () => {
 
     await waitFor(() => expect(cancelQuickPair).toHaveBeenCalledTimes(1));
     expect(screen.queryByTestId('quick-pair-searching')).toBeNull();
+    expect(window.location.pathname).toBe('/');
+  });
+
+  it('switches presets while queued without a stale navigation', async () => {
+    joinQuickPair
+      .mockResolvedValueOnce(SEARCHING_2_15)
+      .mockResolvedValueOnce({
+        ...SEARCHING_2_15,
+        playerCount: 3,
+        turnTimeoutSeconds: 30,
+        requiredCount: 3,
+      });
+    renderLobby();
+
+    fireEvent.click(screen.getByTestId('quick-pair-2-15'));
+    await screen.findByTestId('quick-pair-searching');
+
+    fireEvent.click(screen.getByTestId('quick-pair-3-30'));
+
+    await waitFor(() => expect(cancelQuickPair).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(screen.getByTestId('quick-pair-searching').textContent).toContain('3P • 30s'),
+    );
+    expect(window.location.pathname).toBe('/');
   });
 
   it('streams the live pool snapshot and joins a room in one click', async () => {
@@ -381,6 +465,28 @@ describe('M2 LobbyPage', () => {
     fireEvent.click(screen.getByTestId('qa-spectator-match'));
     await waitFor(() => expect(createSpectatorMatchPreset).toHaveBeenCalledTimes(1));
     await expectGamePath('spec-1');
+  });
+
+  it('T-90-6: matches the queued quick-pair opponent in one click', async () => {
+    renderLobby();
+
+    const button = screen.getByTestId('qa-quick-pair-opponent');
+    expect(button.textContent).toBe('Match queued quick-pair opponent');
+    fireEvent.click(button);
+
+    await waitFor(() => expect(triggerQaQuickPairOpponent).toHaveBeenCalledTimes(1));
+    await expectGamePath('qa-pair-1');
+  });
+
+  it('T-90-6: launches a four-card small-hand match in one click', async () => {
+    renderLobby();
+
+    const button = screen.getByTestId('qa-small-hand-match');
+    expect(button.textContent).toBe('Launch small-hand match (4 cards)');
+    fireEvent.click(button);
+
+    await waitFor(() => expect(launchQaSmallHandMatch).toHaveBeenCalledTimes(1));
+    await expectGamePath('small-1');
   });
 
   it('keeps the existing local game editor available below the M2 lobby', () => {

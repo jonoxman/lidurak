@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from 'preact/hooks';
-import { cancelQuickPair, joinQuickPair } from '../../api/lobbyClient';
-import type { PlayerCount, QuickPairRequest } from '../../types/multiplayer';
+import type {
+  PlayerCount,
+  QuickPairRequest,
+  QuickPairSearching,
+} from '../../types/multiplayer';
 
 /** The six Lichess-style Quick Pairing presets, all with redirects enabled. */
 export const QUICK_PAIR_PRESETS: ReadonlyArray<QuickPairRequest & { playerCount: PlayerCount }> = [
@@ -13,8 +15,15 @@ export const QUICK_PAIR_PRESETS: ReadonlyArray<QuickPairRequest & { playerCount:
 ];
 
 export interface QuickPairingTabProps {
-  /** Opens `/g/:gameId` once the player has a seat. */
-  onMatched: (gameId: string) => void;
+  /** The queue bucket the player is waiting in, or null when not queued. */
+  searching: QuickPairSearching | null;
+  /** A `/api/quick-pair` request is still in flight. */
+  pending?: boolean;
+  error?: string | null;
+  /** Joins (or switches to) a queue bucket. */
+  onSearch: (preset: QuickPairRequest) => void;
+  /** Leaves the queue and clears the searching state. */
+  onCancel: () => void;
 }
 
 const DECK_FOR_PLAYERS: Record<PlayerCount, string> = {
@@ -24,46 +33,20 @@ const DECK_FOR_PLAYERS: Record<PlayerCount, string> = {
 };
 
 /**
- * Quick Pairing: pick a table size and turn clock, and the server either seats
- * the player in a matching waiting room or opens one for them.
+ * Quick Pairing: pick a table size and turn clock.
  *
- * While the request is in flight the tab shows a searching indicator with a
- * Cancel action, so a queued player is never stuck without a way out.
+ * The queue state lives in `LobbyPage` so the searching banner survives tab
+ * switches and the live `/ws/lobby` match frame always lands on a mounted
+ * screen. Queued players stay on the lobby with this status until the server
+ * seats them or they cancel.
  */
-export function QuickPairingTab({ onMatched }: QuickPairingTabProps) {
-  const [pending, setPending] = useState<QuickPairRequest | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  // Bumped by Cancel, so a late match response cannot navigate after cancel.
-  const attempt = useRef(0);
-
-  const start = async (preset: QuickPairRequest) => {
-    if (pending) return;
-    const current = ++attempt.current;
-    setPending(preset);
-    setError(null);
-    try {
-      const matched = await joinQuickPair(preset);
-      if (attempt.current === current) onMatched(matched.gameId);
-    } catch (reason) {
-      if (attempt.current === current) {
-        setError(reason instanceof Error ? reason.message : String(reason));
-      }
-    } finally {
-      if (attempt.current === current) setPending(null);
-    }
-  };
-
-  const cancel = async () => {
-    // Invalidate the in-flight request before telling the server to drop it.
-    attempt.current += 1;
-    setPending(null);
-    try {
-      await cancelQuickPair();
-    } catch {
-      // A cancel that fails only means the room was already gone.
-    }
-  };
-
+export function QuickPairingTab({
+  searching,
+  pending = false,
+  error = null,
+  onSearch,
+  onCancel,
+}: QuickPairingTabProps) {
   return (
     <section class="m2-panel quick-pair" aria-label="Quick Pairing">
       <h2 class="m2-panel-title">Quick Pairing</h2>
@@ -72,13 +55,14 @@ export function QuickPairingTab({ onMatched }: QuickPairingTabProps) {
         players asking for the same preset.
       </p>
 
-      {pending ? (
+      {searching ? (
         <div class="quick-pair-searching" data-testid="quick-pair-searching" role="status">
           <span class="quick-pair-spinner" aria-hidden="true" />
           <span>
-            Searching for a {pending.playerCount}P • {pending.turnTimeoutSeconds}s table…
+            Searching for a {searching.playerCount}P • {searching.turnTimeoutSeconds}s table… (
+            {searching.queuedCount}/{searching.requiredCount})
           </span>
-          <button type="button" class="m2-button secondary" onClick={() => void cancel()}>
+          <button type="button" class="m2-button secondary" onClick={onCancel}>
             Cancel
           </button>
         </div>
@@ -92,8 +76,8 @@ export function QuickPairingTab({ onMatched }: QuickPairingTabProps) {
             class="quick-pair-tile"
             data-height="double"
             data-testid={`quick-pair-${preset.playerCount}-${preset.turnTimeoutSeconds}`}
-            disabled={pending !== null}
-            onClick={() => void start(preset)}
+            disabled={pending}
+            onClick={() => onSearch(preset)}
           >
             <span class="quick-pair-tile-title">
               {preset.playerCount}P • {preset.turnTimeoutSeconds}s
