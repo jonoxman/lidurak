@@ -697,11 +697,6 @@ process_ticket_on_worker() {
     git checkout -f -B "$BRANCH_NAME" main >/dev/null 2>&1
     mkdir -p .tickets .reviews
     cp "../../${TICKET_FILE}" ".tickets/${TICKET_NAME}.md"
-    cp ../../AGENTS.md ./AGENTS.md 2>/dev/null || true
-    cp ../../SPEC.md ./SPEC.md 2>/dev/null || true
-    cp ../../README.md ./README.md 2>/dev/null || true
-    cp ../../ARCHITECTURE.md ./ARCHITECTURE.md 2>/dev/null || true
-    cp ../../play-local.sh ./play-local.sh 2>/dev/null || true
     rm -f .tickets/STATUS .reviews/agent_notes.md
   )
 
@@ -735,9 +730,9 @@ process_ticket_on_worker() {
     (
       cd "$WT_DIR"
       rm -f .tickets/STATUS
-      git checkout HEAD -- README.md ARCHITECTURE.md 2>/dev/null || true
+      git checkout HEAD -- README.md ARCHITECTURE.md SPEC.md AGENTS.md FEEDBACK.md BACKUP_FEEDBACK.md 2>/dev/null || true
       git add -A
-      git reset -- .reviews/ .tickets/ README.md ARCHITECTURE.md 2>/dev/null || true
+      git reset -- .reviews/ .tickets/ README.md ARCHITECTURE.md SPEC.md AGENTS.md FEEDBACK.md FEEDBACK.backup.md BACKUP_FEEDBACK.md 2>/dev/null || true
       if ! git diff --cached --quiet; then
         agent_git commit -m "feat(${TICKET_NAME}): round ${ROUND} implementation" >/dev/null
       fi
@@ -867,12 +862,15 @@ $(cat "$REVIEW_FILE")" >/dev/null 2>&1 || true
   done
 
   echo "🔒 Acquiring merge lock for ${TICKET_NAME}..." > "$STATUS_FILE"
-  (
+  if ! (
     flock -x 200
     echo "[Worker ${WORKER_ID}] 🔀 Reconciling ${BRANCH_NAME} with latest main..."
 
     cd "$PROJECT_ROOT"
-    git checkout main >/dev/null 2>&1
+    if ! git checkout main >/dev/null 2>&1; then
+      echo "[Worker ${WORKER_ID}] ❌ Failed to checkout main in ${PROJECT_ROOT}!"
+      exit 1
+    fi
     if [ "$USE_GITHUB_PRS" -eq 1 ]; then
       git fetch origin main >/dev/null 2>&1 || true
       git merge --ff-only origin/main >/dev/null 2>&1 || true
@@ -883,12 +881,13 @@ $(cat "$REVIEW_FILE")" >/dev/null 2>&1 || true
       echo "[Worker ${WORKER_ID}] ⚠️  Merge conflict detected with main! Dispatching FreeBuff to resolve..."
       cd "$PROJECT_ROOT"
       local CONFLICT_PROMPT="🚨 GIT MERGE CONFLICT WITH MAIN: Another parallel worker merged changes to 'main' that conflict with your branch. Run 'git status' and 'git diff' to find all <<<<<<< HEAD conflict markers, resolve them cleanly so BOTH branches' features are preserved (never delete another ticket's feature when resolving a conflict!), run the test suite ('sbt -batch test' and 'npm test -- --run') until 100% green, and run: echo DONE > .tickets/STATUS"
-      run_worker_freebuff "$WORKER_ID" "$CONFLICT_PROMPT"
+      run_worker_freebuff "$WORKER_ID" "$CONFLICT_PROMPT" || exit 1
       run_worker_test_gate "$WORKER_ID" "$TICKET_FILE" || exit 1
       cd "$WT_DIR"
       rm -f .tickets/STATUS
+      git checkout HEAD -- README.md ARCHITECTURE.md SPEC.md AGENTS.md FEEDBACK.md BACKUP_FEEDBACK.md 2>/dev/null || true
       git add -A
-      git reset -- .reviews/ .tickets/ 2>/dev/null || true
+      git reset -- .reviews/ .tickets/ README.md ARCHITECTURE.md SPEC.md AGENTS.md FEEDBACK.md FEEDBACK.backup.md BACKUP_FEEDBACK.md 2>/dev/null || true
       agent_git commit -m "chore(${TICKET_NAME}): resolve merge conflicts with main" >/dev/null 2>&1 || true
     else
       cd "$PROJECT_ROOT"
@@ -899,8 +898,24 @@ $(cat "$REVIEW_FILE")" >/dev/null 2>&1 || true
     git checkout --detach HEAD >/dev/null 2>&1
 
     cd "$PROJECT_ROOT"
-    git checkout main >/dev/null 2>&1
-    agent_git merge --no-ff "$BRANCH_NAME" -m "Merge ${TICKET_NAME} (PR #${PR_NUMBER:-local})" >/dev/null 2>&1
+    if ! git checkout main >/dev/null 2>&1; then
+      echo "[Worker ${WORKER_ID}] ❌ Failed to checkout main before final merge!"
+      exit 1
+    fi
+
+    local AHEAD_COUNT
+    AHEAD_COUNT=$(git rev-list --count "main..${BRANCH_NAME}" 2>/dev/null || echo "0")
+    if [ "$AHEAD_COUNT" -eq 0 ]; then
+      echo "[Worker ${WORKER_ID}] ❌ Branch ${BRANCH_NAME} has 0 commits ahead of main! Refusing to mark ${TICKET_NAME} completed."
+      exit 1
+    fi
+
+    if ! agent_git merge --no-ff "$BRANCH_NAME" -m "Merge ${TICKET_NAME} (PR #${PR_NUMBER:-local})"; then
+      echo "[Worker ${WORKER_ID}] ❌ git merge --no-ff ${BRANCH_NAME} FAILED! Check 'git status' on main. Preserving branch ${BRANCH_NAME}."
+      git merge --abort 2>/dev/null || true
+      exit 1
+    fi
+
     touch "$DONE_MARKER"
     git add "$DONE_MARKER" "$TICKET_FILE" 2>/dev/null || true
     agent_git commit -m "chore(tickets): mark ${TICKET_NAME} completed" >/dev/null 2>&1 || true
@@ -913,7 +928,12 @@ $(cat "$REVIEW_FILE")" >/dev/null 2>&1 || true
 
     git branch -D "$BRANCH_NAME" >/dev/null 2>&1 || true
     echo "[Worker ${WORKER_ID}] ✅ ${TICKET_NAME} merged into main and feature branch deleted!"
-  ) 200>.reviews/merge.lock
+  ) 200>.reviews/merge.lock; then
+    echo "❌ Merge failed on ${TICKET_NAME}" > "$STATUS_FILE"
+    echo "Merge failed on ${TICKET_NAME} (branch ${BRANCH_NAME} preserved)" > .reviews/wave_halted.latch
+    send_alert "Worker ${WORKER_ID} Halted — Merge Failed on ${TICKET_NAME}" "Ticket ${TICKET_NAME} failed to merge into main (either 0 commits ahead or dirty working tree conflict). Branch ${BRANCH_NAME} was preserved. Inspect 'git status' on main."
+    return 1
+  fi
 
   docker exec "$CONTAINER" tmux kill-session -t buff 2>/dev/null || true
 
