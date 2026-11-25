@@ -332,6 +332,25 @@ final class RoomManager[F[_]](
       senderPlayerId: String,
       action: WsClientMessage
   ): F[Either[ActionRejected, Unit]] =
+    toGameAction(senderPlayerId, action) match
+      case Left(rejected) => F.pure(Left(rejected))
+      case Right(engineAction) => handleGameAction(gameId, senderPlayerId, engineAction)
+
+  /**
+   * Applies one already-decoded engine action on behalf of the authenticated
+   * `senderPlayerId`.
+   *
+   * This is the shared entry point for every [[GameAction]] variant, including
+   * an `InitialAttack` that names an optional `targetPlayerId` (the Chaos-mode
+   * opening attack), which the compact WebSocket frame does not carry. Seat
+   * authorisation is identical to [[handleAction]]: the acting id is always the
+   * authenticated sender, never a value read from the payload.
+   */
+  def handleGameAction(
+      gameId: String,
+      senderPlayerId: String,
+      action: GameAction
+  ): F[Either[ActionRejected, Unit]] =
     mutex.permit.use { _ =>
       rooms.get.flatMap(_.get(gameId) match
         case None =>
@@ -343,20 +362,18 @@ final class RoomManager[F[_]](
             val senderSeat = room.seatIndexOf(senderPlayerId)
             (room.status, room.gameState, senderSeat) match
               case (RoomStatus.InProgress, Some(state), Some(_)) =>
-                toGameAction(senderPlayerId, action) match
-                  case Left(rejected) => F.pure(Left(rejected))
-                  case Right(engineAction) =>
-                    GameEngine.applyAction(state, senderPlayerId, engineAction) match
-                      case Left(reason) =>
-                        F.pure(Left(ActionRejected.illegalMove(reason)))
-                      case Right(next) =>
-                        val now = System.currentTimeMillis()
-                        val updated = afterMove(room, next, now)
-                        for
-                          _ <- managed.state.set(updated)
-                          _ <- broadcastViews(managed)
-                          _ <- publishLobby
-                        yield Right(())
+                GameEngine.applyAction(state, senderPlayerId, action) match
+                  case Left(reason) =>
+                    F.pure(Left(ActionRejected.illegalMove(reason)))
+                  case Right(next) =>
+                    nowMs.flatMap { now =>
+                      val updated = afterMove(room, next, now)
+                      for
+                        _ <- managed.state.set(updated)
+                        _ <- broadcastViews(managed)
+                        _ <- publishLobby
+                      yield Right(())
+                    }
               case _ =>
                 F.pure(
                   Left(
@@ -456,7 +473,11 @@ final class RoomManager[F[_]](
           id = seat.playerId.getOrElse(player.id),
           name = seat.displayName.getOrElse(player.name)
         )
-      }
+      },
+      // The overall game clock starts on the transition into InProgress and
+      // stays frozen until the match is over.
+      gameStartedAtMs = Some(now),
+      gameEndedAtMs = None
     )
     room.copy(
       status = RoomStatus.InProgress,
@@ -465,22 +486,30 @@ final class RoomManager[F[_]](
     )
 
   /**
-   * The room after a legal move: the engine state is stored, a finished match
-   * becomes [[RoomStatus.Finished]] with no running clock, and a running one
-   * gets a fresh deadline for whoever is on the clock now.
+   * The room after a legal move: the overall game clock is stamped (started on
+   * the first move at the latest, frozen once the match ends), the engine state
+   * is stored, a finished match becomes [[RoomStatus.Finished]] with no running
+   * clock, and a running one gets a fresh deadline for whoever is on the clock
+   * now.
    */
   private def afterMove(room: GameRoom, next: GameState, now: Long): GameRoom =
+    val stamped = next.copy(
+      gameStartedAtMs = next.gameStartedAtMs
+        .orElse(room.gameState.flatMap(_.gameStartedAtMs))
+        .orElse(Some(now)),
+      gameEndedAtMs = next.gameEndedAtMs.orElse(Option.when(next.isGameOver)(now))
+    )
     if next.isGameOver then
       room.copy(
-        gameState = Some(next),
+        gameState = Some(stamped),
         status = RoomStatus.Finished,
         turnDeadlineEpochMs = None
       )
     else
       room.copy(
-        gameState = Some(next),
+        gameState = Some(stamped),
         status = RoomStatus.InProgress,
-        turnDeadlineEpochMs = deadlineFor(next, room.config.turnTimeoutSeconds, now)
+        turnDeadlineEpochMs = deadlineFor(stamped, room.config.turnTimeoutSeconds, now)
       )
 
   /** The single definition of when the current turn expires. */
@@ -530,14 +559,20 @@ final class RoomManager[F[_]](
       managed: ManagedRoom[F],
       viewerId: String
   ): F[PlayerGameView] =
-    (managed.state.get, managed.clients.get).mapN { (room, clients) =>
-      project(room, clients.map(_.playerId).toSet, viewerId)
+    (managed.state.get, managed.clients.get, nowMs).mapN { (room, clients, now) =>
+      project(room, clients.map(_.playerId).toSet, viewerId, now)
     }
 
+  /**
+   * Projects `room` for one viewer at `nowMs`. Both the REST view and every
+   * broadcast frame go through this one function, so `GET /api/games/:gameId`
+   * and the `/ws/games/:gameId` `gameViewUpdate` payload can never disagree.
+   */
   private def project(
       room: GameRoom,
       connectedPlayerIds: Set[String],
-      viewerId: String
+      viewerId: String,
+      nowMs: Long
   ): PlayerGameView =
     room.gameState match
       case None =>
@@ -556,7 +591,8 @@ final class RoomManager[F[_]](
           state = state,
           viewerId = viewerId,
           connectedPlayerIds = connectedPlayerIds,
-          turnDeadlineEpochMs = room.turnDeadlineEpochMs
+          turnDeadlineMs = room.turnDeadlineEpochMs,
+          nowMs = nowMs
         )
 
   /**
@@ -570,13 +606,15 @@ final class RoomManager[F[_]](
   ): F[Unit] =
     (managed.state.get, managed.clients.get).flatMapN { (room, clients) =>
       val connected = clients.map(_.playerId).toSet
-      clients
-        .filterNot(client => exceptClientIds.contains(client.clientId))
-        .traverse_ { client =>
-          client.queue.offer(
-            WsServerMessage.GameViewUpdate(project(room, connected, client.playerId))
-          )
-        }
+      nowMs.flatMap { now =>
+        clients
+          .filterNot(client => exceptClientIds.contains(client.clientId))
+          .traverse_ { client =>
+            client.queue.offer(
+              WsServerMessage.GameViewUpdate(project(room, connected, client.playerId, now))
+            )
+          }
+      }
     }
 
   /** Snapshots the open pool and publishes it to every lobby subscriber. */

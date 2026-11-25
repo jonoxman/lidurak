@@ -2,7 +2,7 @@ package durak.protocol
 
 import durak.engine.{BoutPhase, Card, GameConfig, GameState, PlayerState, Rank, Suit, TablePair}
 import durak.engine.JsonCodecs.given
-import io.circe.parser
+import io.circe.{parser, Json}
 import io.circe.syntax.*
 import ProtocolCodecs.given
 
@@ -66,7 +66,8 @@ class PlayerGameViewSpec extends munit.FunSuite:
       viewerId: String,
       state: GameState = baseState,
       connected: Set[String] = Set("alice", "carol"),
-      turnDeadlineEpochMs: Option[Long] = Some(90_000L)
+      turnDeadlineMs: Option[Long] = Some(90_000L),
+      nowMs: Long = 20_000L
   ): PlayerGameView =
     PlayerGameView.forViewer(
       gameId = gameId,
@@ -75,7 +76,8 @@ class PlayerGameViewSpec extends munit.FunSuite:
       state = state,
       viewerId = viewerId,
       connectedPlayerIds = connected,
-      turnDeadlineEpochMs = turnDeadlineEpochMs
+      turnDeadlineMs = turnDeadlineMs,
+      nowMs = nowMs
     )
 
   private def assertCardAbsent(encoded: String, secret: Card): Unit =
@@ -189,19 +191,24 @@ class PlayerGameViewSpec extends munit.FunSuite:
 
     assertEquals(view.tablePairs, baseState.tablePairs)
     assertEquals(view.discardCount, 1)
-    assertEquals(view.phase, Some("defense"))
+    assertEquals(view.boutPhase, Some("defense"))
     assertEquals(view.attackerIdx, Some(0))
     assertEquals(view.defenderIdx, Some(1))
     assertEquals(view.maxBoutAttacks, 6)
     assertEquals(view.finishOrder, Vector.empty)
     assertEquals(view.isDraw, false)
-    assertEquals(view.durakId, None)
-    assertEquals(view.turnDeadlineEpochMs, Some(90_000L))
+    assertEquals(view.durak, None)
+    assertEquals(view.turnDeadlineMs, 90_000L)
   }
 
-  test("an idle turn clock is projected as no deadline") {
-    assertEquals(viewFor("alice", baseState, turnDeadlineEpochMs = Some(0L)).turnDeadlineEpochMs, None)
-    assertEquals(viewFor("alice", baseState, turnDeadlineEpochMs = None).turnDeadlineEpochMs, None)
+  test("an idle turn clock is projected as no deadline and no countdown") {
+    val zero = viewFor("alice", baseState, turnDeadlineMs = Some(0L))
+    assertEquals(zero.turnDeadlineMs, 0L)
+    assertEquals(zero.turnSecondsRemaining, 0)
+
+    val missing = viewFor("alice", baseState, turnDeadlineMs = None)
+    assertEquals(missing.turnDeadlineMs, 0L)
+    assertEquals(missing.turnSecondsRemaining, 0)
   }
 
   test("a finished game is projected as Finished with no running clock") {
@@ -210,15 +217,238 @@ class PlayerGameViewSpec extends munit.FunSuite:
       boutPhase = BoutPhase.GameOver,
       finishOrder = Vector("bob", "alice")
     )
-    val view = viewFor("alice", finished, turnDeadlineEpochMs = Some(123_456L))
+    val view = viewFor("alice", finished, turnDeadlineMs = Some(123_456L))
 
     assertEquals(view.status, RoomStatus.Finished)
-    assertEquals(view.phase, Some("gameOver"))
-    assertEquals(view.turnDeadlineEpochMs, None)
+    assertEquals(view.boutPhase, Some("gameOver"))
+    assertEquals(view.turnDeadlineMs, 0L)
+    assertEquals(view.turnSecondsRemaining, 0)
     assertEquals(view.finishOrder, Vector("bob", "alice"))
     assertEquals(view.players.find(_.id == "bob").flatMap(_.finishRank), Some(1))
     // A seat that still holds cards is never projected as finished.
     assertEquals(view.players.find(_.id == "alice").flatMap(_.finishRank), None)
+  }
+
+  // --- Full M1 gameplay projection -----------------------------------------
+
+  test("the viewer's own legal actions, clock and prompt fields mirror the engine") {
+    val view = viewFor("alice")
+
+    // Every card on the table is covered, so the attacker's only move is to pass.
+    assertEquals(view.legalActions, List("pass"))
+    assertEquals(view.turnPlayerId, Some("bob"))
+    assertEquals(view.turnDeadlineMs, 90_000L)
+    assertEquals(view.turnSecondsRemaining, 70)
+    assertEquals(view.promptedPlayerIds, Vector("alice", "carol", "dave"))
+    assertEquals(view.defenderDefenseless, false)
+    assertEquals(view.players.map(_.isTurn), Vector(true, false, true, true))
+    assertEquals(view.players.map(_.status).distinct, Vector(durak.engine.PlayerStatus.Active))
+    assertEquals(view.myHasPassed, false)
+    assertEquals(view.myFinishRank, None)
+    assertEquals(view.myStatus, durak.engine.PlayerStatus.Active)
+    assertEquals(view.winners, Nil)
+  }
+
+  test("throw-in eligibility is projected only for the viewer's own seat") {
+    val throwInState = baseState.copy(
+      players = baseState.players.updated(
+        2,
+        PlayerState(
+          "carol",
+          "Carol",
+          Vector(card(Rank.Nine, Suit.Clubs), card(Rank.Jack, Suit.Spades))
+        )
+      )
+    )
+
+    val carol = viewFor("carol", throwInState)
+    assertEquals(carol.throwInCards, List(card(Rank.Nine, Suit.Clubs)))
+    assertEquals(carol.throwInCapacity, 1)
+    assertEquals(carol.canThrowIn, true)
+    assert(carol.legalActions.contains("throwIn"), carol.legalActions.toString)
+
+    // A seat with no matching rank gets nothing to throw in.
+    val alice = viewFor("alice", throwInState)
+    assertEquals(alice.throwInCards, Nil)
+    assertEquals(alice.throwInCapacity, 0)
+    assertEquals(alice.canThrowIn, false)
+
+    // The defender can never throw in.
+    val bob = viewFor("bob", throwInState)
+    assertEquals(bob.throwInCards, Nil)
+    assertEquals(bob.canThrowIn, false)
+
+    // A spectator receives none of the viewer-scoped action metadata.
+    val spectator = viewFor("anonymous-spectator", throwInState)
+    assertEquals(spectator.hand, Nil)
+    assertEquals(spectator.legalActions, Nil)
+    assertEquals(spectator.throwInCards, Nil)
+    assertEquals(spectator.throwInCapacity, 0)
+    assertEquals(spectator.canThrowIn, false)
+    assertEquals(spectator.eligibleTargetIds, Vector.empty)
+    assertEquals(spectator.redirectTargetId, None)
+    assertEquals(spectator.myStatus, "")
+  }
+
+  test("opening-attack targets and redirect target are public to seated viewers only") {
+    val opening = baseState.copy(boutPhase = BoutPhase.InitialAttack, tablePairs = Vector.empty)
+    assertEquals(viewFor("alice", opening).eligibleTargetIds, Vector("bob"))
+    assertEquals(viewFor("anonymous-spectator", opening).eligibleTargetIds, Vector.empty)
+
+    // The standard-game reflect lands on the next clockwise seat (Carol).
+    assertEquals(viewFor("alice").redirectTargetId, Some("carol"))
+    assertEquals(viewFor("anonymous-spectator").redirectTargetId, None)
+  }
+
+  test("a defenseless defender projects only surrender and the defender prompt") {
+    val helpless = baseState.copy(
+      config = GameConfig(playerCount = 4, seed = 7L, allowRedirect = false),
+      players = baseState.players.updated(
+        1,
+        PlayerState("bob", "Bob", Vector(card(Rank.Two, Suit.Clubs)))
+      ),
+      tablePairs = Vector(TablePair(card(Rank.Ace, Suit.Hearts)))
+    )
+
+    val bob = viewFor("bob", helpless)
+    assertEquals(bob.defenderDefenseless, true)
+    assertEquals(bob.legalActions, List("surrender"))
+    assertEquals(bob.turnPlayerId, Some("bob"))
+    assertEquals(bob.promptedPlayerIds, Vector("bob"))
+  }
+
+  test("a finished match projects winners, durak and frozen game clocks") {
+    val finished = baseState.copy(
+      players = baseState.players.zipWithIndex.map { case (player, idx) =>
+        if idx == 1 then player else player.copy(hand = Vector.empty)
+      },
+      boutPhase = BoutPhase.GameOver,
+      finishOrder = Vector("alice", "carol", "dave", "bob"),
+      gameStartedAtMs = Some(1_000L),
+      gameEndedAtMs = Some(5_000L)
+    )
+
+    val view = viewFor("alice", finished, turnDeadlineMs = Some(123_456L))
+
+    assertEquals(view.status, RoomStatus.Finished)
+    assertEquals(view.winners, List("alice", "carol", "dave"))
+    assertEquals(view.durak, Some("bob"))
+    assertEquals(view.legalActions, Nil)
+    assertEquals(view.turnPlayerId, None)
+    assertEquals(view.turnDeadlineMs, 0L)
+    assertEquals(view.turnSecondsRemaining, 0)
+    assertEquals(view.promptedPlayerIds, Vector.empty)
+    assertEquals(view.players.map(_.isTurn).distinct, Vector(false))
+    assertEquals(view.gameStartedAtMs, Some(1_000L))
+    assertEquals(view.gameEndedAtMs, Some(5_000L))
+    assertEquals(view.myFinishRank, Some(1))
+    // The last seat still holding cards is the Durak and is never ranked.
+    assertEquals(view.players.find(_.id == "bob").flatMap(_.finishRank), None)
+  }
+
+  test("discard history is public and the viewer's own pass/status are projected") {
+    val passed = baseState.copy(
+      players = baseState.players.updated(0, baseState.players(0).copy(hasPassed = true)),
+      discardPile = Vector(card(Rank.Two, Suit.Clubs), card(Rank.Three, Suit.Hearts)),
+      lastDiscardCards = Vector(card(Rank.Three, Suit.Hearts))
+    )
+
+    val view = viewFor("alice", passed)
+    assertEquals(view.discardCount, 2)
+    assertEquals(view.lastDiscardCards, Vector(card(Rank.Three, Suit.Hearts)))
+    assertEquals(view.myHasPassed, true)
+    assertEquals(view.players.find(_.id == "alice").map(_.hasPassed), Some(true))
+  }
+
+  test("the enriched payload round-trips through JSON without exposing hidden cards") {
+    val throwInState = baseState.copy(
+      players = baseState.players.updated(
+        2,
+        PlayerState(
+          "carol",
+          "Carol",
+          Vector(card(Rank.Nine, Suit.Clubs), card(Rank.Jack, Suit.Spades))
+        )
+      )
+    )
+    val carol = viewFor("carol", throwInState)
+    val view = carol
+    val json = view.asJson
+
+    assertEquals(parser.decode[PlayerGameView](json.noSpaces), Right(view))
+
+    val viewKeys = json.asObject.map(_.keys.toSet).getOrElse(fail("view must encode as object"))
+    List(
+      "boutPhase",
+      "legalActions",
+      "winners",
+      "durak",
+      "turnPlayerId",
+      "turnDeadlineMs",
+      "turnSecondsRemaining",
+      "defenderDefenseless",
+      "promptedPlayerIds",
+      "discardCount",
+      "lastDiscardCards",
+      "gameStartedAtMs",
+      "gameEndedAtMs",
+      "eligibleTargetIds",
+      "redirectTargetId",
+      "throwInCards",
+      "throwInCapacity",
+      "canThrowIn",
+      "myHasPassed",
+      "myFinishRank",
+      "myStatus"
+    ).foreach(key => assert(viewKeys.contains(key), s"missing $key: $viewKeys"))
+
+    val encoded = json.noSpaces
+    (aliceHand ++ bobHand ++ daveHand).foreach(assertCardAbsent(encoded, _))
+    hiddenTalonCards.foreach(assertCardAbsent(encoded, _))
+    // The only cards in the payload are the viewer's own hand and the cards it
+    // may legally throw in, so every throw-in card is one of its own.
+    assert(carol.throwInCards.forall(view.hand.contains), carol.throwInCards.toString)
+  }
+
+  test("a legacy payload decodes with the M1 fields defaulted or renamed") {
+    val legacy = Json
+      .obj(
+        "gameId" -> Json.fromString(gameId),
+        "status" -> Json.fromString("inProgress"),
+        "config" -> Json.obj(
+          "playerCount" -> Json.fromInt(4),
+          "allowRedirect" -> Json.True,
+          "turnTimeoutSeconds" -> Json.fromInt(15),
+          "isPublic" -> Json.True
+        ),
+        "viewerId" -> Json.fromString("alice"),
+        "viewerSeat" -> Json.fromInt(0),
+        "hand" -> aliceHand.asJson,
+        "players" -> Json.arr(),
+        "seats" -> Json.arr(),
+        "tablePairs" -> Json.arr(),
+        "talonCount" -> Json.fromInt(0),
+        "bottomTrumpCard" -> Json.Null,
+        "trumpSuit" -> Json.fromString("diamonds"),
+        "phase" -> Json.fromString("defense"),
+        "attackerIdx" -> Json.fromInt(0),
+        "defenderIdx" -> Json.fromInt(1),
+        "maxBoutAttacks" -> Json.fromInt(6),
+        "finishOrder" -> Json.arr(),
+        "isDraw" -> Json.False,
+        "durakId" -> Json.Null,
+        "turnDeadlineEpochMs" -> Json.fromLong(90_000L)
+      )
+
+    val decoded = parser.decode[PlayerGameView](legacy.noSpaces)
+    assert(decoded.isRight, decoded.toString)
+    val view = decoded.toOption.get
+    assertEquals(view.boutPhase, Some("defense"))
+    assertEquals(view.durak, None)
+    assertEquals(view.turnDeadlineMs, 90_000L)
+    assertEquals(view.legalActions, Nil)
+    assertEquals(view.throwInCards, Nil)
+    assertEquals(view.canThrowIn, false)
   }
 
   // --- Waiting room ---
@@ -242,8 +472,16 @@ class PlayerGameViewSpec extends munit.FunSuite:
     assertEquals(view.talonCount, 0)
     assertEquals(view.bottomTrumpCard, None)
     assertEquals(view.trumpSuit, None)
-    assertEquals(view.phase, None)
-    assertEquals(view.turnDeadlineEpochMs, None)
+    assertEquals(view.boutPhase, None)
+    assertEquals(view.turnDeadlineMs, 0L)
+    assertEquals(view.legalActions, Nil)
+    assertEquals(view.throwInCards, Nil)
+    assertEquals(view.canThrowIn, false)
+    assertEquals(view.eligibleTargetIds, Vector.empty)
+    assertEquals(view.redirectTargetId, None)
+    assertEquals(view.winners, Nil)
+    assertEquals(view.durak, None)
+    assertEquals(view.promptedPlayerIds, Vector.empty)
   }
 
   test("a waiting-room spectator gets no seat and no hand") {
@@ -381,7 +619,9 @@ class PlayerGameViewSpec extends munit.FunSuite:
     assertEquals(topLevelKeys, Set("type", "view"))
     assert(!viewKeys.contains("talon"), viewKeys.toString)
     assert(!viewKeys.contains("discardPile"), viewKeys.toString)
-    assert(!viewKeys.contains("lastDiscardCards"), viewKeys.toString)
+    // The most recent discard is required public M1 metadata; the older
+    // discards stay hidden behind `discardCount` only.
+    assert(viewKeys.contains("lastDiscardCards"), viewKeys.toString)
     assert(!viewKeys.contains("players.cardLists"), viewKeys.toString)
 
     (bobHand ++ carolHand ++ daveHand).foreach(assertCardAbsent(encoded, _))

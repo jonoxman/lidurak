@@ -3,7 +3,7 @@ package durak.rooms
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import cats.syntax.all.*
-import durak.engine.{Card, GameState, JsonCodecs}
+import durak.engine.{Card, GameAction, GameEngine, GameState, JsonCodecs}
 import durak.engine.JsonCodecs.given
 import durak.protocol.{PlayerGameView, ProtocolCodecs, RoomStatus, WsClientMessage, WsServerMessage}
 import durak.protocol.ProtocolCodecs.given
@@ -490,6 +490,167 @@ class RoomManagerSpec extends munit.FunSuite:
 
     // Unknown rooms report an error instead of silently succeeding.
     assert(rm.enforceTurnTimeout("missing-room", deadline).unsafeRunSync().isLeft)
+  }
+
+  // --- M1 projection wiring ------------------------------------------------
+
+  test("starting a match stamps the game clock and the configured turn deadline") {
+    val rm = manager
+    val room = startTwoPlayer(rm)
+    val gameRoom = rm.getRoom(room.gameId).unsafeRunSync().getOrElse(fail("room missing"))
+
+    val startedAt = gameRoom.gameState.flatMap(_.gameStartedAtMs)
+      .getOrElse(fail("a started match must stamp gameStartedAtMs"))
+    assert(startedAt > 0L)
+    assertEquals(gameRoom.gameState.flatMap(_.gameEndedAtMs), None)
+
+    val deadline = gameRoom.turnDeadlineEpochMs
+      .getOrElse(fail("a running match must have a turn deadline"))
+    // The room uses its configured 15-second clock; allow one second of slack.
+    assert(deadline >= startedAt + 14_000L, s"deadline $deadline vs start $startedAt")
+    assert(deadline <= System.currentTimeMillis() + 15_000L, deadline.toString)
+
+    val view = rm.getRoomView(room.gameId, "host").unsafeRunSync()
+      .getOrElse(fail("view missing"))
+    assertEquals(view.gameStartedAtMs, Some(startedAt))
+    assertEquals(view.gameEndedAtMs, None)
+    assertEquals(view.turnDeadlineMs, deadline)
+    assert(view.turnSecondsRemaining > 0 && view.turnSecondsRemaining <= 15)
+    assertEquals(view.boutPhase, Some("initialAttack"))
+  }
+
+  test("each viewer receives only their own legal actions and targeting metadata") {
+    val rm = manager
+    val room = startTwoPlayer(rm)
+    val state = stateOf(rm, room.gameId)
+    val attackerId = state.players(state.attackerIdx).id
+    val defenderId = state.players(state.defenderIdx).id
+
+    val attackerView = rm.getRoomView(room.gameId, attackerId).unsafeRunSync()
+      .getOrElse(fail("attacker view missing"))
+    assertEquals(attackerView.legalActions, List("attack"))
+    assertEquals(attackerView.eligibleTargetIds, Vector(defenderId))
+    assertEquals(attackerView.turnPlayerId, Some(attackerId))
+    assertEquals(attackerView.promptedPlayerIds, Vector(attackerId))
+    assert(attackerView.turnDeadlineMs > 0L)
+    assert(attackerView.turnSecondsRemaining > 0)
+
+    val defenderView = rm.getRoomView(room.gameId, defenderId).unsafeRunSync()
+      .getOrElse(fail("defender view missing"))
+    assertEquals(defenderView.legalActions, Nil)
+    assertEquals(defenderView.throwInCards, Nil)
+    assertEquals(defenderView.canThrowIn, false)
+
+    val spectatorView = rm.getRoomView(room.gameId, "watcher").unsafeRunSync()
+      .getOrElse(fail("spectator view missing"))
+    assertEquals(spectatorView.viewerSeat, None)
+    assertEquals(spectatorView.hand, Nil)
+    assertEquals(spectatorView.legalActions, Nil)
+    assertEquals(spectatorView.throwInCards, Nil)
+    assertEquals(spectatorView.throwInCapacity, 0)
+    assertEquals(spectatorView.canThrowIn, false)
+    assertEquals(spectatorView.eligibleTargetIds, Vector.empty)
+    assertEquals(spectatorView.redirectTargetId, None)
+  }
+
+  test("handleGameAction routes every M1 variant through the authenticated seat") {
+    val rm = manager
+    val room = startTwoPlayer(rm)
+    val state = stateOf(rm, room.gameId)
+    val attackerId = state.players(state.attackerIdx).id
+    val defenderId = state.players(state.defenderIdx).id
+    val attackerCard = handOf(state, attackerId).head
+    val defenderCard = handOf(state, defenderId).head
+
+    // An InitialAttack that names the standard clockwise defender is accepted.
+    assertEquals(
+      rm.handleGameAction(
+        room.gameId,
+        attackerId,
+        GameAction.InitialAttack(attackerId, List(attackerCard), Some(defenderId))
+      ).unsafeRunSync(),
+      Right(())
+    )
+    val afterAttack = stateOf(rm, room.gameId)
+    assertNotEquals(afterAttack, state)
+
+    // A spoofed actor is rejected and never mutates the room.
+    val spoofed = rm
+      .handleGameAction(room.gameId, attackerId, GameAction.CoverCard(defenderId, 0, defenderCard))
+      .unsafeRunSync()
+    assertEquals(spoofed.swap.toOption.map(_.code), Some(ActionRejected.IllegalMoveCode))
+    assertEquals(stateOf(rm, room.gameId), afterAttack)
+
+    // Every compact WebSocket frame maps to a seat-bound engine action and is
+    // evaluated by the engine instead of crashing the room.
+    List(
+      WsClientMessage.CoverCard(0, defenderCard),
+      WsClientMessage.RedirectAttack(Nil),
+      WsClientMessage.ThrowInCards(Nil),
+      WsClientMessage.DeclareSurrender,
+      WsClientMessage.PassTurn
+    ).foreach { message =>
+      val result = rm.handleAction(room.gameId, attackerId, message).unsafeRunSync()
+      assert(result.isLeft, s"$message was accepted out of turn")
+      assertEquals(
+        result.swap.toOption.map(_.code),
+        Some(ActionRejected.IllegalMoveCode),
+        message.toString
+      )
+    }
+    assertEquals(stateOf(rm, room.gameId), afterAttack)
+  }
+
+  test("a full match driven through RoomManager ends with frozen clocks and results") {
+    val rm = manager
+    val preset = rm
+      .createPresetRoom(
+        CreateRoomConfig(playerCount = 2, turnTimeoutSeconds = 15, isPublic = false),
+        Vector("qa-1" -> "QA One", "qa-2" -> "QA Two"),
+        autoStartIfFull = true,
+        seed = Some(20260222L)
+      )
+      .unsafeRunSync()
+
+    var state = stateOf(rm, preset.gameId)
+    var steps = 0
+    while !state.isGameOver && steps < 5000 do
+      val actor = state.players
+        .find(player =>
+          state.promptedPlayerIds.contains(player.id) &&
+            GameEngine.legalActions(state, player.id).nonEmpty
+        )
+        .getOrElse(fail(s"no seat can act at step $steps (${state.boutPhase})"))
+      val action = GameEngine.legalActions(state, actor.id).head
+      assertEquals(
+        rm.handleGameAction(preset.gameId, actor.id, action).unsafeRunSync(),
+        Right(()),
+        s"step $steps: $action"
+      )
+      state = stateOf(rm, preset.gameId)
+      steps += 1
+
+    assert(state.isGameOver, s"match did not finish in $steps steps")
+
+    val finished = rm.getRoom(preset.gameId).unsafeRunSync().getOrElse(fail("room missing"))
+    assertEquals(finished.status, RoomStatus.Finished)
+    assertEquals(finished.turnDeadlineEpochMs, None)
+    assert(finished.gameState.flatMap(_.gameStartedAtMs).nonEmpty)
+    val endedAt = finished.gameState.flatMap(_.gameEndedAtMs)
+      .getOrElse(fail("a finished match must stamp gameEndedAtMs"))
+    assert(endedAt > 0L)
+
+    val view = rm.getRoomView(preset.gameId, "qa-1").unsafeRunSync()
+      .getOrElse(fail("view missing"))
+    assertEquals(view.status, RoomStatus.Finished)
+    assertEquals(view.boutPhase, Some("gameOver"))
+    assertEquals(view.turnDeadlineMs, 0L)
+    assertEquals(view.turnSecondsRemaining, 0)
+    assertEquals(view.promptedPlayerIds, Vector.empty)
+    assertEquals(view.gameEndedAtMs, Some(endedAt))
+    assert(view.finishOrder.nonEmpty)
+    assert(view.winners.nonEmpty || view.isDraw)
+    assert(view.durak.nonEmpty || view.isDraw)
   }
 
   // --- QA preset rooms ----------------------------------------------------
