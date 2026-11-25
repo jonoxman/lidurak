@@ -78,6 +78,13 @@ const MOSAIC_PALETTE: Record<'dark' | 'light', { mark: string; markSoft: string;
 };
 
 /**
+ * T-96 ITEM-8: the whole mosaic artwork is painted inside one low-opacity
+ * group so the watermark never competes with the foreground tile titles and
+ * meta lines, in either theme. Kept between 12% and 18%.
+ */
+const MOSAIC_OPACITY: Record<'dark' | 'light', number> = { dark: 0.16, light: 0.14 };
+
+/**
  * T-90-2 ITEM-8a: the same brand lockup as a CSS `background-image` value, so
  * Wave 2's Quick Pairing tiles can paint one faded logo across the mosaic.
  *
@@ -86,9 +93,13 @@ const MOSAIC_PALETTE: Record<'dark' | 'light', { mark: string; markSoft: string;
  */
 export function getBrandLogoMosaicDataUri(theme: 'dark' | 'light'): string {
   const palette = MOSAIC_PALETTE[theme] ?? MOSAIC_PALETTE.dark;
+  const opacity = (MOSAIC_OPACITY[theme] ?? MOSAIC_OPACITY.dark).toFixed(2);
   const svg = [
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 64"',
     ' preserveAspectRatio="xMidYMid meet">',
+    // T-96 ITEM-8: fade the whole lockup so it stays a watermark behind the
+    // Quick Pairing tiles instead of clashing with their foreground text.
+    '<g opacity="' + opacity + '">',
     '<g fill="none" stroke="' + palette.mark + '" stroke-width="3">',
     '<rect x="6" y="18" width="26" height="36" rx="4" opacity="0.55"',
     ' transform="rotate(-10 19 36)"/>',
@@ -98,6 +109,7 @@ export function getBrandLogoMosaicDataUri(theme: 'dark' | 'light'): string {
     '<text x="64" y="42" fill="' + palette.text + '"',
     ' font-family="Segoe UI, system-ui, sans-serif" font-size="30"',
     ' font-weight="800" letter-spacing="4">' + BRAND_NAME + '</text>',
+    '</g>',
     '</svg>',
   ].join('');
   // Parentheses stay unescaped in `encodeURIComponent`, and a CSS `url()`

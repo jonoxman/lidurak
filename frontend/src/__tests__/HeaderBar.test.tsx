@@ -1369,4 +1369,39 @@ describe('T-90-2 BrandLogo', () => {
     expect(svg).toContain('preserveAspectRatio="xMidYMid meet"');
     expect(svg).toContain('LIDURAK');
   });
+
+  it('T-96 ITEM-8: fades the whole mosaic lockup in both themes', () => {
+    const svgOf = (theme: 'dark' | 'light') =>
+      decodeURIComponent(
+        getBrandLogoMosaicDataUri(theme).slice('url("data:image/svg+xml,'.length, -2),
+      );
+
+    const opacities: number[] = [];
+    for (const theme of ['dark', 'light'] as const) {
+      const svg = svgOf(theme);
+      const match = /<g opacity="([0-9.]+)">/.exec(svg);
+      expect(match, theme).not.toBeNull();
+      const opacity = Number(match![1]);
+      opacities.push(opacity);
+      // Genuinely faded: roughly 12%-18%, never the old full-opacity paint.
+      expect(opacity, theme).toBeGreaterThanOrEqual(0.12);
+      expect(opacity, theme).toBeLessThanOrEqual(0.18);
+
+      // The geometry is preserved and fully wrapped by the faded group.
+      expect(svg, theme).toContain('preserveAspectRatio="xMidYMid meet"');
+      expect(svg, theme).toContain('viewBox="0 0 260 64"');
+      const groupOpen = svg.indexOf(match![0]);
+      const groupClose = svg.lastIndexOf('</g>');
+      expect(groupOpen, theme).toBeGreaterThan(-1);
+      expect(groupClose, theme).toBeGreaterThan(groupOpen);
+      const faded = svg.slice(groupOpen, groupClose);
+      expect(faded, theme).toContain('<rect');
+      expect(faded, theme).toContain('<path');
+      expect(faded, theme).toContain('>' + 'LIDURAK' + '<');
+      expect(svg.slice(groupClose + 4).trim(), theme).toBe('</svg>');
+    }
+
+    // Dark and Light stay independently calibrated.
+    expect(opacities[0]).not.toBe(opacities[1]);
+  });
 });
