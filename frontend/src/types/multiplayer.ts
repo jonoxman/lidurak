@@ -8,7 +8,13 @@
  * The card and table-pair types are the existing frontend ones (`suit`/`rank`
  * travel as lowercase strings, see `durak.engine.JsonCodecs`).
  */
-import { isCard, type Card, type TablePair } from '../types';
+import {
+  isCard,
+  type Card,
+  type PlayerGameView as M1PlayerGameView,
+  type PublicPlayerSummary as M1OpponentSummary,
+  type TablePair,
+} from '../types';
 
 export type { Card, TablePair };
 
@@ -52,6 +58,10 @@ export interface PublicPlayerSummary {
   hasPassed: boolean;
   finishRank: number | null;
   seatIndex: number;
+  /** Backend player status (`active`, `out`, `durak`, …). */
+  status: string;
+  /** True for the seats the current bout is waiting on. */
+  isTurn: boolean;
 }
 
 /** One seat of a room, occupied or not. */
@@ -89,6 +99,37 @@ export interface PlayerGameView {
   isDraw: boolean;
   durakId: string | null;
   turnDeadlineEpochMs: number | null;
+  /** Moves the viewer's own seat may make right now (empty for spectators). */
+  legalActions: string[];
+  /** Every winner, in finishing order. */
+  winners: string[];
+  /** Seat whose turn clock is running, if any. */
+  turnPlayerId: string | null;
+  /** Whole seconds left on the turn clock as projected by the server. */
+  turnSecondsRemaining: number;
+  /** The viewer is defending and holds no legal cover or redirect. */
+  defenderDefenseless: boolean;
+  /** Seats the room is currently waiting on. */
+  promptedPlayerIds: string[];
+  /** Most recent discard, revealed face-up in the deck box. */
+  lastDiscardCards: Card[];
+  /** Epoch-ms timestamps behind the split game/turn clocks. */
+  gameStartedAtMs: number | null;
+  gameEndedAtMs: number | null;
+  /** Seats the current attacker may aim at (Chaos / opening target list). */
+  eligibleTargetIds: string[];
+  /** The seat a reflection would reach, so the arrow can point the right way. */
+  redirectTargetId: string | null;
+  /** Cards this seat may legally throw in (empty = cannot). */
+  throwInCards: Card[];
+  /** Remaining attacking cards this seat may add to the bout. */
+  throwInCapacity: number;
+  /** Backend-owned throw-in gate. */
+  canThrowIn: boolean;
+  /** The viewer's own pass flag. */
+  myHasPassed: boolean;
+  /** The viewer's own finishing rank (only once their hand is empty). */
+  myFinishRank: number | null;
 }
 
 /** One open public room in the lobby pool. */
@@ -277,6 +318,8 @@ export function parsePublicPlayerSummary(value: unknown): PublicPlayerSummary {
     hasPassed: booleanOr(raw.hasPassed, false),
     finishRank: optionalNumber(raw.finishRank),
     seatIndex: numberOr(raw.seatIndex, 0),
+    status: typeof raw.status === 'string' ? raw.status : 'active',
+    isTurn: booleanOr(raw.isTurn, false),
   };
 }
 
@@ -316,14 +359,38 @@ export function parsePlayerGameView(value: unknown): PlayerGameView {
     bottomTrumpCard: parseNullableCard(raw.bottomTrumpCard),
     trumpSuit: optionalString(raw.trumpSuit),
     discardCount: numberOr(raw.discardCount, 0),
-    phase: optionalString(raw.phase),
+    // The backend emits `boutPhase`; the M2 alias `phase` stays accepted.
+    phase: optionalString(raw.boutPhase) ?? optionalString(raw.phase),
     attackerIdx: optionalNumber(raw.attackerIdx),
     defenderIdx: optionalNumber(raw.defenderIdx),
     maxBoutAttacks: numberOr(raw.maxBoutAttacks, 0),
     finishOrder: arrayOf(raw.finishOrder, 'finishOrder').map((id) => String(id)),
     isDraw: booleanOr(raw.isDraw, false),
-    durakId: optionalString(raw.durakId),
-    turnDeadlineEpochMs: optionalNumber(raw.turnDeadlineEpochMs),
+    // The backend emits `durak`; the M2 alias `durakId` stays accepted.
+    durakId: optionalString(raw.durak) ?? optionalString(raw.durakId),
+    // The backend emits `turnDeadlineMs`; the M2 alias stays accepted.
+    turnDeadlineEpochMs:
+      optionalNumber(raw.turnDeadlineMs) ?? optionalNumber(raw.turnDeadlineEpochMs),
+    legalActions: arrayOf(raw.legalActions, 'legalActions').map((action) => String(action)),
+    winners: arrayOf(raw.winners, 'winners').map((id) => String(id)),
+    turnPlayerId: optionalString(raw.turnPlayerId),
+    turnSecondsRemaining: numberOr(raw.turnSecondsRemaining, 0),
+    defenderDefenseless: booleanOr(raw.defenderDefenseless, false),
+    promptedPlayerIds: arrayOf(raw.promptedPlayerIds, 'promptedPlayerIds').map((id) =>
+      String(id),
+    ),
+    lastDiscardCards: arrayOf(raw.lastDiscardCards, 'lastDiscardCards').map(parseCard),
+    gameStartedAtMs: optionalNumber(raw.gameStartedAtMs),
+    gameEndedAtMs: optionalNumber(raw.gameEndedAtMs),
+    eligibleTargetIds: arrayOf(raw.eligibleTargetIds, 'eligibleTargetIds').map((id) =>
+      String(id),
+    ),
+    redirectTargetId: optionalString(raw.redirectTargetId),
+    throwInCards: arrayOf(raw.throwInCards, 'throwInCards').map(parseCard),
+    throwInCapacity: numberOr(raw.throwInCapacity, 0),
+    canThrowIn: booleanOr(raw.canThrowIn, false),
+    myHasPassed: booleanOr(raw.myHasPassed, false),
+    myFinishRank: optionalNumber(raw.myFinishRank),
   };
 }
 
@@ -371,4 +438,119 @@ export function parseWsServerMessage(value: unknown): WsServerMessage {
     default:
       return fail(`unknown server message type: ${type}`);
   }
+}
+
+// --- M1 gameplay adapter ---------------------------------------------------
+
+/** The seat id the M1 gameplay table uses for a 0-based seat index. */
+export function m1SeatId(seatIndex: number): string {
+  return `p${seatIndex}`;
+}
+
+/** The id a spectator's projection is viewed as (no hand, no legal moves). */
+export const SPECTATOR_SEAT_ID = 'spectator';
+
+/** 36-card for a two/three-player table, 52-card for four players. */
+export function deckLabel(playerCount: number): string {
+  return playerCount === 4 ? '52-card' : '36-card';
+}
+
+/** Human label of a live socket status. */
+export function connectionLabel(status: SocketStatus): string {
+  switch (status) {
+    case 'connected':
+      return 'Live';
+    case 'reconnecting':
+      return 'Reconnecting';
+    case 'connecting':
+      return 'Connecting';
+    default:
+      return 'Offline';
+  }
+}
+
+/**
+ * Maps a live multiplayer projection onto the Milestone 1 `PlayerGameView`
+ * consumed by `GameTable`, `SortBar`, `ActionBar` and the clock panels.
+ *
+ * Seats are re-keyed from the opaque server player ids to the M1 `p<seat>`
+ * convention (every list keeps fixed seat order), the viewer's own seat becomes
+ * `myId` and every other seat becomes an opponent summary. A spectator
+ * (`viewerSeat === null`) keeps an empty hand, no legal actions and every
+ * player as a public opponent summary — no hidden card list is ever produced.
+ */
+export function toM1GameView(view: PlayerGameView): M1PlayerGameView {
+  const seatIds = new Map<string, string>();
+  view.players.forEach((player) => seatIds.set(player.id, m1SeatId(player.seatIndex)));
+  const translate = (playerId: string | null | undefined): string | null =>
+    playerId == null ? null : (seatIds.get(playerId) ?? playerId);
+  const translateList = (ids: string[]): string[] =>
+    ids.map((id) => translate(id)).filter((id): id is string => id != null);
+
+  const orderedPlayers = [...view.players].sort((left, right) => left.seatIndex - right.seatIndex);
+  const mine =
+    view.viewerSeat == null
+      ? null
+      : (orderedPlayers.find((player) => player.seatIndex === view.viewerSeat) ?? null);
+  const myId = mine != null ? m1SeatId(mine.seatIndex) : SPECTATOR_SEAT_ID;
+
+  const opponents: M1OpponentSummary[] = orderedPlayers
+    .filter((player) => mine == null || player.id !== mine.id)
+    .map((player) => ({
+      id: m1SeatId(player.seatIndex),
+      name: player.name,
+      cardCount: player.cardCount,
+      hasPassed: player.hasPassed,
+      finishRank: player.finishRank,
+      isPresent: player.isConnected,
+    }));
+
+  return {
+    myId,
+    ...(mine != null && mine.name.length > 0 ? { myName: mine.name } : {}),
+    myHand: view.hand,
+    opponents,
+    tablePairs: view.tablePairs.map((pair) => ({
+      attack: pair.attack,
+      defense: pair.defense ?? null,
+    })),
+    talonCount: view.talonCount,
+    bottomTrumpCard: view.bottomTrumpCard,
+    trumpSuit: view.trumpSuit ?? '',
+    attackerIdx: view.attackerIdx ?? 0,
+    defenderIdx: view.defenderIdx ?? 0,
+    boutPhase:
+      view.phase ?? (view.status === 'Finished' ? 'GameOver' : 'InitialAttack'),
+    legalActions: [...view.legalActions],
+    finishOrder: translateList(view.finishOrder),
+    isDraw: view.isDraw,
+    maxBoutAttacks: view.maxBoutAttacks,
+    defenderDefenseless: view.defenderDefenseless,
+    throwInCards: view.throwInCards,
+    throwInCapacity: view.throwInCapacity,
+    canThrowIn: view.canThrowIn,
+    chaosMode: false,
+    isBot: false,
+    playerTypes: orderedPlayers.map(() => 'human'),
+    allowRedirect: view.config.allowRedirect,
+    eligibleTargetIds: translateList(view.eligibleTargetIds),
+    redirectTargetId: translate(view.redirectTargetId),
+    turnDeadlineMs: view.turnDeadlineEpochMs ?? 0,
+    turnSecondsRemaining: view.turnSecondsRemaining,
+    turnPlayerId: translate(view.turnPlayerId) ?? undefined,
+    presentPlayers: orderedPlayers
+      .filter((player) => player.isConnected)
+      .map((player) => m1SeatId(player.seatIndex)),
+    discardCount: view.discardCount,
+    lastDiscardCards: view.lastDiscardCards,
+    gameStartedAtMs: view.gameStartedAtMs,
+    gameEndedAtMs: view.gameEndedAtMs,
+    myHasPassed: view.myHasPassed,
+    myFinishRank: view.myFinishRank,
+    winners: translateList(view.winners),
+    durak: translate(view.durakId),
+    promptedPlayerIds: translateList(view.promptedPlayerIds),
+    transparentMode: false,
+    devMode: false,
+  };
 }

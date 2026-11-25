@@ -54,8 +54,37 @@ vi.mock('../api/websocket', () => ({
   },
 }));
 
+const mpSocket = vi.hoisted(() => ({
+  status: 'connected' as const,
+  sendAction: vi.fn(),
+  sendGameAction: vi.fn(),
+  dispose: vi.fn(),
+}));
+
+vi.mock('../api/gameSocket', () => ({
+  createGameSocket: vi.fn(() => mpSocket),
+}));
+
+vi.mock('../api/sessionClient', () => ({
+  getOrCreateSession: vi.fn(async () => ({
+    playerId: 'guest-1',
+    displayName: 'Alice',
+    isGuest: true,
+  })),
+  updateGuestName: vi.fn(),
+  apiRequest: vi.fn(),
+}));
+
+vi.mock('../api/lobbyClient', () => ({
+  fetchGameView: vi.fn(),
+  joinRoom: vi.fn(),
+  leaveRoom: vi.fn(),
+}));
+
 import * as client from '../api/client';
+import * as lobbyApi from '../api/lobbyClient';
 import { GamePage } from '../pages/GamePage';
+import type { PlayerGameView as MultiplayerGameView } from '../types/multiplayer';
 import {
   getSettings,
   resetSettings,
@@ -133,6 +162,244 @@ const finishedFrameView = (
   gameStartedAtMs: 0,
   gameEndedAtMs: 4000,
   ...overrides,
+});
+
+// --- T-90: live multiplayer room fixtures ---------------------------------
+
+const mpPlayer = (
+  id: string,
+  name: string,
+  seatIndex: number,
+  overrides: Partial<MultiplayerGameView['players'][number]> = {},
+): MultiplayerGameView['players'][number] => ({
+  id,
+  name,
+  rating: null,
+  cardCount: 6,
+  isConnected: true,
+  hasPassed: false,
+  finishRank: null,
+  seatIndex,
+  status: 'active',
+  isTurn: false,
+  ...overrides,
+});
+
+const mpBase = (overrides: Partial<MultiplayerGameView> = {}): MultiplayerGameView => ({
+  gameId: 'room-1',
+  status: 'InProgress',
+  config: { playerCount: 2, allowRedirect: true, turnTimeoutSeconds: 15, isPublic: true },
+  viewerId: 'guest-1',
+  viewerSeat: 0,
+  hand: [{ suit: 'spades', rank: 'six' }],
+  players: [
+    mpPlayer('guest-1', 'Alice', 0, { cardCount: 1 }),
+    mpPlayer('guest-2', 'Bob', 1),
+  ],
+  seats: [
+    { seatIndex: 0, playerId: 'guest-1', displayName: 'Alice', isConnected: true },
+    { seatIndex: 1, playerId: 'guest-2', displayName: 'Bob', isConnected: true },
+  ],
+  tablePairs: [],
+  talonCount: 10,
+  bottomTrumpCard: { suit: 'spades', rank: 'nine' },
+  trumpSuit: 'spades',
+  discardCount: 0,
+  phase: 'defense',
+  attackerIdx: 1,
+  defenderIdx: 0,
+  maxBoutAttacks: 6,
+  finishOrder: [],
+  isDraw: false,
+  durakId: null,
+  turnDeadlineEpochMs: null,
+  legalActions: ['pass'],
+  winners: [],
+  turnPlayerId: 'guest-1',
+  turnSecondsRemaining: 15,
+  defenderDefenseless: false,
+  promptedPlayerIds: [],
+  lastDiscardCards: [],
+  gameStartedAtMs: null,
+  gameEndedAtMs: null,
+  eligibleTargetIds: [],
+  redirectTargetId: null,
+  throwInCards: [],
+  throwInCapacity: 0,
+  canThrowIn: false,
+  myHasPassed: false,
+  myFinishRank: null,
+  ...overrides,
+});
+
+const renderMultiplayer = (onLeaveGame: () => void = () => {}) =>
+  render(
+    <GamePage
+      mode="multiplayer"
+      gameId="room-1"
+      playerId="p0"
+      onSwitchPlayer={() => {}}
+      onLeaveGame={onLeaveGame}
+    />,
+  );
+
+describe('T-90 live multiplayer room (original M1 interface)', () => {
+  const fetchGameView = lobbyApi.fetchGameView as unknown as ReturnType<typeof vi.fn>;
+  const joinRoomMock = lobbyApi.joinRoom as unknown as ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchGameView.mockReset();
+    joinRoomMock.mockReset();
+    mpSocket.sendGameAction.mockClear();
+    mpSocket.dispose.mockClear();
+  });
+
+  it('renders the M1-themed waiting room with invite, config and Leave', async () => {
+    fetchGameView.mockResolvedValue(
+      mpBase({
+        status: 'WaitingForPlayers',
+        hand: [],
+        players: [mpPlayer('guest-1', 'Alice', 0, { cardCount: 0 })],
+        seats: [
+          { seatIndex: 0, playerId: 'guest-1', displayName: 'Alice', isConnected: true },
+          { seatIndex: 1, playerId: null, displayName: null, isConnected: false },
+        ],
+        legalActions: [],
+        turnPlayerId: null,
+        turnSecondsRemaining: 0,
+      }),
+    );
+
+    renderMultiplayer();
+
+    expect(await screen.findByTestId('waiting-room')).toBeTruthy();
+    expect(screen.getByTestId('game-page')).toBeTruthy();
+    expect(screen.getByTestId('invite-panel')).toBeTruthy();
+    expect(screen.getByTestId('invite-url').textContent).toContain('/g/room-1');
+    expect(screen.getByTestId('copy-invite')).toBeTruthy();
+    expect(screen.getByTestId('room-config').textContent).toContain('Redirect on');
+    expect(screen.getByTestId('turn-clock').textContent?.trim()).toBe('00:15');
+    expect(screen.getByTestId('waiting-seat-count').textContent).toContain('1/2');
+    expect(screen.getByText('36-card deck')).toBeTruthy();
+    expect(screen.getByText('15s turn')).toBeTruthy();
+    expect(screen.getByTestId('waiting-seat-1').textContent).toContain('Open seat');
+    expect(screen.getByTestId('leave-room')).toBeTruthy();
+    expect(screen.queryByTestId('join-room')).toBeNull();
+  });
+
+  it('offers Join room to a visitor without a seat', async () => {
+    fetchGameView.mockResolvedValue(
+      mpBase({
+        status: 'WaitingForPlayers',
+        viewerSeat: null,
+        hand: [],
+        players: [mpPlayer('guest-9', 'Zoe', 0, { cardCount: 0 })],
+        seats: [
+          { seatIndex: 0, playerId: 'guest-9', displayName: 'Zoe', isConnected: true },
+          { seatIndex: 1, playerId: null, displayName: null, isConnected: false },
+        ],
+        legalActions: [],
+        turnPlayerId: null,
+        turnSecondsRemaining: 0,
+      }),
+    );
+    joinRoomMock.mockResolvedValue({ gameId: 'room-1', seatIndex: 1, view: mpBase() });
+
+    renderMultiplayer();
+
+    fireEvent.click(await screen.findByTestId('join-room'));
+
+    expect(await screen.findByTestId('players-panel')).toBeTruthy();
+    expect(joinRoomMock).toHaveBeenCalledWith('room-1');
+    expect(screen.queryByTestId('waiting-room')).toBeNull();
+  });
+
+  it('renders the live M1 table and sends a Pass over the room socket', async () => {
+    fetchGameView.mockResolvedValue(mpBase());
+
+    const { container } = renderMultiplayer();
+
+    await waitFor(() => expect(screen.getByTestId('pass-button')).toBeTruthy());
+
+    expect(container.querySelector('[data-zone="sidebar-left"]')).not.toBeNull();
+    expect(container.querySelector('[data-zone="table-arena"]')).not.toBeNull();
+    expect(container.querySelector('[data-zone="sidebar-right"]')).not.toBeNull();
+    expect(screen.getByTestId('sort-bar')).toBeTruthy();
+    expect(screen.getByTestId('action-bar')).toBeTruthy();
+    expect(screen.getByTestId('turn-clock').textContent?.trim()).toBe('00:15');
+    expect(screen.getByTestId('talon-count').textContent).toBe('10');
+    expect(screen.getByTestId('hand-row')).toBeTruthy();
+    // No hotseat / POV switcher tabs in an authenticated multiplayer room.
+    expect(container.querySelector('.hotseat-tabs, .pov-tab')).toBeNull();
+    expect(
+      container.querySelector('[data-zone="sidebar-left"] [role="tab"]'),
+    ).toBeNull();
+
+    fireEvent.click(screen.getByTestId('pass-button'));
+
+    expect(mpSocket.sendGameAction).toHaveBeenCalledWith({
+      type: 'passTurn',
+      playerId: 'p0',
+    });
+  });
+
+  it('shows the winner, Durak and a lobby exit for a finished match', async () => {
+    fetchGameView.mockResolvedValue(
+      mpBase({
+        status: 'Finished',
+        phase: 'GameOver',
+        hand: [],
+        legalActions: [],
+        turnPlayerId: null,
+        finishOrder: ['guest-1', 'guest-2'],
+        winners: ['guest-1'],
+        durakId: 'guest-2',
+      }),
+    );
+    const onLeaveGame = vi.fn();
+
+    renderMultiplayer(onLeaveGame);
+
+    const results = await screen.findByTestId('multiplayer-results');
+    expect(results.textContent).toContain('Alice wins');
+    expect(results.textContent).toContain('Bob is the Durak.');
+    expect(screen.getByTestId('game-over-banner').textContent).toContain('Alice wins');
+    // A live room is never rematched through the local create-game endpoint.
+    expect(screen.queryByTestId('banner-rematch-button')).toBeNull();
+    expect(screen.queryByTestId('pass-button')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('results-lobby-button'));
+    expect(onLeaveGame).toHaveBeenCalled();
+  });
+
+  it('renders a read-only spectator table without any hand card', async () => {
+    fetchGameView.mockResolvedValue(
+      mpBase({
+        viewerSeat: null,
+        hand: [],
+        legalActions: [],
+        turnPlayerId: 'guest-2',
+      }),
+    );
+
+    const { container } = renderMultiplayer();
+
+    await waitFor(() => expect(screen.getByTestId('players-panel')).toBeTruthy());
+
+    const handZone = container.querySelector('[data-zone="player-hand"]') as HTMLElement;
+    expect(handZone.querySelectorAll('.card-slot')).toHaveLength(0);
+    expect(container.querySelectorAll('.hand-card-wrapper')).toHaveLength(0);
+    expect(screen.queryByTestId('action-bar')).toBeNull();
+    expect(screen.queryByTestId('hand-sort-box')).toBeNull();
+    // Every seat is a public summary: Alice (seat 1) and Bob (seat 2).
+    expect(screen.getByTestId('player-row-p0')).toBeTruthy();
+    expect(screen.getByTestId('player-row-p1')).toBeTruthy();
+    expect(screen.getByTestId('opponent-card-count-p0').textContent).toContain('1');
+    expect(screen.getByTestId('opponent-card-count-p1').textContent).toContain('6');
+    expect(screen.getByTestId('spectator-badge')).toBeTruthy();
+    expect(screen.getByTestId('room-info').textContent).toContain('Spectator view');
+    expect(screen.getByTestId('game-page')).toBeTruthy();
+  });
 });
 
 const getGameView = client.getGameView as unknown as ReturnType<typeof vi.fn>;

@@ -421,10 +421,13 @@ describe('lobby.css visual invariants', () => {
     expect(lobbyCss).toContain('color: var(--m2-text-strong);');
   });
 
-  it('shares the M2 button styling with the multiplayer shell', () => {
-    // The projected shell keeps its own M2 dark chrome block for now.
-    expect(lobbyCss).toMatch(/\.multiplayer-page \{[^}]*--m2-text-strong: #f1f1f1/);
-    expect(lobbyCss).toContain('.multiplayer-page .m2-button.secondary');
+  it('T-90: keeps no styles from the removed multiplayer placeholder', () => {
+    // The lightweight placeholder shell is gone: the live room now renders the
+    // M1 gameplay interface, so none of its `.multiplayer-page` or `.mp-*`
+    // placeholder rules may survive in the lobby stylesheet.
+    expect(lobbyCss).not.toContain('.multiplayer-page');
+    expect(lobbyCss).not.toMatch(/\.mp-[a-z-]+/);
+    expect(lobbyCss).toContain('.m2-button.secondary');
   });
 
   it('adapts below 640px and caps the desktop shell', () => {

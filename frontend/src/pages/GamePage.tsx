@@ -11,8 +11,19 @@ import {
   sendAction as sendActionRest,
 } from '../api/client';
 import { GameWebSocket } from '../api/websocket';
+import { createGameSocket, type GameSocket } from '../api/gameSocket';
+import { fetchGameView, joinRoom, leaveRoom } from '../api/lobbyClient';
+import { getOrCreateSession } from '../api/sessionClient';
 import { soundEngine } from '../audio/SoundEngine';
 import { getStoredSortMode } from '../state/settings';
+import {
+  connectionLabel,
+  deckLabel,
+  m1SeatId,
+  toM1GameView,
+  type PlayerGameView as MultiplayerGameView,
+  type SocketStatus,
+} from '../types/multiplayer';
 import {
   buildCoverCard,
   buildDeclareSurrender,
@@ -381,9 +392,25 @@ export interface GamePageProps {
   onNavigateGame?: (gameId: string, playerId?: string) => void;
   /** Leaves the table; defaults to the root URL when the router owns it. */
   onLeaveGame?: () => void;
+  /**
+   * `local` (default) is the M1 hash-route hotseat/bot table; `multiplayer`
+   * owns the `/g/:gameId` room lifecycle (REST + `/ws/games/:gameId`) while
+   * rendering the very same M1 gameplay interface.
+   */
+  mode?: 'local' | 'multiplayer';
 }
 
-export function GamePage({
+/**
+ * The one gameplay page. Multiplayer rooms swap only the data source: the felt
+ * table, hand, sorting, action bar, clocks and result panels are the original
+ * Milestone 1 interface in both modes.
+ */
+export function GamePage(props: GamePageProps) {
+  if (props.mode === 'multiplayer') return <MultiplayerGame {...props} />;
+  return <LocalGamePage {...props} />;
+}
+
+function LocalGamePage({
   gameId,
   playerId,
   onSwitchPlayer,
@@ -2017,6 +2044,969 @@ export function GamePage({
                   <li key={id}>{nameFor(id)}</li>
                 ))}
               </ol>
+            </section>
+          ) : null}
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------------- */
+/* T-90: the live `/g/:gameId` room, rendered with the M1 gameplay interface.  */
+/* ------------------------------------------------------------------------- */
+
+type MultiplayerPhase = 'loading' | 'ready' | 'notFound' | 'error';
+
+/**
+ * The live multiplayer room.
+ *
+ * The page hydrates from `GET /api/games/:gameId` and then follows
+ * `/ws/games/:gameId` for every projection. `WaitingForPlayers` renders an
+ * M1-themed staging panel (invite link, config badges, seats, Join/Leave);
+ * `InProgress` and `Finished` render the original Milestone 1 felt table,
+ * hand, sorting, action bar, clocks and result panel. A spectator
+ * (`viewerSeat === null`) gets the same table, read-only and with an empty
+ * hand, so no hidden card or move trigger can ever leak.
+ */
+export function MultiplayerGame({ gameId, onLeaveGame }: GamePageProps) {
+  const [phase, setPhase] = useState<MultiplayerPhase>('loading');
+  const [room, setRoom] = useState<MultiplayerGameView | null>(null);
+  const [socketStatus, setSocketStatus] = useState<SocketStatus>('connecting');
+  const [selection, setSelection] = useState<{
+    room: MultiplayerGameView;
+    indices: Set<number>;
+  } | null>(null);
+  const [sortMode, setSortMode] = useState<SortMode>(() => {
+    const stored = getStoredSortMode();
+    return stored === 'custom' ? 'rank' : stored;
+  });
+  const [customHandOrder, setCustomHandOrder] = useState<string[]>([]);
+  const [now, setNow] = useState(() => Date.now());
+  const [copied, setCopied] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [roomError, setRoomError] = useState<string | null>(null);
+  const socketRef = useRef<GameSocket | null>(null);
+  const previousViewRef = useRef<PlayerGameView | null>(null);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const leave = () => {
+    if (onLeaveGame) onLeaveGame();
+    else window.location.assign('/');
+  };
+
+  // Session → initial projection → socket, in that order, so a first visitor on
+  // a shared invite URL never races the guest cookie.
+  useEffect(() => {
+    let active = true;
+    setPhase('loading');
+    setRoom(null);
+    setSelection(null);
+    setCustomHandOrder([]);
+    setSocketStatus('connecting');
+    previousViewRef.current = null;
+
+    const boot = async () => {
+      try {
+        await getOrCreateSession();
+      } catch {
+        // `fetchGameView` also carries (and refreshes) the session cookie.
+      }
+
+      let initial: MultiplayerGameView;
+      try {
+        initial = await fetchGameView(gameId);
+      } catch (reason: unknown) {
+        if (!active) return;
+        const status = (reason as { status?: unknown } | null)?.status;
+        setPhase(status === 404 ? 'notFound' : 'error');
+        return;
+      }
+      if (!active) return;
+
+      setRoom(initial);
+      setPhase('ready');
+      socketRef.current = createGameSocket(gameId, {
+        onView: (next) => {
+          if (!active) return;
+          setRoom(next);
+          setSelection(null);
+        },
+        onActionRejected: (code, message) => {
+          // Invalid actions are rejected silently: no banner covers the table.
+          console.warn(`Action rejected (${code}): ${message}`);
+        },
+        onStatusChange: (status) => {
+          if (active) setSocketStatus(status);
+        },
+      });
+    };
+    void boot();
+
+    return () => {
+      active = false;
+      socketRef.current?.dispose();
+      socketRef.current = null;
+    };
+  }, [gameId]);
+
+  // Browsers only unlock audio from a user gesture; do it once per page.
+  useEffect(() => {
+    soundEngine.installUnlockListeners();
+    return () => soundEngine.removeUnlockListeners();
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (copiedTimerRef.current != null) clearTimeout(copiedTimerRef.current);
+    },
+    [],
+  );
+
+  const clockDeadline = room?.turnDeadlineEpochMs ?? 0;
+  const roomInProgress = room?.status === 'InProgress';
+  useEffect(() => {
+    if (!roomInProgress) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(timer);
+  }, [roomInProgress, clockDeadline]);
+
+  // Sound effects follow the authoritative projections, never local clicks.
+  useEffect(() => {
+    if (room == null || room.status === 'WaitingForPlayers') return;
+    const next = toM1GameView(room);
+    const previous = previousViewRef.current;
+    previousViewRef.current = next;
+    if (!previous) return;
+
+    if (!isGameOverPhase(previous.boutPhase) && isGameOverPhase(next.boutPhase)) {
+      soundEngine.playGameOver();
+      return;
+    }
+
+    if (isSurrenderPhase(next.boutPhase) && !isSurrenderPhase(previous.boutPhase)) {
+      const tableCards = previous.tablePairs.reduce(
+        (total, pair) => total + 1 + (pair.defense ? 1 : 0),
+        0,
+      );
+      soundEngine.playSurrender(Math.max(1, tableCards));
+      return;
+    }
+
+    const addedAttacks = next.tablePairs.length - previous.tablePairs.length;
+    if (addedAttacks > 0) {
+      if (next.attackerIdx !== previous.attackerIdx) soundEngine.playRedirect();
+      else soundEngine.playAttackCard(addedAttacks);
+    }
+
+    const coveredBefore = previous.tablePairs.filter((pair) => pair.defense).length;
+    const coveredNow = next.tablePairs.filter((pair) => pair.defense).length;
+    if (coveredNow > coveredBefore) soundEngine.playDefendCard();
+
+    if (
+      next.talonCount < previous.talonCount &&
+      next.myHand.length > previous.myHand.length
+    ) {
+      soundEngine.playTalonDraw(next.myHand.length - previous.myHand.length);
+    }
+  }, [room]);
+
+  const header = (
+    <header class="game-header">
+      <div class="game-meta">
+        <span class="game-id">Game {gameId}</span>
+        <span class={`connection ${socketStatus === 'connected' ? 'live' : 'pending'}`}>
+          {connectionLabel(socketStatus)}
+        </span>
+      </div>
+      <button type="button" class="action-button back-to-lobby" onClick={leave}>
+        Back to lobby
+      </button>
+    </header>
+  );
+
+  if (phase !== 'ready' || room == null) {
+    return (
+      <div
+        class="page game-page"
+        data-testid="game-page"
+        data-mode="multiplayer"
+        data-status={phase}
+      >
+        {header}
+        {phase === 'notFound' ? (
+          <section class="panel" data-testid="game-not-found" role="alert">
+            <h2>Room not found</h2>
+            <p>This table no longer exists. Return to the lobby to start a new one.</p>
+          </section>
+        ) : phase === 'error' ? (
+          <section class="panel" data-testid="game-load-error" role="alert">
+            <h2>Could not load the room</h2>
+            <p>Check the connection and try again.</p>
+          </section>
+        ) : (
+          <p class="loading" data-testid="multiplayer-loading">
+            Loading room {gameId}…
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  const inviteUrl =
+    typeof location === 'undefined'
+      ? `/g/${encodeURIComponent(gameId)}`
+      : `${location.origin}/g/${encodeURIComponent(gameId)}`;
+
+  const copyInvite = () => {
+    try {
+      void navigator.clipboard?.writeText(inviteUrl);
+    } catch {
+      // Clipboard access can be denied; the link itself stays selectable.
+    }
+    setCopied(true);
+    if (copiedTimerRef.current != null) clearTimeout(copiedTimerRef.current);
+    copiedTimerRef.current = setTimeout(() => setCopied(false), 2000);
+  };
+
+  const join = () => {
+    if (pending) return;
+    setPending(true);
+    setRoomError(null);
+    joinRoom(gameId)
+      .then((joined) => {
+        setRoom(joined.view);
+        setSelection(null);
+      })
+      .catch((reason: unknown) => {
+        setRoomError(reason instanceof Error ? reason.message : String(reason));
+      })
+      .finally(() => setPending(false));
+  };
+
+  const leaveRoomNow = () => {
+    if (pending) return;
+    setPending(true);
+    setRoomError(null);
+    leaveRoom(gameId)
+      .then(() => leave())
+      .catch((reason: unknown) => {
+        setRoomError(reason instanceof Error ? reason.message : String(reason));
+      })
+      .finally(() => setPending(false));
+  };
+
+  if (room.status === 'WaitingForPlayers') {
+    const filledSeats = room.seats.filter((seat) => seat.playerId != null).length;
+    return (
+      <div
+        class="page game-page"
+        data-testid="game-page"
+        data-mode="multiplayer"
+        data-status={room.status}
+      >
+        {header}
+        <div class="game-shell">
+          <aside class="game-sidebar sidebar-left" data-zone="sidebar-left">
+            <section class="panel" aria-label="How to Play">
+              <h2>How to Play</h2>
+              <ul class="how-to-play">
+                {HOW_TO_PLAY.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </section>
+          </aside>
+
+          <div class="table-column">
+            <section class="panel live-room" data-testid="waiting-room" aria-label="Room lobby">
+              <h2>Room {room.gameId}</h2>
+              <p class="live-room-lead">
+                Waiting for players — share the invite link to fill the table.
+              </p>
+              <div class="live-room-badges" data-testid="room-config">
+                <span class="live-room-badge" data-testid="waiting-seat-count">
+                  {filledSeats}/{room.config.playerCount} players
+                </span>
+                <span class="live-room-badge">{deckLabel(room.config.playerCount)} deck</span>
+                <span class="live-room-badge">{room.config.turnTimeoutSeconds}s turn</span>
+                <span class="live-room-badge">
+                  {room.config.allowRedirect ? 'Redirect on' : 'Redirect off'}
+                </span>
+                <span class="live-room-badge">
+                  {room.config.isPublic ? 'Public' : 'Private'}
+                </span>
+              </div>
+
+              <div class="live-room-invite" data-testid="invite-panel">
+                <span class="live-room-label">Shareable invite link</span>
+                <code class="live-room-invite-url" data-testid="invite-url">
+                  {inviteUrl}
+                </code>
+                <button
+                  type="button"
+                  class="action-button"
+                  data-testid="copy-invite"
+                  onClick={copyInvite}
+                >
+                  {copied ? 'Copied!' : 'Copy link'}
+                </button>
+              </div>
+
+              <ul class="live-room-seats" aria-label="Seats">
+                {room.seats.map((seat) => (
+                  <li
+                    class="live-room-seat"
+                    key={seat.seatIndex}
+                    data-testid={`waiting-seat-${seat.seatIndex}`}
+                  >
+                    <span class="live-room-seat-number">Seat {seat.seatIndex + 1}</span>
+                    <span class="live-room-seat-name">{seat.displayName ?? 'Open seat'}</span>
+                    <span
+                      class="presence-dot"
+                      data-present={seat.isConnected ? 'true' : 'false'}
+                      aria-hidden="true"
+                    />
+                  </li>
+                ))}
+              </ul>
+
+              <div class="live-room-actions">
+                {room.viewerSeat === null ? (
+                  <button
+                    type="button"
+                    class="action-button green"
+                    data-testid="join-room"
+                    disabled={pending}
+                    onClick={join}
+                  >
+                    {pending ? 'Joining…' : 'Join room'}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    class="action-button red"
+                    data-testid="leave-room"
+                    disabled={pending}
+                    onClick={leaveRoomNow}
+                  >
+                    {pending ? 'Leaving…' : 'Leave room'}
+                  </button>
+                )}
+              </div>
+              {roomError ? (
+                <p class="live-room-error" role="alert">
+                  {roomError}
+                </p>
+              ) : null}
+            </section>
+          </div>
+
+          <aside class="game-sidebar sidebar-right" data-zone="sidebar-right">
+            <section class="panel" aria-label="Turn clock">
+              <h2>Turn</h2>
+              <span class="turn-clock split-clock-value" data-testid="turn-clock">
+                {formatClock(Math.max(0, room.config.turnTimeoutSeconds))}
+              </span>
+            </section>
+            <section class="panel" aria-label="Players">
+              <h2>Players</h2>
+              <ul class="live-room-roster">
+                {room.players.map((player) => (
+                  <li key={player.id} data-testid={`room-player-${player.id}`}>
+                    {player.name}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          </aside>
+        </div>
+      </div>
+    );
+  }
+
+  const gameView = toM1GameView(room);
+  const finished = room.status === 'Finished' || isGameOverPhase(gameView.boutPhase);
+  const spectating = room.viewerSeat == null;
+  const readOnly = spectating || finished;
+
+  const selected = selection?.room === room ? selection.indices : EMPTY_SELECTION;
+  const selectIndices = (indices: Set<number>) => setSelection({ room, indices });
+  const clearSelection = () => setSelection(null);
+
+  const selectedCards: GameCard[] = [...selected]
+    .sort((left, right) => left - right)
+    .map((index) => gameView.myHand[index])
+    .filter((card): card is GameCard => card !== undefined);
+  const selectedKeys = selectedCards.map(cardKey);
+
+  const tableRanks = new Set<string>();
+  gameView.tablePairs.forEach((pair) => {
+    tableRanks.add(pair.attack.rank.toLowerCase());
+    if (pair.defense) tableRanks.add(pair.defense.rank.toLowerCase());
+  });
+
+  const projectedThrowInKeys = new Set((gameView.throwInCards ?? []).map(cardKey));
+  const isLegalThrowInCard = (card: GameCard): boolean =>
+    projectedThrowInKeys.has(cardKey(card));
+  const remainingBoutCapacity = Math.max(
+    0,
+    gameView.maxBoutAttacks - gameView.tablePairs.length,
+  );
+  const throwInSelectionCap = Math.max(
+    0,
+    Math.min(remainingBoutCapacity, gameView.throwInCapacity ?? 0),
+  );
+  const canThrowIn =
+    !readOnly &&
+    gameView.canThrowIn === true &&
+    projectedThrowInKeys.size > 0 &&
+    throwInSelectionCap >= 1;
+
+  const isAttackerTurn =
+    !readOnly &&
+    isInitialAttackPhase(gameView.boutPhase) &&
+    hasLegalAction(gameView.legalActions, 'attack');
+  const canAttack =
+    isAttackerTurn &&
+    selectedCards.length > 0 &&
+    selectedCards.length <= gameView.maxBoutAttacks &&
+    selectedCards.every((card) => card.rank === selectedCards[0].rank);
+
+  const viewerIsDefender =
+    !spectating && gameView.defenderIdx === viewerSeatIndex(gameView);
+  const uncoveredAttacks = gameView.tablePairs
+    .filter((pair) => !pair.defense)
+    .map((pair) => pair.attack);
+  const playableKeys = (() => {
+    if (readOnly) return [];
+    if (isAttackerTurn) return gameView.myHand.map(cardKey);
+    if (viewerIsDefender && hasLegalAction(gameView.legalActions, 'cover')) {
+      return gameView.myHand
+        .filter((card) =>
+          uncoveredAttacks.some((attack) => isLegalCover(attack, card, gameView.trumpSuit)),
+        )
+        .map(cardKey);
+    }
+    if (viewerIsDefender && hasLegalAction(gameView.legalActions, 'redirect')) {
+      return gameView.myHand
+        .filter((card) => tableRanks.has(card.rank.toLowerCase()))
+        .map(cardKey);
+    }
+    if (canThrowIn) {
+      return gameView.myHand.filter(isLegalThrowInCard).map(cardKey);
+    }
+    return [];
+  })();
+
+  const customOrderedHand = (() => {
+    if (sortMode !== 'custom') return gameView.myHand;
+    const remaining = [...gameView.myHand];
+    const ordered: GameCard[] = [];
+    for (const key of customHandOrder) {
+      const index = remaining.findIndex((card) => cardKey(card) === key);
+      if (index >= 0) ordered.push(...remaining.splice(index, 1));
+    }
+    return [...ordered, ...remaining];
+  })();
+  const reorderHand = (cards: GameCard[]) => {
+    setCustomHandOrder(cards.map(cardKey));
+    setSortMode('custom');
+  };
+
+  const dispatch = (action: GameAction) => {
+    if (readOnly) return;
+    const socket = socketRef.current;
+    if (socket != null && typeof socket.sendGameAction === 'function') {
+      socket.sendGameAction(action);
+    } else {
+      console.warn('Ignored action: the room socket is not connected yet');
+    }
+    clearSelection();
+  };
+
+  const toggleCard = (card: GameCard) => {
+    const index = gameView.myHand.findIndex(
+      (handCard) => handCard.suit === card.suit && handCard.rank === card.rank,
+    );
+    if (index < 0) return;
+    const next = new Set(selected);
+    if (next.has(index)) {
+      next.delete(index);
+      selectIndices(next);
+      return;
+    }
+    if (canThrowIn) {
+      if (!isLegalThrowInCard(card)) return;
+      if (next.size >= throwInSelectionCap) return;
+    }
+    next.add(index);
+    selectIndices(next);
+  };
+
+  const sameRankGroup = (card: GameCard, pool: GameCard[] = selectedCards): GameCard[] => {
+    const chosen: GameCard[] = [card];
+    pool.forEach((candidate) => {
+      if (candidate.rank !== card.rank) return;
+      if (chosen.some((entry) => cardKey(entry) === cardKey(candidate))) return;
+      chosen.push(candidate);
+    });
+    return chosen.slice(0, Math.max(1, gameView.maxBoutAttacks));
+  };
+
+  const throwInGroup = (card: GameCard, pool: GameCard[] = selectedCards): GameCard[] => {
+    const chosen: GameCard[] = [card];
+    pool.forEach((candidate) => {
+      if (!isLegalThrowInCard(candidate)) return;
+      if (chosen.some((entry) => cardKey(entry) === cardKey(candidate))) return;
+      chosen.push(candidate);
+    });
+    return chosen.slice(0, Math.max(1, throwInSelectionCap));
+  };
+
+  const isSelectedCard = (card: GameCard, pool: GameCard[] = selectedCards): boolean =>
+    pool.some((candidate) => cardKey(candidate) === cardKey(card));
+
+  const attack = () => {
+    if (canAttack) dispatch(buildInitialAttack(gameView.myId, selectedCards));
+  };
+
+  const coverAttack = (attackIndex: number) => {
+    if (!hasLegalAction(gameView.legalActions, 'cover')) return;
+    if (selectedCards.length !== 1) return;
+    dispatch(buildCoverCard(gameView.myId, attackIndex, selectedCards[0]));
+  };
+
+  const playCard = (card: GameCard) => {
+    if (isAttackerTurn) {
+      dispatch(buildInitialAttack(gameView.myId, sameRankGroup(card)));
+      return;
+    }
+
+    if (canThrowIn && isLegalThrowInCard(card)) {
+      const cards = throwInGroup(card);
+      dispatch(buildThrowInCards(gameView.myId, cards.length > 1 ? cards : [card]));
+      return;
+    }
+
+    if (viewerIsDefender) {
+      const reflectGroup = sameRankGroup(card);
+      if (
+        hasLegalAction(gameView.legalActions, 'redirect') &&
+        isSelectedCard(card) &&
+        reflectGroup.length > 1 &&
+        reflectGroup.every((candidate) => tableRanks.has(candidate.rank.toLowerCase()))
+      ) {
+        dispatch(buildRedirectAttack(gameView.myId, reflectGroup));
+        return;
+      }
+      const beatable = gameView.tablePairs.reduce<number[]>((indices, pair, index) => {
+        if (!pair.defense && isLegalCover(pair.attack, card, gameView.trumpSuit)) {
+          indices.push(index);
+        }
+        return indices;
+      }, []);
+      const defenderAction = defenderDoubleClickAction(card, {
+        playerId: gameView.myId,
+        coverableAttackIndices: beatable,
+        canCover: hasLegalAction(gameView.legalActions, 'cover'),
+        canRedirect: hasLegalAction(gameView.legalActions, 'redirect'),
+        canThrowIn: hasLegalAction(gameView.legalActions, 'throwIn'),
+        matchesTableRank: tableRanks.has(card.rank.toLowerCase()),
+      });
+      if (defenderAction) dispatch(defenderAction);
+    }
+  };
+
+  const handleActionBar = (action: { type: string }) => {
+    switch (action.type) {
+      case 'passTurn':
+        dispatch(buildPassTurn(gameView.myId));
+        break;
+      case 'declareSurrender':
+        dispatch(buildDeclareSurrender(gameView.myId));
+        break;
+      case 'redirect':
+        if (!hasLegalAction(gameView.legalActions, 'redirect') || selectedCards.length === 0) {
+          return;
+        }
+        dispatch(buildRedirectAttack(gameView.myId, selectedCards));
+        break;
+      default:
+        break;
+    }
+  };
+
+  const playAttackDrop = (card: GameCard) => {
+    if (!isAttackerTurn) return;
+    const group = sameRankGroup(card);
+    const cards = isSelectedCard(card) && group.length > 1 ? group : [card];
+    dispatch(buildInitialAttack(gameView.myId, cards));
+  };
+
+  const playCoverDrop = (card: GameCard, attackIndex: number) => {
+    if (!hasLegalAction(gameView.legalActions, 'cover')) return;
+    dispatch(buildCoverCard(gameView.myId, attackIndex, card));
+  };
+
+  const playThrowInDrop = (card: GameCard) => {
+    if (!canThrowIn || !isLegalThrowInCard(card)) return;
+    const group = throwInGroup(card);
+    const cards = isSelectedCard(card) && group.length > 1 ? group : [card];
+    dispatch(buildThrowInCards(gameView.myId, cards));
+  };
+
+  const playRedirectDrop = (card: GameCard) => {
+    if (!hasLegalAction(gameView.legalActions, 'redirect')) return;
+    const group = sameRankGroup(card);
+    const cards = isSelectedCard(card) && group.length > 1 ? group : [card];
+    dispatch(buildRedirectAttack(gameView.myId, cards));
+  };
+
+  const nameFor = (id: string): string => {
+    if (gameView.myId === id && gameView.myName) return gameView.myName;
+    return gameView.opponents.find((opponent) => opponent.id === id)?.name ?? id;
+  };
+
+  const attackerId = seatIdFor(gameView, gameView.attackerIdx);
+  const defenderId = seatIdFor(gameView, gameView.defenderIdx);
+
+  const playersInSeatOrder = [...room.players]
+    .sort((left, right) => left.seatIndex - right.seatIndex)
+    .map((player) => ({
+      id: m1SeatId(player.seatIndex),
+      name: player.name,
+      cardCount: player.cardCount,
+      hasPassed: player.hasPassed,
+      finishRank: player.finishRank,
+      present: player.isConnected,
+      mine: room.viewerSeat != null && player.seatIndex === room.viewerSeat,
+    }));
+
+  const winnerId = gameView.winners?.[0] ?? gameView.finishOrder[0] ?? null;
+  const durakId = gameView.isDraw ? null : (gameView.durak ?? null);
+
+  const gameClock = formatGameClock(gameView.gameStartedAtMs, gameView.gameEndedAtMs, now);
+  const gameClockActive =
+    !finished && gameView.gameStartedAtMs != null && gameView.gameEndedAtMs == null;
+  const viewerOnClock =
+    !readOnly && turnPlayerIdFor(gameView) === gameView.myId;
+  const displaySeconds = viewerOnClock ? clockSeconds(gameView, now) : 15;
+  const turnLowTime = viewerOnClock && displaySeconds <= 5 && displaySeconds > 0;
+
+  return (
+    <div
+      class="page game-page"
+      data-testid="game-page"
+      data-mode="multiplayer"
+      data-status={room.status}
+    >
+      {header}
+
+      {finished ? (
+        <div class="game-over-banner" data-testid="game-over-banner" role="status">
+          <strong class="game-over-title">
+            {gameView.isDraw
+              ? 'Game over — Draw'
+              : winnerId
+                ? `Game over — ${nameFor(winnerId)} wins`
+                : 'Game over'}
+          </strong>
+          {!gameView.isDraw && durakId ? (
+            <span class="game-over-durak">
+              {durakId === gameView.myId ? 'Durak: you' : `Durak: ${nameFor(durakId)}`}
+            </span>
+          ) : null}
+          <button
+            type="button"
+            class="action-button banner-lobby-button"
+            data-testid="banner-lobby-button"
+            onClick={leave}
+          >
+            Return to lobby
+          </button>
+        </div>
+      ) : null}
+
+      <div class="game-shell">
+        <aside class="game-sidebar sidebar-left" data-zone="sidebar-left">
+          <section
+            class="panel players-panel"
+            data-testid="players-panel"
+            aria-label="Player status"
+          >
+            <h2>Players</h2>
+            <ul class="status-badges players-list" data-testid="players-list">
+              {playersInSeatOrder.map((player) => {
+                const isDurak = finished && durakId === player.id;
+                const statusTag: 'DURAK' | 'WINNER' | 'OUT' | 'PASSED' | null = isDurak
+                  ? 'DURAK'
+                  : player.cardCount === 0 && player.finishRank != null
+                    ? player.finishRank === 1
+                      ? 'WINNER'
+                      : 'OUT'
+                    : player.hasPassed
+                      ? 'PASSED'
+                      : null;
+                const role =
+                  finished
+                    ? 'none'
+                    : player.id === attackerId
+                      ? 'attacker'
+                      : player.id === defenderId
+                        ? 'defender'
+                        : 'none';
+                return (
+                  <li
+                    key={player.id}
+                    class={`status-badge${player.mine ? ' mine me' : ''}`}
+                    data-testid={`player-row-${player.id}`}
+                    data-player-id={player.id}
+                    data-role={role}
+                    data-pov-clickable="false"
+                  >
+                    <span class="status-player">
+                      <span
+                        class={`presence-dot${player.present ? ' present' : ''}`}
+                        data-present={player.present ? 'true' : 'false'}
+                        role="img"
+                        aria-label={player.present ? 'Present' : 'Away'}
+                      />
+                      <span class="status-name">
+                        {formatPlayerDisplayName(player.id, player.name, gameView.myId)}
+                      </span>
+                    </span>
+                    <span
+                      class="status-cards"
+                      data-testid={`player-cards-${player.id}`}
+                    >
+                      {player.cardCount} cards
+                    </span>
+                    <span class="status-state-slot">
+                      {statusTag ? (
+                        <span
+                          class="status-tag-slot"
+                          data-testid={`player-status-tag-${player.id}`}
+                          data-status={statusTag}
+                        >
+                          <span
+                            class={`status-tag ${statusTag === 'PASSED' ? 'passed-tag status-out' : 'status-out'}`}
+                            data-status={statusTag}
+                          >
+                            {statusTag}
+                          </span>
+                        </span>
+                      ) : null}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+
+          <section class="panel" data-testid="room-info" aria-label="Room info">
+            <h2>Room</h2>
+            <ul class="live-room-facts">
+              {spectating ? (
+                <li data-testid="spectator-badge">Spectator view</li>
+              ) : (
+                <li>Seat {(room.viewerSeat ?? 0) + 1}</li>
+              )}
+              <li>{deckLabel(room.config.playerCount)} deck</li>
+              <li>{room.config.turnTimeoutSeconds}s turn clock</li>
+              <li>{room.config.allowRedirect ? 'Redirect on' : 'Redirect off'}</li>
+            </ul>
+          </section>
+
+          <section class="panel" aria-label="How to Play">
+            <h2>How to Play</h2>
+            <ul class="how-to-play">
+              {HOW_TO_PLAY.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          </section>
+        </aside>
+
+        <div class="table-column">
+          <GameTable
+            myId={gameView.myId}
+            myHand={customOrderedHand}
+            opponents={gameView.opponents}
+            tablePairs={gameView.tablePairs}
+            trumpSuit={gameView.trumpSuit}
+            boutPhase={gameView.boutPhase}
+            redirectTargetId={gameView.redirectTargetId ?? null}
+            attackerId={attackerId}
+            defenderId={defenderId}
+            eligibleTargetIds={gameView.eligibleTargetIds ?? []}
+            awaitingAttack={isAttackerTurn}
+            defending={
+              !readOnly && viewerIsDefender && gameView.tablePairs.some((pair) => !pair.defense)
+            }
+            highlightUncovered={
+              !readOnly &&
+              viewerIsDefender &&
+              normalizeToken(gameView.boutPhase) === 'defense' &&
+              gameView.tablePairs.some((pair) => !pair.defense)
+            }
+            isSurrenderingDefender={
+              viewerIsDefender && isSurrenderPhase(gameView.boutPhase)
+            }
+            surrenderTriggered={false}
+            defenderDefenseless={viewerIsDefender && gameView.defenderDefenseless === true}
+            canRedirect={
+              !readOnly && hasLegalAction(gameView.legalActions, 'redirect')
+            }
+            canThrowIn={canThrowIn}
+            throwInCards={gameView.throwInCards}
+            throwInCapacity={gameView.throwInCapacity}
+            myHasPassed={gameView.myHasPassed === true}
+            isReviewMode={false}
+            isBot={spectating}
+            turnPlayerId={turnPlayerIdFor(gameView)}
+            turnSecondsRemaining={clockSeconds(gameView, now)}
+            sortMode={sortMode}
+            transparentMode={false}
+            selectedKeys={readOnly ? [] : selectedKeys}
+            playableKeys={playableKeys}
+            onCardClick={readOnly ? undefined : toggleCard}
+            onCardDoubleClick={readOnly ? undefined : playCard}
+            onTableCardClick={
+              !readOnly && hasLegalAction(gameView.legalActions, 'cover')
+                ? coverAttack
+                : undefined
+            }
+            onAttackDrop={readOnly ? undefined : playAttackDrop}
+            onCoverDrop={
+              !readOnly && hasLegalAction(gameView.legalActions, 'cover')
+                ? playCoverDrop
+                : undefined
+            }
+            onThrowInDrop={readOnly ? undefined : playThrowInDrop}
+            onRedirectDrop={readOnly ? undefined : playRedirectDrop}
+            onReorderHand={readOnly ? undefined : reorderHand}
+          >
+            {readOnly ? null : (
+              <div class="game-buttons">
+                {isAttackerTurn ? (
+                  <button
+                    type="button"
+                    class="action-button green"
+                    disabled={!canAttack}
+                    onClick={attack}
+                  >
+                    Attack
+                  </button>
+                ) : null}
+                <ActionBar
+                  legalActions={gameView.legalActions}
+                  onAction={handleActionBar}
+                  isBotSeat={false}
+                />
+              </div>
+            )}
+          </GameTable>
+
+          {spectating ? null : (
+            <section
+              class="panel sidebar-box sidebar-sort-box hand-sort-box"
+              data-zone="hand-sort-box"
+              data-testid="hand-sort-box"
+              aria-label="Hand sorting"
+            >
+              <h2>HAND SORTING</h2>
+              <SortBar mode={sortMode} onModeChange={setSortMode} />
+            </section>
+          )}
+        </div>
+
+        <aside class="game-sidebar sidebar-right" data-zone="sidebar-right">
+          <section
+            class="panel clock-split-panel"
+            data-testid="clock-panel"
+            aria-label="Game and turn clocks"
+          >
+            <div
+              class="clock-half split-clock-half game-clock-half"
+              data-testid="game-clock-half"
+              data-active={gameClockActive ? 'true' : 'false'}
+              data-highlighted="false"
+            >
+              <h2>Game</h2>
+              <span
+                class="game-clock split-clock-value"
+                data-testid="game-clock"
+                data-active={gameClockActive ? 'true' : 'false'}
+                data-highlighted="false"
+              >
+                {gameClock}
+              </span>
+            </div>
+            <div
+              class={`clock-half split-clock-half turn-clock-half${turnLowTime ? ' clock-low' : ''}`}
+              data-testid="turn-clock-half"
+              data-active={viewerOnClock ? 'true' : 'false'}
+              data-highlighted={turnLowTime ? 'true' : 'false'}
+              data-low-time={turnLowTime ? 'true' : 'false'}
+            >
+              <h2>Turn</h2>
+              <span
+                class={`turn-clock split-clock-value${viewerOnClock ? ' active' : ''}${
+                  turnLowTime ? ' clock-low' : ''
+                }`}
+                data-testid="turn-clock"
+                data-active={viewerOnClock ? 'true' : 'false'}
+                data-highlighted={turnLowTime ? 'true' : 'false'}
+                data-low-time={turnLowTime ? 'true' : 'false'}
+              >
+                {formatClock(displaySeconds)}
+              </span>
+            </div>
+          </section>
+
+          <TableDeck
+            talonCount={gameView.talonCount}
+            bottomTrumpCard={gameView.bottomTrumpCard}
+            trumpSuit={gameView.trumpSuit}
+            discardCount={gameView.discardCount ?? 0}
+            lastDiscardCards={gameView.lastDiscardCards ?? []}
+          />
+
+          {finished ? (
+            <section
+              class="panel game-result"
+              data-testid="multiplayer-results"
+              aria-label="Game over"
+            >
+              <h2>
+                {gameView.isDraw
+                  ? 'Draw'
+                  : winnerId
+                    ? `${nameFor(winnerId)} wins`
+                    : 'Game over'}
+              </h2>
+              {!gameView.isDraw && durakId ? (
+                <p class="durak-line">
+                  {durakId === gameView.myId
+                    ? 'You are the Durak.'
+                    : `${nameFor(durakId)} is the Durak.`}
+                </p>
+              ) : null}
+              <ol class="finish-order">
+                {gameView.finishOrder.map((id) => (
+                  <li key={id}>{nameFor(id)}</li>
+                ))}
+              </ol>
+              <button
+                type="button"
+                class="action-button back-to-lobby"
+                data-testid="results-lobby-button"
+                onClick={leave}
+              >
+                Return to lobby
+              </button>
             </section>
           ) : null}
         </aside>

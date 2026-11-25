@@ -3,7 +3,6 @@ import { HeaderBar } from './components/HeaderBar';
 import { initSettings } from './state/settings';
 import { GamePage } from './pages/GamePage';
 import { LobbyPage } from './pages/LobbyPage';
-import { MultiplayerGamePage } from './pages/MultiplayerGamePage';
 import { navigateToLobby, useRoute } from './router/useRoute';
 
 interface LobbyRoute {
@@ -95,7 +94,15 @@ export function App() {
       ) : showLobby || route.kind === 'lobby' ? (
         <LobbyPage />
       ) : (
-        <MultiplayerGamePage gameId={route.gameId} onNavigateLobby={navigateToLobby} />
+        // T-90: `/g/:gameId` is the original M1 gameplay interface in live
+        // multiplayer mode — never a placeholder screen.
+        <GamePage
+          mode="multiplayer"
+          gameId={route.gameId}
+          playerId="p0"
+          onSwitchPlayer={() => {}}
+          onLeaveGame={navigateToLobby}
+        />
       )}
     </div>
   );
