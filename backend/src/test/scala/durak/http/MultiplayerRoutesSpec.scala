@@ -578,6 +578,15 @@ class MultiplayerRoutesSpec extends munit.FunSuite:
     assertEquals(intField(view, "viewerSeat"), 0)
     assert(view.hcursor.downField("hand").as[List[Json]].toOption.exists(_.nonEmpty))
 
+    // T-96: seat 0 (the caller) is the opening attacker, so the reviewer gets
+    // playable cards and the Attack button instead of an idle synthetic seat.
+    assertEquals(intField(view, "attackerIdx"), 0)
+    val legalActions = view.hcursor
+      .downField("legalActions")
+      .as[List[String]]
+      .getOrElse(fail("missing legalActions"))
+    assert(legalActions.contains("attack"), legalActions.toString)
+
     val playerIds = view.hcursor
       .downField("seats")
       .as[List[Json]]
@@ -651,6 +660,13 @@ class MultiplayerRoutesSpec extends munit.FunSuite:
       view.hcursor.downField("hand").as[List[Json]].toOption.map(_.size),
       Some(4)
     )
+    // T-96: the small-hand preset opens on the caller's own attack as well.
+    assertEquals(intField(view, "attackerIdx"), 0)
+    val legalActions = view.hcursor
+      .downField("legalActions")
+      .as[List[String]]
+      .getOrElse(fail("missing legalActions"))
+    assert(legalActions.contains("attack"), legalActions.toString)
     assertEquals(
       view.hcursor.downField("players").as[List[Json]].toOption.map(_.size),
       Some(2)

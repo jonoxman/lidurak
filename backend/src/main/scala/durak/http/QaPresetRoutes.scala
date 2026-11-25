@@ -141,7 +141,11 @@ object QaPresetRoutes:
               (session.playerId -> session.displayName) +: opponents,
               autoStartIfFull = true,
               seed = Some(PresetSeed),
-              initialHandSize = handSize
+              initialHandSize = handSize,
+              // T-96: a preset reviewer must land on their own opening attack
+              // instead of a synthetic opponent that never plays. Seat 0 is the
+              // caller, so it is always the dealt attacker here.
+              firstAttackerIdx = Some(0)
             )
             .flatMap(room =>
               Ok(
