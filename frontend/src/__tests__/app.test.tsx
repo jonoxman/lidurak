@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/preact';
+import { fireEvent, render, screen, waitFor } from '@testing-library/preact';
 
 vi.mock('../api/client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/client')>();
@@ -67,7 +67,7 @@ vi.mock('../api/websocket', () => ({
 
 import * as client from '../api/client';
 import * as lobbyApi from '../api/lobbyClient';
-import { App, parseRoute } from '../app';
+import { App } from '../app';
 import appCss from '../app.css?raw';
 import tableCss from '../styles/table.css?raw';
 import type { PlayerGameView } from '../types/multiplayer';
@@ -178,7 +178,7 @@ describe('App', () => {
     expect(name.textContent?.trim()).not.toBe('Guest');
   });
 
-  it('keeps the M1 hash game route ahead of the History API', async () => {
+  it('normalizes a legacy #/g bookmark into a clean path and opens the local table', async () => {
     window.history.replaceState({}, '', '/g/history-42');
     window.location.hash = '#/g/local-1?player=p1';
     getGameView.mockReturnValue(new Promise(() => {}));
@@ -188,6 +188,69 @@ describe('App', () => {
     expect(await screen.findByText(/Loading game local-1/)).toBeTruthy();
     expect(screen.queryByTestId('waiting-room')).toBeNull();
     expect(fetchGameView).not.toHaveBeenCalled();
+    // The address bar was rewritten in place: path route, seat query, no hash.
+    expect(window.location.pathname).toBe('/g/local-1');
+    expect(window.location.search).toBe('?player=p1');
+    expect(window.location.hash).toBe('');
+  });
+
+  it('T-90-feedback-3 ITEM-3a: the LIDURAK logo returns from /g/:gameId to exact /', async () => {
+    window.history.replaceState({}, '', '/g/room-42');
+
+    render(<App />);
+    await screen.findByTestId('waiting-room');
+
+    fireEvent.click(screen.getByRole('link', { name: 'LIDURAK' }));
+
+    expect(window.location.pathname).toBe('/');
+    expect(window.location.search).toBe('');
+    expect(window.location.hash).toBe('');
+    expect(await screen.findByRole('button', { name: 'Create Game' })).toBeTruthy();
+    expect(screen.queryByTestId('waiting-room')).toBeNull();
+  });
+
+  it('T-90-feedback-3 ITEM-3b: a PLAY menu item returns from /g/:gameId to exact /', async () => {
+    window.history.replaceState({}, '', '/g/room-42');
+
+    render(<App />);
+    await screen.findByTestId('waiting-room');
+
+    const playTrigger = screen.getByRole('button', { name: 'PLAY' });
+    fireEvent.mouseEnter(playTrigger.closest('.header-menu')!);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'New game' }));
+
+    expect(window.location.pathname).toBe('/');
+    expect(window.location.search).toBe('');
+    expect(window.location.hash).toBe('');
+    expect(await screen.findByRole('button', { name: 'Create Game' })).toBeTruthy();
+  });
+
+  it('T-90-feedback-3 ITEM-3b: the in-game Leave control returns to exact /', async () => {
+    window.history.replaceState({}, '', '/g/room-42');
+    (lobbyApi.leaveRoom as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+    render(<App />);
+    await screen.findByTestId('leave-room');
+
+    fireEvent.click(screen.getByTestId('leave-room'));
+
+    await waitFor(() => expect(window.location.pathname).toBe('/'));
+    expect(window.location.search).toBe('');
+    expect(window.location.hash).toBe('');
+    expect(await screen.findByRole('button', { name: 'Create Game' })).toBeTruthy();
+  });
+
+  it('T-90-feedback-3 ITEM-3b: no rendered anchor anywhere carries a #/ or # href', async () => {
+    render(<App />);
+    await screen.findByRole('button', { name: 'Create Game' });
+
+    const anchors = Array.from(document.querySelectorAll('a'));
+    expect(anchors.length).toBeGreaterThan(0);
+    for (const anchor of anchors) {
+      const href = anchor.getAttribute('href');
+      expect(href, anchor.outerHTML).not.toBe('#');
+      expect(href?.startsWith('#/'), anchor.outerHTML).toBe(false);
+    }
   });
 
   it('does not repeat the Lidurak title below the header bar', async () => {
@@ -209,7 +272,7 @@ describe('App', () => {
 
     const header = screen.getByRole('banner');
     expect(header.getAttribute('data-zone')).toBe('site-header');
-    expect(screen.getByRole('link', { name: 'LIDURAK' }).getAttribute('href')).toBe('#/');
+    expect(screen.getByRole('link', { name: 'LIDURAK' }).getAttribute('href')).toBe('/');
     expect(screen.getByRole('button', { name: 'Account menu' })).toBeTruthy();
     await screen.findByRole('button', { name: 'Create Game' });
   });
@@ -389,73 +452,6 @@ describe('T-90 semantic feature color system', () => {
     expect(cssRule(appCss, ".turn-clock[data-low-time='true']")).toContain(
       'var(--clock-urgent-accent)',
     );
-  });
-});
-
-describe('parseRoute', () => {
-  it('routes a game hash with a player query parameter', () => {
-    expect(parseRoute('#/g/game-1?player=p2')).toEqual({
-      name: 'game',
-      gameId: 'game-1',
-      playerId: 'p2',
-    });
-  });
-
-  it('routes an 8-character alphanumeric game id', () => {
-    expect(parseRoute('#/g/aB3dE9fZ?player=p1')).toEqual({
-      name: 'game',
-      gameId: 'aB3dE9fZ',
-      playerId: 'p1',
-    });
-  });
-
-  it('decodes the game id and defaults the player id', () => {
-    expect(parseRoute('#/g/game%2F1')).toEqual({
-      name: 'game',
-      gameId: 'game/1',
-      playerId: 'p0',
-    });
-  });
-
-  it('falls back to the lobby for other hashes', () => {
-    expect(parseRoute('')).toEqual({ name: 'lobby' });
-    expect(parseRoute('#/')).toEqual({ name: 'lobby' });
-    expect(parseRoute('#/g/')).toEqual({ name: 'lobby' });
-  });
-
-  it('rejects a game id that is empty once decoded', () => {
-    expect(parseRoute('#/g/%20')).toEqual({ name: 'lobby' });
-    expect(parseRoute('#/g/%20%20')).toEqual({ name: 'lobby' });
-    expect(parseRoute('#/g/%E0%A4%A')).toEqual({ name: 'lobby' });
-  });
-
-  it('defaults a blank player query parameter', () => {
-    expect(parseRoute('#/g/game-1?player=')).toEqual({
-      name: 'game',
-      gameId: 'game-1',
-      playerId: 'p0',
-    });
-  });
-
-  it('routes the /replay alias of a game and defaults the player', () => {
-    expect(parseRoute('#/g/game-1/replay')).toEqual({
-      name: 'game',
-      gameId: 'game-1',
-      playerId: 'p0',
-    });
-    expect(parseRoute('#/g/game-1/replay?player=p2')).toEqual({
-      name: 'game',
-      gameId: 'game-1',
-      playerId: 'p2',
-    });
-  });
-
-  it('defaults a whitespace-only player query parameter', () => {
-    expect(parseRoute('#/g/game-1?player=%20')).toEqual({
-      name: 'game',
-      gameId: 'game-1',
-      playerId: 'p0',
-    });
   });
 });
 

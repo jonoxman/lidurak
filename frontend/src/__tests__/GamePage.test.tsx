@@ -2371,6 +2371,25 @@ describe('GamePage', () => {
     expect(screen.queryByTestId('review-nav')).toBeNull();
   });
 
+  it('T-90-feedback-3 ITEM-3b: a rematch fallback pushes a clean path, never a hash', async () => {
+    window.history.replaceState(null, '', '/');
+    getGameView.mockResolvedValue({
+      ...finishedFrameView('p0'),
+      playerTypes: ['human', 'basicBot'],
+    });
+    getGameReplay.mockResolvedValue({ gameId: 'game-1', moves: [], frames: [] });
+    createGameMock.mockResolvedValue({ gameId: 'game-2', players: ['p0', 'p1'] });
+
+    // No `onNavigateGame`: the page falls back to the clean SPA route itself.
+    render(<GamePage gameId="game-1" playerId="p0" onSwitchPlayer={() => {}} />);
+
+    fireEvent.click(await screen.findByTestId('banner-rematch-button'));
+
+    await waitFor(() => expect(window.location.pathname).toBe('/g/game-2'));
+    expect(window.location.search).toBe('?player=p0');
+    expect(window.location.hash).toBe('');
+  });
+
   it('keeps the review frame when the POV menu switches players', async () => {
     const frames = [
       {
