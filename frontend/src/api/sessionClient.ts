@@ -111,8 +111,53 @@ function parseGuestSession(value: unknown): GuestSession {
  * lobby) the moment a name changes.
  */
 let cachedGuestSession: GuestSession | null = null;
-let inFlightGuestSession: Promise<GuestSession | null> | null = null;
+let inFlightGuestSession: Promise<GuestSession> | null = null;
 const guestSessionListeners = new Set<(session: GuestSession) => void>();
+
+/**
+ * T-90-feedback ITEM-1b: the locally generated `Guest-XXXX` used only while
+ * `/api/session` cannot be reached (an offline page, an unmocked unit test).
+ *
+ * It is deliberately *not* stored in [[cachedGuestSession]]: the next
+ * `ensureGuestSession()` still asks the server, so a real backend-minted session
+ * replaces this label as soon as it lands. It is stable within one page, so the
+ * header never sees the name change between two failed retries.
+ */
+let fallbackGuestSession: GuestSession | null = null;
+
+/** Characters of the backend's `Guest-XXXX` suffix (`A-Z0-9`). */
+const GUEST_NAME_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+
+/** Characters of the backend's public `guest-xxxxxxxx` player id. */
+const GUEST_ID_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
+
+function randomSuffix(alphabet: string, length: number): string {
+  let suffix = '';
+  for (let index = 0; index < length; index += 1) {
+    suffix += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  return suffix;
+}
+
+/**
+ * A `Guest-XXXX` display name with the exact shape the backend mints. Used for
+ * the offline fallback, so the UI never renders the bare `"Guest"` placeholder.
+ */
+export function generateGuestName(): string {
+  return `Guest-${randomSuffix(GUEST_NAME_ALPHABET, 4)}`;
+}
+
+/** The offline fallback identity for this page, generated on first use. */
+function localFallbackGuestSession(): GuestSession {
+  if (fallbackGuestSession === null) {
+    fallbackGuestSession = {
+      playerId: `guest-${randomSuffix(GUEST_ID_ALPHABET, 8)}`,
+      displayName: generateGuestName(),
+      isGuest: true,
+    };
+  }
+  return fallbackGuestSession;
+}
 
 /** The session already resolved for this page, or `null` before the first load. */
 export function getCachedGuestSession(): GuestSession | null {
@@ -133,6 +178,7 @@ export function subscribeGuestSession(
 export function resetGuestSessionCache(): void {
   cachedGuestSession = null;
   inFlightGuestSession = null;
+  fallbackGuestSession = null;
   guestSessionListeners.clear();
 }
 
@@ -146,27 +192,33 @@ function publishGuestSession(session: GuestSession): GuestSession {
  * Resolves the guest session at most once per page and deduplicates concurrent
  * callers onto that single in-flight request.
  *
- * Resolves `null` instead of rejecting when `fetch` is unavailable (an isolated
- * component unit test) or the request fails, so callers can render their
- * fallback guest label without an unhandled rejection.
+ * T-90-feedback ITEM-1a/1b: never resolves `null` and never rejects. A cold
+ * visit resolves the authoritative backend `Guest-XXXX` (the call that also
+ * sets the `HttpOnly` cookie); a failed request or an environment without
+ * `fetch` resolves a locally generated `Guest-XXXX` instead, so the profile
+ * menu can never paint the bare `"Guest"` placeholder.
  */
-export function ensureGuestSession(): Promise<GuestSession | null> {
+export function ensureGuestSession(): Promise<GuestSession> {
   if (cachedGuestSession !== null) return Promise.resolve(cachedGuestSession);
   if (inFlightGuestSession !== null) return inFlightGuestSession;
-  if (typeof fetch !== 'function') return Promise.resolve(null);
+  if (typeof fetch !== 'function') {
+    return Promise.resolve(localFallbackGuestSession());
+  }
 
   inFlightGuestSession = apiRequest('/api/session')
     .then((body) => publishGuestSession(parseGuestSession(body)))
     .then(
       (session) => {
         inFlightGuestSession = null;
+        // The authoritative name won; the offline placeholder is retired.
+        fallbackGuestSession = null;
         return session;
       },
-      (error: unknown) => {
+      () => {
         inFlightGuestSession = null;
-        // A real HTTP failure is still surfaced to a caller that requested the
-        // session explicitly; the header handles it and keeps its fallback.
-        throw error;
+        // Never cache this as the real session, so a later retry (once the
+        // backend is up) still replaces it with the backend-minted Guest-XXXX.
+        return localFallbackGuestSession();
       },
     );
   return inFlightGuestSession;
@@ -179,11 +231,7 @@ export function ensureGuestSession(): Promise<GuestSession | null> {
  * issue competing session requests.
  */
 export async function getOrCreateSession(): Promise<GuestSession> {
-  const session = await ensureGuestSession();
-  if (session === null) {
-    throw new Error('No guest session available: fetch is unsupported or the request failed');
-  }
-  return session;
+  return ensureGuestSession();
 }
 
 /** Renames the current guest (2–20 printable characters server-side). */

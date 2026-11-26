@@ -133,6 +133,27 @@ describe('M2 LobbyPage', () => {
     );
   });
 
+  it('T-90-feedback ITEM-1b: resolves the guest session before the first lobby request', async () => {
+    let releaseSession!: (session: typeof GUEST) => void;
+    getOrCreateSession.mockReturnValue(
+      new Promise<typeof GUEST>((resolve) => {
+        releaseSession = resolve;
+      }),
+    );
+
+    renderLobby();
+
+    await waitFor(() => expect(getOrCreateSession).toHaveBeenCalledTimes(1));
+    // `/api/lobby` must not race the session mint on a cold visit.
+    expect(fetchLobbyRooms).not.toHaveBeenCalled();
+
+    await act(async () => {
+      releaseSession(GUEST);
+    });
+
+    await waitFor(() => expect(fetchLobbyRooms).toHaveBeenCalledTimes(1));
+  });
+
   it('ITEM-2: renders the three lobby tabs and no second header bar', async () => {
     renderLobby();
 

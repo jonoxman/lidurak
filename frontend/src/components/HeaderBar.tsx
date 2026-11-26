@@ -41,9 +41,6 @@ export interface HeaderBarProps {
   guestName?: string;
 }
 
-/** Label shown before a guest session resolves, or when no name exists. */
-export const DEFAULT_GUEST_LABEL = 'Guest';
-
 /** The guest label currently known to the shared session cache, if any. */
 function cachedGuestLabel(): string | null {
   const cached = getCachedGuestSession();
@@ -593,11 +590,13 @@ export function HeaderBar({
   const [profileOpen, setProfileOpen] = useState(false);
   const [submenu, setSubmenu] = useState<SubmenuId | null>(null);
   const [barsUpdating, setBarsUpdating] = useState(false);
-  // T-90-2 ITEM-3: the profile button shows the backend-generated guest name.
-  // The optional prop wins (tests / a pre-fetched shell), then the shared
-  // session cache, and only then the neutral fallback label.
+  // T-90-2 ITEM-3 / T-90-feedback ITEM-1b: the profile button shows the
+  // backend-generated guest name. The optional prop wins (tests / a pre-fetched
+  // shell), then the shared session cache. Until one of them exists the label
+  // is empty — never the bare `"Guest"` placeholder — so a cold load can only
+  // ever paint `Guest-XXXX`.
   const [guestLabel, setGuestLabel] = useState(
-    () => guestName ?? cachedGuestLabel() ?? DEFAULT_GUEST_LABEL,
+    () => guestName ?? cachedGuestLabel() ?? '',
   );
   const previousLevel = useRef<number | null>(null);
   // T-90-feedback-3: wraps the profile trigger *and* its dropdown panel, so a
@@ -626,13 +625,19 @@ export function HeaderBar({
       if (session && session.displayName) setGuestLabel(session.displayName);
     });
 
+    // Re-read the cache *after* subscribing, closing the window between the
+    // render that initialized the state and this effect: a session that landed
+    // in between would otherwise be missed until the next change.
+    const cached = cachedGuestLabel();
+    if (cached !== null) setGuestLabel(cached);
+
     let active = true;
     ensureGuestSession()
       .then((session) => {
         if (active && session && session.displayName) setGuestLabel(session.displayName);
       })
       .catch(() => {
-        /* No session endpoint: keep the neutral guest label. */
+        /* No session endpoint: the generated fallback already covers the label. */
       });
 
     return () => {
@@ -641,7 +646,8 @@ export function HeaderBar({
     };
   }, [guestName]);
 
-  const profileLabel = guestLabel.trim().length > 0 ? guestLabel : DEFAULT_GUEST_LABEL;
+  // T-90-feedback ITEM-1b: an unresolved name renders as empty, never "Guest".
+  const profileLabel = guestLabel.trim();
 
   // The tracker follows the live measured round-trip time reported by the app.
   const level = connectionLevel(pingMs);

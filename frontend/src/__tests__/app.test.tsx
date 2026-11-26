@@ -170,6 +170,14 @@ describe('App', () => {
     expect(fetchGameView).not.toHaveBeenCalled();
   });
 
+  it('T-90-feedback ITEM-1a/1b: paints the backend guest name, never the bare placeholder', async () => {
+    render(<App />);
+
+    const name = await screen.findByTestId('profile-name');
+    await waitFor(() => expect(name.textContent?.trim()).toBe('Guest-AB12'));
+    expect(name.textContent?.trim()).not.toBe('Guest');
+  });
+
   it('keeps the M1 hash game route ahead of the History API', async () => {
     window.history.replaceState({}, '', '/g/history-42');
     window.location.hash = '#/g/local-1?player=p1';

@@ -172,10 +172,22 @@ describe('sessionClient', () => {
   it('falls back to the HTTP status when the error body is unusable', async () => {
     mockFetch.mockResolvedValue(jsonResponse(null, { status: 500, ok: false }));
 
-    await expect(getOrCreateSession()).rejects.toMatchObject({
+    await expect(fetchGameView('missing')).rejects.toMatchObject({
       status: 500,
       message: 'Request failed (HTTP 500)',
     });
+  });
+
+  it('T-90-feedback ITEM-1b: a failed session request yields a Guest-XXXX fallback', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ error: 'Booting' }, { status: 503 }));
+
+    const session = await getOrCreateSession();
+
+    expect(session.displayName).toMatch(/^Guest-[A-Z0-9]{4}$/);
+    expect(session.displayName).not.toBe('Guest');
+    // The local fallback is never cached as the authoritative session, so a
+    // later retry can still pick up the backend-minted Guest-XXXX.
+    expect(getCachedGuestSession()).toBeNull();
   });
 
   it('T-90-2 ITEM-3: deduplicates concurrent guest-session loads', async () => {
@@ -198,10 +210,11 @@ describe('sessionClient', () => {
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
-  it('T-90-2 ITEM-3: degrades to null when fetch is unavailable', async () => {
+  it('T-90-2 ITEM-3: generates a Guest-XXXX fallback when fetch is unavailable', async () => {
     vi.stubGlobal('fetch', undefined);
 
-    await expect(ensureGuestSession()).resolves.toBeNull();
+    const session = await ensureGuestSession();
+    expect(session.displayName).toMatch(/^Guest-[A-Z0-9]{4}$/);
     expect(getCachedGuestSession()).toBeNull();
   });
 });

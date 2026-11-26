@@ -144,32 +144,41 @@ export function LobbyPage({ initialServerReady = false }: LobbyPageProps = {}) {
     };
   }, [serverReady]);
 
-  // Hydrate the guest badge and the initial pool count. Both calls fail
-  // silently: the page stays usable, and the live socket retries on its own.
+  // Hydrate the guest session first, then the initial pool count. Both calls
+  // fail silently: the page stays usable, and the live socket retries on its
+  // own. Waiting for `serverReady` keeps cold loads from firing at a backend
+  // that is still booting.
   useEffect(() => {
+    if (!serverReady) return undefined;
     let cancelled = false;
 
-    getOrCreateSession()
-      .then((hydrated) => {
-        if (cancelled) return;
-        setSession(hydrated);
-      })
-      .catch(() => {
-        // Keep the neutral "Guest" placeholder when the session is offline.
-      });
+    const hydrate = async () => {
+      try {
+        const hydrated = await getOrCreateSession();
+        if (!cancelled) setSession(hydrated);
+      } catch {
+        // Session unavailable: `HeaderBar` keeps its generated Guest-XXXX.
+      }
 
-    fetchLobbyRooms()
-      .then((open) => {
-        if (!cancelled) setRooms(open);
-      })
-      .catch(() => {
+      // T-90-feedback ITEM-1b: only now may the lobby REST calls run. Racing
+      // `/api/session` with `/api/lobby` on a cold visit let the backend mint
+      // two guest cookies, so the name changed after a reload.
+      try {
+        const open = await fetchLobbyRooms();
+        // A QA seed or the live socket may already have delivered fresher
+        // rooms while this initial request was in flight; never clobber them.
+        if (!cancelled) setRooms((current) => (current.length > 0 ? current : open));
+      } catch {
         // The Lobby Pool tab hydrates again when it opens.
-      });
+      }
+    };
+
+    void hydrate();
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [serverReady]);
 
   // One `/ws/lobby` subscription for the whole lobby page: a waiting quick-pair
   // player receives `quickPairMatched` immediately, and the Lobby Pool stays
