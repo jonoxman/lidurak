@@ -724,7 +724,7 @@ describe('M2 LobbyPage', () => {
     );
   });
 
-  it('T-90-3 ITEM-6b: locks a four-player table to 52 cards', () => {
+  it('T-90-feedback ITEM-2: greys out the invalid 36-card option for four players', async () => {
     renderLobby();
 
     fireEvent.click(screen.getByRole('tab', { name: 'Create a Game' }));
@@ -734,18 +734,46 @@ describe('M2 LobbyPage', () => {
     }) as HTMLButtonElement;
     const fiftyTwo = within(deck).getByRole('button', { name: '52 cards' });
 
+    // 2 players: both pills are live and 36 cards is the default.
+    expect(thirtySix.disabled).toBe(false);
+    expect(thirtySix.getAttribute('aria-disabled')).toBe('false');
+    expect(thirtySix.classList.contains('segmented-option--disabled')).toBe(false);
+    expect(thirtySix.getAttribute('aria-pressed')).toBe('true');
+
     fireEvent.click(screen.getByRole('button', { name: '4 players' }));
+
+    // The 36-card pill stays on the form, but is disabled, greyed out and no
+    // longer selected: the deck has already switched to 52 automatically.
+    expect(deck.contains(thirtySix)).toBe(true);
     expect(thirtySix.disabled).toBe(true);
+    expect(thirtySix.getAttribute('aria-disabled')).toBe('true');
+    expect(thirtySix.classList.contains('segmented-option--disabled')).toBe(true);
+    expect(thirtySix.getAttribute('aria-pressed')).toBe('false');
     expect(fiftyTwo.getAttribute('aria-pressed')).toBe('true');
 
-    // A three-player table may still choose either deck.
+    // Clicking the greyed-out pill is a no-op.
+    fireEvent.click(thirtySix);
+    expect(thirtySix.getAttribute('aria-pressed')).toBe('false');
+    expect(fiftyTwo.getAttribute('aria-pressed')).toBe('true');
+
+    // Going back to 3 players re-enables 36 and lets it be chosen again.
     fireEvent.click(screen.getByRole('button', { name: '3 players' }));
     expect(thirtySix.disabled).toBe(false);
-    expect(within(deck).getByRole('button', { name: '52 cards' })).toBeTruthy();
+    expect(thirtySix.getAttribute('aria-disabled')).toBe('false');
+    expect(thirtySix.classList.contains('segmented-option--disabled')).toBe(false);
+    fireEvent.click(thirtySix);
+    expect(thirtySix.getAttribute('aria-pressed')).toBe('true');
 
+    // 2 players keeps both choices live and sends the chosen 36-card deck.
     fireEvent.click(screen.getByRole('button', { name: '2 players' }));
     expect(thirtySix.disabled).toBe(false);
     expect(thirtySix.getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(screen.getByRole('button', { name: 'Create room' }));
+    await waitFor(() =>
+      expect(createRoom).toHaveBeenCalledWith(
+        expect.objectContaining({ playerCount: 2, deckSize: 36 }),
+      ),
+    );
   });
 
   it('T-90-3 ITEM-7d: renders a visual seat map for the table size', () => {
@@ -874,6 +902,27 @@ describe('lobby.css visual invariants', () => {
       expect(block).toMatch(/:hover|:focus-visible/);
     }
     expect(lobbyCss).toContain("html[data-theme='light'] .m2-lobby");
+  });
+
+  it('T-90-feedback ITEM-2: greys out the disabled 36-card deck option in both themes', () => {
+    const at = lobbyCss.indexOf('.segmented-option:disabled');
+    expect(at).toBeGreaterThan(-1);
+    const disabledRule = lobbyCss.slice(at, lobbyCss.indexOf('}', at));
+    expect(disabledRule).toContain('cursor: not-allowed');
+    expect(disabledRule).toContain('opacity:');
+    // ITEM-5: a disabled option is flat and emits no glow, even on hover.
+    expect(disabledRule).toContain('box-shadow: none');
+    expect(disabledRule).not.toContain('--ui-select-glow');
+
+    // The dedicated class is covered as well as the native disabled state.
+    expect(lobbyCss).toContain('.segmented-option--disabled');
+    // ...and the pale Light panel greys it out too.
+    expect(lobbyCss).toMatch(
+      /html\[data-theme='light'\] \.segmented-option:disabled[^{]*\{[^}]*box-shadow: none/,
+    );
+    expect(lobbyCss).toMatch(
+      /html\[data-theme='light'\] \.segmented-option\.segmented-option--disabled[^{]*\{/,
+    );
   });
 
   it('lays out with Grid/Flexbox gaps only and never freeform positioning', () => {
