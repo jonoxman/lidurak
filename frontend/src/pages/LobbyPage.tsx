@@ -18,7 +18,7 @@ import { CreateInviteTab } from '../components/lobby/CreateInviteTab';
 import { LobbyPoolTab } from '../components/lobby/LobbyPoolTab';
 import { QaLobbyPresets } from '../components/lobby/QaLobbyPresets';
 import { QuickPairingTab } from '../components/lobby/QuickPairingTab';
-import { navigateToGame } from '../router/useRoute';
+import { gamePath, navigateToGame } from '../router/useRoute';
 import type { PlayerType } from '../types';
 import type {
   GuestSession,
@@ -485,9 +485,8 @@ function LocalGameSection({ onServerWarmup }: LocalGameSectionProps) {
     setPresetError(null);
     createPresetGame(presetId)
       .then((preset) => {
-        window.location.hash = `#/g/${preset.gameId}?player=${encodeURIComponent(
-          preset.defaultPlayerId,
-        )}`;
+        // Clean History-API route: `/g/:gameId?player=:seat`, no hash.
+        navigateToGame(preset.gameId, preset.defaultPlayerId);
       })
       .catch((reason: unknown) => {
         console.warn('Could not start the QA preset', reason);
@@ -644,7 +643,24 @@ function LocalGameSection({ onServerWarmup }: LocalGameSectionProps) {
           </p>
           <nav class="player-tabs">
             {created.players.map((player) => (
-              <a key={player.id} href={`#/g/${created.gameId}?player=${player.id}`}>
+              <a
+                key={player.id}
+                href={gamePath(created.gameId, player.id)}
+                onClick={(event) => {
+                  // Primary clicks stay in the SPA; modified clicks open a tab.
+                  if (
+                    event.button !== 0 ||
+                    event.metaKey ||
+                    event.ctrlKey ||
+                    event.shiftKey ||
+                    event.altKey
+                  ) {
+                    return;
+                  }
+                  event.preventDefault();
+                  navigateToGame(created.gameId, player.id);
+                }}
+              >
                 {player.name} ({player.id})
               </a>
             ))}

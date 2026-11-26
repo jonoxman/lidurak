@@ -16,6 +16,7 @@ import { fetchGameView, joinRoom, leaveRoom } from '../api/lobbyClient';
 import { getOrCreateSession } from '../api/sessionClient';
 import { soundEngine } from '../audio/SoundEngine';
 import { getStoredSortMode } from '../state/settings';
+import { navigateToGame as routeToGame } from '../router/useRoute';
 import {
   connectionLabel,
   deckLabel,
@@ -1670,15 +1671,14 @@ function LocalGamePage({
     window.location.assign('/');
   };
 
-  // The router owns the URL when it hands us `onNavigateGame`; otherwise the
-  // hash route is enough (the app listens for `hashchange`).
+  // The router owns the URL when it hands us `onNavigateGame`; the fallback
+  // pushes the same clean `/g/:gameId?player=:seat` route itself.
   const navigateToGame = (nextGameId: string, nextPlayerId?: string) => {
     if (onNavigateGame) {
       onNavigateGame(nextGameId, nextPlayerId);
       return;
     }
-    const seat = nextPlayerId ?? playerId;
-    window.location.hash = `#/g/${nextGameId}?player=${encodeURIComponent(seat)}`;
+    routeToGame(nextGameId, nextPlayerId ?? playerId);
   };
 
   // ITEM-PB-9: Rematch restarts the same table — same seats, same names, same

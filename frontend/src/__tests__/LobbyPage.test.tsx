@@ -41,6 +41,7 @@ describe('LobbyPage', () => {
     checkServerHealth.mockReset();
     createPresetGame.mockReset();
     checkServerHealth.mockResolvedValue(true);
+    window.history.replaceState(null, '', '/');
     window.location.hash = '';
   });
 
@@ -166,12 +167,12 @@ describe('LobbyPage', () => {
     );
 
     const alice = await screen.findByRole('link', { name: 'Zoe (p0)' });
-    expect(alice.getAttribute('href')).toBe('#/g/game-1?player=p0');
+    expect(alice.getAttribute('href')).toBe('/g/game-1?player=p0');
     expect(screen.getByRole('link', { name: 'Bob (p1)' }).getAttribute('href')).toBe(
-      '#/g/game-1?player=p1',
+      '/g/game-1?player=p1',
     );
     expect(screen.getByRole('link', { name: 'Carol (p2)' }).getAttribute('href')).toBe(
-      '#/g/game-1?player=p2',
+      '/g/game-1?player=p2',
     );
   });
 
@@ -446,11 +447,14 @@ describe('LobbyPage', () => {
       fireEvent.click(button);
 
       await waitFor(() => expect(createPresetGame).toHaveBeenCalledWith(id));
-      // The preset opens on the seat that makes the scenario readable.
-      await waitFor(() => expect(window.location.hash).toBe('#/g/preset-1?player=p1'));
+      // The preset opens on the seat that makes the scenario readable, through
+      // a clean History-API path with no hash suffix.
+      await waitFor(() => expect(window.location.pathname).toBe('/g/preset-1'));
+      expect(window.location.search).toBe('?player=p1');
+      expect(window.location.hash).toBe('');
       // Wait for the pending latch to drop before the next click.
       await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
-      window.location.hash = '';
+      window.history.replaceState(null, '', '/');
     }
   });
 
@@ -474,7 +478,9 @@ describe('LobbyPage', () => {
 
     await waitFor(() => expect(createPresetGame).toHaveBeenCalledWith('qa-fast-bots'));
     // The reviewer lands on the human seat and watches the bots play.
-    await waitFor(() => expect(window.location.hash).toBe('#/g/fast-bots?player=p0'));
+    await waitFor(() => expect(window.location.pathname).toBe('/g/fast-bots'));
+    expect(window.location.search).toBe('?player=p0');
+    expect(window.location.hash).toBe('');
   });
 
   it('surfaces a failed QA preset instead of navigating', async () => {
@@ -485,7 +491,8 @@ describe('LobbyPage', () => {
 
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('Unknown preset');
-    expect(window.location.hash).not.toContain('preset-1');
+    expect(window.location.pathname).not.toContain('preset-1');
+    expect(window.location.hash).toBe('');
   });
 
   it('T-90: styles the selected player count and primary action with royal blue', () => {

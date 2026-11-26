@@ -6,6 +6,7 @@ import {
   subscribeGuestSession,
 } from '../api/sessionClient';
 import { BrandLogo } from './BrandLogo';
+import { navigateToLobby } from '../router/useRoute';
 import { ALL_CARD_BACK_PATTERNS, CARD_BACK_LABELS, CardBack } from './CardBack';
 import {
   TABLE_TEXTURES,
@@ -54,6 +55,21 @@ interface NavLink {
   href: string;
 }
 
+/**
+ * True for a plain primary click on a link. Modified clicks (Ctrl/Cmd/Shift/
+ * Alt or a non-left button) keep the browser's own new-tab/new-window
+ * behaviour and are never intercepted by the SPA.
+ */
+function isUnmodifiedPrimaryClick(event: MouseEvent): boolean {
+  return (
+    event.button === 0 &&
+    !event.metaKey &&
+    !event.ctrlKey &&
+    !event.shiftKey &&
+    !event.altKey
+  );
+}
+
 interface NavMenu {
   id: string;
   label: string;
@@ -66,36 +82,36 @@ export const NAV_MENUS: readonly NavMenu[] = [
     id: 'play',
     label: 'PLAY',
     links: [
-      { label: 'New game', href: '#/' },
-      { label: 'Quick pairing', href: '#/' },
-      { label: 'Play vs. computer', href: '#/' },
+      { label: 'New game', href: '/' },
+      { label: 'Quick pairing', href: '/' },
+      { label: 'Play vs. computer', href: '/' },
     ],
   },
   {
     id: 'puzzles',
     label: 'PUZZLES',
     links: [
-      { label: 'Daily puzzle', href: '#/' },
-      { label: 'Puzzle dashboard', href: '#/' },
-      { label: 'Puzzle themes', href: '#/' },
+      { label: 'Daily puzzle', href: '/' },
+      { label: 'Puzzle dashboard', href: '/' },
+      { label: 'Puzzle themes', href: '/' },
     ],
   },
   {
     id: 'learn',
     label: 'LEARN',
     links: [
-      { label: 'Durak basics', href: '#/' },
-      { label: 'Practice', href: '#/' },
-      { label: 'Rules', href: '#/' },
+      { label: 'Durak basics', href: '/' },
+      { label: 'Practice', href: '/' },
+      { label: 'Rules', href: '/' },
     ],
   },
   {
     id: 'watch',
     label: 'WATCH',
     links: [
-      { label: 'Live games', href: '#/' },
-      { label: 'Tournaments', href: '#/' },
-      { label: 'Replays', href: '#/' },
+      { label: 'Live games', href: '/' },
+      { label: 'Tournaments', href: '/' },
+      { label: 'Replays', href: '/' },
     ],
   },
 ];
@@ -649,6 +665,18 @@ export function HeaderBar({
   // T-90-feedback ITEM-1b: an unresolved name renders as empty, never "Guest".
   const profileLabel = guestLabel.trim();
 
+  // T-90-feedback-3: every header link that returns to the homepage does it
+  // through the clean History-API router — never a `#/` hash — and closes any
+  // open menu. Modified clicks keep the browser's native new-tab behaviour.
+  const navigateHome = (event: MouseEvent) => {
+    if (!isUnmodifiedPrimaryClick(event)) return;
+    event.preventDefault();
+    setOpenMenu(null);
+    setProfileOpen(false);
+    setSubmenu(null);
+    navigateToLobby();
+  };
+
   // The tracker follows the live measured round-trip time reported by the app.
   const level = connectionLevel(pingMs);
   // Tier colour: green only for a good connection, yellow for two bars and red
@@ -727,7 +755,7 @@ export function HeaderBar({
       data-theme={resolvedTheme}
       data-header-gradient={resolvedTheme === 'light' ? 'lightening' : 'darkening'}
     >
-      <a class="header-brand" href="#/" onClick={() => setOpenMenu(null)}>
+      <a class="header-brand" href="/" onClick={navigateHome}>
         {/* T-90-2 ITEM-8a: the header mark and the large logo share one source. */}
         <BrandLogo size="header" />
       </a>
@@ -756,7 +784,7 @@ export function HeaderBar({
               <ul class="header-menu-dropdown" role="menu" aria-label={`${menu.label} menu`}>
                 {menu.links.map((link) => (
                   <li key={link.label} role="none">
-                    <a role="menuitem" href={link.href}>
+                    <a role="menuitem" href={link.href} onClick={navigateHome}>
                       {link.label}
                     </a>
                   </li>

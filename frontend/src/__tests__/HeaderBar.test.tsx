@@ -48,6 +48,7 @@ describe('HeaderBar', () => {
   beforeEach(() => {
     resetSettings();
     window.localStorage.clear();
+    window.history.replaceState(null, '', '/');
   });
 
   afterEach(() => {
@@ -61,7 +62,7 @@ describe('HeaderBar', () => {
     render(<HeaderBar />);
 
     const brand = screen.getByRole('link', { name: 'LIDURAK' });
-    expect(brand.getAttribute('href')).toBe('#/');
+    expect(brand.getAttribute('href')).toBe('/');
     expect(brand.classList.contains('header-brand')).toBe(true);
 
     const logo = screen.getByTestId('header-logo');
@@ -78,6 +79,42 @@ describe('HeaderBar', () => {
       expect(trigger.getAttribute('aria-haspopup')).toBe('true');
       expect(trigger.getAttribute('aria-expanded')).toBe('false');
     }
+  });
+
+  it('T-90-feedback-3 ITEM-3a: the brand returns to exact / with no hash suffix', () => {
+    window.history.replaceState(null, '', '/g/test-room');
+    render(<HeaderBar />);
+
+    fireEvent.click(screen.getByRole('link', { name: 'LIDURAK' }));
+
+    expect(window.location.pathname).toBe('/');
+    expect(window.location.search).toBe('');
+    expect(window.location.hash).toBe('');
+  });
+
+  it('T-90-feedback-3 ITEM-3b: no header link carries a #/ or # href', () => {
+    const { container } = render(<HeaderBar />);
+
+    // Every nav menu (and its items) is rendered in the DOM, even when closed.
+    const anchors = Array.from(container.querySelectorAll('a'));
+    expect(anchors.length).toBeGreaterThan(0);
+    for (const anchor of anchors) {
+      const href = anchor.getAttribute('href');
+      expect(href, anchor.outerHTML).not.toBe('#');
+      expect(href?.startsWith('#/'), anchor.outerHTML).toBe(false);
+    }
+  });
+
+  it('T-90-feedback-3 ITEM-3b: a PLAY submenu item returns to exact /', () => {
+    window.history.replaceState(null, '', '/g/test-room');
+    const { container } = render(<HeaderBar />);
+
+    fireEvent.mouseEnter(container.querySelector('.header-menu')!);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'New game' }));
+
+    expect(window.location.pathname).toBe('/');
+    expect(window.location.search).toBe('');
+    expect(window.location.hash).toBe('');
   });
 
   it('opens a navigation menu on hover and closes it on leave', () => {
