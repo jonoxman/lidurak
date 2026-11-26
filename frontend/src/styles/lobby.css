@@ -555,6 +555,40 @@ html[data-theme='light'] .m2-lobby {
   outline: none;
 }
 
+/* T-90-feedback ITEM-2: the 36-card deck stays visible at a four-seat table but
+   is greyed out and non-selectable. The muted colour resolves from the theme
+   tokens, so Dark and Light grey it out the same way, and ITEM-5 still holds:
+   a disabled option rests flat and never picks up a hover/focus glow. */
+.segmented-option:disabled,
+.segmented-option.segmented-option--disabled {
+  border-color: color-mix(in srgb, var(--m2-border) 60%, transparent);
+  background: color-mix(in srgb, var(--m2-surface-raised) 40%, var(--m2-surface));
+  color: color-mix(in srgb, var(--m2-text) 35%, var(--m2-surface));
+  opacity: 0.6;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* Belt and braces: a disabled pill keeps its grey even when hovered/focused. */
+.segmented-option:disabled:hover,
+.segmented-option:disabled:focus-visible,
+.segmented-option.segmented-option--disabled:hover,
+.segmented-option.segmented-option--disabled:focus-visible {
+  border-color: color-mix(in srgb, var(--m2-border) 60%, transparent);
+  box-shadow: none;
+  outline: none;
+}
+
+/* The pale Light panel needs a slightly deeper grey than the Dark one. */
+html[data-theme='light'] .segmented-option:disabled,
+html[data-theme='light'] .segmented-option.segmented-option--disabled {
+  border-color: color-mix(in srgb, var(--m2-border) 70%, transparent);
+  background: color-mix(in srgb, var(--m2-surface-raised) 55%, var(--m2-surface));
+  color: color-mix(in srgb, var(--m2-text) 45%, var(--m2-surface));
+  opacity: 0.65;
+  box-shadow: none;
+}
+
 .create-invite-toggle {
   display: flex;
   align-items: center;

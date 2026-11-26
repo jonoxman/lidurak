@@ -120,6 +120,10 @@ export function CreateInviteTab({
 
   const changePlayerCount = (count: PlayerCount) => {
     setPlayerCount(count);
+    // ITEM-2: a four-seat table only plays the full deck, so choosing 4 players
+    // moves the stored deck choice to 52 straight away instead of leaving a
+    // stale 36 behind the disabled pill.
+    if (count === 4) setDeckChoice(52);
     setSeatTypes((previous) =>
       Array.from({ length: count }, (_, index) => previous[index] ?? 'human'),
     );
@@ -210,14 +214,21 @@ export function CreateInviteTab({
             </div>
           </fieldset>
 
-          {/* ITEM-6b: 36 or 52 cards for 2P/3P; a 4P table is always 52. */}
+          {/* ITEM-6b: 36 or 52 cards for 2P/3P; a 4P table is always 52.
+              ITEM-2: the 36-card pill stays on the form at 4P, but is disabled
+              and greyed out instead of disappearing. */}
           <fieldset class="create-invite-group" data-testid="create-game-deck-size">
             <legend>Deck</legend>
             <div class="segmented" role="group" aria-label="Deck size">
               <button
                 type="button"
-                class="segmented-option"
+                class={
+                  playerCount === 4
+                    ? 'segmented-option segmented-option--disabled'
+                    : 'segmented-option'
+                }
                 aria-pressed={deckSize === 36}
+                aria-disabled={playerCount === 4}
                 disabled={playerCount === 4}
                 onClick={() => setDeckChoice(36)}
               >
