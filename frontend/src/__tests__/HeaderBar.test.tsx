@@ -1313,11 +1313,48 @@ describe('T-90-2 header guest name and icon order', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('ITEM-3: falls back to the neutral guest label without a session endpoint', () => {
+  it('ITEM-3 / T-90-feedback ITEM-1b: never renders the bare "Guest" placeholder', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        await gate;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            playerId: 'guest-1',
+            displayName: 'Guest-QW34',
+            isGuest: true,
+          }),
+        };
+      }),
+    );
+
+    render(<HeaderBar />);
+
+    const name = screen.getByTestId('profile-name');
+    // While the cold-load session request is still in flight the label is
+    // empty — not a generic placeholder that later swaps to Guest-XXXX.
+    expect(name.textContent?.trim()).toBe('');
+
+    release();
+
+    await waitFor(() => expect(name.textContent?.trim()).toBe('Guest-QW34'));
+    expect(name.textContent?.trim()).not.toBe('Guest');
+  });
+
+  it('T-90-feedback ITEM-1b: generates a Guest-XXXX name when no session endpoint exists', async () => {
     vi.stubGlobal('fetch', undefined);
     render(<HeaderBar />);
 
-    expect(screen.getByTestId('profile-name').textContent?.trim()).toBe('Guest');
+    await waitFor(() => {
+      const label = screen.getByTestId('profile-name').textContent?.trim() ?? '';
+      expect(label).toMatch(/^Guest-[A-Z0-9]{4}$/);
+    });
   });
 
   it('ITEM-4: puts the user name first and the user icon on its right', () => {
